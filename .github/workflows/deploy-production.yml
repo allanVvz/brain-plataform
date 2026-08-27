@@ -6,7 +6,7 @@ on:
       action:
         description: Deploy the selected image or roll back to the recorded previous image
         type: choice
-        options: [deploy, rollback, inspect_lifecycle, inspect_graph_bundle, preflight_pause, postflight_validate]
+        options: [deploy, rollback, inspect_lifecycle, inspect_graph_bundle, preflight_pause, postflight_validate, resume_workers]
         default: deploy
       candidate_sha:
         description: Full release SHA for the controlled production gate
@@ -63,7 +63,7 @@ jobs:
           DEPLOY_ACTION: ${{ inputs.action || 'deploy' }}
         run: |
           set -Eeuo pipefail
-          if [ "$DEPLOY_ACTION" = "inspect_lifecycle" ] || [ "$DEPLOY_ACTION" = "inspect_graph_bundle" ] || [ "$DEPLOY_ACTION" = "preflight_pause" ] || [ "$DEPLOY_ACTION" = "postflight_validate" ]; then
+          if [ "$DEPLOY_ACTION" = "inspect_lifecycle" ] || [ "$DEPLOY_ACTION" = "inspect_graph_bundle" ] || [ "$DEPLOY_ACTION" = "preflight_pause" ] || [ "$DEPLOY_ACTION" = "postflight_validate" ] || [ "$DEPLOY_ACTION" = "resume_workers" ]; then
             for value in class=documentation touch_vps=false publish_api=false publish_worker=false publish_migrate=false pause_claims=false backup=false; do
               echo "$value" >> "$GITHUB_OUTPUT"
             done
@@ -151,7 +151,7 @@ jobs:
           IMAGE_TAG=${TARGET_SHA} docker compose --env-file .env.ci --profile edge --profile evolution config --quiet
 
   publish:
-    if: inputs.action != 'rollback' && inputs.action != 'inspect_lifecycle' && inputs.action != 'inspect_graph_bundle' && inputs.action != 'preflight_pause' && inputs.action != 'postflight_validate'
+    if: inputs.action != 'rollback' && inputs.action != 'inspect_lifecycle' && inputs.action != 'inspect_graph_bundle' && inputs.action != 'preflight_pause' && inputs.action != 'postflight_validate' && inputs.action != 'resume_workers'
     needs: [classify, validate]
     runs-on: ubuntu-latest
     outputs:
@@ -239,7 +239,7 @@ jobs:
 
   production_gate:
     needs: classify
-    if: inputs.action == 'inspect_lifecycle' || inputs.action == 'inspect_graph_bundle' || inputs.action == 'preflight_pause' || inputs.action == 'postflight_validate'
+    if: inputs.action == 'inspect_lifecycle' || inputs.action == 'inspect_graph_bundle' || inputs.action == 'preflight_pause' || inputs.action == 'postflight_validate' || inputs.action == 'resume_workers'
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -271,6 +271,21 @@ jobs:
               EXPECTED_RELEASE_SHA="$CANDIDATE_SHA" REQUIRE_FRESH_BACKUP=false \
                 bash ops/vps/validate-production-release.sh
               docker compose --env-file .env.compose exec -T api python -c 'import json; from services import graph_bundle_view as g; c=g.list_versions("zypi-shop"); d=next(x for x in c["versions"] if x["ref"] == "bundle:sdr-whatsapp-multiproduto-draft.json"); assert d["source"] == "draft"; assert d["state"] == "blocked"; assert d["validation_error_count"] > 0; print(json.dumps({"persona_slug": c["persona"]["slug"], "ref": d["ref"], "state": d["state"], "validation_error_count": d["validation_error_count"], "read_only": c["read_only"]}, sort_keys=True))'
+            elif [ "$GATE_ACTION" = "resume_workers" ]; then
+              test -f .deploy/control/claims-paused.json
+              lifecycle_stage="$(python3 ops/vps/release_lifecycle.py show --field stage)"
+              lifecycle_candidate="$(python3 ops/vps/release_lifecycle.py show --field candidate_sha)"
+              [ "$lifecycle_stage" = "awaiting_resume_authorization" ]
+              [ "$lifecycle_candidate" = "$CANDIDATE_SHA" ]
+              [ "$current" = "$CANDIDATE_SHA" ]
+              EXPECTED_RELEASE_SHA="$CANDIDATE_SHA" REQUIRE_FRESH_BACKUP=false \
+                bash ops/vps/validate-production-release.sh
+              python3 ops/vps/release_lifecycle.py authorize-resume \
+                --actor "user" \
+                --reason "Explicit user authorization to resume AI claims after GraphBundle v3 release"
+              bash ops/vps/resume-production-workers.sh "$CANDIDATE_SHA"
+              EXPECTED_RELEASE_SHA="$CANDIDATE_SHA" REQUIRE_FRESH_BACKUP=false \
+                bash ops/vps/validate-production-release.sh
             elif [ "$GATE_ACTION" = "preflight_pause" ]; then
               lifecycle_stage="$(python3 ops/vps/release_lifecycle.py show --field stage)"
               lifecycle_candidate="$(python3 ops/vps/release_lifecycle.py show --field candidate_sha)"
