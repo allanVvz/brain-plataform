@@ -25,6 +25,7 @@ WA_VALIDATOR = (
     ROOT / "api" / "services" / "wa_validator_service.py"
 ).read_text(encoding="utf-8")
 API_DOCKERFILE = (ROOT / "api" / "Dockerfile").read_text(encoding="utf-8")
+DOCKERIGNORE = (ROOT / ".dockerignore").read_text(encoding="utf-8")
 
 
 def test_incremental_deploy_pauses_claims_and_requires_explicit_resume():
@@ -83,6 +84,23 @@ def test_sdr_corpus_is_packaged_inside_the_production_api_image():
     assert '_API_DIR / "evaluation" / "sdr_flow_cases.json"' in WA_VALIDATOR
     assert "COPY --chown=appuser:appuser api/ /app/" in API_DOCKERFILE
     assert 'ROOT_DIR / "tests" / "fixtures"' not in WA_VALIDATOR
+
+
+def test_graph_bundle_catalog_is_packaged_at_the_runtime_lookup_path():
+    zypi_bundle = (
+        ROOT
+        / "data"
+        / "graph_bundles"
+        / "zypi-shop"
+        / "sdr-whatsapp-multiproduto-draft.json"
+    )
+    assert zypi_bundle.is_file()
+    assert "data/*" in DOCKERIGNORE
+    assert "!data/graph_bundles/**" in DOCKERIGNORE
+    assert (
+        "COPY --chown=appuser:appuser data/graph_bundles/ "
+        "/data/graph_bundles/"
+    ) in API_DOCKERFILE
 
 
 def test_api_image_application_layer_is_keyed_by_release_sha():

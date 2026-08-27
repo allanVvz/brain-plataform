@@ -48,6 +48,7 @@ WORKDIR /app
 RUN printf '%s' "${SOURCE_SHA}" > /image-source-sha
 COPY --chown=appuser:appuser api/ /app/
 COPY --chown=appuser:appuser docs/sdr/ /docs/sdr/
+COPY --chown=appuser:appuser data/graph_bundles/ /data/graph_bundles/
 
 FROM runtime-base AS api
 USER appuser
