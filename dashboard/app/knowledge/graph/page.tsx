@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import GraphPageClient from "./GraphPageClient";
+import GraphBackendPageClient from "./GraphBackendPageClient";
 
 export default function GraphPage() {
   return (
@@ -10,7 +10,7 @@ export default function GraphPage() {
         </div>
       }
     >
-      <GraphPageClient />
+      <GraphBackendPageClient />
     </Suspense>
   );
 }

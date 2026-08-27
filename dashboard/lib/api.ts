@@ -1107,6 +1107,22 @@ export const api = {
     params.set("persona_slug", personaSlug);
     return req<any>(`/graph-documents/current?${params.toString()}`);
   },
+  graphBundleVersions: (personaSlug: string) => {
+    const params = new URLSearchParams({ persona_slug: personaSlug });
+    return req<import("./graph-bundle-v3").GraphBundleVersionsPayload>(
+      `/graph-bundles/versions?${params.toString()}`,
+    );
+  },
+  graphBundleView: (
+    personaSlug: string,
+    source: import("./graph-bundle-v3").GraphBundleSource,
+    ref: string,
+  ) => {
+    const params = new URLSearchParams({ persona_slug: personaSlug, source, ref });
+    return req<import("./graph-bundle-v3").GraphBundleViewPayload>(
+      `/graph-bundles/view?${params.toString()}`,
+    );
+  },
   // Canonical write path: publish the edited graph_json. The backend validates
   // the whole document and materializes the derived knowledge_nodes/edges (reindex).
   publishGraphDocument: (body: { persona_slug: string; brand_slug?: string | null; graph_json: any; source?: string; note?: string; expected_version?: number; idempotency_key?: string }) =>

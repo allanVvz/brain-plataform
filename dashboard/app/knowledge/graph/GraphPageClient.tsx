@@ -197,6 +197,13 @@ export default function GraphPageClient() {
     [searchParams],
   );
 
+  const graphBundleV3Href = useMemo(() => {
+    const next = new URLSearchParams(searchParams.toString());
+    next.set("backend", "v3");
+    next.delete("ref");
+    return `/knowledge/graph?${next.toString()}`;
+  }, [searchParams]);
+
   useEffect(() => {
     const syncFromHeader = () => {
       const stored = window.localStorage.getItem("ai-brain-persona-slug") || "";
@@ -715,6 +722,16 @@ export default function GraphPageClient() {
         {/* Row 1: persona + mode + meta */}
         <div className="flex items-center gap-3">
           <span className="text-sm font-semibold text-obs-text">Grafo de Conhecimento</span>
+
+          <div className="flex items-center rounded-lg border border-white/10 bg-white/[0.03] p-0.5 text-[11px]">
+            <span className="rounded-md bg-obs-violet/20 px-2 py-1 text-obs-violet">Graph JSON v2</span>
+            <a
+              href={graphBundleV3Href}
+              className="rounded-md px-2 py-1 text-obs-subtle hover:text-white"
+            >
+              GraphBundle v3
+            </a>
+          </div>
 
           <div className="flex min-w-[320px] items-center gap-2 rounded-lg border border-white/08 bg-white/[0.04] px-2.5 py-1.5 shadow-sm">
             <Layers3 size={11} className="text-obs-subtle" />
