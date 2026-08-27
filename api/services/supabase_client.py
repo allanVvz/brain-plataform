@@ -5062,6 +5062,22 @@ def get_active_workflow_binding_by_phone_number_id(phone_number_id: str) -> Opti
     )
 
 
+def get_workflow_bindings_by_phone_number_id(phone_number_id: str) -> list:
+    """Return every binding that claims a business phone number.
+
+    Normal routing only needs the active binding. Provisioning is stricter:
+    a number already recorded for another persona must be reassigned through
+    the dedicated, audited flow rather than silently becoming a second
+    persona's draft binding.
+    """
+    if not phone_number_id:
+        return []
+    return _q(
+        get_client().table("workflow_bindings").select("*")
+        .eq("whatsapp_phone_number_id", phone_number_id)
+    )
+
+
 def get_workflow_binding_by_id(binding_id: Optional[str]) -> Optional[dict]:
     if not binding_id:
         return None

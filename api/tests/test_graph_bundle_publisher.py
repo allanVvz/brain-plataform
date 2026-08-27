@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 
 API_ROOT = Path(__file__).resolve().parents[1]
@@ -132,3 +135,64 @@ def test_stage_bundle_rejects_stale_human_approval_before_writes(monkeypatch):
         assert "approved_draft_checksum_mismatch" in str(exc)
 
     assert writes == []
+
+
+class _PublicationQuery:
+    def __init__(self, publication: dict):
+        self.publication = publication
+
+    def select(self, *_args):
+        return self
+
+    def eq(self, *_args):
+        return self
+
+    def maybe_single(self):
+        return self
+
+    def execute(self):
+        return SimpleNamespace(data=self.publication)
+
+
+class _PublicationClient:
+    def __init__(self, publication: dict):
+        self.publication = publication
+        self.rpc_calls: list[tuple[str, dict]] = []
+
+    def table(self, _name):
+        return _PublicationQuery(self.publication)
+
+    def rpc(self, name, params):
+        self.rpc_calls.append((name, params))
+        return SimpleNamespace(execute=lambda: SimpleNamespace(data={"ok": True}))
+
+
+def test_activate_staged_bundle_rejects_publication_of_another_persona(monkeypatch):
+    bundle = _bundle()
+    plan = graph_bundle.build_publication_plan(bundle)
+    normalized = graph_bundle.normalize_bundle(bundle)
+    foreign_publication = {
+        "id": "publication-foreign",
+        "persona_id": "persona-other",
+        "status": "compiled",
+        "checksum": plan["runtime_checksum"],
+        "version": 7,
+    }
+    client = _PublicationClient(foreign_publication)
+    monkeypatch.setattr(
+        graph_bundle_publisher.supabase_client,
+        "get_persona",
+        lambda _slug: {"id": normalized["persona"]["id"]},
+    )
+    monkeypatch.setattr(graph_bundle_publisher.supabase_client, "get_client", lambda: client)
+
+    with pytest.raises(graph_bundle_publisher.GraphBundlePublishError, match="persona_scope_mismatch"):
+        graph_bundle_publisher.activate_staged_bundle(
+            bundle,
+            publication_id="publication-foreign",
+            approved_draft_checksum=plan["draft_checksum"],
+            approved_runtime_checksum=plan["runtime_checksum"],
+            actor="test",
+        )
+
+    assert client.rpc_calls == []

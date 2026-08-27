@@ -239,6 +239,18 @@ def activate_staged_bundle(
         raise GraphBundlePublishError("activation_draft_checksum_mismatch")
     if plan.get("runtime_checksum") != approved_runtime_checksum:
         raise GraphBundlePublishError("activation_runtime_checksum_mismatch")
+
+    # Activation must be scoped just as tightly as staging.  The publication
+    # id comes from a previous stage, but it is still an external identifier at
+    # this boundary; never let a bundle for persona A activate a staged
+    # publication belonging to persona B.
+    normalized = graph_bundle.normalize_bundle(bundle)
+    persona_id = normalized["persona"]["id"]
+    persona_slug = normalized["persona"]["slug"]
+    persona = supabase_client.get_persona(persona_slug)
+    if not persona or str(persona.get("id") or "") != persona_id:
+        raise GraphBundlePublishError("persona_scope_mismatch")
+
     client = supabase_client.get_client()
     publication = (
         client.table("graph_publications").select("*")
@@ -246,6 +258,8 @@ def activate_staged_bundle(
     )
     if not publication:
         raise GraphBundlePublishError("staged_publication_not_found")
+    if str(publication.get("persona_id") or "") != persona_id:
+        raise GraphBundlePublishError("staged_publication_persona_scope_mismatch")
     if publication.get("status") not in {"compiled", "active"}:
         raise GraphBundlePublishError(
             f"staged_publication_not_activatable:{publication.get('status')}"
