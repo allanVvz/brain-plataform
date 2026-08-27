@@ -16,14 +16,20 @@ usar uma stack Docker local para implementar, auditar ou testar este projeto.
   revisao/autorizacao. Uma autorizacao nao implica as outras.
 - Mudancas de conversa devem ser testadas somente pelo WA Validator
   direto/interno, sem WhatsApp real.
-- Manter transporte e IAs pausados durante auditoria, deploy e validacao; so
-  retomar mediante autorizacao explicita posterior.
+- Aplicar pausa no menor escopo afetado pela operacao. Em release de
+  codigo/infra do runtime compartilhado, manter todos os transportes e IAs
+  pausados. Em publicacao de conteudo isolada por persona, pausar somente o
+  binding/IA da persona alvo quando ele existir; personas nao envolvidas
+  continuam operando. Persona nova sem binding/workflow/transporte ja e inerte
+  e nao exige pausar outras personas. So retomar o que foi pausado mediante
+  autorizacao explicita posterior.
 - Retencao e limpeza permanecem em dry-run ate autorizacao especifica. Nunca
   inferir permissao para apagar dados a partir de uma autorizacao de deploy.
 
 ### Auditoria
-1. Confirmar SHA, release, health/readiness e estado pausado via endpoints e
-   scripts oficiais de producao.
+1. Confirmar SHA, release, health/readiness e o estado operacional no escopo da
+   operacao via endpoints e scripts oficiais de producao. Release compartilhada
+   exige pausa global; publicacao de conteudo exige isolamento da persona alvo.
 2. Executar dry-run da operacao solicitada e registrar contagens/IDs tecnicos
    nao secretos.
 3. Revisar o resultado antes de qualquer mutacao produtiva adicional.

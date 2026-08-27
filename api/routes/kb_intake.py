@@ -7,6 +7,7 @@ import time
 
 from services import auth_service, integration_service
 from services import supabase_client
+from services import graph_bundle_publisher
 from schemas.agent_harness import MessageCreate
 from services.agent_harness import SofiaAgentHarness
 from services.agent_harness_repository import AgentHarnessRepository
@@ -23,6 +24,7 @@ from services.kb_intake_service import (
     update_session_plan,
     _invalid_criar_persona,
     _session_public_state,
+    _save_session,
 )
 
 router = APIRouter(prefix="/kb-intake", tags=["kb-intake"])
@@ -82,10 +84,22 @@ class CrawlBody(BaseModel):
     session_id: Optional[str] = None
 
 
+class IngestDocumentBody(BaseModel):
+    text: str
+    model: str = "gpt-4o-mini"
+
+
 class PlanUpdateBody(BaseModel):
     knowledge_plan: dict[str, Any]
     status: Optional[str] = None
     last_change: Optional[str] = None
+
+
+class ApprovePublicationBody(BaseModel):
+    approved_draft_checksum: str
+    approved_runtime_checksum: str
+    activate: bool = False
+    acknowledge_breaking_changes: bool = False
 
 
 def _assert_session_access(session_id: str, request: Request) -> dict[str, Any]:
@@ -259,6 +273,25 @@ def crawl_preview(body: CrawlBody, request: Request):
         raise HTTPException(500, f"Erro no crawler: {exc}") from exc
     if body.session_id:
         attach_crawler_capture(body.session_id, result)
+    return result
+
+
+@router.post("/{session_id}/ingest-document")
+def ingest_document(session_id: str, body: IngestDocumentBody, request: Request):
+    """Document-text counterpart to /crawl-preview: extracts catalog
+    candidates from a pasted/uploaded document (instead of a crawled URL)
+    and attaches them the same way, so the existing 'build the whole tree'
+    flow (build_full_tree_plan_from_session) picks them up unchanged. Every
+    candidate lands in the plan as status='pendente_validacao' -- nothing
+    from a bulk document reaches a publishable GraphBundle without the
+    operator explicitly confirming it first."""
+    _assert_session_access(session_id, request)
+    from services.document_candidate_extractor import extract_candidates_from_document
+
+    if not body.text.strip():
+        raise HTTPException(400, {"error": "Documento vazio."})
+    result = extract_candidates_from_document(body.text, model=body.model)
+    attach_crawler_capture(session_id, result)
     return result
 
 
@@ -610,4 +643,73 @@ def save_knowledge(body: SaveBody, request: Request):
         except Exception:
             pass
         raise HTTPException(400, result)
+    return result
+
+
+@router.post("/{session_id}/approve-publication")
+def approve_publication(session_id: str, body: ApprovePublicationBody, request: Request):
+    """Human approval gate for a Sofia-built GraphBundle staged in
+    save()/_save_via_graph_bundle (session["pending_graph_bundle"] +
+    session["pending_publication_plan"], stage="awaiting_publication_approval").
+
+    Never called implicitly -- save() stops short of staging/activating a
+    GraphBundle precisely so this checksum-approved call is the only way a
+    Sofia-authored persona ever reaches production, mirroring the manual
+    graph-publisher review used to activate Tock Fatal's graph this session
+    and api/scripts/publish_graph_bundle.py's --apply/--activate contract.
+    """
+    user = auth_service.current_user(request)
+    session = _assert_session_access(session_id, request)
+    if session.get("stage") != "awaiting_publication_approval":
+        raise HTTPException(409, {
+            "error": "Sessao nao tem uma publicacao pendente de aprovacao.",
+            "stage": session.get("stage"),
+        })
+    bundle = session.get("pending_graph_bundle")
+    plan = session.get("pending_publication_plan") or {}
+    if not bundle or not plan:
+        raise HTTPException(409, {"error": "Sessao nao tem GraphBundle/plano pendente."})
+    if plan.get("breaking_contract_changes") and not body.acknowledge_breaking_changes:
+        raise HTTPException(400, {
+            "error": (
+                "Este plano tem mudancas de ruptura -- confirme "
+                "acknowledge_breaking_changes=true depois de revisar."
+            ),
+            "breaking_contract_changes": plan["breaking_contract_changes"],
+        })
+    actor = str(user.get("email") or user.get("id") or "kb-intake-operator")
+    try:
+        staged = graph_bundle_publisher.stage_bundle(
+            bundle,
+            approved_draft_checksum=body.approved_draft_checksum,
+            actor=actor,
+        )
+    except graph_bundle_publisher.GraphBundlePublishError as exc:
+        raise HTTPException(400, {"error": str(exc), "error_code": "GRAPH_BUNDLE_STAGE_FAILED"})
+    publication = staged.get("publication") or {}
+    result: dict[str, Any] = {
+        "ok": True,
+        "staged": True,
+        "activated": False,
+        "publication_id": publication.get("id"),
+        "version": publication.get("version"),
+        "runtime_checksum": publication.get("checksum"),
+    }
+    if body.activate:
+        try:
+            activation = graph_bundle_publisher.activate_staged_bundle(
+                bundle,
+                publication_id=str(publication.get("id")),
+                approved_draft_checksum=body.approved_draft_checksum,
+                approved_runtime_checksum=body.approved_runtime_checksum,
+                actor=actor,
+            )
+        except graph_bundle_publisher.GraphBundlePublishError as exc:
+            raise HTTPException(400, {"error": str(exc), "error_code": "GRAPH_BUNDLE_ACTIVATE_FAILED"})
+        result["activated"] = True
+        result["activation"] = activation.get("activation")
+    session["stage"] = "done"
+    session["status"] = "saved" if body.activate else "staged"
+    session.pop("pending_graph_bundle", None)
+    _save_session(session)
     return result

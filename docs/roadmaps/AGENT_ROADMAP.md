@@ -382,10 +382,10 @@ GraphBundle (banco, versionado)
   -> normalização determinística    graph_markdown.canonicalize_graph
   -> validação estrutural/comercial graph_json_v2_validator + regras do bundle
   -> compilação PURA                graph_compiler_v3.compile_graph      [JÁ EXISTE]
-  -> PublicationPlan (diff + custo)                                      [NOVO]
-  -> chunks e embeddings incrementais por chunk_checksum                 [NOVO]
-  -> staging + ativação atômica     activate_graph_publication_v3
-  -> export de cards Markdown para a tela de grafos                      [NOVO]
+  -> PublicationPlan (diff + custo)                                [JÁ EXISTE]
+  -> chunks e embeddings incrementais por chunk_checksum           [PENDENTE]
+  -> staging + ativação atômica     activate_graph_publication_v3   [JÁ EXISTE]
+  -> export de cards Markdown para a tela de grafos                 [PENDENTE]
 ```
 
 O operador enxerga três passos, não quinze:
@@ -393,6 +393,78 @@ O operador enxerga três passos, não quinze:
 ```
 Alterar (card)  ->  Aprovar (plano)  ->  Publicar
 ```
+
+### Item 2 — Cards editáveis alteram o agente de verdade
+
+A evolução do editor acontece em fases explícitas, mantendo Graph JSON v2 e
+GraphBundle v3 em paralelo até existir prova de paridade:
+
+- **2a — Visualização GraphBundle v3:** renderer separado, estados
+  draft/staged/ativo e convivência com Graph JSON v2.
+- **2b — Layout editável:** movimento de nodes persistido fora do bundle, sem
+  alteração semântica ou de checksum.
+- **2c — Edição versionada de nodes:** editar título, resumo/conteúdo, tags,
+  fonte, status e `data` específica do tipo de node.
+- **2d — Operações estruturais:** criar, renomear, arquivar e relacionar nodes,
+  com proteção de Persona, Embedded e Gallery.
+- **2e — Paridade e retirada controlada do v2:** somente depois de provar
+  autoria, aprovação, publicação, rollback e equivalência visual no v3.
+
+Contrato obrigatório da edição GraphBundle futura:
+
+```text
+Editar node
+  -> salvar nova revisão do draft com CAS
+  -> validar GraphBundle
+  -> compilar PublicationPlan
+  -> exibir diff semântico e novos checksums
+  -> aprovação humana
+  -> staging
+  -> ativação explicitamente autorizada
+```
+
+Regras do editor:
+
+- Nunca editar diretamente uma `graph_publications` ativa.
+- Cada save exige `expected_draft_checksum` e chave idempotente; conflito de
+  versão retorna 409 sem sobrescrever outro operador.
+- `id` e `projection_node_id` são imutáveis; rename de slug é operação
+  estrutural própria.
+- Conteúdo sem fonte ou validação permanece `pending_source` ou
+  `pending_validation` e bloqueia publicação.
+- Exclusão comum arquiva; remoção física não faz parte do editor.
+- Somente admin ou acesso `can_edit` altera; viewer permanece somente leitura.
+- Layout não participa do checksum semântico.
+- Cada alteração cria revisão recuperável; desfazer cria outra revisão, sem
+  reescrever histórico.
+- Nenhum save publica automaticamente.
+
+### Isolamento operacional da publicação
+
+Publicação de conteúdo é autônoma por persona. O publisher GraphBundle valida
+o par `persona.id`/`persona.slug`, materializa somente nodes/edges desse
+`persona_id` e não cria nem altera binding, workflow, credencial ou transporte.
+Uma persona nova sem esses recursos permanece inerte mesmo com publicação v3
+ativa. Personas não envolvidas continuam operando e não devem ser pausadas.
+
+Se a persona alvo já tiver binding operacional, a pausa fica restrita a esse
+binding durante staging, ativação e WA Validator. Pausa global é reservada a
+release de código/infra que afeta o runtime compartilhado.
+
+Existem dois caminhos de publicação e eles não são intercambiáveis:
+
+- `.github/workflows/publish-content.yml` publica documentos Markdown/Graph
+  JSON v2 por `publish_persona_documents.py`, com checksum de documento e
+  versão esperada;
+- GraphBundle v3 usa `compile_graph_bundle.py` para o plano e
+  `publish_graph_bundle.py` para staging/ativação, exigindo os checksums de
+  draft e runtime aprovados.
+
+Até existir um workflow `production-content` específico para GraphBundle, a
+execução do publisher v3 no runtime aprovado exige autorização explícita dos
+dois checksums e registro auditável de persona, publicação e versão. Aprovação
+de GraphBundle não autoriza deploy, migration, binding, workflow, transporte,
+retomada ou limpeza.
 
 ```json
 {
@@ -434,7 +506,7 @@ demanda. Nenhum deles re-deriva o projeto do zero.
 | `aurora-unblock` | opus | Coleta evidência read-only, testa as 5 hipóteses do P0 em ordem, salva em `docs/evidence/` | P0 |
 | `graph-publisher` | opus | Gera `PublicationPlan`, compara checksums, publica e ativa; recusa se `validation_errors` não vazio | 1, 4 |
 | `bundle-migrator` | opus | Move regra de negócio de Python para o bundle, um bloco por vez, com teste de equivalência de checksum | 1, 6 |
-| `card-editor` | sonnet | Aplica operações declarativas em cards e devolve o diff semântico | 2 |
+| `card-editor` | sonnet | Aplica operações declarativas versionadas em cards e devolve o `PublicationPlan` com diff semântico; nunca publica nem ativa | 2 |
 | `faq-coverage` | opus | Audita cobertura de FAQ por branch; aponta `claim_type` faltante e posicionamento descoberto | 3 |
 | `sdr-evaluator` | opus | Avalia transcript contra critérios de qualidade (reusa a skill `aurora-conversation-evaluator`) | 3 |
 | `deprecation-sweeper` | sonnet | Detecta arquivo que contradiz este roadmap e propõe arquivamento | 0 |

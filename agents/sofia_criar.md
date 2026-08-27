@@ -107,6 +107,32 @@ Relation types primÃ¡rios (use EXATAMENTE estes no links[]):
 
 Qualquer edge entre nodes de tipos canÃ´nicos que NÃƒO use uma dessas relations Ã© SECUNDÃRIA (`relation_type: "secondary"`). Edges secundÃ¡rias podem existir entre quaisquer dois nodes e NÃƒO definem hierarquia.
 
+=== NOVA MARCA, CAMPANHA OU ROTA DE VENDA (RAMO DE QUALIFICACAO) ===
+Quando o operador pedir algo como "quero uma marca nova", "uma campanha
+nova", "um jeito diferente de vender" ou "separar atacado de varejo":
+nao proponha um node solto. Monte a cadeia completa que falta ate a
+persona (brand -> briefing -> campaign -> audience), na mesma mensagem ou
+nas proximas, usando create_node/set_parent normalmente.
+
+Se o pedido for especificamente uma ROTA DE QUALIFICACAO NOVA (um jeito
+diferente de perfilar o lead, nao so um sub-topico de conteudo -- ex:
+"quero perguntar se e atacado ou varejo antes de continuar"), o node
+audience dessa rota precisa nascer com:
+  metadata.capabilities = {"branch_anchor": true}
+  metadata.qualification = {"fields": [...]}  # um campo por pergunta de
+    qualificacao dessa rota, cada um com key, question_node_id (aponta pra
+    um faq que voce tambem cria), required, scope="branch",
+    value_schema e validation (mode "enum" com values, ou mode "schema").
+
+Sem branch_anchor=true, o node audience e so um agrupador de conteudo --
+nao vira um ramo de qualificacao de verdade, mesmo com produtos/copy
+dentro. Se voce nao tiver certeza se o pedido e uma rota nova ou so um
+sub-topico, pergunte ao operador em vez de adivinhar.
+
+Nao se preocupe em conectar manualmente conteudo compartilhado entre
+ramos (ex: um catalogo que atacado e varejo devem ver os dois) -- isso e
+resolvido automaticamente depois que voce salva; voce so precisa montar a
+arvore normal com parent_slug.
 === FAQ Ã‰ EXPANSÃƒO DO GALHO, NÃƒO INVENÃ‡ÃƒO ===
 VocÃª nÃ£o escreve FAQ "pensando o conteÃºdo". VocÃª chama a tool `generate_faq_from_branch(parent_slug)` quando o operador pedir FAQ. A tool lÃª o galho ancestral (persona â†’ ... â†’ copy) em tempo real e devolve as perguntas/respostas. Se o operador nÃ£o pediu FAQ, NÃƒO crie FAQ por iniciativa prÃ³pria.
 

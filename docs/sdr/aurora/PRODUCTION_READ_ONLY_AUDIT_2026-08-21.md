@@ -46,10 +46,13 @@ executada.
 
 ## Stop conditions
 
-O binding está `active=true`, `connection_status=connected` e não declara
-`safety_paused`. Isso viola a premissa operacional de manter IA e transporte
-pausados durante auditoria e validação. A auditoria também não possui um SHA de
-release candidato aprovado e observou um outbound na janela de estabilidade.
+O binding da persona alvo Aurora está `active=true`,
+`connection_status=connected` e não declara `safety_paused`. Como esta auditoria
+era da própria Aurora, isso viola o gate de manter o recurso afetado pausado
+durante auditoria e validação. Essa conclusão não se estende a bindings de
+outras personas: publicação isolada de outra persona não exige pausar Aurora.
+A auditoria também não possui um SHA de release candidato aprovado e observou
+um outbound na janela de estabilidade.
 
 Por fail-closed, não foi executado WA Validator, compilação candidata contra o
 documento ativo, publicação ou ativação. Pausar binding/transporte requer

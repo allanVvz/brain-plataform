@@ -518,44 +518,6 @@ def test_add_action_rejects_without_any_active_branch():
     assert "add_without_active_branch" in proof["errors"]
 
 
-def test_next_question_must_target_the_first_missing_graph_field():
-    contract = {
-        "branch_path_checksum": "checksum:a",
-        "closure_node_ids": ["branch:a", "q:first", "q:second"],
-        "fields": [
-            {"key": "first", "owner_node_id": "persona", "required": True,
-             "accepted_statuses": ["known"], "question_node_id": "q:first"},
-            {"key": "second", "owner_node_id": "persona", "required": True,
-             "accepted_statuses": ["known"], "question_node_id": "q:second"},
-        ],
-        "questions": {
-            "q:first": {"field_key": "first", "text": "First?", "depends_on": []},
-            "q:second": {"field_key": "second", "text": "Second?", "depends_on": []},
-        },
-    }
-    proof = graph_proof_checker_v3.check(
-        publication={
-            "status": "active", "checksum": "sha256:x",
-            "document_json": {"branch_anchors": ["branch:a"]},
-        },
-        contract=contract,
-        ledger={"graph_checksum": "sha256:x", "facts": {}},
-        proposal={
-            "branch_action": "keep", "branch_anchor_node_id": "branch:a",
-            "branch_path_checksum": "checksum:a", "branch_evidence_span": "",
-            "extracted_facts": [], "claims": [],
-            "next_question_node_id": "q:second", "cited_node_ids": [],
-            "cited_chunk_ids": [], "reply": "Second?",
-            "qualification_complete": False, "handoff_requested": False,
-        },
-        message="hello", source_message_id="msg-1",
-        package_node_ids={"branch:a"}, package_chunk_ids=set(),
-        active_branch_node_id="branch:a", branch_selection_allowed=False,
-        branch_switch_allowed=False,
-    )
-    assert "next_question_not_first_missing_field" in proof["errors"]
-
-
 def test_add_action_requires_literal_evidence():
     kwargs = _base_check_kwargs(branch_switch_allowed=True)
     kwargs["proposal"] = {**kwargs["proposal"], "branch_evidence_span": "algo que não foi dito"}

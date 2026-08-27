@@ -22,6 +22,10 @@ Validate the real path `operator -> Evolution -> target persona -> agent -> Evol
 4. Keep the transport-side agent paused for the whole run. Activate the target agent only after the transport side is confirmed paused.
 5. Preserve history, bindings, providers and nodes. Do not delete messages, move leads or reconnect channels.
 
+This pause contract applies only to the target and transport personas involved
+in the E2E. Unrelated personas remain operational and must not be paused or
+mutated.
+
 ## Drive the browser
 
 Use the repository Playwright installation or another Playwright-compatible browser controller. Prefer an isolated persistent session and manual login. Keep the visible authenticated browser attached to automation.

@@ -35,6 +35,10 @@ stale fixture for the active publication.
   `activate_graph_publication_v3` during planning.
 - Human approval of a plan does not authorize deploy, migration, activation,
   transport resume, retention cleanup or WhatsApp traffic.
+- A GraphBundle plan and publication are scoped to one persona. Do not pause or
+  mutate unrelated personas. A new persona without binding/workflow/transport
+  is already inert; an existing target persona may require only its own binding
+  to remain paused during a separately authorized publication/validation.
 - Validate conversation changes with `brain-agent-e2e` through the internal WA
   Validator; never use real WhatsApp for this repository.
 

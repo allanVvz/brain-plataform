@@ -12,3 +12,11 @@
 
 Fail closed when a metric is unavailable. Do not run cleanup, restart or retry
 from this audit.
+
+## Pause scope
+
+The table above is a shared code/infra release gate, so all agents and
+transport are paused for that cutover. A persona-scoped content publication is
+different: only the target binding/AI is paused when it exists. A new persona
+without binding, workflow or transport is already inert, and unrelated
+personas remain operational.
