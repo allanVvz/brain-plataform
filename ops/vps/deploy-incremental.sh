@@ -120,6 +120,10 @@ if [[ -s "$STATE_DIR/lifecycle.json" ]]; then
       && -s "$STATE_DIR/control/claims-paused.json" ]]; then
       echo "archiving and superseding reviewed release $existing_candidate at $existing_stage"
       prepare_args+=(--force --force-reason "$SUPERSEDE_RELEASE_REASON")
+    elif [[ "$existing_candidate" == "$CURRENT_SHA" && "$existing_stage" == "verified" ]]; then
+      # A verified lifecycle is complete. The lifecycle controller will replace
+      # it with this new candidate without requiring a forced supersession.
+      echo "previous verified lifecycle is complete; preparing new candidate"
     else
       echo "unfinished release cannot be superseded safely: candidate=$existing_candidate stage=$existing_stage" >&2
       exit 1

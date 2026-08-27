@@ -59,6 +59,11 @@ def test_abandoned_pre_pause_candidate_can_be_superseded_safely():
     assert "unfinished release cannot be superseded safely" in DEPLOY
 
 
+def test_completed_verified_lifecycle_allows_the_next_candidate():
+    assert '"$existing_candidate" == "$CURRENT_SHA" && "$existing_stage" == "verified"' in DEPLOY
+    assert "previous verified lifecycle is complete; preparing new candidate" in DEPLOY
+
+
 def test_resume_checks_digest_and_is_idempotent_after_verified():
     assert "image_digests_verified=true" in RESUME
     assert "workers already resumed and release verified" in RESUME
