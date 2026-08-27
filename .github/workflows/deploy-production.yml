@@ -6,10 +6,15 @@ on:
       action:
         description: Deploy the selected image or roll back to the recorded previous image
         type: choice
-        options: [deploy, rollback, inspect_lifecycle, inspect_graph_bundle, inspect_resume_bindings, clear_code_release_binding_pauses, preflight_pause, postflight_validate, resume_workers]
+        options: [deploy, rollback, inspect_lifecycle, inspect_graph_bundle, inspect_resume_bindings, inspect_persona_binding, safety_pause_persona, clear_code_release_binding_pauses, preflight_pause, postflight_validate, resume_workers]
         default: deploy
       candidate_sha:
         description: Full release SHA for the controlled production gate
+        required: false
+      persona_slug:
+        description: Persona scope for binding inspection or safety pause
+        type: choice
+        options: [tock-fatal, aurora]
         required: false
       image_tag:
         description: Existing immutable SHA tag (optional; current commit for deploy, recorded previous for rollback)
@@ -63,7 +68,7 @@ jobs:
           DEPLOY_ACTION: ${{ inputs.action || 'deploy' }}
         run: |
           set -Eeuo pipefail
-          if [ "$DEPLOY_ACTION" = "inspect_lifecycle" ] || [ "$DEPLOY_ACTION" = "inspect_graph_bundle" ] || [ "$DEPLOY_ACTION" = "inspect_resume_bindings" ] || [ "$DEPLOY_ACTION" = "clear_code_release_binding_pauses" ] || [ "$DEPLOY_ACTION" = "preflight_pause" ] || [ "$DEPLOY_ACTION" = "postflight_validate" ] || [ "$DEPLOY_ACTION" = "resume_workers" ]; then
+          if [ "$DEPLOY_ACTION" = "inspect_lifecycle" ] || [ "$DEPLOY_ACTION" = "inspect_graph_bundle" ] || [ "$DEPLOY_ACTION" = "inspect_resume_bindings" ] || [ "$DEPLOY_ACTION" = "inspect_persona_binding" ] || [ "$DEPLOY_ACTION" = "safety_pause_persona" ] || [ "$DEPLOY_ACTION" = "clear_code_release_binding_pauses" ] || [ "$DEPLOY_ACTION" = "preflight_pause" ] || [ "$DEPLOY_ACTION" = "postflight_validate" ] || [ "$DEPLOY_ACTION" = "resume_workers" ]; then
             for value in class=documentation touch_vps=false publish_api=false publish_worker=false publish_migrate=false pause_claims=false backup=false; do
               echo "$value" >> "$GITHUB_OUTPUT"
             done
@@ -151,7 +156,7 @@ jobs:
           IMAGE_TAG=${TARGET_SHA} docker compose --env-file .env.ci --profile edge --profile evolution config --quiet
 
   publish:
-    if: inputs.action != 'rollback' && inputs.action != 'inspect_lifecycle' && inputs.action != 'inspect_graph_bundle' && inputs.action != 'inspect_resume_bindings' && inputs.action != 'clear_code_release_binding_pauses' && inputs.action != 'preflight_pause' && inputs.action != 'postflight_validate' && inputs.action != 'resume_workers'
+    if: inputs.action != 'rollback' && inputs.action != 'inspect_lifecycle' && inputs.action != 'inspect_graph_bundle' && inputs.action != 'inspect_resume_bindings' && inputs.action != 'inspect_persona_binding' && inputs.action != 'safety_pause_persona' && inputs.action != 'clear_code_release_binding_pauses' && inputs.action != 'preflight_pause' && inputs.action != 'postflight_validate' && inputs.action != 'resume_workers'
     needs: [classify, validate]
     runs-on: ubuntu-latest
     outputs:
@@ -239,7 +244,7 @@ jobs:
 
   production_gate:
     needs: classify
-    if: inputs.action == 'inspect_lifecycle' || inputs.action == 'inspect_graph_bundle' || inputs.action == 'inspect_resume_bindings' || inputs.action == 'clear_code_release_binding_pauses' || inputs.action == 'preflight_pause' || inputs.action == 'postflight_validate' || inputs.action == 'resume_workers'
+    if: inputs.action == 'inspect_lifecycle' || inputs.action == 'inspect_graph_bundle' || inputs.action == 'inspect_resume_bindings' || inputs.action == 'inspect_persona_binding' || inputs.action == 'safety_pause_persona' || inputs.action == 'clear_code_release_binding_pauses' || inputs.action == 'preflight_pause' || inputs.action == 'postflight_validate' || inputs.action == 'resume_workers'
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -249,13 +254,14 @@ jobs:
           VPS_APP_DIR: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           GATE_ACTION: ${{ inputs.action }}
           CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          PERSONA_SLUG: ${{ inputs.persona_slug }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
           command_timeout: 30m
-          envs: VPS_APP_DIR,GATE_ACTION,CANDIDATE_SHA
+          envs: VPS_APP_DIR,GATE_ACTION,CANDIDATE_SHA,PERSONA_SLUG
           script: |
             set -Eeuo pipefail
             cd "$VPS_APP_DIR"
@@ -268,6 +274,31 @@ jobs:
               python3 ops/vps/release_lifecycle.py show
             elif [ "$GATE_ACTION" = "inspect_resume_bindings" ]; then
               docker compose --env-file .env.compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -P pager=off -c "select b.id::text as binding_id, p.slug as persona_slug, b.connection_status, coalesce(b.metadata->>\$\$safety_pause_reason\$\$, b.metadata->>\$\$pause_reason\$\$, \$\$\$\$) as safety_reason, b.updated_at from public.workflow_bindings b join public.personas p on p.id=b.persona_id where b.active and (b.connection_status=\$\$safety_paused\$\$ or coalesce((b.metadata->>\$\$safety_paused\$\$)::boolean,false)) order by p.slug, b.id;"'
+            elif [ "$GATE_ACTION" = "inspect_persona_binding" ]; then
+              [[ "$PERSONA_SLUG" == "tock-fatal" || "$PERSONA_SLUG" == "aurora" ]]
+              docker compose --env-file .env.compose exec -T api python -c 'import json,sys; from services import supabase_client; p=supabase_client.get_persona(sys.argv[1]) or {}; rows=[b for b in supabase_client.get_workflow_bindings(str(p.get("id") or "")) if b.get("active")]; print(json.dumps({"persona_slug": sys.argv[1], "active_bindings": [{"id": str(b.get("id")), "provider": b.get("provider"), "connection_status": b.get("connection_status"), "decision_owner": (b.get("metadata") or {}).get("decision_owner"), "safety_paused": bool((b.get("metadata") or {}).get("safety_paused")), "safety_pause_reason": (b.get("metadata") or {}).get("safety_pause_reason")} for b in rows]}, sort_keys=True))' "$PERSONA_SLUG"
+            elif [ "$GATE_ACTION" = "safety_pause_persona" ]; then
+              [[ "$PERSONA_SLUG" == "tock-fatal" || "$PERSONA_SLUG" == "aurora" ]]
+              [ "$current" = "$CANDIDATE_SHA" ]
+              docker compose --env-file .env.compose exec -T api python - "$PERSONA_SLUG" <<'PY'
+            import sys
+            from datetime import datetime, timezone
+            from services import supabase_client
+
+            slug = sys.argv[1]
+            persona = supabase_client.get_persona(slug) or {}
+            bindings = [row for row in supabase_client.get_workflow_bindings(str(persona.get("id") or "")) if row.get("active")]
+            assert len(bindings) == 1, f"expected exactly one active binding for {slug}, found {len(bindings)}"
+            binding = bindings[0]
+            metadata = dict(binding.get("metadata") or {})
+            metadata["safety_paused"] = True
+            metadata["safety_pause_reason"] = "wa_validator_unsupported_claim:33107811431:b99ff979-a853-4c7d-8bf5-5ff1f9215ffd"
+            metadata["safety_paused_at"] = datetime.now(timezone.utc).isoformat()
+            metadata["safety_paused_by"] = "production_wa_validator"
+            supabase_client.update_workflow_binding_metadata(str(binding["id"]), metadata)
+            supabase_client.insert_event({"event_type": "whatsapp.binding_safety_paused", "entity_type": "workflow_binding", "entity_id": str(binding["id"]), "persona_id": persona["id"], "payload": {"persona_slug": slug, "reason": metadata["safety_pause_reason"]}}, source="ops.wa_validator_safety_gate")
+            print({"persona_slug": slug, "binding_id": str(binding["id"]), "safety_paused": True, "reason": metadata["safety_pause_reason"]})
+            PY
             elif [ "$GATE_ACTION" = "clear_code_release_binding_pauses" ]; then
               test -f .deploy/control/claims-paused.json
               [ "$(python3 ops/vps/release_lifecycle.py show --field stage)" = "awaiting_resume_authorization" ]
