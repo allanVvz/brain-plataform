@@ -79,8 +79,8 @@ paralelo seguro.
 | P0 | Destravar a Aurora SDR (ciclo com memória travado) | **em aberto — evidência coletada 2026-08-19 (branch `chore/aurora-unblock-p0-evidence-2026-08-19`, commit `62d8c62`, não mesclada): nenhuma das 5 hipóteses reproduziu contra tráfego real; falta sessão de prova formal via WA Validator e teste da hipótese 3 (orçamento de prompt) antes de marcar concluído** | `aurora-unblock` |
 | 0 | Higiene do repositório e precedência de documentos | **concluído 2026-08-19** | `deprecation-sweeper` |
 | 1 | Publisher genérico, PublicationPlan, embeddings incrementais | **em progresso — GraphBundle + PublicationPlan + staging/ativação em duas fases já existem e publicaram a Tock Fatal real; falta embeddings incrementais por chunk e o publisher completo de edição/remoção** | `bundle-migrator`, `graph-publisher`, `release-gate` |
-| 2 | Cards editáveis alteram o agente de verdade | a fazer | `card-editor` |
-| 2a | Ordem visual e editável das perguntas de qualificação, integrada à Sofia | **a fazer — prioridade de autoria; sem tornar a conversa um roteiro rígido** | `card-editor`, `graph-publisher` |
+| 2 | Cards editáveis alteram o agente de verdade | **em progresso — 2a e 2b entregues no editor GraphBundle v3; 2c–2e permanecem bloqueadas pelos gates de revisão/publicação** | `card-editor` |
+| 2c.1 | Ordem visual e editável das perguntas de qualificação, integrada à Sofia | **a fazer — prioridade de autoria; sem tornar a conversa um roteiro rígido** | `card-editor`, `graph-publisher` |
 | 3 | Sofia produz dados declarativos, não código | a fazer | `faq-coverage`, `sdr-evaluator` |
 | 4 | Tock Fatal nasce no pipeline novo | **em progresso — v8 ativa (182 nós, catálogo estrutural sem preço); falta escopo de ramo real e os 220 nós comerciais — ver item 4a e a seção "Runtime semantic-first" (2026-08-22)** | `graph-publisher` |
 | 5 | n8n estável e desacoplado do conteúdo | a fazer | — |
@@ -581,6 +581,49 @@ O operador enxerga três passos, não quinze:
 Alterar (card)  ->  Aprovar (plano)  ->  Publicar
 ```
 
+### Item 2 — fases do editor GraphBundle
+
+- **2a — Visualização GraphBundle v3:** renderer separado, estados
+  draft/staged/ativo e convivência com Graph JSON v2.
+- **2b — Layout editável:** movimento de nodes persistido fora do bundle, sem
+  alteração semântica ou de checksum.
+- **2c — Edição versionada de nodes:** editar título, resumo/conteúdo, tags,
+  fonte, status e `data` específica do tipo de node. A ordem visual e editável
+  das perguntas de qualificação é o subitem prioritário 2c.1.
+- **2d — Operações estruturais:** criar, renomear, arquivar e relacionar nodes,
+  com proteção de Persona, Embedded e Gallery.
+- **2e — Paridade e retirada controlada do v2:** somente depois de provar
+  autoria, aprovação, publicação, rollback e equivalência visual no v3.
+
+Contrato obrigatório da edição GraphBundle futura:
+
+```text
+Editar node
+  -> salvar nova revisão do draft com CAS
+  -> validar GraphBundle
+  -> compilar PublicationPlan
+  -> exibir diff semântico e novos checksums
+  -> aprovação humana
+  -> staging
+  -> ativação explicitamente autorizada
+```
+
+Regras do editor:
+
+- Nunca editar diretamente uma `graph_publications` ativa.
+- Cada save exige `expected_draft_checksum` e chave idempotente; conflito de
+  versão retorna 409 sem sobrescrever outro operador.
+- `id` e `projection_node_id` são imutáveis; rename de slug é operação
+  estrutural própria.
+- Conteúdo sem fonte ou validação permanece `pending_source` ou
+  `pending_validation` e bloqueia publicação.
+- Exclusão comum arquiva; remoção física não faz parte do editor.
+- Somente admin ou acesso `can_edit` altera; viewer permanece somente leitura.
+- Layout não participa do checksum semântico.
+- Cada alteração cria revisão recuperável; desfazer cria outra revisão, sem
+  reescrever histórico.
+- Nenhum save publica automaticamente.
+
 ```json
 {
   "draft_checksum": "...",
@@ -621,7 +664,7 @@ demanda. Nenhum deles re-deriva o projeto do zero.
 | `aurora-unblock` | opus | Coleta evidência read-only, testa as 5 hipóteses do P0 em ordem, salva em `docs/evidence/` | P0 |
 | `graph-publisher` | opus | Gera `PublicationPlan`, compara checksums, publica e ativa; recusa se `validation_errors` não vazio | 1, 4 |
 | `bundle-migrator` | opus | Move regra de negócio de Python para o bundle, um bloco por vez, com teste de equivalência de checksum | 1, 6 |
-| `card-editor` | sonnet | Aplica operações declarativas em cards e devolve o diff semântico | 2 |
+| `card-editor` | sonnet | Aplica operações declarativas versionadas em cards e devolve o `PublicationPlan` com diff semântico; nunca publica nem ativa | 2 |
 | `faq-coverage` | opus | Audita cobertura de FAQ por branch; aponta `claim_type` faltante e posicionamento descoberto | 3 |
 | `sdr-evaluator` | opus | Avalia transcript contra critérios de qualidade (reusa a skill `aurora-conversation-evaluator`) | 3 |
 | `deprecation-sweeper` | sonnet | Detecta arquivo que contradiz este roadmap e propõe arquivamento | 0 |
