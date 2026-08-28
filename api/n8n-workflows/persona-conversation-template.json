@@ -35,7 +35,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{$env.API_INTERNAL_BASE_URL + '/internal/conversations/context'}}",
+        "url": "={{$env.API_INTERNAL_BASE_URL + '/internal/v1/conversations/context'}}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -64,7 +64,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{$env.API_INTERNAL_BASE_URL + '/internal/conversations/decide'}}",
+        "url": "={{$env.API_INTERNAL_BASE_URL + '/internal/v1/conversations/decide'}}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -185,7 +185,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{$env.API_INTERNAL_BASE_URL + '/internal/conversations/decide'}}",
+        "url": "={{$env.API_INTERNAL_BASE_URL + '/internal/v1/conversations/decide'}}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -308,7 +308,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{$env.API_INTERNAL_BASE_URL + '/internal/conversations/decide'}}",
+        "url": "={{$env.API_INTERNAL_BASE_URL + '/internal/v1/conversations/decide'}}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -351,7 +351,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{$env.API_INTERNAL_BASE_URL + '/internal/conversations/commit'}}",
+        "url": "={{$env.API_INTERNAL_BASE_URL + '/internal/v1/conversations/commit'}}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -380,7 +380,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{$env.API_INTERNAL_BASE_URL + '/internal/conversations/technical-failure'}}",
+        "url": "={{$env.API_INTERNAL_BASE_URL + '/internal/v1/conversations/technical-failure'}}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [

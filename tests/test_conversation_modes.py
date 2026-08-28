@@ -307,9 +307,9 @@ def test_n8n_agentic_template_and_local_mode_are_distinct_contracts():
         node.get("parameters", {}).get("url", "")
         for node in workflow["nodes"]
     ]
-    assert any("/internal/conversations/context" in url for url in urls)
-    assert any("/internal/conversations/decide" in url for url in urls)
-    assert any("/internal/conversations/commit" in url for url in urls)
+    assert any("/internal/v1/conversations/context" in url for url in urls)
+    assert any("/internal/v1/conversations/decide" in url for url in urls)
+    assert any("/internal/v1/conversations/commit" in url for url in urls)
     source = inspect.getsource(conversation_runtime.execute_pipeline)
     assert source.index("build_context(") < source.index("decide(") < source.index("commit(")
     assert workflow["meta"]["template"] == "graph_agentic_v3"
@@ -346,7 +346,7 @@ def test_technical_failure_captures_which_node_failed_and_why_without_handoff():
             node for node in workflow["nodes"] if node.get("id") == "failsafe"
         )
         assert fail_safe["name"] == "Quarantine technical failure"
-        assert "/internal/conversations/technical-failure" in fail_safe["parameters"]["url"]
+        assert "/internal/v1/conversations/technical-failure" in fail_safe["parameters"]["url"]
         assert "fail-safe-handoff" not in fail_safe["parameters"]["url"]
         body = fail_safe["parameters"]["body"]
         assert "failed_node" in body

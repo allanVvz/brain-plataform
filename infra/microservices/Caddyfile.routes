@@ -4,7 +4,7 @@ handle @transport {
   reverse_proxy {$BRAIN_TRANSPORT_UPSTREAM}
 }
 
-@runtime path /process /internal/conversations/* /internal/agents/* /agents* /agent-harness* /insights* /leads* /wa-validator* /qa/*
+@runtime path /process /agents* /agent-harness* /insights* /leads* /wa-validator* /qa/*
 handle @runtime {
   reverse_proxy {$BRAIN_RUNTIME_UPSTREAM}
 }

@@ -27,9 +27,9 @@ PUBLIC_PREFIXES = ("/health", "/auth/", "/webhooks/", "/api/menu/")
 
 
 def _upstream(path: str) -> str:
-    if path.startswith(("/webhooks/evolution/", "/webhooks/whatsapp", "/messages", "/messaging", "/process")):
+    if path.startswith(("/webhooks/evolution/", "/webhooks/whatsapp", "/messages", "/messaging")):
         return os.environ["BRAIN_TRANSPORT_URL"]
-    if path.startswith(("/internal/conversations/", "/internal/agents/", "/agents", "/agent-harness", "/insights", "/leads", "/wa-validator", "/qa/")):
+    if path.startswith(("/process", "/agents", "/agent-harness", "/insights", "/leads", "/wa-validator", "/qa/")):
         return os.environ["BRAIN_RUNTIME_URL"]
     return os.environ["BRAIN_CONTROL_PLANE_URL"]
 
@@ -72,7 +72,7 @@ async def proxy(path: str, request: Request) -> Response:
     route = "/" + path
     if route.startswith("/api-brain/"):
         route = route.removeprefix("/api-brain")
-    if route.startswith("/internal/v1/"):
+    if route.startswith("/internal/"):
         return JSONResponse({"detail": "not found"}, status_code=404)
     headers = _headers(request)
     is_public = route == "/" or route.startswith(PUBLIC_PREFIXES)

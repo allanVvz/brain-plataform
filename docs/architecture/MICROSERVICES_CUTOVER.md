@@ -5,6 +5,12 @@ Target repositories are `brain-contracts`, `brain-control-plane`,
 the dashboard, `/api-brain` gateway, migrations, route map, and release-manifest
 orchestrator.
 
+Public routing keeps the existing paths: webhooks, messages and provider
+dispatch go to transport; `/process`, agents, leads, decisions and the WA
+Validator go to conversation runtime; authoring, GraphBundle, KB, assets and
+administration go to control plane. Internal service endpoints stay under
+`/internal/v1/*` and are not exposed directly by the gateway.
+
 Before the initial cutover, shared runtime releases retain the global pause gate.
 The cutover itself is limited to the approved eight-hour window and must leave
 all paused components paused. No file in `infra/microservices` authorizes deploy,

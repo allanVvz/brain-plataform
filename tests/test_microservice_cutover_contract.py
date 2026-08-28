@@ -15,7 +15,16 @@ def test_turn_runtime_only_reads_active_publication_at_context_start():
 def test_gateway_strips_client_identity_and_blocks_new_internal_api():
     source = (ROOT / "api/gateway_main.py").read_text(encoding="utf-8")
     assert 'IDENTITY_HEADERS = {"x-brain-principal", "x-brain-principal-signature"}' in source
-    assert 'route.startswith("/internal/v1/")' in source
+    assert 'route.startswith("/internal/")' in source
+
+
+def test_gateway_routes_decisions_to_runtime_not_transport():
+    source = (ROOT / "api/gateway_main.py").read_text(encoding="utf-8")
+    transport_rule, runtime_rule = source.split("def _upstream", 1)[1].split(
+        "def _principal", 1
+    )[0].split("return os.environ[\"BRAIN_TRANSPORT_URL\"]", 1)
+    assert '"/process"' not in transport_rule
+    assert '"/process"' in runtime_rule
 
 
 def test_canonical_n8n_template_has_no_microservice_fork():
