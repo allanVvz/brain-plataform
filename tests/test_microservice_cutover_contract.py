@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 import yaml
 
@@ -51,3 +52,17 @@ def test_blue_green_has_gateway_and_role_separated_env_files():
     assert "BRAIN_TRANSPORT_URL" in services["control-plane-blue"]["environment"]
     assert "BRAIN_RUNTIME_URL" in services["transport-blue"]["environment"]
     assert "BRAIN_RUNTIME_URL" in services["transport-green"]["environment"]
+
+
+def test_source_import_manifest_tracks_merged_service_heads():
+    manifest = json.loads(
+        (ROOT / "ops/microservices/source-import-manifest.json").read_text(encoding="utf-8")
+    )
+    heads = manifest["current_main_commits"]
+    assert set(heads) == {
+        "brain-contracts",
+        "brain-control-plane",
+        "brain-conversation-runtime",
+        "brain-transport",
+    }
+    assert all(len(sha) == 40 for sha in heads.values())

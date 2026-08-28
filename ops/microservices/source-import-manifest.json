@@ -11,6 +11,12 @@
     "brain-conversation-runtime": "e3137f53594fa5daa304648f649d40f4721242ee",
     "brain-transport": "c78ad64d7e9d9daef08a0b062766f44983cde3b3"
   },
+  "current_main_commits": {
+    "brain-contracts": "0a1c05389388fcf392dab7041e30e1c1132379b8",
+    "brain-control-plane": "ef817b6c5067b390ae75c7c55aa210d949335507",
+    "brain-conversation-runtime": "67e7b9224c8d1099b0372ce3c96bc04a8499e21b",
+    "brain-transport": "fdc68afb68964deb0685ab80fb7eb5310770c09b"
+  },
   "route_map_checksum": "sha256:d1733cb225a648ef1d78c33081fc78c55f557ed85613a71dd0e53be60461f331",
   "n8n_checksum": "sha256:426296e5339741b85bd0711306b7738cb6051cdb7450d13dea36fa32d5690a5e"
 }
