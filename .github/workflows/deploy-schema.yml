@@ -3,18 +3,22 @@ on:
   workflow_dispatch:
     inputs:
       manifest_sha: {description: Integrated release manifest SHA, required: true}
-      apply: {description: Apply approved expand-compatible migrations, type: boolean, default: false}
+      manifest_path: {description: Release manifest path, required: true, default: ops/microservices/release-manifest.json}
+permissions:
+  contents: read
 jobs:
-  review:
-    environment: production-schema
+  dry-run:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: python -m json.tool ops/microservices/source-import-manifest.json >/dev/null
-      - name: Dry-run only
-        if: inputs.apply != true
-        run: echo "schema dry-run reviewed for ${{ inputs.manifest_sha }}"
-      - name: Apply via approved production runner
-        if: inputs.apply == true
-        run: gh workflow run deploy-production.yml -f run_migrations=true -f release_sha="${{ inputs.manifest_sha }}"
-        env: {GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"}
+        with: {ref: "${{ inputs.manifest_sha }}"}
+      - name: Validate immutable release manifest
+        run: python ops/microservices/validate-release-manifest.py "${{ inputs.manifest_path }}"
+      - name: Build deterministic schema plan
+        run: python ops/microservices/plan-schema-release.py "${{ inputs.manifest_path }}" > schema-release-plan.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: schema-release-plan-${{ inputs.manifest_sha }}
+          path: schema-release-plan.json
+          if-no-files-found: error
+          retention-days: 30
