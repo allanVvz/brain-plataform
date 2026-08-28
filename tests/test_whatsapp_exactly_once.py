@@ -665,7 +665,7 @@ def test_v3_commercial_note_includes_a_shared_field_owned_by_the_persona(monkeyp
     )
     monkeypatch.setattr(
         conversation_runtime.supabase_client,
-        "get_active_graph_publication",
+        "get_graph_publication_by_id",
         lambda *_a, **_k: {
             "document_json": {
                 "branch_contracts": {

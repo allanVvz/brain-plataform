@@ -1,5 +1,8 @@
 # Production release gates
 
+GraphBundle releases use persona-scoped shadow validation and atomic
+activation; they are not treated as a shared code release.
+
 > Updated 2026-08-24: `KEEP_WORKERS_PAUSED` is the legacy full-deploy path.
 > The official incremental path classifies the change, leaves API-only releases
 > independent from workers, and pauses new conversational claims with a durable
