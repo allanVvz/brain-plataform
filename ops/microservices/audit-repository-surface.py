@@ -100,6 +100,15 @@ def audit(api_root: Path, repository_module: str, roots: list[str] | None = None
         function_tables, function_rpcs = _literal_db_objects(functions[name])
         tables.update(function_tables)
         rpcs.update(function_rpcs)
+    direct_tables: set[str] = set()
+    direct_rpcs: set[str] = set()
+    for path in production_paths:
+        module_tree = ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
+        module_tables, module_rpcs = _literal_db_objects(module_tree)
+        direct_tables.update(module_tables)
+        direct_rpcs.update(module_rpcs)
+    all_tables = tables | direct_tables
+    all_rpcs = rpcs | direct_rpcs
     return {
         "api_root": str(api_root.resolve()),
         "repository_module": repository_module,
@@ -110,12 +119,18 @@ def audit(api_root: Path, repository_module: str, roots: list[str] | None = None
         "unreachable_functions": sorted(set(functions) - reachable),
         "literal_tables": sorted(tables),
         "literal_rpcs": sorted(rpcs),
+        "direct_literal_tables": sorted(direct_tables),
+        "direct_literal_rpcs": sorted(direct_rpcs),
+        "production_literal_tables": sorted(all_tables),
+        "production_literal_rpcs": sorted(all_rpcs),
         "counts": {
             "all_functions": len(functions),
             "reachable_functions": len(reachable),
             "unreachable_functions": len(functions) - len(reachable),
             "literal_tables": len(tables),
             "literal_rpcs": len(rpcs),
+            "production_literal_tables": len(all_tables),
+            "production_literal_rpcs": len(all_rpcs),
         },
     }
 

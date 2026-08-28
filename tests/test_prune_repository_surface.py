@@ -49,3 +49,19 @@ def test_pruner_preserves_reachable_helpers_and_top_level_state(tmp_path):
     assert "def helper" in source
     assert "def used" in source
     assert "def dead" not in source
+
+
+def test_audit_includes_direct_database_objects_outside_repository(tmp_path):
+    api = _fixture(tmp_path)
+    (api / "services" / "active.py").write_text(
+        "from services import supabase_client\n"
+        "def run():\n"
+        "    supabase_client.get_client().table('direct_table').select('*').execute()\n"
+        "    supabase_client.get_client().rpc('direct_rpc', {}).execute()\n"
+        "    return supabase_client.used()\n"
+    )
+
+    audit = MODULE._auditor().audit(api, "repositories.domain")
+
+    assert "direct_table" in audit["production_literal_tables"]
+    assert "direct_rpc" in audit["production_literal_rpcs"]
