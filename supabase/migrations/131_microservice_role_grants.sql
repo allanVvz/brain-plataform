@@ -51,27 +51,31 @@ BEGIN
       (
         'brain_control_plane',
         ARRAY[
-          'agent_logs','agent_sessions','app_users','approved_knowledge_snapshots',
+          'agent_logs','agent_run_steps','agent_runs','agent_sessions','app_users','approved_knowledge_snapshots',
           'asset_readings','assets','audiences','brand_profiles','contact_consents',
+          'campaign_recipients','campaign_revision_imports','campaign_revisions','campaigns',
           'conversation_facts','conversation_journeys','conversation_ledger_branches',
-          'conversation_ledgers','flow_insights','graph_publications','integration_status',
+          'conversation_ledgers','flow_insights','graph_branch_contracts','graph_branch_memberships',
+          'graph_node_coordinates','graph_publications','integration_status',
           'kb_entries','knowledge_edges','knowledge_intake_messages','knowledge_items',
           'knowledge_node_type_registry','knowledge_nodes','knowledge_rag_chunks',
           'knowledge_rag_entries','knowledge_rag_links','knowledge_relation_type_registry',
           'knowledge_sources','lead_audience_memberships','lead_buffer','lead_import_batches',
-          'lead_import_rows','leads','messages','n8n_executions','personas','pipeline_status',
+          'lead_import_rows','leads','message_templates','messages','n8n_executions','personas','pipeline_status',
           'public_site_formats','sofia_plan_sessions','sync_logs','sync_runs','system_events',
           'system_health','user_integration_connections','user_persona_access','workflow_bindings'
         ]::text[],
         ARRAY[
-          'agent_logs','agent_sessions','app_users','approved_knowledge_snapshots',
+          'agent_logs','agent_run_steps','agent_runs','agent_sessions','app_users','approved_knowledge_snapshots',
           'asset_readings','assets','audiences','brand_profiles','contact_consents',
+          'campaign_recipients','campaign_revision_imports','campaign_revisions','campaigns',
           'flow_insights','graph_publications','integration_status','kb_entries',
+          'graph_branch_contracts','graph_branch_memberships','graph_node_coordinates',
           'knowledge_edges','knowledge_intake_messages','knowledge_items',
           'knowledge_node_type_registry','knowledge_nodes','knowledge_rag_chunks',
           'knowledge_rag_entries','knowledge_rag_links','knowledge_relation_type_registry',
           'knowledge_sources','lead_audience_memberships','lead_import_batches','lead_import_rows',
-          'leads','n8n_executions','personas','pipeline_status','public_site_formats',
+          'leads','message_templates','n8n_executions','personas','pipeline_status','public_site_formats',
           'sofia_plan_sessions','sync_logs','sync_runs','system_events','system_health',
           'user_integration_connections','user_persona_access','workflow_bindings'
         ]::text[]
@@ -79,34 +83,37 @@ BEGIN
       (
         'brain_runtime',
         ARRAY[
-          'agent_logs','app_users','approved_knowledge_snapshots','assets','audiences',
+          'agent_logs','agents','app_users','approved_knowledge_snapshots','assets','audiences',
           'contact_consents','conversation_facts','conversation_journeys',
           'conversation_ledger_branches','conversation_ledgers','conversation_turn_proofs',
-          'flow_insights','graph_publications','integration_status','kb_entries','knowledge_edges',
+          'flow_insights','graph_branch_contracts','graph_branch_memberships','graph_node_coordinates',
+          'graph_publications','integration_status','kb_entries','knowledge_edges',
           'knowledge_intake_messages','knowledge_items','knowledge_nodes','knowledge_rag_chunks',
           'knowledge_rag_entries','knowledge_rag_links','knowledge_sources',
           'lead_audience_memberships','lead_buffer','lead_import_batches','lead_import_rows',
-          'leads','messages','n8n_executions','personas','pipeline_status','sofia_plan_sessions',
+          'leads','messages','n8n_executions','persona_role_assignments','personas','pipeline_status',
+          'sales_conversions','sofia_plan_sessions',
           'sync_logs','sync_runs','system_events','system_health','user_integration_connections',
-          'wa_validator_sessions','workflow_bindings'
+          'user_persona_access','wa_validator_sessions','workflow_bindings'
         ]::text[],
         ARRAY[
-          'agent_logs','contact_consents','conversation_facts','conversation_journeys',
+          'agent_logs','agents','contact_consents','conversation_facts','conversation_journeys',
           'conversation_ledger_branches','conversation_ledgers','conversation_turn_proofs',
-          'flow_insights','leads','pipeline_status','system_events','system_health',
+          'flow_insights','leads','persona_role_assignments','pipeline_status','sales_conversions',
+          'system_events','system_health',
           'wa_validator_sessions'
         ]::text[]
       ),
       (
         'brain_transport',
         ARRAY[
-          'agent_logs','app_users','asset_readings','assets','audiences','conversation_facts',
+          'agent_logs','agents','app_users','asset_readings','assets','audiences','campaign_recipients','conversation_facts',
           'conversation_journeys','conversation_ledger_branches','conversation_ledgers',
           'graph_publications','integration_status','kb_entries','knowledge_edges',
           'knowledge_intake_messages','knowledge_items','knowledge_nodes','knowledge_rag_chunks',
           'knowledge_rag_entries','lead_audience_memberships','lead_buffer','leads','messages',
           'personas','pipeline_status','system_events','system_health',
-          'user_integration_connections','workflow_bindings'
+          'user_integration_connections','user_persona_access','workflow_bindings'
         ]::text[],
         ARRAY[
           'agent_logs','asset_readings','assets','integration_status','lead_buffer','leads',
@@ -175,6 +182,8 @@ BEGIN
   FOR role_name, function_name IN
     SELECT * FROM (VALUES
       ('brain_control_plane','activate_persona_whatsapp_binding'),
+      ('brain_control_plane','activate_graph_publication_v3'),
+      ('brain_control_plane','create_campaign_draft_v1'),
       ('brain_control_plane','conversation_carry_over_facts_by_lead_v1'),
       ('brain_control_plane','enqueue_whatsapp_envelope'),
       ('brain_control_plane','graph_branch_package_v3'),('brain_control_plane','graph_branch_rank_v3'),
@@ -182,6 +191,7 @@ BEGIN
       ('brain_control_plane','graph_service_rank_v3'),('brain_control_plane','graph_turn_context_batch_v3'),
       ('brain_control_plane','graph_turn_context_batch_v4'),('brain_control_plane','messages_page'),
       ('brain_control_plane','record_contact_consent_v1'),('brain_control_plane','replace_lead_semantic_group_v1'),
+      ('brain_control_plane','transition_campaign_status_v1'),
       ('brain_runtime','audit_conversation_turn_v3'),('brain_runtime','backdate_lead_messages'),
       ('brain_runtime','claim_conversation_commit'),('brain_runtime','claim_inactivity_recovery_candidate_v1'),
       ('brain_runtime','claim_next_wa_validator_session'),('brain_runtime','claim_wa_validator_session'),

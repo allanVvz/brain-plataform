@@ -24,3 +24,18 @@ def test_microservice_grants_are_explicit_not_universal():
     assert "brain_gateway',\n        ARRAY" not in SQL
     assert "brain_runtime','commit_graph_turn_and_outbox_v4" in SQL
     assert "brain_transport','claim_whatsapp_buffer" in SQL
+
+
+def test_domain_owned_tables_and_routines_are_present_in_role_manifest():
+    for object_name in (
+        "agent_runs", "agent_run_steps", "campaigns", "campaign_revisions",
+        "campaign_recipients", "message_templates", "graph_branch_contracts",
+        "graph_branch_memberships", "graph_node_coordinates",
+    ):
+        assert f"'{object_name}'" in SQL
+    for routine in (
+        "activate_graph_publication_v3", "create_campaign_draft_v1",
+        "transition_campaign_status_v1",
+    ):
+        assert f"'brain_control_plane','{routine}'" in SQL
+    assert "'brain_runtime','activate_graph_publication_v3'" not in SQL
