@@ -85,7 +85,7 @@ async def readiness() -> Response:
 def _upstream(path: str) -> str:
     if path.startswith(("/webhooks/evolution/", "/webhooks/whatsapp", "/messages")):
         return os.environ["BRAIN_TRANSPORT_URL"]
-    if path.startswith(("/process", "/agents", "/agent-harness", "/insights", "/leads", "/wa-validator", "/qa/")):
+    if path.startswith(("/process", "/agents", "/insights", "/leads", "/wa-validator")):
         return os.environ["BRAIN_RUNTIME_URL"]
     return os.environ["BRAIN_CONTROL_PLANE_URL"]
 
