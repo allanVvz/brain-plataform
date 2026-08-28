@@ -3,7 +3,7 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env.compose}"
 cd "$ROOT_DIR"
-COMPOSE=(docker compose --env-file "$ENV_FILE")
+COMPOSE=(docker compose --env-file "$ENV_FILE" --profile blue-green)
 "${COMPOSE[@]}" ps
 "${COMPOSE[@]}" exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1' <<'SQL'
 select pg_size_pretty(pg_database_size(current_database())) as database_size;
@@ -22,6 +22,8 @@ left join knowledge_nodes t on t.id=e.target_node_id
 where s.id is null or t.id is null;
 SQL
 docker system df
-api_bind="$("${COMPOSE[@]}" port api 8080)"
+active_api_service="$(tr -d '\r\n' < .deploy/api-active-slot 2>/dev/null || true)"
+[[ "$active_api_service" == "api-candidate" ]] || active_api_service=api
+api_bind="$("${COMPOSE[@]}" port "$active_api_service" 8080)"
 curl --fail --show-error --silent "http://$api_bind/health/ready"
 echo

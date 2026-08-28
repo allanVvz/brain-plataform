@@ -26,7 +26,7 @@
     "asked_question_node_ids": ["q:name"],
     "max_attempts": 1,
     "field_pending": true,
-    "expected_failures": ["contextual_bridge_required"]
+    "expected_failures": ["question_already_asked"]
   },
   {
     "name": "retomada_verdadeiramente_contextual",
@@ -37,7 +37,7 @@
     "asked_question_node_ids": ["q:name"],
     "max_attempts": 1,
     "field_pending": true,
-    "expected_failures": []
+    "expected_failures": ["question_already_asked"]
   },
   {
     "name": "retomada_contextual_com_pergunta_parafraseada",
@@ -47,7 +47,7 @@
     "asked_question_node_ids": ["q:objective"],
     "max_attempts": 1,
     "field_pending": true,
-    "expected_failures": []
+    "expected_failures": ["question_already_asked"]
   },
   {
     "name": "retomada_contextual_com_pergunta_abreviada",
@@ -57,7 +57,7 @@
     "asked_question_node_ids": ["q:objective"],
     "max_attempts": 1,
     "field_pending": true,
-    "expected_failures": []
+    "expected_failures": ["question_already_asked"]
   },
   {
     "name": "pergunta_parafraseada_sem_ponte",
@@ -67,7 +67,7 @@
     "asked_question_node_ids": ["q:objective"],
     "max_attempts": 1,
     "field_pending": true,
-    "expected_failures": ["contextual_bridge_required"]
+    "expected_failures": ["question_already_asked"]
   },
   {
     "name": "progressao_para_pergunta_diferente",
@@ -89,7 +89,7 @@
     "asked_question_node_ids": ["q:name", "q:name"],
     "max_attempts": 1,
     "field_pending": true,
-    "expected_failures": ["question_attempt_budget_exceeded"]
+    "expected_failures": ["question_already_asked"]
   },
   {
     "name": "repeticao_da_confirmacao_terminal",

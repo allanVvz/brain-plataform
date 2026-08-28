@@ -116,11 +116,13 @@ def assess_repetition(
 ) -> dict[str, Any]:
     """Return deterministic repetition failures for one prospective reply.
 
-    ``max_attempts`` is the number of contextual resumptions after the initial
-    question. Therefore a value of one permits at most two emissions of the
-    same ``question_node_id``.
+    A graph question is single-emission within the compatible journey state.
+    ``max_attempts`` remains in the call signature only so older publications
+    can be read without a schema fork; it no longer authorizes a second ask.
+    Contextual bridges are diagnostic evidence, never permission to repeat a
+    field the customer has already seen.
     """
-    normalized_max = max(0, min(int(max_attempts), 1))
+    del max_attempts
     previous = [str(value or "") for value in recent_replies if str(value or "").strip()]
     semantic_matches = [
         index for index, value in enumerate(previous)
@@ -134,12 +136,9 @@ def assess_repetition(
     previous_emissions = asked.count(str(question_node_id or "")) if question_node_id else 0
     repeated_question = bool(question_node_id and previous_emissions > 0)
     if repeated_question:
-        if previous_emissions >= 1 + normalized_max:
-            failures.append("question_attempt_budget_exceeded")
+        failures.append("question_already_asked")
         if not field_pending:
             failures.append("question_field_not_pending")
-        if not has_substantive_contextual_bridge(current_reply, question_text):
-            failures.append("contextual_bridge_required")
 
     if terminal_intent and terminal_intent == previous_terminal_intent:
         failures.append("terminal_repetition")
@@ -153,7 +152,7 @@ def assess_repetition(
         "similarities": [semantic_similarity(value, current_reply) for value in previous],
         "question_node_id": question_node_id,
         "previous_question_emissions": previous_emissions,
-        "allowed_question_emissions": 1 + normalized_max,
+        "allowed_question_emissions": 1,
         "contextual_bridge": _contextual_bridge(current_reply, question_text),
         "terminal_intent": terminal_intent,
     }

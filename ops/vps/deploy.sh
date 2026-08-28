@@ -139,6 +139,10 @@ deploy_tag() {
   local tag="$1"
   local allow_local_images="${2:-false}"
   export IMAGE_TAG="$tag"
+  export API_TAG="$tag" WORKER_TAG="$tag" MIGRATE_TAG="$tag"
+  mkdir -p "$STATE_DIR/caddy"
+  cp infra/Caddyfile "$STATE_DIR/caddy/Caddyfile"
+  printf '%s\n' api > "$STATE_DIR/api-active-slot"
   if ! "${COMPOSE[@]}" pull migrate api workers seed-admin; then
     [[ "$allow_local_images" == "true" ]] || return 1
     echo "Registry pull failed during rollback; validating immutable local images." >&2

@@ -42,6 +42,9 @@ def test_customer_profile_is_resolved_from_the_packaged_api_tree():
     assert wv._CUSTOMER_PROFILES_PATH == API_ROOT / "evaluation" / "wa_validator_customer_profiles.json"
     assert wv._CUSTOMER_PROFILES_PATH.is_file()
     assert wv._customer_profile("appointment")["answers"]["nome_cliente"]["value"]
+    appointment_answers = wv._customer_profile("appointment")["answers"]
+    assert appointment_answers["procedimento_anterior"]["value"] == "nenhum"
+    assert appointment_answers["foco_brilho_riscos"]["value"] == "ambos"
 
 
 def test_bots_keeps_authorized_persona_when_graph_label_lookup_fails(monkeypatch):
@@ -99,6 +102,37 @@ def test_semantic_script_starts_with_one_graph_derived_turn():
     assert script["driver"]["mode"] == "semantic_graph_v1"
     assert script["driver"]["initial_known_fields"] == []
     assert script["steps"][0]["expected_branch_node_id"] == "branch:one"
+
+
+def test_appointment_profile_covers_current_published_polishing_fields():
+    publication = _semantic_publication()
+    contract = publication["document_json"]["branch_contracts"]["branch:one"]
+    for key, question in (
+        ("procedimento_anterior", "Já houve procedimento anterior?"),
+        ("foco_brilho_riscos", "O foco é brilho, riscos ou ambos?"),
+    ):
+        question_id = f"q:{key}"
+        contract["fields"].append({
+            "key": key,
+            "owner_node_id": "branch:one",
+            "required": True,
+            "accepted_statuses": ["known"],
+            "question_node_id": question_id,
+        })
+        contract["questions"][question_id] = {
+            "field_key": key,
+            "text": question,
+        }
+        contract["closure_node_ids"].append(question_id)
+
+    script = wv._semantic_appointment_script(
+        publication=publication,
+        flow_id="sdr_qualificacao_carro",
+        initial_state="cold",
+    )
+
+    assert script["driver"]["answers"]["procedimento_anterior"]["value"] == "nenhum"
+    assert script["driver"]["answers"]["foco_brilho_riscos"]["value"] == "ambos"
 
 
 def test_semantic_script_known_name_is_state_not_a_scripted_message():
@@ -687,11 +721,11 @@ def test_semantic_turn_audit_rejects_final_confirmation_while_field_confirmation
     assert "field_confirmation_precedes_final_confirmation" in audit["failures"]
 
 
-def test_semantic_turn_audit_rejects_a_later_field_before_first_missing():
-    """The validator must enforce the same graph-owned order as proof."""
+def test_semantic_turn_audit_accepts_any_currently_askable_field():
+    """Graph scope and pending state matter; wording and order do not."""
     inputs = _semantic_audit_inputs()
     inputs["customer_step"]["intended_facts"] = {}
-    inputs["turn"]["text"] = "Perfeito! Qual seu objetivo com o carro?"
+    inputs["turn"]["text"] = "Perfeito! O que você espera alcançar com esse cuidado?"
     inputs["proof_record"]["proof_result"]["missing_fields"] = ["nome_cliente", "objective"]
     inputs["proof_record"]["proof_result"]["next_question_node_id"] = "q:objective"
     inputs["proof_record"]["proof_result"]["accepted_facts"] = []
@@ -701,9 +735,28 @@ def test_semantic_turn_audit_rejects_a_later_field_before_first_missing():
 
     audit = wv._semantic_turn_audit(**inputs)
 
-    assert audit["passed"] is False
+    assert audit["passed"] is True
     assert audit["asked_field"] == "objective"
-    assert "first_missing_field_only" in audit["failures"]
+    assert audit["criteria"]["question_semantically_askable"] is True
+
+
+def test_semantic_turn_audit_accepts_two_clauses_bound_to_one_askable_field():
+    """Natural follow-up wording does not turn one proof-bound field into two."""
+    inputs = _semantic_audit_inputs()
+    inputs["turn"]["text"] = (
+        "Qual é o seu objetivo? Você busca proteção ou aparência?"
+    )
+    inputs["proof_record"]["proof_result"]["accepted_facts"] = []
+    inputs["proof_record"]["proof_result"]["missing_fields"] = ["objective"]
+    inputs["proof_record"]["proof_result"]["next_question_node_id"] = "q:objective"
+    inputs["ledger_after"]["facts"].pop("objective")
+    inputs["customer_step"]["intended_facts"] = {}
+
+    audit = wv._semantic_turn_audit(**inputs)
+
+    assert audit["passed"] is True
+    assert audit["asked_field"] == "objective"
+    assert audit["criteria"]["question_semantically_askable"] is True
 
 
 def test_semantic_turn_audit_rejects_a_question_for_a_field_that_is_not_missing():
@@ -716,7 +769,7 @@ def test_semantic_turn_audit_rejects_a_question_for_a_field_that_is_not_missing(
     audit = wv._semantic_turn_audit(**inputs)
 
     assert audit["passed"] is False
-    assert "first_missing_field_only" in audit["failures"]
+    assert "question_semantically_askable" in audit["failures"]
 
 
 def test_semantic_turn_audit_rejects_repeated_reply_and_fallback():
@@ -741,7 +794,7 @@ def test_semantic_turn_audit_rejects_identical_reply_while_field_is_pending():
     assert "reply_not_repeated" in audit["failures"]
 
 
-def test_semantic_turn_audit_accepts_one_contextual_question_resumption():
+def test_semantic_turn_audit_rejects_contextual_question_resumption():
     inputs = _semantic_audit_inputs()
     inputs["recent_replies"] = ["Qual seu nome?"]
     inputs["previous_question_node_id"] = "q:name"
@@ -756,7 +809,9 @@ def test_semantic_turn_audit_accepts_one_contextual_question_resumption():
 
     audit = wv._semantic_turn_audit(**inputs)
 
-    assert audit["passed"] is True, audit["failures"]
+    assert audit["passed"] is False
+    assert "question_repetition_budget" in audit["failures"]
+    assert "question_already_asked" in audit["repetition_audit"]["failures"]
     assert audit["repetition_audit"]["previous_question_emissions"] == 1
 
 
@@ -780,7 +835,7 @@ def test_semantic_turn_audit_rejects_rewritten_third_question_by_node_budget():
 
     assert audit["passed"] is False
     assert "question_repetition_budget" in audit["failures"]
-    assert "question_attempt_budget_exceeded" in audit["repetition_audit"]["failures"]
+    assert "question_already_asked" in audit["repetition_audit"]["failures"]
 
 
 def test_semantic_turn_audit_rejects_superficially_reworded_reply():
@@ -1087,6 +1142,26 @@ def test_semantic_turn_audit_uses_singular_active_branch_at_terminal_commit():
     inputs["customer_step"]["expected_active_branch_node_ids"] = ["branch:one"]
     inputs["ledger_after"]["active_branch_node_id"] = "branch:one"
     inputs["ledger_after"].pop("active_branch_node_ids", None)
+
+    audit = wv._semantic_turn_audit(**inputs)
+
+    assert audit["criteria"]["expected_active_branches_persisted"] is True
+
+
+def test_semantic_turn_audit_accepts_all_confirmed_branches_at_terminal_handoff():
+    inputs = _semantic_audit_inputs()
+    expected = ["branch:one", "branch:two"]
+    inputs["customer_step"]["expected_active_branch_node_ids"] = expected
+    inputs["ledger_after"]["active_branch_node_ids"] = ["branch:one"]
+    proof = inputs["proof_record"]["proof_result"]
+    proof.update({
+        "qualification_complete": True,
+        "missing_fields": [],
+        "next_question_node_id": None,
+        "confirmed_branch_node_ids": expected,
+    })
+    inputs["turn"].update({"route": "HUMAN", "handoff": True})
+    inputs["expected_handoff"] = True
 
     audit = wv._semantic_turn_audit(**inputs)
 

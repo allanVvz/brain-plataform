@@ -38,8 +38,8 @@ jobs:
           echo "backend=$(scoped "^(api/|tests/|supabase/migrations/|scripts/check_.*\.py$|${conversation_gate#^})")" >> "$GITHUB_OUTPUT"
           echo "frontend=$(scoped "^(dashboard/|${conversation_gate#^})")" >> "$GITHUB_OUTPUT"
           echo "compose=$(scoped '^(docker-compose\.yml|\.env\.compose\.example|infra/|ops/vps/|Caddyfile|kong\.yml)')" >> "$GITHUB_OUTPUT"
-          echo "python_deps=$(scoped '^api/requirements(-dev)?\.txt$')" >> "$GITHUB_OUTPUT"
-          echo "image=$(scoped '^(api/Dockerfile|api/requirements(-dev)?\.txt|infra/migrate\.Dockerfile)$')" >> "$GITHUB_OUTPUT"
+          echo "python_deps=$(scoped '^api/requirements(-[^/]+)?\.txt$')" >> "$GITHUB_OUTPUT"
+          echo "image=$(scoped '^(api/Dockerfile|api/requirements(-[^/]+)?\.txt|infra/migrate\.Dockerfile)$')" >> "$GITHUB_OUTPUT"
           echo "workflows=$(changed '^\.github/workflows/')" >> "$GITHUB_OUTPUT"
 
       - name: Validar sintaxe dos workflows alterados
@@ -146,7 +146,7 @@ jobs:
 
       - name: Build da imagem alterada
         if: steps.changes.outputs.image == 'true'
-        run: docker build -f api/Dockerfile -t brain-api:ci .
+        run: docker build --target api -f api/Dockerfile -t brain-api:ci .
 
       - name: Scan da imagem alterada
         if: steps.changes.outputs.image == 'true'

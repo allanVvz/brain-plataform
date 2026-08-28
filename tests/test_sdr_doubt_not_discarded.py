@@ -63,7 +63,6 @@ def _fixture(monkeypatch):
             "question_repetition": {"max_attempts": 1},
             "doubt_handling": {
                 "answer_before_qualification": "Respondo primeiro.",
-                "continue_with_first_missing_field": "Seguimos com o campo pendente.",
                 "deferred_response": "A equipe explica esse detalhe publicado.",
             },
             "qualification": {
@@ -195,17 +194,31 @@ def _proposal(document):
     }
 
 
-def _decide(document, context):
+def _decide(document, context, *, repaired=False):
+    proposal = _proposal(document)
+    if repaired:
+        proposal = {**proposal, "next_question_node_id": None, "reply": ANSWER}
     return graph_agent_runtime_v3.decide(
-        context, model_observation={"proposal": _proposal(document)},
+        context, model_observation={
+            "proposal": proposal,
+            "repair_attempt": 1 if repaired else 0,
+        },
     )
 
 
 def test_confirmacao_de_servico_nao_engole_a_resposta_da_duvida(monkeypatch):
     """`reply = confirmation_text` levava junto a explicacao do servico."""
     document, pub = _fixture(monkeypatch)
-    _decision, response = _decide(
+    _decision, first = _decide(
         document, _context(document, pub, message_id="msg:1", asked=["q:servico"]),
+    )
+    assert first.reply_text is None
+    assert first.proof["repair_required"] is True
+
+    _decision, response = _decide(
+        document,
+        _context(document, pub, message_id="msg:1", asked=["q:servico"]),
+        repaired=True,
     )
 
     reply = response.reply_text or ""
@@ -221,7 +234,7 @@ def test_duvida_respondida_nao_gasta_o_orcamento_de_pergunta(monkeypatch):
         document, pub, message_id="msg:2",
         asked=["q:servico", "q:servico"],
         history=[{"role": "assistant", "content": "Qual servico te interessa?"}],
-    ))
+    ), repaired=True)
 
     desistencias = [
         fact for fact in response.proof["accepted_facts"]
@@ -231,89 +244,69 @@ def test_duvida_respondida_nao_gasta_o_orcamento_de_pergunta(monkeypatch):
     assert decision.route.value != "HUMAN"
 
 
-def test_supressao_de_duplicata_ainda_entrega_o_conteudo_novo(monkeypatch):
-    """Reter a pergunta repetida nao pode reter o turno inteiro."""
+def test_reparo_do_modelo_preserva_conteudo_novo_sem_repetir_campo(monkeypatch):
+    """A segunda chamada preserva a resposta e remove a pergunta repetida."""
     document, pub = _fixture(monkeypatch)
-    _decision, response = _decide(document, _context(
+    context = _context(
         document, pub, message_id="msg:3",
         asked=["q:servico", "q:servico"],
         history=[
             {"role": "assistant", "content": "Qual servico te interessa?"},
             {"role": "assistant", "content": "Qual servico te interessa?"},
         ],
-    ))
+    )
 
-    assert response.reply_text, "o cliente nao pode ficar sem resposta"
+    _decision, first = _decide(document, context)
+    assert first.reply_text is None
+    assert first.proof["repair_required"] is True
+
+    _decision, response = _decide(document, context, repaired=True)
+
+    assert response.reply_text == ANSWER
+    assert "Qual servico" not in response.reply_text
 
 
-def test_pergunta_suprimida_nao_conta_como_feita(monkeypatch):
-    """O orcamento conta entregas, nao intencoes."""
+def test_contrato_segmentado_publica_a_duvida_sem_repetir_campo(monkeypatch):
+    """No v2, uma pergunta ruim nao exige reparo nem descarta a resposta."""
+    document, pub = _fixture(monkeypatch)
+    context = _context(
+        document, pub, message_id="msg:semantic-v2", asked=["q:servico"],
+        history=[{"role": "assistant", "content": "Qual servico te interessa?"}],
+    )
+    proposal = {
+        **_proposal(document),
+        "answer_text": ANSWER,
+        "question_text": "Qual servico te interessa",
+        "next_question_field_key": "servico",
+        "next_question_node_id": None,
+        "reply": f"{ANSWER} Qual servico te interessa",
+    }
+
+    decision, response = graph_agent_runtime_v3.decide(
+        context,
+        model_observation={"proposal": proposal, "repair_attempt": 0},
+    )
+
+    assert decision.route.value != "HUMAN"
+    assert response.reply_text == ANSWER
+    assert response.proof["question_discarded"] is True
+    assert response.proof["repair_required"] is False
+    assert response.cart_state["asked_question_node_ids"] == ["q:servico"]
+
+
+def test_proposta_repetida_nao_registra_nova_emissao(monkeypatch):
+    """A memoria conta apenas a pergunta que o cliente recebeu."""
     document, pub = _fixture(monkeypatch)
     _decision, response = _decide(document, _context(
         document, pub, message_id="msg:4",
-        asked=["q:servico", "q:servico"],
+        asked=["q:servico"],
         history=[
-            {"role": "assistant", "content": "Qual servico te interessa?"},
             {"role": "assistant", "content": "Qual servico te interessa?"},
         ],
     ))
 
     asked = response.cart_state["asked_question_node_ids"]
-    assert asked.count("q:servico") == 2, asked
-
-
-def test_claim_nao_autorizada_da_duvida_pede_uma_correcao_com_feedback(monkeypatch):
-    document, pub = _fixture(monkeypatch)
-    proposal = _proposal(document)
-    proposal["claims"] = [{
-        "claim_type": "other",
-        "value": {},
-        "evidence_node_ids": ["faq:not-authorized"],
-        "evidence_chunk_ids": [],
-    }]
-    _decision, response = graph_agent_runtime_v3.decide(
-        _context(document, pub, message_id="msg:feedback", asked=[]),
-        model_observation={"proposal": proposal},
-    )
-
-    # Regression (live 2026-08-18): this branch never had anything to fetch
-    # (repair_requirements is always empty here -- the graph-approved
-    # answer is already fully computed) so waiting on a repair round trip
-    # before replying just risked total silence if that round trip never
-    # completed. The very first attempt now resolves immediately with the
-    # approved answer instead of returning reply_text=None.
-    assert ANSWER in (response.reply_text or ""), response.proof.get("model_proposal_errors")
-    assert response.proof["repair_required"] is False
-    assert response.proof["policy_feedback"]["kind"] == "claim_not_authorized"
-    assert response.proof["policy_feedback"]["approved_faq"]["node_id"] == "faq:ppf-how"
-    assert response.proof["model_attempts"] == 1
-
-
-def test_segunda_proposta_invalida_ainda_entrega_faq_publicada(monkeypatch):
-    document, pub = _fixture(monkeypatch)
-    proposal = _proposal(document)
-    proposal["claims"] = [{
-        "claim_type": "other",
-        "value": {},
-        "evidence_node_ids": ["faq:not-authorized"],
-        "evidence_chunk_ids": [],
-    }]
-    _decision, response = graph_agent_runtime_v3.decide(
-        _context(
-            document, pub, message_id="msg:feedback-2", asked=["q:servico"],
-            history=[{"role": "assistant", "content": "Qual servico te interessa?"}],
-        ),
-        model_observation={"proposal": proposal, "repair_attempt": 1},
-    )
-
-    assert ANSWER in (response.reply_text or "")
-    # This branch no longer distinguishes repair_attempt=0 from >=1 -- it
-    # always resolves immediately (see the sibling regression test above),
-    # so this now also happens to be the first-attempt outcome/label even
-    # though this specific call passed repair_attempt=1.
-    assert response.proof["fallback_applied"] == "published_faq_immediate"
-    assert response.proof["model_attempts"] == 1
-    assert response.proof["repetition_action"] != "suppressed_duplicate_outbound"
+    assert asked.count("q:servico") == 1, asked
 
 
 def test_o_contrato_comum_nunca_autoriza_mais_que_um_galho(monkeypatch):

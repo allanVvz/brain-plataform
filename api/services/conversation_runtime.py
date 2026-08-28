@@ -809,35 +809,6 @@ def build_context(
         cart["_identified_service_slug"] = branch_node.slug
     ledger = graph_conversation_contract.ledger_from_state(cart, contract)
     unresolved_fields = graph_conversation_contract.missing_fields(ledger, contract)
-    # Golden Dataset RAG (knowledge_rag_entries/knowledge_rag_chunks,
-    # persona-scoped, approved/validated only) — a real retrieval layer
-    # distinct from rag_nodes' in-memory graph-node keyword filter above.
-    # Built for the n8n agentic flow (deterministic ignores this field and
-    # keeps using rag_nodes/rag_paths unchanged).
-    try:
-        rag_chunks = supabase_client.search_active_rag_chunks(
-            persona_id=str(persona.get("id") or lead.get("persona_id") or ""),
-            query=message,
-            limit=12,
-            branch_anchor_node_id=active_branch_id,
-            allowed_node_ids=sorted(branch_ids),
-            active_path_node_ids=active_coordinate.get("path_node_ids") or [],
-            unresolved_fields=unresolved_fields,
-            graph_version=version,
-        )
-    except Exception as exc:  # noqa: BLE001 — RAG is best-effort context, never fatal
-        logger.warning("search_active_rag_chunks failed: %s", exc)
-        rag_chunks = []
-    try:
-        system_prompt = build_system_prompt(graph)
-    except Exception as exc:  # noqa: BLE001 — the deterministic path never needs this
-        logger.warning("build_system_prompt failed: %s", exc)
-        system_prompt = ""
-    available_services = [
-        {"slug": node.slug, "label": node.label}
-        for node in graph.nodes
-        if node.node_type in ("product", "service") and node.slug
-    ]
     agent_slug = next(
         (
             str((node.data or {}).get("metadata", {}).get("agent_slug"))
@@ -858,14 +829,42 @@ def build_context(
             or "agent"
         ),
     )
+    # Golden Dataset RAG (knowledge_rag_entries/knowledge_rag_chunks,
+    # persona-scoped, approved/validated only) — a real retrieval layer
+    # distinct from rag_nodes' in-memory graph-node keyword filter above.
+    # Built for the n8n agentic flow (deterministic ignores this field and
+    # keeps using rag_nodes/rag_paths unchanged).
     try:
-        projection_nodes, _projection_edges = supabase_client.list_all_knowledge_graph(
+        rag_chunks = supabase_client.search_active_rag_chunks(
             persona_id=str(persona.get("id") or lead.get("persona_id") or ""),
-            limit_nodes=5000,
+            query=message,
+            limit=12,
+            branch_anchor_node_id=active_branch_id,
+            allowed_node_ids=sorted(branch_ids),
+            active_path_node_ids=active_coordinate.get("path_node_ids") or [],
+            unresolved_fields=unresolved_fields,
+            graph_version=version,
+            agent_slug=agent_slug,
         )
-    except Exception as exc:  # projection UUIDs are optional trace metadata
-        logger.warning("list_all_knowledge_graph failed: %s", exc)
-        projection_nodes = []
+    except Exception as exc:  # noqa: BLE001 — RAG is best-effort context, never fatal
+        logger.warning("search_active_rag_chunks failed: %s", exc)
+        rag_chunks = []
+    try:
+        system_prompt = build_system_prompt(graph)
+    except Exception as exc:  # noqa: BLE001 — the deterministic path never needs this
+        logger.warning("build_system_prompt failed: %s", exc)
+        system_prompt = ""
+    available_services = [
+        {"slug": node.slug, "label": node.label}
+        for node in graph.nodes
+        if node.node_type in ("product", "service") and node.slug
+    ]
+    # Projection UUIDs are optional trace metadata. Loading the complete graph
+    # here used to turn every conversational turn into an unbounded authoring
+    # read (and eventually a huge PostgREST ``in(...)`` URL). Context cards are
+    # already built from the compiled graph plus bounded RAG chunks, so the
+    # production conversation path must not enumerate the authoring graph.
+    projection_nodes: list[dict[str, Any]] = []
     cards = context_cards_service.resolve_cards(
         graph=graph,
         graph_version=version,

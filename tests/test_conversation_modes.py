@@ -11,10 +11,31 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "api"))
 
-from routes import personas, whatsapp
+from routes import conversations, personas, whatsapp
 from services import conversation_runtime, wa_validator_service
 from services.sdr_documents import compile_persona_documents
 from workers.whatsapp_dispatch_worker import WhatsAppDispatchWorker
+
+
+def test_validator_counts_one_model_repair_as_one_persisted_decision():
+    audit = {
+        "inbound_count": 1,
+        "decision_count": 1,
+        "proof_count": 1,
+        "valid_proof_count": 1,
+        "outbound_count": 1,
+        "outbound_released_after_proof": True,
+        "commit_state": "completed",
+        "prompt_tokens": 30_000,
+        "model_calls": 2,
+        "deterministic_branch_match": True,
+    }
+
+    assert wa_validator_service._conversation_v3_invariant_errors(audit) == []
+    audit["model_calls"] = 3
+    assert wa_validator_service._conversation_v3_invariant_errors(audit) == [
+        "model_calls=3"
+    ]
 
 
 def test_active_whatsapp_binding_accepts_every_contact():
@@ -357,6 +378,55 @@ def test_technical_failure_captures_which_node_failed_and_why_without_handoff():
         assert "reason: 'workflow_step_failed'," not in body
 
 
+def test_technical_failure_finalizes_processing_commit_before_dead_letter(monkeypatch):
+    calls: list[tuple] = []
+    monkeypatch.setenv("AI_BRAIN_WEBHOOK_TOKEN", "test-token")
+    monkeypatch.setattr(
+        conversations.conversation_runtime.supabase_client,
+        "get_lead_by_ref",
+        lambda _lead_ref: {"id": 93, "persona_id": "persona:test", "ai_paused": False},
+    )
+    monkeypatch.setattr(
+        conversations.conversation_runtime.supabase_client,
+        "fail_conversation_commit",
+        lambda buffer_id, reason: calls.append(("commit", buffer_id, reason))
+        or {"updated": True, "status": "failed"},
+    )
+    monkeypatch.setattr(
+        conversations.conversation_runtime.supabase_client,
+        "complete_whatsapp_buffer",
+        lambda buffer_id, status, error=None: calls.append(
+            ("buffer", buffer_id, status, error)
+        ),
+    )
+    monkeypatch.setattr(
+        conversations.conversation_runtime.supabase_client,
+        "insert_event",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        conversations.conversation_runtime,
+        "emit_turn_event",
+        lambda *args, **kwargs: None,
+    )
+
+    result = conversations.technical_failure(
+        conversations.TechnicalFailureRequest(
+            lead_ref=93,
+            buffer_id="inbound:test",
+            reason="workflow_step_failed:commit",
+            correlation_id="corr:test",
+        ),
+        x_webhook_token="test-token",
+    )
+
+    assert calls[0] == ("commit", "inbound:test", "workflow_step_failed:commit")
+    assert calls[1][:3] == ("buffer", "inbound:test", "dead_letter")
+    assert result["technical_failure"] is True
+    assert result["workflow_outcome"] == "technical_failure"
+    assert result["commit_state"] == "failed"
+
+
 def test_canonical_agentic_workflow_uses_compact_graph_context():
     workflow = json.loads((ROOT / "api/n8n-workflows/persona-conversation-template.json").read_text(encoding="utf-8"))
     code = next(node for node in workflow["nodes"] if node["name"] == "Build graph grounded agent request")["parameters"]["jsCode"]
@@ -370,7 +440,11 @@ def test_canonical_agentic_workflow_forwards_semantic_observations():
     request = next(node for node in workflow["nodes"] if node["name"] == "Build graph grounded agent request")["parameters"]["jsCode"]
     validate = next(node for node in workflow["nodes"] if node["name"] == "Validate agent response")["parameters"]["jsCode"]
     persist = next(node for node in workflow["nodes"] if node["name"] == "Persist once and enqueue send")["parameters"]["body"]
-    assert "extracted_facts" in request and "extracted_facts" in validate
+    # `facts` alone would also match facts_by_key/accepted_facts, so assert the
+    # interpretation contract itself: the schema the model is handed and the
+    # parse that turns its answer back into facts.
+    assert "'intents','state_relation'" in request
+    assert "Array.isArray(parsed.facts)" in validate
     assert "response: $json.response" in persist
 
 

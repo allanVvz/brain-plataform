@@ -113,10 +113,10 @@ def test_validate_graph_json_rejects_incomplete_graph_owned_conversation_policy(
     assert "appointment persona requires conversation_policy.doubt_handling" in errors
 
 
-def test_question_repetition_accepts_zero_contextual_retries():
+def test_legacy_question_repetition_metadata_remains_readable():
     graph = build_aurora_graph()
     persona = next(node for node in graph.nodes if node.node_type == "persona")
-    persona.data["conversation_policy"]["question_repetition"]["max_attempts"] = 0
+    persona.data["conversation_policy"]["question_repetition"] = {"max_attempts": 1}
 
     valid, errors = validate_graph_json(graph)
 

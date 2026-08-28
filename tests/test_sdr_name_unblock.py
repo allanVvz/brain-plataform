@@ -61,7 +61,6 @@ def _fixture(monkeypatch, *, confirmation_policy="last_resort"):
             "question_repetition": {"max_attempts": 1},
             "doubt_handling": {
                 "answer_before_qualification": "Respondo primeiro.",
-                "continue_with_first_missing_field": "Sigo com o campo pendente.",
                 "deferred_response": "A equipe explica esse detalhe publicado.",
             },
             "qualification": {
@@ -192,7 +191,10 @@ def _context(document, pub, message, *, asked=("q:nome",), facts_by_key=None,
     )
 
 
-def _name_proposal(value, evidence, *, confidence=0.95, reply="Entendi."):
+def _name_proposal(
+    value, evidence, *, confidence=0.95,
+    reply=f"Entendi. {SERVICE_QUESTION}",
+):
     return {
         "branch_action": "none",
         "branch_anchor_node_id": None,
@@ -274,9 +276,26 @@ def test_repetir_o_candidato_pendente_confirma_e_avanca(monkeypatch):
             "content": "Entendi. Allan Rodrigues e o seu nome completo?",
         }],
         message_id="msg:2",
-    )
+    ).model_copy(update={"pending_confirmation_ref": "fact:nome:persona:generic"})
 
-    _decision, response = _decide(context, _name_proposal("Allan Rodrigues", "allan rodrigues"))
+    # Repeating the pending candidate value used to confirm it on its own
+    # (`_restates_pending_candidate`, now dead code). Confirmation now comes
+    # from the model's semantic reading of the same message, so the customer
+    # restating "allan rodrigues" must surface as an explicit confirmation
+    # intent bound to the pending fact's ref.
+    _decision, response = graph_agent_runtime_v3.decide(
+        context, model_observation={
+            "interpretation": {
+                "intents": [{"kind": "confirmation", "evidence_span": "allan rodrigues"}],
+                "state_relation": "continue",
+                "confirmation": {
+                    "state": "affirm",
+                    "target_ref": "fact:nome:persona:generic",
+                    "evidence_span": "allan rodrigues",
+                },
+            },
+        },
+    )
 
     assert response.proof["mode"] == "deterministic_field_confirmation"
     fact = next(
@@ -287,10 +306,12 @@ def test_repetir_o_candidato_pendente_confirma_e_avanca(monkeypatch):
     assert fact["value"] == "Allan Rodrigues"
 
 
-def test_turno_de_coleta_nunca_termina_so_em_reconhecimento(monkeypatch):
-    """"Entendi." sozinho nao e um turno -- e um silencio disfarcado."""
+def test_saudacao_livre_aceita_pergunta_natural_vinculada_ao_campo(monkeypatch):
     document, pub = _fixture(monkeypatch)
-    # O modelo nao consegue ler nada util e devolve so um reconhecimento.
+    reply = (
+        "Oi! Que bom falar com voce. "
+        "O que voce esta buscando para o seu carro?"
+    )
     proposal = {
         "branch_action": "none",
         "branch_anchor_node_id": None,
@@ -298,24 +319,24 @@ def test_turno_de_coleta_nunca_termina_so_em_reconhecimento(monkeypatch):
         "branch_evidence_span": "",
         "extracted_facts": [],
         "claims": [],
-        "next_question_node_id": "q:nome",
+        "next_question_node_id": "q:servico",
         "cited_node_ids": [], "cited_chunk_ids": [],
-        "reply": "Entendi.",
+        "reply": reply,
         "qualification_complete": False, "handoff_requested": False,
     }
     context = _context(
-        document, pub, "hmmm ta",
-        history=[{
-            "message_id": "msg:0", "role": "assistant", "content": NAME_QUESTION,
-        }],
+        document, pub, "ooii", asked=(),
         message_id="msg:3",
     )
 
     _decision, response = _decide(context, proposal)
 
-    reply = response.reply_text or ""
-    assert reply.strip() not in {"", "Entendi."}
-    assert "?" in reply, reply
+    assert response.proof["valid"], response.proof["errors"]
+    assert response.reply_text == reply
+    assert response.proof["next_question_node_id"] == "q:servico"
+    assert response.proof["question_component_invalid"] is False
+    assert response.proof["repair_required"] is False
+    assert "model_question_metadata_askable" in response.proof["observations"]
 
 
 def test_nome_invalido_nao_vira_fato_e_o_turno_continua_util(monkeypatch):
@@ -328,7 +349,7 @@ def test_nome_invalido_nao_vira_fato_e_o_turno_continua_util(monkeypatch):
 
     assert not [
         item for item in response.proof["accepted_facts"]
-        if item["field_key"] == "nome"
+        if item["field_key"] == "nome" and item["status"] == "known"
     ]
     assert any(
         entry.get("errors") == ["human_full_name_invalid"]

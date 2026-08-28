@@ -22,7 +22,9 @@ cp -a "$ROOT_DIR/supabase/migrations" "$STAGE/supabase/"
 cp -a "$ROOT_DIR/docs/sdr" "$STAGE/docs/"
 printf '%s\n' "$SOURCE_SHA" > "$STAGE/SOURCE_SHA"
 printf '%s\n' "${API_IMAGE_DIGEST:-unresolved}" > "$STAGE/API_IMAGE_DIGEST"
+printf '%s\n' "${WORKER_IMAGE_DIGEST:-unresolved}" > "$STAGE/WORKER_IMAGE_DIGEST"
 printf '%s\n' "${MIGRATE_IMAGE_DIGEST:-unresolved}" > "$STAGE/MIGRATE_IMAGE_DIGEST"
+printf '%s\n' "${RUNTIME_BASE_IMAGE_DIGEST:-unresolved}" > "$STAGE/RUNTIME_BASE_IMAGE_DIGEST"
 (cd "$STAGE" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
 tar -C "$STAGE" -czf "$ARCHIVE" .
 (cd "$OUT_DIR" && sha256sum "$(basename "$ARCHIVE")" > "$(basename "$ARCHIVE").sha256")

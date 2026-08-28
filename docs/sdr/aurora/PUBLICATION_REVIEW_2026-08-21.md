@@ -28,6 +28,28 @@ O checksum canônico difere do hash do arquivo porque o pipeline atualiza o
 Graph JSON 2.0 para 2.1, materializa nodes de pergunta e renderiza Markdown de
 forma determinística antes da publicação.
 
+## Correção do gate materializado — 2026-08-22
+
+O checksum `sha256:f40a29b5b8fdc8373948b7e281c0f96e8487084d8e92e81ae9ec367d70bc1b40`
+foi produzido pelo helper offline com IDs textuais de fixture. O documento v3
+produtivo inclui os UUIDs reais da persona e dos nodes projetados; por isso esse
+SHA não era materializável e não podia ser ativado sem divergir do documento
+validado pelo runtime.
+
+O publicador legado Aurora agora restringe a compilação aos 153 nodes e 234
+edges do Graph v9, excluindo assets, conversas e outros nodes operacionais da
+persona. Dois dry-runs consecutivos contra a projeção produtiva produziram:
+
+| Artefato | Checksum | Contagem |
+|---|---|---|
+| Documento v3 materializável inicial | `sha256:06fd7dd7f3452fea3b2e688c7864243b19ab2fa2380873f93a7c9a6d17c12299` | 87 nodes / 168 edges / 14 branches / 30 FAQs elegíveis |
+| Legado final ativo v12 | `sha256:76d68b6851f0e92745725319aee531c26caed7729fc7eb8ca0df70cc944a0f4e` | 153 nodes / 234 edges |
+| Runtime final ativo v71 | `sha256:ca7d049c4e6b49e5ce6970369a1c4b59ee4de0496a2e2d584fadbd767e3460d6` | 87 nodes / 168 edges / 14 branches / 30 FAQs elegíveis / 85 entries / 1.844 chunks |
+
+Três projeções FAQ antigas com o mesmo `graph_json_node_id` foram identificadas
+para desativação não destrutiva no deploy. As linhas canônicas são escolhidas
+por ID estável, tipo e slug do Graph v9. GraphBundle permanece dívida técnica.
+
 ## Diff semântico
 
 - Campos comuns reduzidos para `nome_cliente` e `servico`.
@@ -56,8 +78,11 @@ forma determinística antes da publicação.
 
 ## Validação local
 
-- `70 passed` no gate focado, incluindo o contrato de materialização das
+- `71 passed` no gate focado, incluindo o contrato de materialização das
   perguntas e as suítes Aurora.
+- `1045 passed` na suíte ampla sem os testes SQL locais, que exigem banco
+  efêmero e não foram executados conforme a política de produção sem Docker
+  local.
 - Graph JSON 2.1 válido.
 - Todas as chaves obrigatórias possuem pergunta não vazia no node Persona.
 - 53 FAQs pendentes com exatamente cinco aliases e zero grant ao Embedded.
@@ -65,10 +90,10 @@ forma determinística antes da publicação.
 
 ## Sequência autorizada
 
-1. Deploy do SHA contendo fixture, docs e testes, mantendo o binding como está
-   por decisão explícita do operador durante a fase de teste.
-2. Publicar Graph JSON legado com CAS `expected-version=8` e `--skip-v3`.
-3. Revisar versão 9 e checksum materializado.
-4. Ativação/compilação v3 permanece separada; executar somente após autorização
-   explícita adicional.
-5. Após ativação, validar apenas pelo WA Validator direto.
+1. Deploy final concluído no SHA `fc204dfc7e67114eb3a82112b3745b9683f47712`.
+2. Graph JSON legado v12 publicado por CAS e sem ativação v3 automática.
+3. Dois dry-runs v3 consecutivos confirmaram o checksum final.
+4. Publicação v71 materializada e ativada separadamente sob autorização
+   explícita.
+5. Validação continua exclusivamente pelo WA Validator direto; transporte e IA
+   permanecem pausados.

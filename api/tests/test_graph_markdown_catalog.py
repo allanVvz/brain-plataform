@@ -13,34 +13,50 @@ from services import (
     knowledge_catalog,
     knowledge_graph,
 )
+from scripts.publish_aurora_graph import build_graph
 
 
 FIXTURE = Path(__file__).resolve().parents[1] / "scripts" / "fixtures" / "aurora_graph_v2.json"
 
 
 def test_aurora_markdown_contract_and_catalog():
-    graph = GraphJson.model_validate(json.loads(FIXTURE.read_text(encoding="utf-8")))
-    normalized = graph_markdown.canonicalize_graph(graph)
+    # Validate the same canonical preparation used by dry-run and publisher.
+    # The authored fixture intentionally does not carry every approved
+    # FAQ -> Embedded projection before publication.
+    normalized = build_graph()
     factual = [
         node for node in normalized.nodes
         if node.node_type in graph_markdown.FACTUAL_NODE_TYPES
     ]
-    assert len(normalized.nodes) == 59
-    assert len(normalized.edges) == 80
-    assert len(factual) == 57
+    assert len(normalized.nodes) == 153
+    assert len(normalized.edges) == 287
+    assert len(factual) == 151
     assert all((node.data or {}).get("markdown") for node in factual)
 
     faq_nodes = [node for node in factual if node.node_type == "faq"]
+    approved_faq_nodes = [
+        node for node in faq_nodes if node.lifecycle.status == "approved"
+    ]
     embedded = next(node for node in normalized.nodes if node.node_type == "embedded")
     faq_edges = [
         edge for edge in normalized.edges
-        if edge.target == embedded.id and edge.source in {node.id for node in faq_nodes}
+        if edge.target == embedded.id
+        and edge.source in {node.id for node in approved_faq_nodes}
+        and edge.lifecycle.status == "active"
     ]
-    assert len(faq_nodes) == 23
-    assert len(faq_edges) == 23
-    assert len({edge.source for edge in faq_edges}) == 23
-    assert all(node.data["markdown_document"] is True for node in faq_nodes)
-    assert all(node.data["question_count"] == 1 for node in faq_nodes)
+    assert len(faq_nodes) == 103
+    assert len(approved_faq_nodes) == 98
+    assert len(faq_edges) == 98
+    assert len({edge.source for edge in faq_edges}) == 98
+    markdown_faq_nodes = [
+        node for node in faq_nodes
+        if (node.data or {}).get("markdown_document") is True
+    ]
+    # Fifteen graph-owned qualification questions also use node_type=faq but
+    # are not conversational FAQ documents. The remaining 88 are canonical
+    # Markdown FAQs; the 53 expanded nodes carry aliases in question_count.
+    assert len(markdown_faq_nodes) == 88
+    assert all(node.data["question_count"] >= 1 for node in markdown_faq_nodes)
 
     catalog = knowledge_catalog.project_graph(
         normalized,
@@ -49,10 +65,10 @@ def test_aurora_markdown_contract_and_catalog():
         persona_id="aurora-id",
         persona_name="Aurora",
     )
-    assert catalog["graph"]["document_count"] == 57
+    assert catalog["graph"]["document_count"] == 151
     assert catalog["categories"][0]["key"] == "faqs"
-    assert catalog["categories"][0]["count"] == 23
-    assert catalog["embedded"]["faq_count"] == 23
+    assert catalog["categories"][0]["count"] == 103
+    assert catalog["embedded"]["faq_count"] == 98
 
 
 def test_validated_empty_factual_node_is_rejected():

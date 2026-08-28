@@ -227,9 +227,22 @@ def test_generic_pending_fact_confirmation_has_no_field_name_handler(monkeypatch
         messages=[{"role": "user", "content": "sim", "message_id": "m2"}],
         cart={"facts": {"fictional_field": pending}, "facts_by_key": {"fictional_field": [pending]}},
         rag_nodes=[], rag_paths=[], journey_id="journey", graph_contract=document["common_contract"],
+        pending_confirmation_ref="fact:fictional_field:persona",
     )
 
-    _decision, response = graph_agent_runtime_v3.decide(context, model_observation=None)
+    _decision, response = graph_agent_runtime_v3.decide(
+        context, model_observation={
+            "interpretation": {
+                "intents": [{"kind": "confirmation", "evidence_span": "sim"}],
+                "state_relation": "continue",
+                "confirmation": {
+                    "state": "affirm",
+                    "target_ref": "fact:fictional_field:persona",
+                    "evidence_span": "sim",
+                },
+            },
+        },
+    )
 
     fact = response.proof["accepted_facts"][0]
     assert fact["field_key"] == "fictional_field"
@@ -248,6 +261,6 @@ def test_v4_sql_and_template_keep_no_journey_exactly_once_contract() -> None:
     assert "journey_action=none" in migration
     assert "INSERT INTO public.conversation_turn_proofs" in migration
     assert "conversation_facts" not in migration.split("journey_action=none", 1)[1]
-    assert "interaction_observation" in template_text
+    assert "intents" in template_text and "state_relation" in template_text
     assert "shared_memory" in template_text
     assert "slice(-8)" in template_text

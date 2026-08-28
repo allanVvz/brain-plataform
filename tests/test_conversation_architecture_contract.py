@@ -43,6 +43,42 @@ process.stdout.write(JSON.stringify(result[0].json));
     return json.loads(completed.stdout)
 
 
+def _run_response_validator(
+    node_name: str, model_payload: dict, *, accepted_facts: list[dict] | None = None,
+    first_interpretation: dict | None = None,
+) -> dict:
+    if not shutil.which("node"):
+        pytest.skip("node is required to execute the canonical n8n code node")
+    javascript = _node(node_name)["parameters"]["jsCode"]
+    harness = """
+const fs = require('fs');
+const fixture = JSON.parse(fs.readFileSync(0, 'utf8'));
+const nodes = {
+  'Build graph grounded agent request': {llm_call_started_at: Date.now(), prompt_estimated_tokens: 1},
+  'Build graph repair request': {llm_call_started_at: Date.now(), prompt_estimated_tokens: 1, repair_context_node_ids: [], repair_context_chunk_ids: [], repair_context_chunk_sources: {}},
+  'Validate agent response': {model_observation: {token_usage: null, interpretation: fixture.firstInterpretation || {}}},
+  'Validate conversation binding': {model: 'fixture-model'},
+  'Reconcile fields with graph policy': {response: {proof: {accepted_facts: fixture.acceptedFacts || []}}},
+};
+const select = (name) => ({item: {json: nodes[name]}});
+const result = new Function('$', '$json', fixture.javascript)(select, fixture.modelPayload);
+process.stdout.write(JSON.stringify(result[0].json));
+"""
+    completed = subprocess.run(
+        ["node", "-e", harness],
+        input=json.dumps({
+            "javascript": javascript,
+            "modelPayload": model_payload,
+            "acceptedFacts": accepted_facts or [],
+            "firstInterpretation": first_interpretation or {},
+        }),
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    return json.loads(completed.stdout)
+
+
 def _prompt_fixture(*, large: bool, message: str) -> tuple[dict, dict]:
     policy = {"instructions": "politica-publicada " * (460 if large else 2)}
     fields = [
@@ -98,7 +134,10 @@ def _prompt_fixture(*, large: bool, message: str) -> tuple[dict, dict]:
             "policy_version": 1,
         },
         "messages": [{"role": "user", "content": message}],
-        "cart": {"facts_by_key": {"customer_name": [{"value": "Luiza"}]}},
+        "cart": {
+            "facts_by_key": {"customer_name": [{"value": "Luiza"}]},
+            "asked_question_node_ids": [],
+        },
         "retrieval_trace": {
             "common_contract": common_contract,
             "branch_candidates": [{"branch_anchor_node_id": "service-polimento", "score": 0.99}],
@@ -161,17 +200,25 @@ def test_model_prompt_is_compact_and_budgeted_before_both_calls():
         "graph_and_cards: 'top_level_graph_contract_approved_nodes_approved_chunks', "
         "memory: boundedMemory"
     ) not in initial
-    assert "agent_behavior: 'system_message'" in initial
-    assert "graph_and_cards: 'top_level_graph_contract_approved_nodes_approved_chunks'" in initial
-    assert "memory: 'top_level_shared_memory'" in initial
-    assert "persona_policy: { '$ref': 'graph_contract.conversation_policy' }" in initial
-    assert "common_contract: commonContractPrompt" in initial
-    assert "['agent_activity','journey_outcomes','recent_messages','historical_facts']" in initial
+    assert "const usefulMemory" in initial
+    assert "approved_nodes: approvedNodes" in initial
+    assert "approved_chunks: approvedChunks" in initial
+    assert "conversation_policy:" in initial
+    assert "const promptGraphContract" in initial
+    assert "graph_contract: promptGraphContract" in initial
+    assert "graph_contract: context.graph_contract" not in initial
+    assert "commonContractPrompt" not in initial
+    assert "service_catalog:" not in initial
+    assert "agent_activity" not in initial
+    assert "journey_outcomes" not in initial
+    assert "historical_facts" not in initial
     assert "promptEstimatedTokens > 22000" in initial
     assert "messages: [...original.messages" not in repair
-    assert "const originalContext = JSON.parse(original.messages[1].content" in repair
-    assert "facts_by_key: originalContext.facts_by_key" in repair
-    assert "shared_memory: originalContext.shared_memory" in repair
+    assert "const originalPrompt = JSON.parse(original.messages[1].content" in repair
+    assert "Correct only the invalid component" in repair
+    assert "temperature: 0" in repair
+    assert "preserved_response" in repair
+    assert "approved_faq" not in repair
 
 
 def test_aurora_sized_audio_prompt_stays_below_preventive_budget_without_losing_evidence():
@@ -180,42 +227,26 @@ def test_aurora_sized_audio_prompt_stays_below_preventive_budget_without_losing_
 
     result = _run_prompt_builder(context, binding)
     prompt = json.loads(result["request_body"]["messages"][1]["content"])
-    legacy_prompt = {
-        **prompt,
-        "common_contract": context["retrieval_trace"]["common_contract"],
-        "prompt_layers": {
-            **prompt["prompt_layers"],
-            "persona_policy": context["graph_contract"]["conversation_policy"],
-        },
-    }
-    legacy_messages = [
-        result["request_body"]["messages"][0],
-        {"role": "user", "content": json.dumps(legacy_prompt, ensure_ascii=False, separators=(",", ":"))},
-    ]
-    legacy_estimate = (len(json.dumps(legacy_messages, ensure_ascii=False, separators=(",", ":"))) + 3) // 4
-
-    assert legacy_estimate > 24_000
     assert result["prompt_estimated_tokens"] <= 22_000
     assert prompt["customer_message"] == message
-    assert prompt["prompt_layers"]["turn"]["customer_message"] == message
     assert prompt["source_message_id"] == "wamid-audio-1"
-    assert prompt["graph_contract"] == context["graph_contract"]
+    assert [field["key"] for field in prompt["graph_contract"]["fields"]] == [
+        "customer_name", "service",
+    ]
+    assert all("already_asked" in field for field in prompt["graph_contract"]["fields"])
+    assert "questions" not in prompt["graph_contract"]
+    assert "claims" not in prompt["graph_contract"]
+    assert "closure_node_ids" not in prompt["graph_contract"]
+    assert "mandatory_contract_evidence" not in prompt["graph_contract"]
+    assert prompt["conversation_policy"] == context["graph_contract"]["conversation_policy"]
     assert prompt["approved_nodes"][0]["node_id"] == "faq-polimento"
     assert prompt["approved_chunks"][0]["text"] == context["rag_chunks"][0]["chunk_text"]
     assert prompt["facts_by_key"] == context["cart"]["facts_by_key"]
-    assert prompt["shared_memory"]["profile_facts"] == context["shared_memory"]["profile_facts"]
-    assert prompt["shared_memory"]["current_journey"] == context["shared_memory"]["current_journey"]
-    assert prompt["shared_memory"]["pending_items"] == context["shared_memory"]["pending_items"]
-    assert prompt["common_contract"] == {
-        "$ref": "graph_contract", "scope": "common_fields_questions_claims",
-    }
-    assert prompt["prompt_layers"]["persona_policy"] == {
-        "$ref": "graph_contract.conversation_policy",
-    }
-    optional = prompt["shared_memory"]
-    order = ["agent_activity", "journey_outcomes", "recent_messages", "historical_facts"]
-    first_retained = next((index for index, key in enumerate(order) if optional[key]), len(order))
-    assert all(not optional[key] for key in order[:first_retained])
+    assert prompt["memory"]["profile_facts"] == context["shared_memory"]["profile_facts"]
+    assert prompt["memory"]["current_journey"] == context["shared_memory"]["current_journey"]
+    assert prompt["memory"]["pending_items"] == context["shared_memory"]["pending_items"]
+    assert "common_contract" not in prompt
+    assert "prompt_layers" not in prompt
 
 
 def test_tock_sized_audio_prompt_preserves_current_behavior_and_full_transcription():
@@ -227,46 +258,200 @@ def test_tock_sized_audio_prompt_preserves_current_behavior_and_full_transcripti
 
     assert result["prompt_estimated_tokens"] < 22_000
     assert prompt["customer_message"] == message
-    assert prompt["prompt_layers"]["turn"]["customer_message"] == message
-    for key in ("agent_activity", "journey_outcomes", "recent_messages", "historical_facts"):
-        assert prompt["shared_memory"][key] == context["shared_memory"][key]
+    assert prompt["memory"]["recent_messages"] == context["shared_memory"]["recent_messages"]
+    assert set(prompt["memory"]) == {
+        "profile_facts", "current_journey", "pending_items", "recent_messages",
+        "last_handoff", "product_interests", "asked_topics",
+    }
+
+
+def test_prompt_exposes_spent_questions_as_semantic_topics_without_question_ids():
+    context, binding = _prompt_fixture(
+        large=False, message="Qual e o preco e o pedido minimo?",
+    )
+    context["cart"]["asked_question_node_ids"] = ["q-service"]
+
+    result = _run_prompt_builder(context, binding)
+    prompt = json.loads(result["request_body"]["messages"][1]["content"])
+
+    assert prompt["memory"]["asked_topics"] == ["service"]
+    service = next(
+        field for field in prompt["graph_contract"]["fields"]
+        if field["key"] == "service"
+    )
+    assert service["already_asked"] is True
+    assert "q-service" not in result["request_body"]["messages"][1]["content"]
+
+
+def test_large_published_graph_is_projected_to_a_conversational_contract():
+    message = "ooii"
+    context, binding = _prompt_fixture(large=False, message=message)
+    context["graph_contract"].update({
+        "claims": [
+            {
+                "claim_type": "commercial_fact",
+                "value": {"description": f"published claim {index}"},
+                "evidence_node_ids": [f"faq:{index}"],
+            }
+            for index in range(293)
+        ],
+        "closure_node_ids": [f"node:{index}" for index in range(542)],
+        "eligible_faq_node_ids": [f"faq:{index}" for index in range(299)],
+    })
+
+    result = _run_prompt_builder(context, binding)
+    prompt = json.loads(result["request_body"]["messages"][1]["content"])
+
+    assert result["prompt_estimated_tokens"] < 22_000
+    assert prompt["customer_message"] == message
+    assert prompt["approved_chunks"][0]["text"] == context["rag_chunks"][0]["chunk_text"]
+    assert [field["key"] for field in prompt["graph_contract"]["fields"]] == [
+        field["key"] for field in context["graph_contract"]["fields"]
+    ]
+    assert "claims" not in prompt["graph_contract"]
+    assert "closure_node_ids" not in prompt["graph_contract"]
+    assert "eligible_faq_node_ids" not in prompt["graph_contract"]
 
 
 def test_model_prompt_receives_complete_multi_service_memory_contract():
     initial = _node("Build graph grounded agent request")["parameters"]["jsCode"]
     initial_validator = _node("Validate agent response")["parameters"]["jsCode"]
     repair_validator = _node("Validate repaired agent response")["parameters"]["jsCode"]
-    assert "['none','keep','select','switch','add']" in initial
-    assert "required: ['action','branch_anchor_node_id','branch_path_checksum','evidence_span']" in initial
-    assert "'service_operations'" in initial
-    assert "'service_operations'" in initial_validator
-    assert "'service_operations'" in repair_validator
-    assert "'service_observations'" in initial
-    assert "'service_observations'" in initial_validator
-    assert "'service_observations'" in repair_validator
+    # branch_action + service_operations (multi-op array, actions
+    # ['add','keep','drop']) were folded into the single semantic
+    # branch_selection object; its action enum is the superset of both
+    # (service_operations contributed 'drop', branch_action the rest).
+    assert "['none','keep','select','switch','add','drop']" in initial
+    assert "required: ['action','branch_anchor_node_id','evidence_span']" in initial
     assert "active_branch_node_ids: context.active_branch_node_ids" in initial
     assert "facts_by_key: context.cart && context.cart.facts_by_key" in initial
     assert "known_facts: context.known_facts" not in initial
-    assert "shared_memory: boundedMemory" in initial
+    assert "memory: usefulMemory" in initial
     for field in (
-        "journey: { id: context.journey_id",
-        "pending_field_key: context.pending_field_key",
-        "pending_question_node_id: context.pending_question_node_id",
-        "last_handoff: context.last_handoff",
-        "pending_reconfirmation: context.pending_reconfirmation",
-        "time_since_last_client_message: context.time_since_last_client_message",
-        "operational_mode: context.operational_mode",
-        "service_catalog: context.available_services",
-        "service_resolution: context.retrieval_trace",
-        "semantic_score_min: 0.78",
-        "semantic_margin_min: 0.08",
-        "consumed_service_spans:",
-        "reserved_spans:",
-        "common_contract:",
-        "pending_confirmation:",
-        "confirmation_templates:",
+        "identity: { agent_slug: context.agent_slug",
+            "publication: { version: context.graph_version",
+        "customer_message: binding.message",
+        "branch_candidates: context.retrieval_trace",
+        "graph_contract: promptGraphContract",
+        "approved_nodes: approvedNodes",
+        "approved_chunks: approvedChunks",
+        "pending_confirmation_ref: context.pending_confirmation_ref",
     ):
         assert field in initial
+
+
+def test_model_contract_uses_semantic_question_metadata_and_separates_audience_from_product():
+    initial = _node("Build graph grounded agent request")["parameters"]["jsCode"]
+    validators = [
+        _node("Validate agent response")["parameters"]["jsCode"],
+        _node("Validate repaired agent response")["parameters"]["jsCode"],
+    ]
+
+    # The model authors one complete public message and selects only a
+    # semantic field key. Graph ids remain an internal proof/ledger concern.
+    assert "question_field_key" in initial
+    assert "never emit a graph question id" in initial.lower()
+    assert "next_question_node_id" not in initial
+    assert "questions: Object.fromEntries" not in initial
+    for validator in validators:
+        assert "responseSource.question_field_key" in validator
+        assert "next_question_node_id: null" in validator
+
+    # Audience/channel nodes are context; product/group interest is a
+    # separate unresolved field. Keep this distinction portable instead of
+    # adding persona literals to runtime code.
+    assert "Never repeat a known or already_asked topic" in initial
+    assert "Audience is purchase context, never a product" in initial
+
+
+@pytest.mark.parametrize(
+    "node_name", ["Validate agent response", "Validate repaired agent response"]
+)
+def test_n8n_validators_never_append_compat_question_to_model_answer(node_name):
+    interpretation = {
+        "intents": [],
+        "state_relation": "continue",
+        "answers_field_key": None,
+        "confirmation": {
+            "state": "none", "target_ref": None, "evidence_span": "",
+            "correction_field_key": None, "correction_value": None,
+        },
+        "branch_selections": [],
+        "facts": [],
+        "invalidated_facts": [],
+        "entities": [],
+        "questions": [],
+        "claims": [],
+        "recommended_next_action": "ask_field",
+        "cited_node_ids": [],
+        "cited_chunk_ids": [],
+        "response": {
+            "answer": (
+                "O pedido minimo varia conforme o produto. "
+                "Qual grupo de produtos voce quer conhecer?"
+            ),
+            "question": None,
+            "question_field_key": "product_interest",
+        },
+        "handoff_requested": False,
+    }
+    result = _run_response_validator(node_name, {
+        "choices": [{"message": {"content": json.dumps(interpretation)}}],
+    })
+
+    parsed = result["model_observation"]["interpretation"]
+    assert parsed["next_question_node_id"] is None
+    assert parsed["next_question_field_key"] == "product_interest"
+    assert parsed["response"] == interpretation["response"]
+    assert parsed["reply"] == interpretation["response"]["answer"]
+
+
+def test_repaired_validator_preserves_facts_accepted_before_question_repair():
+    interpretation = {
+        "intents": [], "state_relation": "continue", "answers_field_key": None,
+        "confirmation": {
+            "state": "none", "target_ref": None, "evidence_span": "",
+            "correction_field_key": None, "correction_value": None,
+        },
+        "branch_selections": [], "facts": [], "invalidated_facts": [],
+        "entities": [], "questions": [], "claims": [],
+        "recommended_next_action": "answer_question",
+        "cited_node_ids": [], "cited_chunk_ids": [],
+        "response": {
+            "answer": "Prazer, Ana.", "question": None,
+            "question_field_key": None,
+        },
+        "handoff_requested": False,
+    }
+    accepted = [{
+        "field_key": "name", "value": "Ana", "status": "known",
+        "owner_node_id": "persona:test", "evidence_span": "Ana",
+        "source_message_id": "msg:1", "metadata": {},
+    }]
+
+    result = _run_response_validator(
+        "Validate repaired agent response",
+        {"choices": [{"message": {"content": json.dumps(interpretation)}}]},
+        accepted_facts=accepted,
+    )
+
+    assert result["model_observation"]["interpretation"]["facts"] == accepted
+
+
+def test_n8n_repairs_repetition_with_the_model_before_commit():
+    gate = _node("Graph proof needs repair")["parameters"]["conditions"]["conditions"][0][
+        "leftValue"
+    ]
+    repair = _node("Build graph repair request")["parameters"]["jsCode"]
+    repaired_validator = _node("Validate repaired agent response")["parameters"]["jsCode"]
+
+    assert "proof.repair_required" in gate
+    assert "repetition_audit" not in gate
+    assert "invalid or repeated" in repair
+    assert "response.question" in repair
+    assert "preserved_accepted_facts: proof.accepted_facts" in repair
+    assert "const preservedFacts" in repaired_validator
+    assert "preservedFacts.filter" in repaired_validator
 
 
 def test_completed_commit_uses_the_status_key_consumed_by_the_claim_rpc():
@@ -274,6 +459,7 @@ def test_completed_commit_uses_the_status_key_consumed_by_the_claim_rpc():
     assert "payload->'conversation_commit'->>'status'" in SQL
 
 
-def test_unambiguous_graph_branch_cannot_trigger_a_repair_call():
+def test_every_backend_repair_requirement_reaches_the_model_repair_call():
     condition = _node("Graph proof needs repair")["parameters"]["conditions"]["conditions"][0]["leftValue"]
-    assert "deterministic_branch_match" in condition
+    assert "proof.repair_required" in condition
+    assert "deterministic_branch_match" not in condition

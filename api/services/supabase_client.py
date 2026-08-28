@@ -2149,6 +2149,11 @@ def list_knowledge_nodes_by_ids(node_ids: list[str]) -> list[dict]:
         return []
 
 
+# Node ids are rendered into the query string, so the batch stays well under
+# any gateway URL limit.
+_EDGE_LOOKUP_BATCH = 100
+
+
 def list_all_knowledge_graph(persona_id: Optional[str] = None, limit_nodes: int = 1500) -> tuple[list[dict], list[dict]]:
     """Return all nodes + edges (optionally scoped to persona). Used by /knowledge/graph-data."""
     global _KG_TABLES_MISSING
@@ -2167,10 +2172,27 @@ def list_all_knowledge_graph(persona_id: Optional[str] = None, limit_nodes: int 
     if not nodes:
         return [], []
     node_ids = [n["id"] for n in nodes]
-    try:
-        eq_in_source = client.table("knowledge_edges").select("*").in_("source_node_id", node_ids).limit(5000).execute().data or []
-    except Exception:
-        eq_in_source = []
+    # Batched on purpose: `in_` renders every id into the query string, so a
+    # large graph produced a URL the gateway rejects. The failure used to be
+    # swallowed into "no edges", which is indistinguishable from a genuinely
+    # edgeless graph -- and callers act on that. graph_bundle_publisher's
+    # preflight, for one, would see an empty existing-edge set and wave through
+    # a bundle that silently orphans every live edge. An unreadable graph must
+    # raise, never look empty.
+    eq_in_source: list[dict] = []
+    for start in range(0, len(node_ids), _EDGE_LOOKUP_BATCH):
+        batch = node_ids[start:start + _EDGE_LOOKUP_BATCH]
+        try:
+            rows = (
+                client.table("knowledge_edges").select("*")
+                .in_("source_node_id", batch).limit(5000).execute().data
+            ) or []
+        except Exception as exc:
+            if _kg_unavailable(exc):
+                _KG_TABLES_MISSING = True
+                return [], []
+            raise
+        eq_in_source.extend(rows)
     active_edges = [edge for edge in eq_in_source if not _edge_is_inactive(edge)]
     return nodes, active_edges
 
@@ -4041,6 +4063,108 @@ def count_knowledge_rag_chunks_by_entry_ids(entry_ids: list[str]) -> dict[str, i
     return counts
 
 
+def _rag_row_matches_agent(row: dict, agent_slug: str | None) -> bool:
+    """Reject only rows explicitly scoped to a different agent.
+
+    Older publications are persona-wide and carry no agent marker.  Those rows
+    remain visible to the persona's current agent, while any explicit agent
+    scope must match the caller.
+    """
+    expected = str(agent_slug or "").strip().lower()
+    if not expected:
+        return True
+    metadata: dict[str, Any] = {}
+    entry = row.get("entry")
+    if isinstance(entry, dict) and isinstance(entry.get("metadata"), dict):
+        metadata.update(entry["metadata"])
+    if isinstance(row.get("metadata"), dict):
+        metadata.update(row["metadata"])
+    explicit: list[str] = []
+    for key in ("agent_slug", "agent", "agent_slugs", "visible_to_agents"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            explicit.append(value)
+        elif isinstance(value, (list, tuple, set)):
+            explicit.extend(str(item) for item in value if str(item).strip())
+    if not explicit:
+        return True
+    return expected in {value.strip().lower() for value in explicit}
+
+
+_RAG_LEXICAL_STOPWORDS = {
+    "a", "as", "ao", "aos", "com", "da", "das", "de", "do", "dos",
+    "e", "em", "eu", "me", "o", "os", "para", "por", "pra", "pro",
+    "algo", "busco", "procurando", "procuro", "que", "qual", "quais",
+    "quero", "queria", "tem", "tenho", "tipo", "um", "uma", "voce", "voces",
+}
+
+
+def _rag_terms(value: str, *, meaningful_only: bool = False) -> set[str]:
+    normalized = unicodedata.normalize("NFKD", value or "")
+    normalized = "".join(
+        ch for ch in normalized if not unicodedata.combining(ch)
+    ).lower()
+    terms = {
+        part for part in re.findall(r"[a-z0-9]+", normalized)
+        if len(part) > 1
+    }
+    if meaningful_only:
+        meaningful = terms - _RAG_LEXICAL_STOPWORDS
+        return meaningful or terms
+    return terms
+
+
+def _accent_insensitive_rag_candidates(
+    rows: list[dict], query: str, *, limit: int,
+) -> list[dict]:
+    """Rank published chunks lexically without treating accents as identity.
+
+    PostgreSQL's current ``simple`` text-search configuration treats
+    ``opcoes`` and ``opções`` as different lexemes.  This bounded adapter
+    fallback keeps retrieval useful for informal WhatsApp spelling while still
+    returning RAG chunks (never a canonical response chosen by the runtime).
+    """
+    all_terms = _rag_terms(query)
+    terms = _rag_terms(query, meaningful_only=True)
+    if not terms:
+        return []
+    normalized_query = " ".join(sorted(terms))
+    ranked: list[tuple[float, str, dict]] = []
+    for row in rows:
+        text_terms = _rag_terms(
+            " ".join(
+                [
+                    str(row.get("chunk_text") or ""),
+                    str(row.get("chunk_summary") or ""),
+                    json.dumps(row.get("metadata") or {}, ensure_ascii=False),
+                ]
+            )
+        )
+        overlap = len(terms & text_terms)
+        if not overlap:
+            continue
+        coverage = overlap / max(1, len(terms))
+        context_coverage = len(all_terms & text_terms) / max(1, len(all_terms))
+        # Coverage is intentionally stronger than the structural tie score so
+        # an exact catalog/group chunk survives the later diversity reranker.
+        score = 1.0 + coverage + (context_coverage * 0.25)
+        candidate = {
+            **row,
+            "chunk_id": row.get("chunk_id") or row.get("id"),
+            "source_node_id": (
+                row.get("source_node_id") or row.get("source_graph_node_id")
+            ),
+            "hybrid_score": max(float(row.get("hybrid_score") or 0), score),
+            "adapter_lexical_score": coverage,
+            "adapter_normalized_query": normalized_query,
+        }
+        ranked.append(
+            (score, str(candidate.get("chunk_id") or ""), candidate)
+        )
+    ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return [item[2] for item in ranked[:max(1, int(limit))]]
+
+
 def search_active_rag_chunks(
     *,
     persona_id: str,
@@ -4051,6 +4175,7 @@ def search_active_rag_chunks(
     active_path_node_ids: list[str] | None = None,
     unresolved_fields: list[str] | None = None,
     graph_version: int | None = None,
+    agent_slug: str | None = None,
 ) -> list[dict]:
     """Return persona-scoped Golden Dataset chunks before any legacy fallback.
 
@@ -4060,32 +4185,57 @@ def search_active_rag_chunks(
     if not persona_id:
         return []
     client = get_client()
+    # Narrow candidates in Postgres before loading entry details.  The old
+    # implementation first loaded up to 2,000 entries and then serialized all
+    # of their UUIDs into repeated ``in.(...)`` chunk requests.  Apart from the
+    # original HTTP 414, broad catalogs made one conversational turn allocate
+    # the whole legacy RAG projection in the API process.
+    terms = _rag_terms(query)
+    candidate_limit = max(48, min(256, max(1, int(limit)) * 8))
+    chunk_query = (
+        client.table("knowledge_rag_chunks")
+        .select(
+            "id,rag_entry_id,persona_id,chunk_index,chunk_text,"
+            "chunk_summary,metadata"
+        )
+        .eq("persona_id", persona_id)
+        .limit(candidate_limit)
+    )
+    if terms:
+        # OR keeps useful accented candidates reachable when one informal
+        # WhatsApp token (for example ``opcoes``) differs from the published
+        # spelling (``opções``).  Final accent-insensitive ranking stays local
+        # over this bounded candidate set.
+        chunk_query = chunk_query.text_search(
+            "search_document",
+            " OR ".join(sorted(terms)),
+            options={"type": "web_search", "config": "simple"},
+        )
+    chunks = _q(chunk_query)
+    entry_ids = list(dict.fromkeys(
+        str(row.get("rag_entry_id"))
+        for row in chunks if row.get("rag_entry_id")
+    ))
+    if not entry_ids:
+        return []
     entries = _q(
         client.table("knowledge_rag_entries")
         .select("id,title,content_type,slug,status,metadata,canonical_key")
         .eq("persona_id", persona_id)
         .in_("status", ["active", "approved", "validated", "embedded"])
-        .limit(2000)
+        .in_("id", entry_ids)
+        .limit(len(entry_ids))
     )
-    entry_by_id = {str(row.get("id")): row for row in entries if row.get("id")}
+    entry_by_id = {
+        str(row.get("id")): row
+        for row in entries
+        if row.get("id") and _rag_row_matches_agent(row, agent_slug)
+    }
     if not entry_by_id:
         return []
-    chunks = _q(
-        client.table("knowledge_rag_chunks")
-        .select("id,rag_entry_id,persona_id,chunk_index,chunk_text,chunk_summary,metadata")
-        .eq("persona_id", persona_id)
-        .in_("rag_entry_id", list(entry_by_id))
-        .limit(5000)
-    )
     # WhatsApp questions commonly contain accents, punctuation and hyphenated
     # names (for example "Coca-Cola" / "preço").  Normalize both sides so a
     # lexical RAG fallback remains useful before embeddings are available.
-    def _rag_terms(value: str) -> set[str]:
-        normalized = unicodedata.normalize("NFKD", value or "")
-        normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch)).lower()
-        return {part for part in re.findall(r"[a-z0-9]+", normalized) if len(part) > 1}
-
-    terms = _rag_terms(query)
     allowed = set(allowed_node_ids or [])
     active_path = set(active_path_node_ids or [])
     pending = set(unresolved_fields or [])
@@ -4093,6 +4243,8 @@ def search_active_rag_chunks(
     for chunk in chunks:
         entry = entry_by_id.get(str(chunk.get("rag_entry_id")))
         if not entry:
+            continue
+        if not _rag_row_matches_agent({**chunk, "entry": entry}, agent_slug):
             continue
         metadata = {
             **(entry.get("metadata") or {}),
@@ -4635,8 +4787,10 @@ def search_graph_rag_v3(
     active_path_node_ids: list[str] | None = None,
     missing_fields: list[str] | None = None,
     limit: int = 24,
+    agent_slug: str | None = None,
 ) -> list[dict]:
-    result = get_client().rpc(
+    client = get_client()
+    result = client.rpc(
         "graph_hybrid_search_v3",
         {
             "p_persona_id": persona_id,
@@ -4649,7 +4803,72 @@ def search_graph_rag_v3(
             "p_limit": max(1, min(int(limit), 200)),
         },
     ).execute()
-    return result.data or []
+    rows = [
+        row for row in (result.data or [])
+        if _rag_row_matches_agent(row, agent_slug)
+    ]
+    query_terms = _rag_terms(query, meaningful_only=True)
+    best_overlap = max(
+        (
+            len(
+                query_terms
+                & _rag_terms(
+                    " ".join(
+                        [
+                            str(row.get("chunk_text") or ""),
+                            str(row.get("chunk_summary") or ""),
+                        ]
+                    )
+                )
+            )
+            for row in rows
+        ),
+        default=0,
+    )
+    required_overlap = max(1, int(len(query_terms) * 0.67 + 0.999))
+    if query_terms and best_overlap < required_overlap:
+        candidate_limit = max(64, min(256, max(1, int(limit)) * 4))
+        published_query = (
+            client.table("knowledge_rag_chunks")
+            .select(
+                "id,rag_entry_id,persona_id,chunk_text,chunk_summary,metadata,"
+                "source_graph_node_id,branch_anchor_node_id,chunk_kind,projection_status"
+            )
+            .eq("persona_id", persona_id)
+            .eq("publication_id", publication_id)
+            .eq("branch_anchor_node_id", branch_node_id)
+            .eq("chunk_kind", "faq")
+            .in_("projection_status", ["ready", "published"])
+            .limit(candidate_limit)
+            .text_search(
+                "search_document",
+                " OR ".join(sorted(query_terms)),
+                options={"type": "web_search", "config": "simple"},
+            )
+        )
+        published_rows = _q(published_query)
+        supplemental = _accent_insensitive_rag_candidates(
+            [
+                row for row in published_rows
+                if _rag_row_matches_agent(row, agent_slug)
+            ],
+            query,
+            limit=min(max(4, int(limit)), 24),
+        )
+        merged = {
+            str(row.get("chunk_id") or row.get("id")): row
+            for row in [*rows, *supplemental]
+            if row.get("chunk_id") or row.get("id")
+        }
+        rows = sorted(
+            merged.values(),
+            key=lambda row: (
+                float(row.get("hybrid_score") or 0),
+                str(row.get("chunk_id") or row.get("id") or ""),
+            ),
+            reverse=True,
+        )[:max(1, min(int(limit), 200))]
+    return rows
 
 
 def search_graph_faq_v3(
@@ -5438,6 +5657,50 @@ def complete_whatsapp_buffer(buffer_id: str, status: str, error: str | None = No
                     get_client().table("messages").update({"metadata": merged_metadata})
                     .eq("id", message["id"])
                 )
+
+
+def fail_conversation_commit(inbound_buffer_id: str, reason: str) -> dict:
+    """Finalize an already-claimed inbound commit after a terminal failure.
+
+    The update is conditional on the commit still being ``processing`` so a
+    late fail-safe can never overwrite a concurrent successful commit.  This
+    uses the existing lead_buffer payload ledger and requires no new storage.
+    """
+    from datetime import datetime, timezone
+
+    row = _one(
+        get_client().table("lead_buffer")
+        .select("payload")
+        .eq("id", inbound_buffer_id)
+        .maybe_single()
+    ) or {}
+    payload = dict(row.get("payload") or {})
+    commit = dict(payload.get("conversation_commit") or {})
+    if str(commit.get("status") or "") != "processing":
+        return {"updated": False, "status": commit.get("status")}
+    failed = {
+        **commit,
+        "status": "failed",
+        "failed_at": datetime.now(timezone.utc).isoformat(),
+        "failure_reason": str(reason or "technical_failure")[:1000],
+    }
+    _execute_with_retry(
+        get_client().table("lead_buffer")
+        .update({"payload": {**payload, "conversation_commit": failed}})
+        .eq("id", inbound_buffer_id)
+        .eq("payload->conversation_commit->>status", "processing")
+    )
+    current = _one(
+        get_client().table("lead_buffer")
+        .select("payload")
+        .eq("id", inbound_buffer_id)
+        .maybe_single()
+    ) or {}
+    current_status = str(
+        (((current.get("payload") or {}).get("conversation_commit") or {}).get("status"))
+        or "unknown"
+    )
+    return {"updated": current_status == "failed", "status": current_status}
 
 
 def release_whatsapp_buffer(buffer_id: str, status: str, *, delay_seconds: int, error: str | None, decrement_attempt: bool = False) -> None:

@@ -14,6 +14,67 @@ from services import graph_proof_checker_v3
 from schemas.conversation import ServiceOperation
 
 
+def _check_reply_without_claims(reply: str) -> dict:
+    return graph_proof_checker_v3.check(
+        publication={
+            "status": "active",
+            "checksum": "sha256:reply-claims",
+            "document_json": {"branch_anchors": ["branch:sales"]},
+        },
+        contract={
+            "branch_path_checksum": "checksum:sales",
+            "closure_node_ids": ["branch:sales"],
+            "fields": [],
+            "questions": {},
+            "claims": [],
+        },
+        ledger={"graph_checksum": "sha256:reply-claims", "facts": {}},
+        proposal={
+            "branch_action": "keep",
+            "branch_anchor_node_id": "branch:sales",
+            "branch_path_checksum": "checksum:sales",
+            "branch_evidence_span": "",
+            "extracted_facts": [],
+            "claims": [],
+            "next_question_node_id": None,
+            "cited_node_ids": [],
+            "cited_chunk_ids": [],
+            "reply": reply,
+            "qualification_complete": True,
+            "handoff_requested": False,
+        },
+        message="Qual e o preco e o pedido minimo?",
+        source_message_id="msg-commercial-gap",
+        package_node_ids={"branch:sales"},
+        package_chunk_ids=set(),
+        active_branch_node_id="branch:sales",
+        branch_selection_allowed=False,
+        branch_switch_allowed=False,
+    )
+
+
+def test_reply_cannot_hide_price_and_minimum_order_outside_claim_envelope():
+    proof = _check_reply_without_claims(
+        "O body custa R$ 29,90 e a compra e unitaria, sem pedido minimo."
+    )
+
+    assert "claim_omitted_from_proposal:price" in proof["errors"]
+    assert "claim_omitted_from_proposal:minimum_order" in proof["errors"]
+    assert proof["valid"] is False
+
+
+def test_safe_commercial_deferral_does_not_invent_a_claim():
+    proof = _check_reply_without_claims(
+        "Nao consigo confirmar o pedido minimo com seguranca; preciso verificar com a equipe humana."
+    )
+
+    assert not [
+        error for error in proof["errors"]
+        if error.startswith("claim_omitted_from_proposal:")
+    ]
+    assert proof["valid"] is True, proof["errors"]
+
+
 def test_aggregate_missing_fields_unions_two_active_branches():
     """Two simultaneously-selected services must each keep their own
     required fields pending until resolved, while a shared persona-owned
@@ -333,13 +394,15 @@ def test_check_without_additional_fields_still_rejects_a_foreign_branch_fact():
         active_branch_node_id="branch:a", active_branch_node_ids=["branch:a", "branch:b"],
         branch_selection_allowed=False, branch_switch_allowed=True,
     )
-    assert proof["valid"] is False
+    assert proof["valid"] is True
     # Matches pre-existing behavior: contract_a already declares "servico"
     # (for branch:a), so the key isn't unknown -- it's an owner mismatch,
     # not undeclared. additional_fields only adds NEW (key, owner) pairs;
     # it doesn't change this outcome for a key the focused contract already
     # declares under a different owner.
     assert "field_owner_mismatch:servico" in proof["errors"]
+    assert "field_owner_mismatch:servico" in proof["component_errors"]
+    assert proof["accepted_facts"] == []
 
 
 def test_check_field_owner_mismatch_still_distinguished_from_undeclared_field():
@@ -369,9 +432,11 @@ def test_check_field_owner_mismatch_still_distinguished_from_undeclared_field():
         branch_selection_allowed=False, branch_switch_allowed=True,
         additional_fields=[branch_b_field],
     )
-    assert proof["valid"] is False
+    assert proof["valid"] is True
     assert "field_owner_mismatch:servico" in proof["errors"]
+    assert "field_owner_mismatch:servico" in proof["component_errors"]
     assert "undeclared_field:servico" not in proof["errors"]
+    assert proof["accepted_facts"] == []
 
 
 def test_field_validation_entries_are_attributed_to_the_owning_branch():
@@ -506,6 +571,213 @@ def test_add_action_accepts_a_new_branch_alongside_the_active_one():
     assert proof["valid"], proof["errors"]
 
 
+def test_unproved_question_text_is_not_authorized_when_selection_is_invalid():
+    kwargs = _base_check_kwargs()
+    kwargs["contract"] = {
+        "branch_path_checksum": "checksum:b",
+        "closure_node_ids": ["branch:b", "q:objective", "q:budget"],
+        "fields": [{
+            "key": "objective", "owner_node_id": "branch:b", "required": True,
+            "accepted_statuses": ["known"], "question_node_id": "q:objective",
+        }],
+        "questions": {
+            "q:objective": {"field_key": "objective", "text": "Qual seu objetivo?"},
+            "q:budget": {"field_key": "budget", "text": "Qual seu orçamento?"},
+        },
+    }
+    kwargs["proposal"] = {
+        **kwargs["proposal"],
+        "next_question_node_id": "q:budget",
+        "reply": "Posso te orientar. Qual seu orçamento?",
+    }
+
+    proof = graph_proof_checker_v3.check(**kwargs)
+
+    assert proof["valid"] is True
+    assert "question_not_semantically_askable" in proof["errors"]
+    assert "question_not_semantically_askable" in proof["component_errors"]
+    assert proof["next_question_node_id"] is None
+    assert proof["question_component_invalid"] is True
+    assert proof["repair_required"] is True
+    assert proof["repair_requirements"][0]["issue"] == "question_not_semantically_askable"
+
+
+def test_invalid_question_metadata_never_discards_valid_facts_or_memory():
+    kwargs = _base_check_kwargs()
+    kwargs["contract"] = {
+        "branch_path_checksum": "checksum:b",
+        "closure_node_ids": ["branch:b", "q:name"],
+        "fields": [{
+            "key": "name", "owner_node_id": "branch:b", "required": True,
+            "accepted_statuses": ["known"], "question_node_id": "q:name",
+            "value_schema": {"type": "string"},
+        }],
+        "questions": {
+            "q:name": {"field_key": "name", "text": "Como você se chama?"},
+        },
+    }
+    kwargs["proposal"] = {
+        **kwargs["proposal"],
+        "extracted_facts": [{
+            "field_key": "name", "owner_node_id": "branch:b",
+            "status": "known", "value": "Ana", "source_message_id": "msg-1",
+            "evidence_span": "Ana", "confidence": 1,
+        }],
+        "next_question_node_id": "q:stale",
+        "reply": "Prazer, Ana. Qual é o orçamento?",
+    }
+    kwargs["message"] = "Ana"
+
+    proof = graph_proof_checker_v3.check(**kwargs)
+
+    assert proof["valid"] is True
+    assert proof["accepted_facts"][0]["value"] == "Ana"
+    assert proof["ledger"]["facts"]["name"]["value"] == "Ana"
+    assert proof["next_question_node_id"] is None
+    assert proof["question_component_invalid"] is True
+    assert proof["repair_required"] is True
+
+
+def test_segmented_answer_survives_when_model_repeats_an_asked_topic():
+    kwargs = _base_check_kwargs()
+    kwargs["contract"] = {
+        "branch_path_checksum": "checksum:b",
+        "closure_node_ids": ["branch:b", "q:volume"],
+        "fields": [{
+            "key": "volume", "owner_node_id": "branch:b", "required": True,
+            "accepted_statuses": ["known"], "question_node_id": "q:volume",
+        }],
+        "questions": {
+            "q:volume": {
+                "field_key": "volume", "text": "Qual volume pretende avaliar?",
+            },
+        },
+    }
+    kwargs["ledger"] = {
+        "graph_checksum": "sha256:x", "facts": {},
+        "asked_question_node_ids": ["q:volume"],
+    }
+    kwargs["proposal"] = {
+        **kwargs["proposal"],
+        "answer_text": "Os valores dependem do produto escolhido.",
+        "question_text": "Que tipo de volume voce pretende avaliar para revenda",
+        "next_question_field_key": "volume",
+        "next_question_node_id": None,
+        "reply": (
+            "Os valores dependem do produto escolhido. "
+            "Que tipo de volume voce pretende avaliar para revenda"
+        ),
+    }
+
+    proof = graph_proof_checker_v3.check(**kwargs)
+
+    assert proof["valid"] is True
+    assert proof["question_component_invalid"] is True
+    assert proof["question_discarded"] is True
+    assert proof["publishable_answer_text"] == (
+        "Os valores dependem do produto escolhido."
+    )
+    assert proof["repair_required"] is False
+    assert proof["next_question_node_id"] is None
+
+
+def test_canonical_answer_question_is_mapped_and_counted_from_semantic_key():
+    kwargs = _base_check_kwargs()
+    kwargs["contract"] = {
+        "branch_path_checksum": "checksum:b",
+        "closure_node_ids": ["branch:b", "q:volume"],
+        "fields": [{
+            "key": "volume", "owner_node_id": "branch:b", "required": True,
+            "accepted_statuses": ["known"], "question_node_id": "q:volume",
+        }],
+        "questions": {
+            "q:volume": {
+                "field_key": "volume", "text": "Qual volume pretende avaliar?",
+            },
+        },
+    }
+    kwargs["proposal"] = {
+        **kwargs["proposal"],
+        "answer_text": (
+            "Posso te orientar. "
+            "Que tipo de volume voce pretende avaliar para revenda"
+        ),
+        "question_text": "",
+        "next_question_field_key": "volume",
+        "next_question_node_id": None,
+        "reply": (
+            "Posso te orientar. "
+            "Que tipo de volume voce pretende avaliar para revenda"
+        ),
+    }
+
+    proof = graph_proof_checker_v3.check(**kwargs)
+
+    assert proof["valid"] is True
+    assert proof["question_count"] == 1
+    assert proof["next_question_node_id"] == "q:volume"
+    assert proof["next_question_field_key"] == "volume"
+    assert "model_question_field_askable" in proof["observations"]
+
+
+def test_canonical_repeated_question_requires_repair_without_losing_facts():
+    kwargs = _base_check_kwargs()
+    kwargs["contract"] = {
+        "branch_path_checksum": "checksum:b",
+        "closure_node_ids": ["branch:b", "q:volume", "q:name"],
+        "fields": [
+            {
+                "key": "volume", "owner_node_id": "branch:b", "required": True,
+                "accepted_statuses": ["known"], "question_node_id": "q:volume",
+            },
+            {
+                "key": "name", "owner_node_id": "branch:b", "required": True,
+                "accepted_statuses": ["known"], "question_node_id": "q:name",
+                "value_schema": {"type": "string"},
+            },
+        ],
+        "questions": {
+            "q:volume": {
+                "field_key": "volume", "text": "Qual volume pretende avaliar?",
+            },
+            "q:name": {"field_key": "name", "text": "Como voce se chama?"},
+        },
+    }
+    kwargs["ledger"] = {
+        "graph_checksum": "sha256:x", "facts": {},
+        "asked_question_node_ids": ["q:volume"],
+    }
+    kwargs["message"] = "Meu nome e Ana"
+    kwargs["proposal"] = {
+        **kwargs["proposal"],
+        "extracted_facts": [{
+            "field_key": "name", "owner_node_id": "branch:b",
+            "status": "known", "value": "Ana", "source_message_id": "msg-1",
+            "evidence_span": "Ana", "confidence": 1,
+        }],
+        "answer_text": (
+            "Prazer, Ana. Que tipo de volume voce pretende avaliar para revenda?"
+        ),
+        "question_text": "",
+        "next_question_field_key": "volume",
+        "next_question_node_id": None,
+        "reply": (
+            "Prazer, Ana. Que tipo de volume voce pretende avaliar para revenda?"
+        ),
+    }
+
+    proof = graph_proof_checker_v3.check(**kwargs)
+
+    assert proof["valid"] is True
+    assert proof["accepted_facts"][0]["value"] == "Ana"
+    assert proof["ledger"]["facts"]["name"]["value"] == "Ana"
+    assert proof["question_component_invalid"] is True
+    assert proof["question_discarded"] is False
+    assert proof["publishable_answer_text"] is None
+    assert proof["repair_required"] is True
+    assert proof["next_question_node_id"] is None
+
+
 def test_add_action_rejects_re_adding_an_already_active_branch():
     kwargs = _base_check_kwargs(active_branch_node_ids=["branch:a", "branch:b"])
     proof = graph_proof_checker_v3.check(**kwargs)
@@ -516,6 +788,47 @@ def test_add_action_rejects_without_any_active_branch():
     kwargs = _base_check_kwargs(active_branch_node_id=None, active_branch_node_ids=[])
     proof = graph_proof_checker_v3.check(**kwargs)
     assert "add_without_active_branch" in proof["errors"]
+
+
+def test_next_question_metadata_accepts_natural_wording_for_any_askable_field():
+    contract = {
+        "branch_path_checksum": "checksum:a",
+        "closure_node_ids": ["branch:a", "q:first", "q:second"],
+        "fields": [
+            {"key": "first", "owner_node_id": "persona", "required": True,
+             "accepted_statuses": ["known"], "question_node_id": "q:first"},
+            {"key": "second", "owner_node_id": "persona", "required": True,
+             "accepted_statuses": ["known"], "question_node_id": "q:second"},
+        ],
+        "questions": {
+            "q:first": {"field_key": "first", "text": "First?", "depends_on": []},
+            "q:second": {"field_key": "second", "text": "Second?", "depends_on": []},
+        },
+    }
+    proof = graph_proof_checker_v3.check(
+        publication={
+            "status": "active", "checksum": "sha256:x",
+            "document_json": {"branch_anchors": ["branch:a"]},
+        },
+        contract=contract,
+        ledger={"graph_checksum": "sha256:x", "facts": {}},
+        proposal={
+            "branch_action": "keep", "branch_anchor_node_id": "branch:a",
+            "branch_path_checksum": "checksum:a", "branch_evidence_span": "",
+            "extracted_facts": [], "claims": [],
+            "next_question_node_id": "q:second", "cited_node_ids": [],
+            "cited_chunk_ids": [], "reply": "What result matters most to you?",
+            "qualification_complete": False, "handoff_requested": False,
+        },
+        message="hello", source_message_id="msg-1",
+        package_node_ids={"branch:a"}, package_chunk_ids=set(),
+        active_branch_node_id="branch:a", branch_selection_allowed=False,
+        branch_switch_allowed=False,
+    )
+    assert proof["valid"] is True
+    assert proof["next_question_node_id"] == "q:second"
+    assert "question_not_semantically_askable" not in proof["errors"]
+    assert "model_question_metadata_askable" in proof["observations"]
 
 
 def test_add_action_requires_literal_evidence():
@@ -553,6 +866,33 @@ def test_human_full_name_rejects_incomplete_or_non_name_values(value):
     assert not graph_proof_checker_v3.is_human_full_name(value)
 
 
+@pytest.mark.parametrize("value", ["Allan", "Allan Rodrigues", "José da Silva"])
+def test_human_name_accepts_preferred_or_complete_name(value):
+    canonical, error = graph_proof_checker_v3._canonical_field_value(
+        {
+            "validation": {"mode": "semantic", "semantic_type": "human_name"},
+            "value_schema": {"type": "string", "minLength": 1},
+        },
+        value,
+        value,
+    )
+    assert canonical == value
+    assert error is None
+
+
+@pytest.mark.parametrize("value", ["oi", "bom dia", "123", "https://example.com", "quero polimento"])
+def test_human_name_rejects_greetings_numbers_urls_and_non_names(value):
+    _, error = graph_proof_checker_v3._canonical_field_value(
+        {
+            "validation": {"mode": "semantic", "semantic_type": "human_name"},
+            "value_schema": {"type": "string", "minLength": 1},
+        },
+        value,
+        value,
+    )
+    assert error == "value is not a plausible human name"
+
+
 def test_pending_name_confirmation_never_resolves_a_required_field():
     field = {
         "accepted_statuses": ["known", "needs_confirmation", "invalid"],
@@ -565,7 +905,7 @@ def test_pending_name_confirmation_never_resolves_a_required_field():
     )
 
 
-def test_service_operation_requires_authorized_consumed_evidence():
+def test_branch_operation_does_not_depend_on_service_resolver_consumption():
     document = {
         "branch_anchors": ["branch:a"],
         "coordinates": {"branch:a": {"path_checksum": "checksum:a"}},
@@ -575,11 +915,16 @@ def test_service_operation_requires_authorized_consumed_evidence():
         "branch_path_checksum": "checksum:a", "evidence_span": "Vitrifica\u00e7\u00e3o",
         "evidence_type": "exact_catalog", "resolution_method": "exact_catalog",
     }
-    rejected = graph_proof_checker_v3.check_service_operations(
+    accepted_without_resolver = graph_proof_checker_v3.check_service_operations(
         document=document, message="Quero Vitrifica\u00e7\u00e3o", operations=[operation],
         active_branch_node_ids=[], consumed_service_spans=[],
     )
-    assert "service_evidence_not_consumed:branch:a" in rejected["errors"]
+    assert accepted_without_resolver["valid"]
+    assert accepted_without_resolver["errors"] == []
+    assert (
+        "branch_evidence_not_consumed:branch:a"
+        in accepted_without_resolver["observations"]
+    )
 
     accepted = graph_proof_checker_v3.check_service_operations(
         document=document, message="Quero Vitrifica\u00e7\u00e3o", operations=[operation],
@@ -590,6 +935,25 @@ def test_service_operation_requires_authorized_consumed_evidence():
     )
     assert accepted["valid"], accepted["errors"]
     assert accepted["next_active_branch_node_ids"] == ["branch:a"]
+
+
+def test_multiple_questions_are_quality_observation_not_a_global_rejection():
+    kwargs = _base_check_kwargs()
+    kwargs["proposal"] = {
+        **kwargs["proposal"],
+        "next_question_node_id": None,
+        "reply": "Posso explicar. Você quer comparar opções? É para uso próprio?",
+    }
+
+    proof = graph_proof_checker_v3.check(**kwargs)
+
+    assert proof["valid"] is True
+    assert proof["gating_errors"] == []
+    assert proof["question_count"] == 2
+    assert proof["observations"] == [
+        "unmapped_model_question",
+        "multiple_questions_in_reply",
+    ]
 
 
 def test_explicit_change_evidence_can_only_drop_an_active_branch():

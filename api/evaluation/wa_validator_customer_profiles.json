@@ -13,7 +13,15 @@
         "text": "Há marcas de uso e sujeira acumulada no veículo",
         "value": "Há marcas de uso e sujeira acumulada no veículo"
       },
-      "vehicle_color": {"text": "Prata", "value": "Prata"}
+      "vehicle_color": {"text": "Prata", "value": "Prata"},
+      "procedimento_anterior": {
+        "text": "Nunca foi feito nenhum procedimento nessa pintura",
+        "value": "nenhum"
+      },
+      "foco_brilho_riscos": {
+        "text": "Quero recuperar o brilho e reduzir os riscos",
+        "value": "ambos"
+      }
     },
     "regression_cases": [
       {

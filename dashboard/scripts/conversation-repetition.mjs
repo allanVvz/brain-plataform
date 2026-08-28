@@ -104,7 +104,9 @@ export function assessRepetition({
   terminalIntent = null,
   previousTerminalIntent = null,
 }) {
-  const normalizedMax = [0, 1].includes(maxAttempts) ? maxAttempts : 0;
+  // Kept as an input so older graph publications remain readable. A retry
+  // budget no longer authorizes emitting the same question twice.
+  void maxAttempts;
   const previous = recentReplies.map((value) => String(value || "")).filter((value) => value.trim());
   const semanticMatchIndexes = previous
     .map((value, index) => (isSemanticRepetition(value, currentReply) ? index : -1))
@@ -116,13 +118,8 @@ export function assessRepetition({
     ? askedQuestionNodeIds.map(String).filter((value) => value === String(questionNodeId)).length
     : 0;
   if (questionNodeId && previousQuestionEmissions > 0) {
-    if (previousQuestionEmissions >= 1 + normalizedMax) {
-      failures.push("question_attempt_budget_exceeded");
-    }
+    failures.push("question_already_asked");
     if (!fieldPending) failures.push("question_field_not_pending");
-    if (!hasSubstantiveContextualBridge(currentReply, questionText)) {
-      failures.push("contextual_bridge_required");
-    }
   }
   if (terminalIntent && terminalIntent === previousTerminalIntent) {
     failures.push("terminal_repetition");
@@ -136,7 +133,7 @@ export function assessRepetition({
     similarities: previous.map((value) => semanticSimilarity(value, currentReply)),
     questionNodeId,
     previousQuestionEmissions,
-    allowedQuestionEmissions: 1 + normalizedMax,
+    allowedQuestionEmissions: 1,
     contextualBridge: contextualBridge(currentReply, questionText),
     terminalIntent,
   };

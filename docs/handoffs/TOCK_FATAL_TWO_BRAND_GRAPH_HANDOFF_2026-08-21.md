@@ -213,20 +213,15 @@ Fluxo:
    (comando em `C:\Users\allan\.claude\jobs\9f8790ce\tmp\compute_plan_v3.py`,
    adaptar os paths) — confirmar que os checksums da seção 2 ainda batem.
 2. `scp`/copiar o bundle para a VPS, ex. `/opt/brain-ai/tmp/`.
-3. `ssh root@srv1846215.hstgr.cloud` → `cd /opt/brain-ai` → identificar o
-   serviço de API saudável da release aprovada e rodar nele
-   `python scripts/publish_graph_bundle.py ...`. O path do script no runtime é
-   `scripts/publish_graph_bundle.py`; não assumir que o nome Compose do serviço
-   será sempre `api` durante rollout blue/green.
+3. `ssh root@srv1846215.hstgr.cloud` → `cd /opt/brain-ai` → rodar o comando
+   acima com `docker compose --env-file .env.compose exec api python
+   scripts/publish_graph_bundle.py ...` (confirmar path exato do script
+   dentro do container antes de rodar).
 4. Verificar pós-ativação: `bash ops/vps/audit.sh` (contagem de nodes/edges
    deve subir ~161/165), conferir `graph_publications` tem nova versão ativa
    com o `runtime_checksum` esperado, e testar uma pergunta de catálogo real
    via WA Validator antes de considerar concluído.
 5. Reportar ao operador com números reais pós-ativação.
-
-Essa operação é restrita à Tock Fatal. Somente o binding da persona alvo, se
-operacional, precisa permanecer pausado durante staging/ativação/validação;
-bindings de outras personas não são parte do gate e não devem ser alterados.
 
 **Regra do próprio `.claude/agents/graph-publisher.md`**: "o checksum
 aprovado é o checksum ativado" — se o checksum calculado no passo 1 não bater

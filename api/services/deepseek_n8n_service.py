@@ -25,7 +25,7 @@ _REQUIRED_NODE_IDS = {
 
 
 def _validate_workflow_topology(workflow: dict[str, Any]) -> None:
-    """Reject dangling n8n connections before a workflow can be published."""
+    """Reject dangling or non-terminating paths before workflow publication."""
     nodes = workflow.get("nodes") or []
     names = [str(node.get("name") or "").strip() for node in nodes]
     if not names or any(not name for name in names):
@@ -33,6 +33,7 @@ def _validate_workflow_topology(workflow: dict[str, Any]) -> None:
     if len(names) != len(set(names)):
         raise ValueError("conversation workflow node names must be unique")
     known = set(names)
+    adjacency: dict[str, set[str]] = {name: set() for name in names}
     for source_name, outputs in (workflow.get("connections") or {}).items():
         if source_name not in known:
             raise ValueError(
@@ -47,6 +48,38 @@ def _validate_workflow_topology(workflow: dict[str, Any]) -> None:
                             "conversation workflow connection target is missing: "
                             f"{source_name} -> {target_name or '<empty>'}"
                         )
+                    adjacency[source_name].add(target_name)
+
+    terminal_names = {
+        str(node.get("name") or "").strip()
+        for node in nodes
+        if node.get("type") == "n8n-nodes-base.respondToWebhook"
+    }
+    if len(terminal_names) != 1:
+        raise ValueError(
+            "conversation workflow must contain exactly one Respond to Webhook node"
+        )
+    terminal = next(iter(terminal_names))
+
+    def reaches_terminal(start: str) -> bool:
+        pending = [start]
+        visited: set[str] = set()
+        while pending:
+            current = pending.pop()
+            if current == terminal:
+                return True
+            if current in visited:
+                continue
+            visited.add(current)
+            pending.extend(adjacency.get(current) or ())
+        return False
+
+    stranded = sorted(name for name in names if not reaches_terminal(name))
+    if stranded:
+        raise ValueError(
+            "conversation workflow paths do not reach Respond to Webhook: "
+            + ", ".join(stranded)
+        )
 
 
 def _workflow_checksum(workflow: dict[str, Any]) -> str:

@@ -183,7 +183,10 @@ class ExtractedFact(StrictModel):
 
 
 class CommercialClaim(StrictModel):
-    claim_type: str = Field(pattern="^(price|availability|schedule|stock|duration|service_detail|other)$")
+    # Claim taxonomy is graph-authored. Runtime proof checks the cited
+    # published policy/chunks instead of rejecting valid domain-specific
+    # knowledge because it is absent from a backend enum.
+    claim_type: str = Field(min_length=1)
     value: dict[str, Any] = Field(default_factory=dict)
     evidence_node_ids: list[str] = Field(default_factory=list)
     evidence_chunk_ids: list[str] = Field(default_factory=list)
@@ -203,11 +206,211 @@ class ConversationProposal(StrictModel):
     service_operations: list[ServiceOperation] = Field(default_factory=list)
     extracted_facts: list[ExtractedFact] = Field(default_factory=list)
     claims: list[CommercialClaim] = Field(default_factory=list)
+    # Canonical semantic-first proposals carry the complete public message in
+    # ``answer_text`` and ``reply``. ``question_text`` remains only for rolling
+    # compatibility with an installed older workflow; new code never appends
+    # it and proof never slices a canonical message deterministically.
+    answer_text: str = ""
+    question_text: str = ""
+    next_question_field_key: str | None = None
     next_question_node_id: str | None = None
     cited_node_ids: list[str] = Field(default_factory=list)
     cited_chunk_ids: list[str] = Field(default_factory=list)
     reply: str = ""
     qualification_complete: bool = False
+    handoff_requested: bool = False
+
+
+class SemanticIntentKind(StrEnum):
+    ANSWER_PENDING_FIELD = "answer_pending_field"
+    COMMERCIAL_QUESTION = "commercial_question"
+    SPONTANEOUS_INFO = "spontaneous_info"
+    CORRECTION = "correction"
+    CONFIRMATION = "confirmation"
+    REJECTION = "rejection"
+    GREETING = "greeting"
+    OBJECTION = "objection"
+    PRODUCT_CHANGE = "product_change"
+    AUDIENCE_CHANGE = "audience_change"
+    RESUME = "resume"
+    SMALL_TALK = "small_talk"
+    UNCLEAR = "unclear"
+
+
+class SemanticIntent(StrictModel):
+    """One act the customer performed in this message.
+
+    A message routinely carries several -- answering the pending question and
+    asking a commercial one in the same breath -- so the contract is a list
+    and the backend must serve every one of them.
+    """
+
+    kind: SemanticIntentKind
+    evidence_span: str = Field(min_length=1)
+
+
+class ConfirmationState(StrEnum):
+    NONE = "none"
+    AFFIRM = "affirm"
+    REJECT = "reject"
+    PARTIAL = "partial"
+    AMBIGUOUS = "ambiguous"
+
+
+class SemanticConfirmation(StrictModel):
+    """Confirmation bound to something identifiable, not to positive words.
+
+    ``target_ref`` is what the customer is agreeing WITH -- the pending
+    confirmation the backend published this turn. A confirmation whose target
+    does not match the pending one is not a confirmation of anything, which is
+    what stops a bare "sim" from silently confirming an arbitrary claim.
+    """
+
+    state: ConfirmationState = ConfirmationState.NONE
+    target_ref: str | None = None
+    evidence_span: str = ""
+    # For PARTIAL ("yes, but change X to Y"): what still has to change.
+    correction_field_key: str | None = None
+    correction_value: Any | None = None
+
+
+class BranchSelectionAction(StrEnum):
+    NONE = "none"
+    KEEP = "keep"
+    SELECT = "select"
+    SWITCH = "switch"
+    ADD = "add"
+    DROP = "drop"
+
+
+class SemanticBranchSelection(StrictModel):
+    """Natural language normalized to a branch anchor published in the graph.
+
+    The model does the normalizing ("é pra mim" -> the retail anchor); the
+    backend only checks the anchor exists and the span is really in the
+    message. No alias list in backend code.
+    """
+
+    action: BranchSelectionAction = BranchSelectionAction.NONE
+    branch_anchor_node_id: str | None = None
+    evidence_span: str = ""
+
+
+class CustomerQuestionKind(StrEnum):
+    AVAILABILITY = "availability"
+    PRICE = "price"
+    STOCK = "stock"
+    POLICY = "policy"
+    SCHEDULE = "schedule"
+    DEADLINE = "deadline"
+    PRODUCT_DETAIL = "product_detail"
+    OTHER = "other"
+
+
+class CustomerQuestion(StrictModel):
+    """A question the customer asked that the turn owes an answer to.
+
+    Kept separate from ``facts`` so an availability question is never absorbed
+    as the raw value of whatever field happened to be pending.
+    """
+
+    kind: CustomerQuestionKind
+    topic: str = Field(min_length=1)
+    entity_node_ids: list[str] = Field(default_factory=list)
+    evidence_span: str = Field(min_length=1)
+
+
+class SemanticEntityKind(StrEnum):
+    PRODUCT = "product"
+    QUANTITY = "quantity"
+    AUDIENCE = "audience"
+    OTHER = "other"
+
+
+class SemanticEntity(StrictModel):
+    kind: SemanticEntityKind
+    value: Any | None = None
+    node_id: str | None = None
+    evidence_span: str = Field(min_length=1)
+
+
+class FactInvalidation(StrictModel):
+    """A previously accepted fact this message makes untrue."""
+
+    field_key: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+    evidence_span: str = Field(min_length=1)
+
+
+class StateRelation(StrEnum):
+    CONTINUE = "continue"
+    NEW_DEMAND = "new_demand"
+    CORRECTION = "correction"
+    RESUME = "resume"
+    POST_COMPLETION = "post_completion"
+    UNCLEAR = "unclear"
+
+
+class RecommendedNextAction(StrEnum):
+    ASK_FIELD = "ask_field"
+    ANSWER_QUESTION = "answer_question"
+    CONFIRM = "confirm"
+    HANDOFF = "handoff"
+    CLARIFY = "clarify"
+    CLOSE = "close"
+
+
+class SemanticResponse(StrictModel):
+    """One model-authored public message with optional question metadata.
+
+    ``question_field_key`` is semantic audit metadata, not dialogue policy.
+    The backend maps it to a published question node only after proving that
+    the field is currently askable and has never been asked in this journey.
+    ``question`` is a read-only compatibility field for older workflows; the
+    canonical message, including any natural question, lives in ``answer``.
+    """
+
+    answer: str = ""
+    question: str | None = None
+    question_field_key: str | None = None
+
+
+class SemanticInterpretation(StrictModel):
+    """The model's whole reading of one inbound, in one structured object.
+
+    Replaces phrase-list interpretation in the backend. Every element carries
+    the span of the customer's own words that supports it -- deliberately no
+    numeric confidence anywhere, because a score is not an explanation and the
+    backend must be able to re-check each claim against the literal message.
+    """
+
+    intents: list[SemanticIntent] = Field(default_factory=list)
+    state_relation: StateRelation = StateRelation.UNCLEAR
+    # Which pending field (if any) this message answers, by graph field key.
+    answers_field_key: str | None = None
+    confirmation: SemanticConfirmation = Field(default_factory=SemanticConfirmation)
+    # A turn may open one branch, two at once ("é pra mim e também quero
+    # revender"), or swap one for another. The literal resolver always emitted
+    # a list of operations; the semantic reading has to be able to say the same
+    # thing or it silently loses multi-branch conversations.
+    branch_selections: list[SemanticBranchSelection] = Field(default_factory=list)
+    facts: list[ExtractedFact] = Field(default_factory=list)
+    invalidated_facts: list[FactInvalidation] = Field(default_factory=list)
+    entities: list[SemanticEntity] = Field(default_factory=list)
+    questions: list[CustomerQuestion] = Field(default_factory=list)
+    claims: list[CommercialClaim] = Field(default_factory=list)
+    recommended_next_action: RecommendedNextAction = RecommendedNextAction.CLARIFY
+    cited_node_ids: list[str] = Field(default_factory=list)
+    cited_chunk_ids: list[str] = Field(default_factory=list)
+    response: SemanticResponse = Field(default_factory=SemanticResponse)
+    # Compatibility fields for an installed workflow that has not yet been
+    # resynchronised. New canonical workflows use ``response`` exclusively.
+    next_question_field_key: str | None = None
+    # Ephemeral reference to an existing graph question. This carries the
+    # model's natural choice through the established proof/ledger path and is
+    # not a persistent schema field.
+    next_question_node_id: str | None = None
+    reply: str = ""
     handoff_requested: bool = False
 
 
@@ -223,7 +426,10 @@ class ConversationContext(StrictModel):
     rag_chunks: list[dict[str, Any]] = Field(default_factory=list)
     context_cards: list[ContextCard] = Field(default_factory=list)
     system_prompt: str = ""
-    available_services: list[dict[str, str]] = Field(default_factory=list)
+    # Values are not all strings: each anchor carries the graph's own `aliases`
+    # list, which is what lets the model map natural wording onto a real anchor
+    # id instead of the backend matching phrases itself.
+    available_services: list[dict[str, Any]] = Field(default_factory=list)
     active_branch_node_id: str | None = None
     active_branch_node_ids: list[str] = Field(default_factory=list)
     # Branches (any offering -- service or product) already confirmed in this
@@ -248,6 +454,11 @@ class ConversationContext(StrictModel):
     journey_state: ConversationJourneyState = ConversationJourneyState.COLLECTING
     pending_field_key: str | None = None
     pending_question_node_id: str | None = None
+    # Stable id of whatever the previous turn asked the customer to confirm.
+    # A confirmation is only accepted when it names this ref, so "sim" with
+    # nothing pending confirms nothing instead of confirming the last thing
+    # that happens to be on the ledger.
+    pending_confirmation_ref: str | None = None
     last_handoff: dict[str, Any] = Field(default_factory=dict)
     operational_mode: ConversationOperationalMode = ConversationOperationalMode.COLLECTION
     shared_memory: SharedLeadMemory = Field(default_factory=SharedLeadMemory)

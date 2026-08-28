@@ -90,6 +90,12 @@ API_INTERNAL_BASE_URL=https://api.<dominio>
 NEXT_PUBLIC_API_BASE_URL=/api-brain
 ```
 
+O valor acima é o backend server-side usado pelo dashboard/Vercel. Dentro do
+container n8n, o Compose define deliberadamente `API_INTERNAL_BASE_URL=http://caddy`.
+Esse nome é o origin estável da rede Docker: o Caddy acompanha o slot ativo
+(`api` ou `api-candidate`) durante o blue-green. Não aponte o n8n diretamente
+para um desses slots, pois o slot anterior é encerrado depois do cutover.
+
 Nao configure `SUPABASE_SERVICE_KEY` ou segredos do backend na Vercel. O Storage publico recebe apenas `/storage/v1/*`; PostgREST nao e publicado nesse dominio.
 
 ## 5. Ensaio de migracao
@@ -136,6 +142,68 @@ bash ops/vps/rollback.sh <commit-sha>
 ```
 
 Migrations de producao precisam permanecer retrocompativeis com a imagem anterior; rollback de container nao desfaz schema.
+
+### Retomada controlada dos workers depois do deploy
+
+> Atualização 2026-08-24: o procedimento abaixo com `KEEP_WORKERS_PAUSED` e
+> `docker compose up workers` é legado. O fluxo oficial agora classifica o
+> impacto, mantém o processo vivo atrás do marker de pausa de claims e usa os
+> workflows `Record optional production validation` e `Resume production workers`.
+> API isolada não toca workers. A autoridade de versão é
+> `.deploy/components.env` mais os digests aprovados, e a retomada deve chamar
+> `ops/vps/resume-production-workers.sh <sha-completo>` após autorização
+> explícita e aprovação dos gates técnicos. WA Validator e soak são
+> diagnósticos opcionais, nunca requisitos de retomada.
+> Nunca retome diretamente pelo Compose.
+
+O workflow de producao publica API e workers com a mesma tag imutavel, mas
+mantem `KEEP_WORKERS_PAUSED=true` durante a validacao. Portanto, API saudavel e
+`audit.sh` verde nao significam que mensagens estejam sendo consumidas. A
+retomada dos workers e uma etapa operacional separada e exige autorizacao
+explicita, porque qualquer inbound ainda em `buffered` podera produzir uma
+resposta real assim que o consumidor iniciar.
+
+Antes da retomada:
+
+1. confirme a tag em `.deploy/current-tag`, confirme que `IMAGE_TAG` em
+   `.env.compose` tem exatamente o mesmo SHA, health/readiness da API, bindings e
+   estado das IAs;
+2. inventarie buffers `buffered`, `processing`, `awaiting_proof` e
+   `dead_letter`; nao repita um inbound com entrega ou processamento ambiguo;
+3. confirme que nenhum commit terminal permanece em `processing`;
+4. registre os IDs tecnicos dos buffers que serao consumidos.
+
+Suba o worker com a mesma tag da API, informada literalmente a partir do
+checkpoint revisado:
+
+```bash
+IMAGE_TAG=<sha-de-.deploy/current-tag> docker compose --env-file .env.compose up -d workers
+docker compose --env-file .env.compose ps api workers
+docker inspect --format='{{.Config.Image}}' brain-ai-api-1 brain-ai-workers-1
+```
+
+Nunca execute apenas `docker compose ... up -d workers` enquanto `IMAGE_TAG` em
+`.env.compose` estiver diferente de `.deploy/current-tag`: o Compose poderá
+baixar e iniciar silenciosamente uma imagem antiga. Corrija primeiro a tag do
+arquivo operacional ou forneça o SHA literal revisado, use `--no-deps` para não
+recriar a API durante a retomada e confirme também o digest, não apenas o nome
+da tag.
+
+Depois da retomada, acompanhe cada buffer preexistente ate um estado terminal.
+Para cada inbound, exija no maximo uma decisao, um proof valido, um commit e um
+outbound. Pare sem replay se houver `dead_letter`, proof invalido, duplicidade,
+commit preso ou outbound da persona errada. Valide tambem:
+
+```bash
+bash ops/vps/monitor.sh
+docker compose --env-file .env.compose logs --tail=200 workers
+```
+
+`ops/vps/audit.sh` valida a release enquanto os workers podem estar pausados;
+`ops/vps/monitor.sh` e a verificacao que exige o servico `workers` em execucao.
+O relatorio da release deve registrar separadamente `deploy_validated`,
+`workers_resumed`, tag da API/worker, buffers consumidos e o resultado
+`technical_pass`/`quality_pass`.
 
 ## 8. Backup, retencao e monitoramento
 

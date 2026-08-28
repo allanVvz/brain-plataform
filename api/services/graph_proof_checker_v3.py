@@ -1,8 +1,8 @@
 """Generic proof checker for structured GraphRAG model proposals."""
 from __future__ import annotations
 
-import difflib
 import re
+import difflib
 import unicodedata
 from copy import deepcopy
 from typing import Any
@@ -26,6 +26,15 @@ _FINAL_CONFIRMATION = re.compile(
     r"\b(confirmad[oa]|reservad[oa]|agendad[oa]|fechad[oa]|booked|confirmed)\b",
     re.IGNORECASE,
 )
+_PRICE_VALUE_IN_REPLY = re.compile(
+    r"(?<!\w)(?:R\$\s*)?\d{1,3}(?:\.\d{3})*,\d{2}(?!\w)",
+    re.IGNORECASE,
+)
+_COMMERCIAL_DEFERRAL = re.compile(
+    r"\b(?:nao\s+(?:tenho|consigo|posso)|preciso\s+(?:confirmar|verificar)|"
+    r"vou\s+(?:confirmar|verificar)|atendimento\s+humano|equipe\s+humana)\b",
+    re.IGNORECASE,
+)
 _NAME_SEPARATORS = {"-", "'", "’"}
 # Generic floor/ceiling for a complete human name. The graph overrides them
 # per field via `validation.min_tokens` / `validation.max_tokens`.
@@ -34,6 +43,10 @@ NAME_MAX_TOKENS = 6
 _NON_NAME_PHRASES = {
     "oi", "ola", "bom dia", "boa tarde", "boa noite", "tudo bem",
     "e ai", "e ae", "eai", "eae",
+}
+_NON_NAME_OPENING_WORDS = {
+    "quero", "preciso", "gostaria", "procuro", "procurando",
+    "interessado", "interessada",
 }
 
 
@@ -193,14 +206,41 @@ def pending_fields(contract: dict[str, Any], facts: dict[str, Any]) -> list[dict
 def askable_pending_fields(
     contract: dict[str, Any], facts: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    """Pending fields that have not exhausted their published-question limit."""
+    """Pending fields whose graph dependencies are currently satisfied."""
+    pending = pending_fields(contract, facts)
+    pending_keys = {str(field.get("key") or "") for field in pending}
+    questions = contract.get("questions") or {}
     return [
-        field for field in pending_fields(contract, facts)
+        field for field in pending
         if not (
             (fact := facts.get(field["key"]))
             and fact.get("owner_node_id") == field.get("owner_node_id")
             and fact.get("status") in {"unknown", "declined"}
         )
+        and all(
+            dependency not in pending_keys
+            for dependency in {
+                *(field.get("depends_on") or []),
+                *((questions.get(str(field.get("question_node_id") or "")) or {}).get("depends_on") or []),
+            }
+        )
+    ]
+
+
+def exclude_asked_questions(
+    fields: list[dict[str, Any]], asked_question_node_ids: list[str] | None,
+) -> list[dict[str, Any]]:
+    """Return only fields whose graph question was never emitted.
+
+    Missing data remains missing; this helper only controls conversational
+    eligibility. A spent question cannot become askable again merely because
+    the customer took a detour to ask something else.
+    """
+    asked = {str(value) for value in asked_question_node_ids or [] if value}
+    return [
+        field for field in fields
+        if not field.get("question_node_id")
+        or str(field.get("question_node_id")) not in asked
     ]
 
 
@@ -380,9 +420,11 @@ def _canonical_field_value(
             if not is_human_full_name(value, min_tokens=minimum, max_tokens=maximum):
                 return value, "value is not a valid human full name"
         elif semantic_type == "human_name":
-            folded = _fold(value)
-            tokens = folded.split()
-            if not (1 <= len(tokens) <= 6) or any(any(char.isdigit() for char in token) for token in tokens):
+            tokens = value.split()
+            if (
+                not is_human_full_name(value, min_tokens=1, max_tokens=6)
+                or (tokens and _fold(tokens[0]) in _NON_NAME_OPENING_WORDS)
+            ):
                 return value, "value is not a plausible human name"
         schema_error = _schema_error(field.get("value_schema") or {}, value)
         return value.strip(), schema_error
@@ -397,10 +439,18 @@ def check_service_operations(
     active_branch_node_ids: list[str],
     consumed_service_spans: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Prove a first-class service-set transition independently of fields."""
+    """Prove a graph-branch transition independently of conversational copy.
+
+    ``service_operations`` is the legacy wire name.  Branch anchors can model
+    products, audiences or services, so proof must never require a
+    service-specific resolver to have consumed the same span.  Literal
+    evidence, publication membership and the materialized checksum remain the
+    authority; resolver-consumption is diagnostic only.
+    """
     anchors = set(document.get("branch_anchors") or [])
     after = list(dict.fromkeys(str(value) for value in active_branch_node_ids if value))
     errors: list[str] = []
+    observations: list[str] = []
     applied: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
     for operation in operations:
@@ -443,7 +493,7 @@ def check_service_operations(
             None,
         )
         if registered is None:
-            errors.append(f"service_evidence_not_consumed:{anchor}")
+            observations.append(f"branch_evidence_not_consumed:{anchor}")
         if action == "add":
             if anchor in after:
                 errors.append(f"service_add_duplicate:{anchor}")
@@ -460,6 +510,7 @@ def check_service_operations(
     return {
         "valid": not errors,
         "errors": errors,
+        "observations": observations,
         "operations": applied,
         "previous_active_branch_node_ids": list(active_branch_node_ids),
         "next_active_branch_node_ids": after,
@@ -485,6 +536,7 @@ def check(
 ) -> dict[str, Any]:
     errors: list[str] = []
     repair: list[dict[str, Any]] = []
+    observations: list[str] = []
     document = publication.get("document_json") or {}
     branch = str(proposal.get("branch_anchor_node_id") or "")
     action = str(proposal.get("branch_action") or "keep")
@@ -708,22 +760,123 @@ def check(
     missing = pending_fields(contract, facts)
     missing_keys = [field["key"] for field in missing]
     question_id = proposal.get("next_question_node_id")
+    question_field_key = str(
+        proposal.get("next_question_field_key") or ""
+    ).strip() or None
     questions = contract.get("questions") or {}
-    askable = askable_pending_fields(contract, facts)
-    if askable:
-        expected_question_id = askable[0].get("question_node_id")
-        question = questions.get(str(question_id or ""))
-        if question_id != expected_question_id:
-            errors.append("next_question_not_first_missing_field")
-        elif not question or question.get("field_key") != askable[0].get("key"):
-            errors.append("next_question_not_for_pending_field")
+    all_askable = askable_pending_fields(contract, facts)
+    askable = exclude_asked_questions(
+        all_askable,
+        ledger.get("asked_question_node_ids") or [],
+    )
+    answer_text = str(proposal.get("answer_text") or "").strip()
+    question_text = str(proposal.get("question_text") or "").strip()
+    reply_text = str(proposal.get("reply") or "").strip()
+    public_reply = reply_text or answer_text or question_text
+    # Only the rolling legacy envelope has a safely removable question
+    # component. The canonical semantic-first envelope puts the complete
+    # public message in answer/reply, so proof must inspect that message and
+    # must never assume its question can be sliced away deterministically.
+    structured_response = bool(answer_text or question_text)
+    separable_question = bool(answer_text and question_text)
+    spoken_question_text = question_text if separable_question else public_reply
+    question_count = (
+        max(1, question_text.count("?"))
+        if separable_question
+        else (
+            max(1, public_reply.count("?"))
+            if question_field_key and public_reply
+            else public_reply.count("?")
+        )
+    )
+    askable_by_question = {
+        str(field.get("question_node_id") or ""): field
+        for field in askable
+        if str(field.get("question_node_id") or "")
+    }
+    all_askable_by_question = {
+        str(field.get("question_node_id") or ""): field
+        for field in all_askable
+        if str(field.get("question_node_id") or "")
+    }
+    semantic_matches = [
+        candidate_id
+        for candidate_id in askable_by_question
+        if _question_already_asked(
+            str((questions.get(candidate_id) or {}).get("text") or ""),
+            spoken_question_text,
+        )
+    ]
+    if question_count > 0:
+        if question_field_key:
+            field_matches = [
+                field for field in askable
+                if str(field.get("key") or "") == question_field_key
+            ]
+            if len(field_matches) == 1 and field_matches[0].get("question_node_id"):
+                question_id = str(field_matches[0]["question_node_id"])
+                observations.append("model_question_field_askable")
+            else:
+                spent_matches = [
+                    field for field in all_askable
+                    if str(field.get("key") or "") == question_field_key
+                    and field.get("question_node_id")
+                ]
+                if len(spent_matches) == 1:
+                    # Keep the internal id long enough for the repetition
+                    # audit to prove why this semantic topic is unavailable.
+                    question_id = str(spent_matches[0]["question_node_id"])
+                    observations.append("model_question_field_already_asked")
+                else:
+                    errors.append("question_field_not_semantically_askable")
+                    question_id = None
+        elif question_id:
+            if question_id in askable_by_question:
+                # The model owns the wording and supplies the question id as
+                # structured audit metadata.  Prove that the referenced field
+                # is currently askable; do not require lexical similarity to
+                # graph-authored copy that was intentionally withheld from the
+                # prompt.
+                observations.append("model_question_metadata_askable")
+            elif question_id in all_askable_by_question:
+                observations.append("model_question_metadata_already_asked")
+            elif len(semantic_matches) == 1:
+                # The spoken question is the observable authority. A stale
+                # model id is reconciled to the one graph-owned askable
+                # question it semantically matches.
+                question_id = semantic_matches[0]
+                observations.append("next_question_metadata_reconciled")
+            else:
+                errors.append("question_not_semantically_askable")
+                question_id = None
+        elif len(semantic_matches) == 1:
+            question_id = semantic_matches[0]
+            observations.append("next_question_metadata_reconciled")
         else:
-            if any(dependency in missing_keys for dependency in question.get("depends_on") or []):
-                errors.append("next_question_dependencies_unsatisfied")
-    elif missing and question_id:
-        errors.append("question_after_all_pending_fields_deferred")
-    elif question_id:
-        errors.append("question_after_completion")
+            # The model may ask a natural discovery, support or confirmation
+            # question without claiming it advances a qualification field.
+            # Audit it, but never map it to a field or rewrite its text.
+            observations.append("unmapped_model_question")
+    elif question_id or question_field_key:
+        observations.append("next_question_metadata_without_question")
+        question_id = None
+    if question_id:
+        selected_field = all_askable_by_question.get(str(question_id))
+        question = questions.get(str(question_id)) or {}
+        if not selected_field or question.get("field_key") != selected_field.get("key"):
+            errors.append("next_question_not_for_askable_field")
+            question_id = None
+        elif structured_response and str(question_id) in {
+                str(value)
+                for value in ledger.get("asked_question_node_ids") or []
+                if value
+            }:
+            # A spent semantic topic is never eligible again. Legacy split
+            # output may drop only its explicit question component; canonical
+            # output requires one model repair because the backend cannot
+            # safely slice prose from the complete public message.
+            errors.append("question_already_asked")
+            question_id = None
     # qualification_complete is 100% derivable from `missing` -- the same
     # reasoning as re-deriving "servico" from active_branch_node_id
     # server-side (graph_agent_runtime_v3.decide()) rather than trusting a
@@ -735,7 +888,30 @@ def check(
     # moment it mattered most. The authoritative value is returned below;
     # callers should use that instead of proposal["qualification_complete"].
 
-    for claim in proposal.get("claims") or []:
+    claims = proposal.get("claims") or []
+    claim_types = {str(claim.get("claim_type") or "other") for claim in claims}
+    folded_reply = _fold(str(proposal.get("reply") or ""))
+    # The model's structured ``claims`` envelope is part of the proof
+    # boundary. A model must not be able to omit that envelope while still
+    # placing commercial facts directly in customer-facing prose. Confirmed
+    # by production WA Validator 2026-08-27: an empty claims list accompanied
+    # three prices and the unsupported policy "nao ha pedido minimo", which
+    # made the ordinary graph checks report a valid proof.
+    if _PRICE_VALUE_IN_REPLY.search(str(proposal.get("reply") or "")) and "price" not in claim_types:
+        errors.append("claim_omitted_from_proposal:price")
+    minimum_order_asserted = (
+        "nao ha pedido minimo" in folded_reply
+        or "sem pedido minimo" in folded_reply
+        or "compra e unitaria" in folded_reply
+    )
+    if (
+        minimum_order_asserted
+        and not _COMMERCIAL_DEFERRAL.search(folded_reply)
+        and "other" not in claim_types
+    ):
+        errors.append("claim_omitted_from_proposal:minimum_order")
+
+    for claim in claims:
         claim_type = str(claim.get("claim_type") or "other")
         evidence_nodes = set(claim.get("evidence_node_ids") or [])
         evidence_chunks = set(claim.get("evidence_chunk_ids") or [])
@@ -803,18 +979,73 @@ def check(
     if _FINAL_CONFIRMATION.search(str(proposal.get("reply") or "")) and missing:
         errors.append("premature_final_confirmation")
 
+    # Branch navigation, fact extraction, next-question metadata and a model's
+    # handoff flag are independently discardable components.  They may guide
+    # the next turn, but they must not erase a grounded reply.  Publication,
+    # citation, claim and premature-commercial-confirmation failures remain
+    # global proof errors because those are the actual knowledge/isolation
+    # boundary.
+    component_prefixes = (
+        "branch_", "none_with_branch_anchor", "keep_", "add_",
+        "invalid_branch_action", "field_owner_", "undeclared_field:",
+        "duplicate_extracted_fact:", "fact_", "non_known_fact_",
+        "next_question_", "question_",
+    )
+    component_errors = [
+        error for error in errors
+        if error.startswith(component_prefixes) or error == "handoff_not_authorized"
+    ]
+    gating_errors = [error for error in errors if error not in component_errors]
+    if any(error.startswith(("next_question_", "question_")) for error in component_errors):
+        question_id = None
+    if question_count > 1:
+        observations.append("multiple_questions_in_reply")
     repair = list({(item["kind"], item["id"]): item for item in repair if item.get("id")}.values())
-    repair_only = bool(errors) and all("outside_package" in error for error in errors)
+    repair_only = bool(gating_errors) and all(
+        "outside_package" in error for error in gating_errors
+    )
+    question_component_invalid = bool(
+        not question_id
+        and question_count > 0
+        and any(
+            error.startswith(("next_question_", "question_"))
+            for error in component_errors
+        )
+    )
+    discardable_question = bool(question_component_invalid and separable_question)
+    question_repair = [{
+        "kind": "quality",
+        "issue": "question_not_semantically_askable",
+        "instruction": (
+            "Preserve the grounded answer. Ask no question when every useful "
+            "pending topic was already asked; otherwise choose one unasked "
+            "field by semantic key. Never emit a graph node id."
+        ),
+    }] if question_component_invalid and not discardable_question else []
     return {
-        "valid": not errors, "errors": errors,
-        "repair_required": repair_only and bool(repair),
-        "repair_requirements": repair, "ledger": next_ledger,
+        "valid": not gating_errors, "errors": errors,
+        "gating_errors": gating_errors,
+        "repair_required": (
+            (repair_only and bool(repair))
+            or (question_component_invalid and not discardable_question)
+        ),
+        "repair_requirements": [*repair, *question_repair], "ledger": next_ledger,
         "accepted_facts": accepted_facts, "missing_fields": missing_keys,
         "next_question_node_id": question_id,
+        "next_question_field_key": (
+            str((askable_by_question.get(str(question_id)) or {}).get("key") or "")
+            or None
+        ),
+        "question_component_invalid": question_component_invalid,
+        "question_discarded": discardable_question,
+        "publishable_answer_text": answer_text if discardable_question else None,
         "qualification_complete": not missing,
         "handoff_required": handoff_required,
         "required_field_count": required_field_count(contract, facts),
         "field_validation": field_validation,
+        "component_errors": component_errors,
+        "observations": observations,
+        "question_count": question_count,
     }
 
 
@@ -825,81 +1056,40 @@ def _fold(value: str) -> str:
 
 
 def _question_already_asked(question: str, text: str) -> bool:
-    """True when `text` already asks `question`, even personalized/reworded.
-
-    Confirmed live 2026-08-08: a literal substring match breaks the moment
-    the model personalizes the canonical question -- swapping "o carro" for
-    the customer's actual model ("o Onix", "o Civic") -- so the same
-    question got silently appended a second time in the same message.
-    Content-word overlap alone (first attempt at this fix, same day) still
-    missed a short question whose *only* real content word is exactly the
-    one that gets personalized away (e.g. "Qual é a cor do veículo?" ->
-    "...a cor do seu Onix?" -- "veículo" is the one content word, and it's
-    gone). Matching contiguous character runs between the two folded
-    strings catches that: the shared prefix/suffix around the swapped word
-    still accounts for most of the question's length, even when word-level
-    overlap alone would not. Checking both signals (word overlap OR
-    character-run coverage) covers substitutions in either a single word or
-    the sentence's structure, without weakening detection of a genuinely
-    different question -- unrelated questions share only a few short/
-    common words either way.
-    """
+    """Compare natural question wording for audit/memory accounting only."""
     if question.casefold() in text.casefold():
         return True
     q_folded = _fold(question)
     if not q_folded:
         return False
-    # Compare each interrogative sentence, never the whole reply. Summing
-    # every matching character run across an acknowledgement plus an
-    # unrelated question made ordinary Portuguese glue words look like a
-    # match (for example, the graph expected the objective while the model
-    # repeated "como voce se chama?"). SequenceMatcher.ratio keeps order
-    # and penalizes those scattered coincidences, while still recognizing a
-    # personalized noun substitution such as "cor do veiculo" ->
-    # "cor do seu Onix".
     candidates = [
         sentence.strip()
         for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", str(text or ""))
         if "?" in sentence
     ]
-    content_tokens = {token for token in q_folded.split() if len(token) >= 4}
+    generic_tokens = {
+        "qual", "quais", "quanto", "quantos", "como", "onde", "quando",
+        "voce", "voces", "pode", "sabe", "dizer", "meu", "minha", "seu",
+        "sua", "seus", "suas", "para", "com", "uma", "uns", "das", "dos",
+        "que", "tem", "the", "what", "which", "your", "you", "can", "tell",
+    }
+    content_tokens = {
+        token for token in q_folded.split()
+        if len(token) >= 3 and token not in generic_tokens
+    }
     for candidate in candidates:
         candidate_folded = _fold(candidate)
         candidate_tokens = set(candidate_folded.split())
         if (
-            len(content_tokens) >= 2
-            and len(content_tokens & candidate_tokens) / len(content_tokens) >= 0.7
+            content_tokens
+            and len(content_tokens & candidate_tokens) / len(content_tokens) >= 0.6
         ):
             return True
-        if difflib.SequenceMatcher(
+        if content_tokens & candidate_tokens and difflib.SequenceMatcher(
             None, q_folded, candidate_folded, autojunk=False,
         ).ratio() >= 0.68:
             return True
     return False
-
-
-def compose_published_question(
-    *, reply: str, next_question_node_id: str | None, contract: dict[str, Any]
-) -> str:
-    """Preserve acknowledgement/answer prose and emit exactly one graph question."""
-    text = str(reply or "").strip()
-    if not next_question_node_id:
-        return text
-    question = str(((contract.get("questions") or {}).get(next_question_node_id) or {}).get("text") or "").strip()
-    if not question:
-        return text
-    if _question_already_asked(question, text) and text.count("?") <= 1:
-        return text
-    # The model may have drafted a natural acknowledgement followed by a
-    # question for a different field. Routing/field order belongs to the
-    # graph, so retain declarative sentences but discard every interrogative
-    # sentence before appending the single authorized question.
-    sentences = re.split(r"(?<=[.!?])\s+|[\r\n]+", text)
-    declarative = " ".join(
-        sentence.strip() for sentence in sentences
-        if sentence.strip() and "?" not in sentence
-    ).strip()
-    return f"{declarative}\n\n{question}".strip()
 
 
 def validate_natural_summary(reply: str, *, informed_values: list[str]) -> bool:

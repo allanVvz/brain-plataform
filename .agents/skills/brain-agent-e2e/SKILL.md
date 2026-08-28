@@ -7,6 +7,13 @@ description: Validate Brain AI conversational agents end to end through the dash
 
 Validate the real path `operator -> Evolution -> target persona -> agent -> Evolution -> operator`. Treat persisted destination messages and runtime decisions as evidence; never treat a provider `sent` flag alone as delivery proof.
 
+This skill is an optional diagnostic and repair tool. WA Validator or live E2E
+results are never universal deploy, publication or resume gates. Release
+authorization is decided by the production lifecycle's technical invariants;
+concrete evidence of duplication, wrong-persona context, unproved outbound or
+unsafe price/date/time confirmation still blocks processing regardless of
+which tool discovered it.
+
 ## Load task references
 
 - Read [references/n8n-template-contract.md](references/n8n-template-contract.md) whenever n8n, backend behavior, provisioning or cross-persona reuse is in scope.
@@ -45,8 +52,8 @@ For every turn:
 2. If the customer message contains a doubt or interruption, require the agent to answer it before resuming qualification.
 3. Extract and verify every fact present in the customer message, not only the field the previous turn expected.
 4. Require a natural acknowledgement of the received content before the next graph question.
-5. Require exactly the question for `missing_fields[0]`; never answer a different scripted field just to keep the run moving.
-6. Stop before sending when the question cannot be mapped unambiguously to a published graph field.
+5. Require a natural next question that respects published facts, limits and unresolved qualification needs. `missing_fields` is a completion signal, not a forced dialogue order; do not require `missing_fields[0]` or an exact FAQ script.
+6. Stop before sending when the response cites a commercial fact/limit that cannot be mapped to published evidence, or crosses persona/agent scope.
 7. Stop when a persisted fact is asked again or the reply substantially repeats any recent agent reply.
 8. Send exactly once from the paused transport-side conversation. Do not volunteer price, date or time.
 9. Record the send timestamp and HTTP status.
@@ -59,7 +66,7 @@ For every turn:
 Keep two independent verdicts:
 
 - `technical_pass`: canonical inbound, one decision, one valid proof, at most one proof-gated outbound, atomic commit and token budget.
-- `quality_pass`: every semantic turn criterion above passed and qualification/handoff followed the persisted graph state.
+- `quality_pass`: every semantic turn criterion above passed; the model's explanation, recommendation and natural next question remained grounded in the published graph without becoming a fixed script.
 
 A run may have `technical_pass=true` and `quality_pass=false`. A fixed-sequence or browser-only run without ledger/fact/proof evidence is `technical_only` or `browser_dynamic_dialogue`; it is never conversational-quality evidence by itself.
 
@@ -89,7 +96,7 @@ Stop all new sends immediately when any condition occurs:
 - more than one agent decision or outbound for one inbound;
 - transport-side agent responds automatically;
 - target response uses the wrong persona/service/history;
-- the driver cannot map the agent's actual question to one published graph field;
+- the reply cites unpublished commercial knowledge or crosses persona/agent scope;
 - the agent repeats a recent response or asks a field whose fact is already current;
 - the agent ignores a doubt/interruption or asks the next field before answering it;
 - price, date or time is confirmed without the required human confirmation;
@@ -122,9 +129,9 @@ When code or workflow changes are part of the task:
 
 For n8n qualification, preserve this order:
 
-`context -> initial policy -> structured model extraction -> policy reconciliation -> aligned reply -> exactly-once commit`
+`published context/limits -> model interpretation and natural reply -> proof of cited evidence + isolation -> CAS/idempotent commit -> at most one outbound`
 
-Model output may extract customer facts and identify a graph-valid service, but it never owns routing, required fields, the next question, handoff or confirmation policy.
+The graph owns published knowledge, commercial facts/limits and qualification completion policy. The model owns explanation, recommendation, language, conversational flow and the next natural question. Proof checks cited published evidence plus persona/agent isolation; it must not deterministically select a FAQ, force `missing_fields[0]`, rebuild Product/Offer/Copy per turn or replace a valid model reply. Exactly-once only guards the one inbound/decision/commit/max-one-outbound invariant.
 
 ## Use the project command
 

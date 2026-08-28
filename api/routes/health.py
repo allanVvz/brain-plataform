@@ -22,6 +22,7 @@ def health_live():
     return {
         "status": "ok",
         "service": "api",
+        "source_sha": os.environ.get("SOURCE_SHA") or "unknown",
         "workers_embedded": (os.environ.get("RUN_EMBEDDED_WORKERS") or "").strip().lower() in {"1", "true", "yes", "on"},
     }
 
@@ -31,6 +32,7 @@ def health_ready():
     ok, detail = supabase_client.ping_supabase()
     payload = {
         "status": "ready" if ok else "degraded",
+        "source_sha": os.environ.get("SOURCE_SHA") or "unknown",
         "checks": {
             "supabase": {
                 "ok": ok,

@@ -27,7 +27,9 @@ docs/*
 !docs/qa/**
 tests
 test-artifacts
-data
+data/*
+!data/graph_bundles/
+!data/graph_bundles/**
 tmp
 paperclip
 .agents

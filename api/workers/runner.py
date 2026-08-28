@@ -42,8 +42,8 @@ async def _run(selected: list[str]) -> None:
     for signame in (signal.SIGTERM, signal.SIGINT):
         try:
             loop.add_signal_handler(signame, request_shutdown)
-        except NotImplementedError:  # Windows test runner
-            pass
+        except (NotImplementedError, RuntimeError):  # Windows test runner
+            signal.signal(signame, lambda *_: request_shutdown())
     try:
         await asyncio.gather(*tasks)
     finally:

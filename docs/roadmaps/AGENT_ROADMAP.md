@@ -75,15 +75,115 @@ paralelo seguro.
 
 | # | Item | Estado | Agente |
 |---|---|---|---|
+| P0 | Reduzir memoria e complexidade da recuperacao conversacional | **em aberto - incidente produtivo confirmado em 2026-08-24: `/internal/conversations/context` e `/internal/conversations/decide` carregam nodes, edges e projecoes legacy em volume excessivo por turno; a API atingiu o limite de 1,5 GiB e workers Gunicorn foram encerrados por OOM, deixando inbounds em `dead_letter` sem resposta. O hotfix tornou o coercion compativel com `semantic_type`/JSON Schema nullable em lista; ainda falta limitar a recuperacao a publicacao ativa, top-k RAG e consultas em lotes/server-side, sem reconstruir o grafo completo no runtime. Preservar proof sem reescrita e exactly-once.** | `runtime-rag` |
 | P0 | Destravar a Aurora SDR (ciclo com memória travado) | **em aberto — evidência coletada 2026-08-19 (branch `chore/aurora-unblock-p0-evidence-2026-08-19`, commit `62d8c62`, não mesclada): nenhuma das 5 hipóteses reproduziu contra tráfego real; falta sessão de prova formal via WA Validator e teste da hipótese 3 (orçamento de prompt) antes de marcar concluído** | `aurora-unblock` |
 | 0 | Higiene do repositório e precedência de documentos | **concluído 2026-08-19** | `deprecation-sweeper` |
 | 1 | Publisher genérico, PublicationPlan, embeddings incrementais | **em progresso — GraphBundle + PublicationPlan + staging/ativação em duas fases já existem e publicaram a Tock Fatal real; falta embeddings incrementais por chunk e o publisher completo de edição/remoção** | `bundle-migrator`, `graph-publisher`, `release-gate` |
-| 2 | Cards editáveis alteram o agente de verdade | a fazer | `card-editor` |
+| 2 | Cards editáveis alteram o agente de verdade | **em progresso — 2a e 2b entregues no editor GraphBundle v3; 2c–2e permanecem bloqueadas pelos gates de revisão/publicação** | `card-editor` |
+| 2c.1 | Ordem visual e editável das perguntas de qualificação, integrada à Sofia | **a fazer — prioridade de autoria; sem tornar a conversa um roteiro rígido** | `card-editor`, `graph-publisher` |
 | 3 | Sofia produz dados declarativos, não código | a fazer | `faq-coverage`, `sdr-evaluator` |
-| 4 | Tock Fatal nasce no pipeline novo | **em progresso — bundle nominal (`sdr-qualification-v1`, 2 galhos de audiência) ativo em produção e provado via WA Validator (varejo, revenda, troca de galho, lacuna de conhecimento); falta conteúdo comercial real (produto/preço/atacado-varejo) — ver item 4a** | `graph-publisher` |
+| 4 | Tock Fatal nasce no pipeline novo | **em progresso — v8 ativa (182 nós, catálogo estrutural sem preço); falta escopo de ramo real e os 220 nós comerciais — ver item 4a e a seção "Runtime semantic-first" (2026-08-22)** | `graph-publisher` |
 | 5 | n8n estável e desacoplado do conteúdo | a fazer | — |
 | 6 | Aurora migra para o bundle | a fazer | `bundle-migrator` |
-| 7 | Orquestradores por estágio e campanha por ciclo → arquitetura multi-agente | **redesenhado 2026-08-20, ver seção própria abaixo** | `graph-publisher`, `card-editor` |
+| 7 | Orquestradores por estágio e campanha por ciclo → arquitetura multi-agente | **redesenhado 2026-08-20; decisão nova 2026-08-22: escopo de conhecimento por agente via cards Embedded — ver seção própria abaixo** | `graph-publisher`, `card-editor` |
+| 8 | Runtime semantic-first (interpretação pelo modelo, prova pelo backend) | **em progresso 2026-08-22, branch `agent/sofia-vitoria-audit` — ver seção própria** | `graph-publisher` |
+| 8a | Navegação consultiva de catálogo e mídia no SDR | **FAQ por ProductGroup entregue no candidato 2026-08-24; falta assets/fotos/vídeos/links e avaliação offline de qualidade** | `faq-coverage`, `sdr-evaluator` |
+| 9 | Deploy incremental, leve e retomável | **em progresso 2026-08-24 — lifecycle durável, classificação, pausa/drain/resume, proof do primeiro claim, blue-green da API, imagens separadas, retenção autorizada e gates semânticos implementados no candidato; medição real e prova em QA/produção ainda pendentes** | `release-gate` |
+
+### 9 — Deploy incremental, leve e retomável
+
+O deploy é classificado automaticamente em `documentation`, `dashboard`,
+`graph`, `api`, `worker`, `conversational` ou `migration`. Documentação e grafo
+não fazem deploy de código; dashboard fica no fluxo Vercel; API isolada não
+toca workers; worker isolado pausa novos claims, drena e troca apenas o worker.
+
+O lifecycle persistido em `.deploy/lifecycle.json` é atômico e retomável:
+
+`prepared -> images_pulled -> claims_paused -> queue_drained -> migration_complete -> candidate_healthy -> awaiting_resume_authorization -> workers_resumed -> verified`
+
+`validator_complete` e `soak_complete` permanecem apenas como estados legados
+compatíveis para evidência opcional; não são gates de deploy ou retomada.
+Etapas não aplicáveis podem ser puladas, mas uma regressão só é permitida para
+`claims_paused` como safety stop. A retomada é uma operação separada, exige
+autorização durável e prova um inbound canônico com uma decisão, um proof, um
+commit e no máximo um outbound. Webhooks continuam gravando durante a pausa.
+
+API e worker têm imagens e SHAs de componente independentes. Um deploy isolado
+portanto pode produzir SHAs diferentes sem reiniciar o outro processo; o
+manifesto aprovado é a autoridade e a divergência fica alertada. Exigir SHA
+literal igual e simultaneamente proibir o restart do componente não alterado é
+um contrato impossível, por isso o gate correto compara cada container ao seu
+SHA/digest aprovado no release.
+
+Retenção preserva atual, rollback e imagens em uso. Apply de limpeza continua
+separado do deploy e exige autorização própria. O limite de disco é `<35%`.
+O soak conversacional de no mínimo 30 minutos é durável e não entra no tempo
+ativo do deploy: a instalação chega a `candidate_healthy`, o validador interno
+é registrado, e outra operação completa o soak e pede autorização de resume.
+
+O blue-green mantém o admin do Caddy restrito a `127.0.0.1:2019` dentro do
+container; a porta não é publicada pelo Compose. Instalações legadas com
+`admin off` fazem uma única recriação controlada do Caddy ainda apontando para
+a API ativa e, depois disso, cada cutover usa reload gracioso. Um candidato
+substituto só pode reiniciar o lifecycle até `queue_drained`, com o mesmo
+`previous_sha`; após `candidate_healthy`, a troca automática continua proibida.
+Uma substituição post-cutover revisada exige `supersede_unfinished_release`,
+motivo não vazio e marker de claims pausados. Antes do novo `prepared`, o estado
+completo anterior é preservado em `.deploy/releases/<candidate_sha>.json` e o
+evento `superseded` é anexado ao ledger durável.
+
+Pendências para concluir o item:
+
+- provar em QA a alternância blue-green e o rollback automático do upstream;
+- provar API e worker abaixo de 1,5 GB no registry/host;
+- medir p95 de deploy comum abaixo de 3 minutos e candidato conversacional
+  abaixo de 8 minutos, excluindo soak e espera humana;
+- validar os novos workflows em QA e depois em janela produtiva autorizada.
+
+### 2a — Ordem visual das perguntas e autoria pela Sofia
+
+O editor do grafo deve permitir ordenar visualmente as perguntas de
+qualificação dentro de cada Persona, Audience, produto ou serviço. A ordem
+vertical apresentada na tree deve corresponder à preferência declarada em
+`qualification.fields[]`, preservando `question_node_id`, `depends_on`,
+`priority`, fonte e status. Arrastar uma pergunta para cima ou para baixo deve
+gerar um patch declarativo no grafo existente; não criar tabela, campo
+persistente paralelo nem regra por persona.
+
+Regras de produto e autoria:
+
+- a UI mostra uma prévia numerada da sequência por branch e permite reordenar
+  por drag-and-drop;
+- a posição visual livre só altera a semântica quando o operador salva/aprova
+  a nova ordem; o layout não pode mudar o atendimento silenciosamente;
+- dependências continuam soberanas: a UI bloqueia ou explica uma ordem em que
+  uma pergunta apareça antes do campo declarado em `depends_on`;
+- fatos já conhecidos, campos recusados e perguntas respondidas são pulados;
+- a ordem é uma preferência entre perguntas atualmente elegíveis, não uma
+  volta ao `missing_fields[0]`: o modelo ainda pode escolher outra pergunta
+  pendente e permitida, responder uma dúvida primeiro e variar a linguagem;
+- o proof valida que a pergunta escolhida pertence ao conjunto pendente e tem
+  dependências satisfeitas, sem substituir a resposta do modelo.
+
+A Sofia deve conseguir criar, revisar e reordenar essa sequência por linguagem
+natural, por exemplo: "pergunte primeiro se é uso próprio ou revenda e deixe
+volume por último". Antes de salvar, ela apresenta o diff `ordem anterior →
+ordem proposta`, dependências afetadas, nodes/edges envolvidos e perguntas sem
+fonte ou sem `question_node_id`. A mudança segue o mesmo PublicationPlan, CAS,
+checksum e aprovação humana dos demais cards.
+
+Gate de compilação e aceite:
+
+1. compilar a ordem por topological sort de `depends_on`, usando a sequência
+   visual declarada e `priority` apenas como desempate;
+2. rejeitar ciclos, dependência ausente, pergunta fora da branch ou mistura de
+   persona/canal;
+3. mostrar no dry-run a sequência final de cada branch e marcar como breaking
+   change quando a ordem publicada for alterada;
+4. provar em teste que reordenar visualmente muda o contrato compilado e o
+   checksum, mas não muda fatos, copy, Embedded ou outro fluxo;
+5. manter Aurora e Tock Fatal no runtime v3 com publicacoes e bindings isolados
+   explícita da Aurora.
 
 ### Progresso local do pipeline novo — 2026-08-20
 
@@ -105,6 +205,89 @@ incrementais por `chunk_checksum` (compilação hoje reembeda tudo a cada
 publish) e o publisher completo de edição/remoção (hoje só cobre
 materialização inicial). Roadmap incremental e gates completos:
 `docs/architecture/GRAPH_BUNDLE_PUBLICATION_PLAN.md`.
+
+### Runtime semantic-first e escopo bidimensional — 2026-08-22
+
+Decisões desta sessão, implementadas ou aprovadas na branch
+`agent/sofia-vitoria-audit`. Handoff completo:
+`docs/handoffs/SESSAO_2026-08-22_SEMANTIC_RUNTIME_E_ESCOPO.md`.
+
+**Interpretar é do modelo; provar é do backend.** Uma auditoria ao vivo em
+produção (2026-08-21) provou que o modelo lia certo e o backend descartava a
+leitura correta por não bater com lista de frases: `"uso próprio mesmo"` não
+selecionava público e `"sim, tá correto"` não fechava a qualificação — o
+primeiro e o último passo do funil quebravam por fraseado. `_EXPLICIT_CONFIRMATIONS`
+e os markers de serviço deixaram de ser autoridade; sobrevivem só como
+normalizadores auxiliares. O contrato novo é `SemanticInterpretation`
+(`api/schemas/conversation.py`), **sem confiança numérica** — todo elemento
+carrega o trecho literal da mensagem, e o backend reconfere contra a mensagem e
+o grafo (`api/services/semantic_interpretation_validator.py`).
+
+**Escopo passa a ser bidimensional: ramos ativos × agente que responde.**
+- *Ramo* decide de quem é o conhecimento (varejo vs. atacado).
+- *Agente* decide o que pode ser afirmado. Preço não é regra global da persona,
+  é competência do agente — hoje só existe o SDR, amanhã haverá outros. Isso
+  se declara em **vários cards `Embedded`, um por agente** (`data.agent_slug`);
+  card sem `agent_slug` continua valendo para todos, então nada existente
+  quebra. O Embedded já governa "o que pode ser afirmado" (a aresta
+  `faq → embedded` decide quais FAQs viram claim autorizada,
+  `graph_compiler_v3.py:746-752,955-972`) — passa a governar também "por quem".
+  Isso substitui `commercial_claims_allowed`,
+  `forbid_unpublished_price_stock_deadline_policy` e
+  `unsupported_commercial_claim`, **confirmados inertes**: não são lidos por
+  nenhum caminho de execução.
+
+**Fatos de arquitetura levantados nesta sessão (não repetir a investigação):**
+- O fechamento de ramo é de **passo único e não transitivo**
+  (`graph_compiler_v3.py:788-799`): a aresta semântica traz só o nó-alvo, nunca
+  a subárvore `contains`. Foi por isso que a v8 precisou de 165 arestas
+  `persona → nó` — e é por isso que os dois ramos hoje enxergam 176 dos 182
+  nós, ou seja, **a diferenciação de ramo não existe na prática**.
+- Multi-ramo já é real no runtime **menos na recuperação**:
+  `active_branch_node_ids`, `check_service_operations` e os `aggregate_*`
+  (`graph_proof_checker_v3.py:213-300,392`) já trabalham com lista, mas
+  `_retrieval_branch_for_turn` resolve **um** ramo e só os chunks dele viram
+  `context_cards`.
+- A trava de preço em texto livre **já existe, no pipeline legado**
+  (`graph_conversation_contract.py:587-606,746-763`, testes em
+  `tests/test_graph_conversation_contract.py:404-457`). O v3 não a chama. É
+  código para portar, não para inventar.
+
+### Fronteira central de runtime
+
+O GraphBundle publicado fornece conhecimento, fatos comerciais e limites. O
+modelo possui explicacao, recomendacao, linguagem, fluxo conversacional e a
+proxima pergunta natural; nao pode inventar fatos. `missing_fields` indica
+completude, nao um roteiro: runtime/proof nao podem forcar `missing_fields[0]`,
+selecionar FAQ deterministicamente, substituir resposta valida do modelo ou
+reconstruir Product/Offer/Copy por turno.
+
+Proof confere somente evidencia publicada citada e isolamento persona/agente.
+CAS e exactly-once continuam obrigatorios para um inbound -> uma decisao -> um
+commit -> no maximo um outbound, sem escolher conteudo da conversa. O gate de
+publicacao deve validar acumulacao top-down de cada FAQ de evidencia, com caminho
+ativo da Persona, fonte/status e escopo intactos. Tock Fatal segue GraphBundle;
+Aurora e Tock Fatal operam no runtime v3, com publicacoes e estado isolados.
+
+### Comportamento do SDR — prioridade corrente (2026-08-23)
+
+Tock e Aurora estão publicadas e respondendo, mas **as duas estão ruins em
+comportamento**, por motivos diferentes e já diagnosticados com dados reais de
+produção. Plano completo, com transcrições e causas exatas:
+`docs/handoffs/PROXIMA_SESSAO_SDR_INTELIGENTE.md`.
+
+- **Tock**: loop por deadlock de dependência (ramo resolve, mas o fato do campo
+  seletor grava `unknown/ignored_twice`, e todo campo que depende dele é
+  rejeitado para sempre) + **`eligible_faq = 0`**, ou seja, 365 nós de catálogo
+  publicados e **nenhum** capaz de sustentar uma resposta.
+- **Aurora**: tem o conhecimento e não o usa — só libera depois que o cliente
+  nomeia o serviço, quando o trabalho do SDR é justamente mapear necessidade →
+  solução. Confirmação de serviço também não vira fato.
+- **Ordem**: corrigir o backend da Tock primeiro; na Aurora só correções
+  pequenas no fluxo atual; migrar Aurora para o pipeline novo (item 6) só
+  depois da Tock validada.
+- **Adiado**: cards `Embedded` por agente (seção G). Hoje só existe o SDR; a
+  única diferença prevista é SDR sem preço / Closer com preço.
 
 ### Item 4a — o que falta pra Tock Fatal ser uma persona real, não uma prova
 
@@ -221,8 +404,9 @@ hipótese 3 (orçamento de prompt), que não foi coberta nesta rodada.
 
 ### Prova de saída
 
-Validação **somente** pelo WA Validator interno (`POST /wa-validator/run-direct`),
-nunca WhatsApp real — regra rígida de `AGENTS.md`.
+Quando solicitada, a validação usa o WA Validator interno
+(`POST /wa-validator/run-direct`) e nunca WhatsApp real. Ela é diagnóstico
+opcional, não gate de deploy, publicação ou retomada.
 
 - 1 inbound → 1 decisão → 1 proof válido → 1 commit → 1 outbound inerte
 - `qualification_complete=true`
@@ -367,6 +551,9 @@ governança 7 abaixo).
 
 Uma única fonte autoral declarativa por persona. Todo o resto é derivado.
 
+Tock Fatal e Aurora usam GraphBundle/runtime v3, cada uma isolada por
+publicacao, checksum, binding e memoria; o runtime comum nao mistura contratos.
+
 ```
 GraphBundle (banco, versionado)
 ├── identidade + versão de contrato
@@ -382,10 +569,10 @@ GraphBundle (banco, versionado)
   -> normalização determinística    graph_markdown.canonicalize_graph
   -> validação estrutural/comercial graph_json_v2_validator + regras do bundle
   -> compilação PURA                graph_compiler_v3.compile_graph      [JÁ EXISTE]
-  -> PublicationPlan (diff + custo)                                [JÁ EXISTE]
-  -> chunks e embeddings incrementais por chunk_checksum           [PENDENTE]
-  -> staging + ativação atômica     activate_graph_publication_v3   [JÁ EXISTE]
-  -> export de cards Markdown para a tela de grafos                 [PENDENTE]
+  -> PublicationPlan (diff + custo)                                      [NOVO]
+  -> chunks e embeddings incrementais por chunk_checksum                 [NOVO]
+  -> staging + ativação atômica     activate_graph_publication_v3
+  -> export de cards Markdown para a tela de grafos                      [NOVO]
 ```
 
 O operador enxerga três passos, não quinze:
@@ -394,17 +581,15 @@ O operador enxerga três passos, não quinze:
 Alterar (card)  ->  Aprovar (plano)  ->  Publicar
 ```
 
-### Item 2 — Cards editáveis alteram o agente de verdade
-
-A evolução do editor acontece em fases explícitas, mantendo Graph JSON v2 e
-GraphBundle v3 em paralelo até existir prova de paridade:
+### Item 2 — fases do editor GraphBundle
 
 - **2a — Visualização GraphBundle v3:** renderer separado, estados
   draft/staged/ativo e convivência com Graph JSON v2.
 - **2b — Layout editável:** movimento de nodes persistido fora do bundle, sem
   alteração semântica ou de checksum.
 - **2c — Edição versionada de nodes:** editar título, resumo/conteúdo, tags,
-  fonte, status e `data` específica do tipo de node.
+  fonte, status e `data` específica do tipo de node. A ordem visual e editável
+  das perguntas de qualificação é o subitem prioritário 2c.1.
 - **2d — Operações estruturais:** criar, renomear, arquivar e relacionar nodes,
   com proteção de Persona, Embedded e Gallery.
 - **2e — Paridade e retirada controlada do v2:** somente depois de provar
@@ -438,33 +623,6 @@ Regras do editor:
 - Cada alteração cria revisão recuperável; desfazer cria outra revisão, sem
   reescrever histórico.
 - Nenhum save publica automaticamente.
-
-### Isolamento operacional da publicação
-
-Publicação de conteúdo é autônoma por persona. O publisher GraphBundle valida
-o par `persona.id`/`persona.slug`, materializa somente nodes/edges desse
-`persona_id` e não cria nem altera binding, workflow, credencial ou transporte.
-Uma persona nova sem esses recursos permanece inerte mesmo com publicação v3
-ativa. Personas não envolvidas continuam operando e não devem ser pausadas.
-
-Se a persona alvo já tiver binding operacional, a pausa fica restrita a esse
-binding durante staging, ativação e WA Validator. Pausa global é reservada a
-release de código/infra que afeta o runtime compartilhado.
-
-Existem dois caminhos de publicação e eles não são intercambiáveis:
-
-- `.github/workflows/publish-content.yml` publica documentos Markdown/Graph
-  JSON v2 por `publish_persona_documents.py`, com checksum de documento e
-  versão esperada;
-- GraphBundle v3 usa `compile_graph_bundle.py` para o plano e
-  `publish_graph_bundle.py` para staging/ativação, exigindo os checksums de
-  draft e runtime aprovados.
-
-Até existir um workflow `production-content` específico para GraphBundle, a
-execução do publisher v3 no runtime aprovado exige autorização explícita dos
-dois checksums e registro auditável de persona, publicação e versão. Aprovação
-de GraphBundle não autoriza deploy, migration, binding, workflow, transporte,
-retomada ou limpeza.
 
 ```json
 {
@@ -519,7 +677,8 @@ demanda. Nenhum deles re-deriva o projeto do zero.
 3. Conflito entre documentos resolve pela ordem de precedência, e o agente
    **reporta** o conflito — não escolhe em silêncio.
 4. Nunca rodar Docker local (`AGENTS.md`).
-5. Nunca testar conversa por WhatsApp real; só WA Validator interno.
+5. Quando houver teste automatizado de conversa, preferir o WA Validator
+   interno; ele não é obrigatório para deploy ou retomada.
 6. Reusar as skills existentes em vez de duplicar:
    - `.claude/skills/aurora-premium-sdr/`
    - `.claude/skills/aurora-conversation-evaluator/`

@@ -5,8 +5,28 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env.compose}"
 BACKUP_ROOT="${BACKUP_ROOT:-/var/backups/brain-ai}"
 RESTORE_MARKER="${RESTORE_MARKER:-$BACKUP_ROOT/restore-tests/LAST_SUCCESS}"
+DISK_MAX_PERCENT="${DISK_MAX_PERCENT:-35}"
 cd "$ROOT_DIR"
 COMPOSE=(docker compose --env-file "$ENV_FILE")
+COMPOSE_BG=(docker compose --env-file "$ENV_FILE" --profile blue-green)
+active_api_service="$(tr -d '\r\n' < .deploy/api-active-slot 2>/dev/null || true)"
+[[ "$active_api_service" == "api-candidate" ]] || active_api_service=api
+impact_class="$(python3 ops/vps/release_lifecycle.py show --field impact_class 2>/dev/null || true)"
+require_fresh_backup="${REQUIRE_FRESH_BACKUP:-}"
+if [[ -z "$require_fresh_backup" ]]; then
+  if [[ "$impact_class" == "migration" ]]; then
+    require_fresh_backup=true
+  elif [[ -n "$impact_class" ]]; then
+    require_fresh_backup=false
+  else
+    # A standalone audit without durable release context remains fail closed.
+    require_fresh_backup=true
+  fi
+fi
+[[ "$require_fresh_backup" == "true" || "$require_fresh_backup" == "false" ]] || {
+  echo "REQUIRE_FRESH_BACKUP must be true or false" >&2
+  exit 2
+}
 failed=0
 
 check_file() {
@@ -36,6 +56,29 @@ if [[ -s .deploy/release-directory ]]; then
     printf 'FAIL\trelease_checksums\t%s\n' "$release_dir"; failed=1
   fi
 fi
+
+check_container_digest() {
+  local service="$1" digest_file="$2" expected cid image_id
+  if [[ ! -s "$digest_file" ]]; then
+    printf 'FAIL\t%s_digest\tmissing evidence\n' "$service"; failed=1; return
+  fi
+  expected="$(tr -d '\r\n' < "$digest_file")"
+  if [[ ! "$expected" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    printf 'FAIL\t%s_digest\tunresolved\n' "$service"; failed=1; return
+  fi
+  cid="$("${COMPOSE_BG[@]}" ps -q "$service")"
+  if [[ -z "$cid" ]]; then
+    printf 'FAIL\t%s_digest\tcontainer missing\n' "$service"; failed=1; return
+  fi
+  image_id="$(docker inspect -f '{{.Image}}' "$cid")"
+  if docker image inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' "$image_id" | grep -Fq "@$expected"; then
+    printf 'PASS\t%s_digest\t%s\n' "$service" "$expected"
+  else
+    printf 'FAIL\t%s_digest\texpected=%s\n' "$service" "$expected"; failed=1
+  fi
+}
+check_container_digest "$active_api_service" .deploy/release-api-digest
+check_container_digest workers .deploy/release-worker-digest
 
 "${COMPOSE[@]}" ps
 "${COMPOSE[@]}" exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -P pager=off' <<'SQL'
@@ -94,6 +137,17 @@ from public.lead_buffer where status in ('processing','awaiting_proof');
 select 'outbound_rows_15m' metric, count(*)::text value
 from public.lead_buffer
 where direction='outbound' and created_at >= now()-interval '15 minutes';
+
+select 'unproved_agent_outbound_15m' metric, count(*)::text value
+from public.lead_buffer b
+where b.direction='outbound'
+  and b.created_at >= now()-interval '15 minutes'
+  and coalesce(b.payload->>'sender_type','')='agent'
+  and not exists (
+    select 1 from public.conversation_turn_proofs p
+    where p.outbound_id=b.id::text
+      and coalesce((p.proof_result->>'valid')::boolean, false)
+  );
 
 select 'graph_checksum_divergence' metric, count(*)::text value
 from public.conversation_ledgers l
@@ -179,6 +233,17 @@ begin
     where status='awaiting_proof' and updated_at < now()-interval '5 minutes'
   ) then raise exception 'orphan proof buffer rows remain'; end if;
   if exists (
+    select 1 from public.lead_buffer b
+    where b.direction='outbound'
+      and b.created_at >= now()-interval '15 minutes'
+      and coalesce(b.payload->>'sender_type','')='agent'
+      and not exists (
+        select 1 from public.conversation_turn_proofs p
+        where p.outbound_id=b.id::text
+          and coalesce((p.proof_result->>'valid')::boolean, false)
+      )
+  ) then raise exception 'unproved agent outbound observed'; end if;
+  if exists (
     select 1 from public.conversation_ledgers l
     join public.graph_publications p on p.id=l.publication_id
     where l.graph_checksum is distinct from p.checksum
@@ -190,10 +255,22 @@ SQL
 printf 'INFO\tdocker_stats\n'
 docker stats --no-stream --format '{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}'
 df -P "$ROOT_DIR"
+disk_used="$(df -P "$ROOT_DIR" | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
+if [[ "$disk_used" =~ ^[0-9]+$ ]] && (( disk_used < DISK_MAX_PERCENT )); then
+  printf 'PASS\tdisk_usage\t%s%% limit<%s%%\n' "$disk_used" "$DISK_MAX_PERCENT"
+else
+  printf 'FAIL\tdisk_usage\t%s%% limit<%s%%\n' "${disk_used:-unknown}" "$DISK_MAX_PERCENT"
+  failed=1
+fi
 
 latest_backup="$(find "$BACKUP_ROOT" -mindepth 2 -maxdepth 2 -name postgres-data.dump -mmin -1560 -print -quit 2>/dev/null || true)"
 if [[ -n "$latest_backup" ]]; then printf 'PASS\tbackup_age\t%s\n' "$latest_backup"
-else printf 'FAIL\tbackup_age\tno data-only backup within 26h\n'; failed=1; fi
+elif [[ "$require_fresh_backup" == "true" ]]; then
+  printf 'FAIL\tbackup_age\tno data-only backup within 26h impact=%s\n' "${impact_class:-unknown}"
+  failed=1
+else
+  printf 'WARN\tbackup_age\tno data-only backup within 26h; not required for impact=%s\n' "$impact_class"
+fi
 
 if [[ -f "$RESTORE_MARKER" && -n "$(find "$RESTORE_MARKER" -mmin -43200 -print -quit 2>/dev/null)" ]]; then
   printf 'PASS\tlast_restore\t%s\n' "$(cat "$RESTORE_MARKER")"

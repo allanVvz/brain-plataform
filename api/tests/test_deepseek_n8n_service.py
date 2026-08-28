@@ -57,6 +57,17 @@ def test_canonical_template_connections_resolve_to_published_node_names():
     deepseek_n8n_service._validate_workflow_topology(template)
 
 
+def test_terminal_http_nodes_always_emit_an_item_for_the_webhook_response():
+    template = json.loads(
+        deepseek_n8n_service._TEMPLATE.read_text(encoding="utf-8")
+    )
+    by_id = {node["id"]: node for node in template["nodes"]}
+
+    assert by_id["commit"]["alwaysOutputData"] is True
+    assert by_id["failsafe"]["alwaysOutputData"] is True
+    assert by_id["respond"]["parameters"]["responseBody"] == "={{$json}}"
+
+
 def test_workflow_topology_rejects_dangling_connection():
     with pytest.raises(ValueError, match="connection target is missing"):
         deepseek_n8n_service._validate_workflow_topology({
@@ -64,6 +75,28 @@ def test_workflow_topology_rejects_dangling_connection():
             "connections": {
                 "Inbound": {
                     "main": [[{"node": "Missing", "type": "main", "index": 0}]],
+                },
+            },
+        })
+
+
+def test_workflow_topology_rejects_a_path_without_webhook_response():
+    with pytest.raises(ValueError, match="do not reach Respond to Webhook"):
+        deepseek_n8n_service._validate_workflow_topology({
+            "nodes": [
+                {
+                    "name": "Inbound", "type": "n8n-nodes-base.webhook",
+                },
+                {
+                    "name": "Dead end", "type": "n8n-nodes-base.code",
+                },
+                {
+                    "name": "Respond", "type": "n8n-nodes-base.respondToWebhook",
+                },
+            ],
+            "connections": {
+                "Inbound": {
+                    "main": [[{"node": "Dead end", "type": "main", "index": 0}]],
                 },
             },
         })
@@ -106,11 +139,30 @@ def test_model_proposal_is_proved_and_repaired_against_graph_before_commit():
     assert node_ids.index("final_response") < node_ids.index("commit")
     assert "model_observation" in reconcile["parameters"]["body"]
     assert "contract_probe" in policy["parameters"]["body"]
-    assert "extracted_facts" in model_response["parameters"]["jsCode"]
+    # The parse node builds the semantic interpretation the backend proves:
+    # the customer's facts plus the questions they asked, kept apart so a
+    # commercial question is never absorbed as a field value.
+    assert "interpretation" in model_response["parameters"]["jsCode"]
+    assert "facts" in model_response["parameters"]["jsCode"]
+    assert "questions" in model_response["parameters"]["jsCode"]
     assert "repair_required" in str(repair_gate["parameters"])
     assert "repair_attempt" in repair_reconcile["parameters"]["body"] or "model_observation" in repair_reconcile["parameters"]["body"]
     assert "graph proof" in final_response["parameters"]["jsCode"]
     assert "response: $json.response" in commit["parameters"]["body"]
+
+
+def test_repeated_question_repair_is_compact_model_owned_and_preserves_interpretation():
+    workflow = _live_workflow("cred-1")
+    by_id = {node["id"]: node for node in workflow["nodes"]}
+    request_code = by_id["repair_request"]["parameters"]["jsCode"]
+    response_code = by_id["repair_response"]["parameters"]["jsCode"]
+
+    assert "questionOnlyRepair" in request_code
+    assert "Ask no question" in request_code
+    assert "invalid_answer" in request_code
+    assert "recent_messages" in request_code
+    assert "question_field_key: null" in response_code
+    assert "...firstInterpretation" in response_code
 
 
 def test_canonical_template_has_no_persona_or_business_hardcode():

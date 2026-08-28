@@ -19,6 +19,7 @@ from services import (
     conversation_runtime,
     event_emitter,
     n8n_client,
+    production_control,
     supabase_client,
     sre_logger,
     whatsapp_outbox,
@@ -56,11 +57,25 @@ class WhatsAppDispatchWorker(BaseWorker):
     def __init__(self) -> None:
         super().__init__()
         self.worker_id = f"{socket.gethostname()}:{os.getpid()}"
+        self._claims_paused = False
         self.concurrency = max(
             1, int(os.environ.get("WHATSAPP_DISPATCH_CONCURRENCY", "4")),
         )
 
     def _run_cycle(self) -> None:
+        pause = production_control.claims_pause()
+        if pause:
+            if not self._claims_paused:
+                sre_logger.warn(
+                    self.name,
+                    "new claims paused by production lifecycle: "
+                    f"{str(pause.get('reason') or 'controlled_release')[:160]}",
+                )
+            self._claims_paused = True
+            return
+        if self._claims_paused:
+            sre_logger.info(self.name, "new claims resumed by production lifecycle")
+            self._claims_paused = False
         rows = supabase_client.claim_whatsapp_buffer(self.worker_id)
         groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for row in rows:

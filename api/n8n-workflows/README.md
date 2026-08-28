@@ -12,10 +12,16 @@ persona, agente, webhook e credencial. Prompt, políticas, campos e conhecimento
 vêm do Graph JSON publicado e dos `context_cards`; nunca existe função ou
 template específico por cliente.
 
-O template `graph_agentic_v3` usa proposta estruturada, proof checker e um
-único repair loop por expansão do galho. Falha técnica de grounding não vira
-handoff comercial; após a tentativa de reparo, a resposta segura é a pergunta
-exata publicada no node de qualificação pendente.
+O template `graph_agentic_v3` usa interpretação estruturada, proof checker e no
+máximo um repair do modelo. `response.answer` é a mensagem pública completa e
+`response.question` existe apenas para compatibilidade; o backend nunca anexa
+`field_questions[missing_fields[0]]` nem escolhe uma pergunta para o modelo.
+Quando apenas a pergunta natural é inválida ou repetida, o repair reescreve
+somente a mensagem pública, sem receber IDs ou uma lista de campos
+perguntáveis, enquanto fatos, memória, branch e claims já provados permanecem
+intactos. Uma primeira saída que não cumpra o schema também atravessa esse
+mesmo limite de um único repair, preservando o estado já commitado; somente uma
+segunda falha não é publicada e produz handoff observável.
 
 O contrato em Markdown faz parte do fluxo auditável:
 `api/contracts/graph-agent-runtime-v3.md` é checksumado dentro de cada

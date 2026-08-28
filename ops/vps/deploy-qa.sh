@@ -19,6 +19,7 @@ EXPECTED_COMPOSE_PROJECT_NAME="${EXPECTED_COMPOSE_PROJECT_NAME:-brain-ai-qa}" \
   python3 "$ROOT_DIR/ops/vps/validate_env.py" "$ENV_FILE"
 cd "$ROOT_DIR"
 export IMAGE_TAG="$TARGET_TAG"
+export API_TAG="$TARGET_TAG" WORKER_TAG="$TARGET_TAG" MIGRATE_TAG="$TARGET_TAG"
 COMPOSE=(docker compose --env-file "$ENV_FILE")
 
 # Shared with prod's Caddy so it can reach this stack's api/kong. Prod's
@@ -58,6 +59,7 @@ deploy_tag() {
   local tag="$1"
   local allow_local_images="${2:-false}"
   export IMAGE_TAG="$tag"
+  export API_TAG="$tag" WORKER_TAG="$tag" MIGRATE_TAG="$tag"
   if ! "${COMPOSE[@]}" pull migrate api workers seed-admin; then
     [[ "$allow_local_images" == "true" ]] || return 1
     echo "Registry pull failed during rollback; validating immutable local images." >&2

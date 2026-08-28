@@ -1,0 +1,108 @@
+name: Run production WA Validator
+
+on:
+  workflow_dispatch:
+    inputs:
+      persona_slug:
+        description: Persona validated through the internal direct driver
+        type: choice
+        options: [tock-fatal, aurora]
+        required: true
+      flow_id:
+        description: Semantic validator flow compatible with the persona
+        required: true
+      initial_state:
+        description: Initial qualification state
+        type: choice
+        options: [cold, known_name]
+        default: cold
+
+permissions:
+  contents: read
+
+concurrency:
+  group: brain-ai-production-validator
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Run internal direct validation
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f # v1.2.2
+        env:
+          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+          PERSONA_SLUG: ${{ inputs.persona_slug }}
+          FLOW_ID: ${{ inputs.flow_id }}
+          INITIAL_STATE: ${{ inputs.initial_state }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          envs: VPS_APP_DIR,PERSONA_SLUG,FLOW_ID,INITIAL_STATE
+          command_timeout: 20m
+          script: |
+            set -Eeuo pipefail
+            cd "$VPS_APP_DIR"
+            [[ "$PERSONA_SLUG" =~ ^[a-z0-9-]{2,80}$ ]] || { echo "invalid persona slug" >&2; exit 2; }
+            [[ "$FLOW_ID" =~ ^[a-z0-9_]{2,100}$ ]] || { echo "invalid flow id" >&2; exit 2; }
+            [[ "$INITIAL_STATE" == "cold" || "$INITIAL_STATE" == "known_name" ]] || {
+              echo "invalid initial state" >&2
+              exit 2
+            }
+
+            lifecycle_stage="$(python3 ops/vps/release_lifecycle.py show --field stage)"
+            case "$lifecycle_stage" in
+              candidate_healthy|validator_complete|soak_complete|awaiting_resume_authorization|workers_resumed|verified) ;;
+              *)
+                echo "validator requires an installed healthy candidate; found $lifecycle_stage" >&2
+                exit 1
+                ;;
+            esac
+
+            active_api_service="$(tr -d '\r\n' < .deploy/api-active-slot 2>/dev/null || true)"
+            [[ "$active_api_service" == "api-candidate" ]] || active_api_service=api
+            compose=(docker compose --env-file .env.compose)
+            "${compose[@]}" ps --status running "$active_api_service" workers
+
+            session_output="$("${compose[@]}" exec -T "$active_api_service" \
+              python -c 'import sys; from services import wa_validator_service as w; generated=w.generate_script(persona_slug=sys.argv[1], flow_id=sys.argv[2], target_contact="production-lifecycle", initial_state=sys.argv[3]); session_id=generated["session_id"]; w.enqueue_session_direct(session_id); print("WA_VALIDATOR_SESSION_ID=" + session_id)' \
+              "$PERSONA_SLUG" "$FLOW_ID" "$INITIAL_STATE")"
+            printf '%s\n' "$session_output"
+            session_id="$(printf '%s\n' "$session_output" | sed -n 's/^WA_VALIDATOR_SESSION_ID=//p' | tail -n 1)"
+            [[ "$session_id" =~ ^[A-Za-z0-9_-]{8,160}$ ]] || {
+              echo "validator did not return a valid session id" >&2
+              exit 1
+            }
+
+            deadline=$((SECONDS + 900))
+            while (( SECONDS < deadline )); do
+              summary="$("${compose[@]}" exec -T "$active_api_service" \
+                python -c 'import json,sys; from services import wa_validator_service as w; s=w.get_session(sys.argv[1]); print(json.dumps({"status": s.get("status"), "technical_pass": s.get("technical_pass"), "quality_pass": s.get("quality_pass"), "quality_scope": s.get("quality_scope"), "turn_count": len(((s.get("output") or {}).get("conversation") or [])), "error": s.get("error")}, ensure_ascii=True, sort_keys=True))' \
+                "$session_id")"
+              printf 'WA_VALIDATOR_STATUS=%s\n' "$summary"
+              status="$(printf '%s' "$summary" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status") or "")')"
+              if [[ "$status" == "done" ]]; then
+                printf '%s' "$summary" | python3 -c 'import json,sys; value=json.load(sys.stdin); ok=value.get("technical_pass") is True and value.get("quality_pass") is True and value.get("quality_scope")=="semantic_graph_v1"; raise SystemExit(0 if ok else 1)'
+                echo "WA_VALIDATOR_RESULT=passed"
+                exit 0
+              fi
+              if [[ "$status" == "error" || "$status" == "failed" ]]; then
+                "${compose[@]}" exec -T "$active_api_service" \
+                  python -c 'import json,sys; from services import n8n_client, supabase_client, wa_validator_service as w; session=w.get_session(sys.argv[1]); persona=supabase_client.get_persona(str(session.get("persona_slug") or "")) or {}; bindings=supabase_client.get_workflow_bindings(str(persona.get("id") or "")); binding=next((row for row in bindings if row.get("active") and row.get("n8n_workflow_id")), {}); workflow_id=str(binding.get("n8n_workflow_id") or ""); rows=n8n_client.get_executions(limit=8, workflow_id=workflow_id) if workflow_id else []; row=rows[0] if rows else {}; full=n8n_client.get_execution(str(row.get("id"))) if row else {}; result=((full.get("data") or {}).get("resultData") or {}); error=result.get("error") or {}; run_data=result.get("runData") or {}; node_payload=lambda name: next((item.get("json") or {} for execution in reversed(run_data.get(name) or []) for branch in ((execution.get("data") or {}).get("main") or []) for item in (branch or []) if isinstance(item, dict)), {}); context=node_payload("Load published graph context"); context_error=context.get("error") or {}; events=supabase_client.get_events(limit=1, event_type="conversation.technical_failure", persona_id=str(persona.get("id") or ""), entity_id=str(session.get("lead_ref") or "")); event_payload=(events[0].get("payload") or {}) if events else {}; summary={"workflow_id": workflow_id, "execution_id": row.get("id"), "status": row.get("status"), "started_at": row.get("startedAt"), "stopped_at": row.get("stoppedAt"), "last_node": result.get("lastNodeExecuted"), "error_message": error.get("message"), "error_node": (error.get("node") or {}).get("name"), "executed_nodes": sorted(run_data.keys()), "context_error_message": str(context_error.get("message") or context.get("message") or "")[:1000], "context_http_code": context_error.get("httpCode") or context_error.get("statusCode") or context.get("httpCode") or context.get("statusCode"), "technical_failure_reason": event_payload.get("reason"), "technical_failure_diagnostic": event_payload.get("diagnostic")}; print("N8N_EXECUTION_DIAGNOSTIC=" + json.dumps(summary, ensure_ascii=True, sort_keys=True))' \
+                  "$session_id" || true
+                "${compose[@]}" exec -T "$active_api_service" \
+                  python -c 'import json,sys; from services import n8n_client, supabase_client, wa_validator_service as w; session=w.get_session(sys.argv[1]); persona=supabase_client.get_persona(str(session.get("persona_slug") or "")) or {}; binding=next((row for row in supabase_client.get_workflow_bindings(str(persona.get("id") or "")) if row.get("active") and row.get("n8n_workflow_id")), {}); rows=n8n_client.get_executions(limit=8, workflow_id=str(binding.get("n8n_workflow_id") or "")); full=n8n_client.get_execution(str(rows[0].get("id"))) if rows else {}; run_data=(((full.get("data") or {}).get("resultData") or {}).get("runData") or {}); payload=lambda name: next((item.get("json") or {} for execution in reversed(run_data.get(name) or []) for branch in ((execution.get("data") or {}).get("main") or []) for item in (branch or []) if isinstance(item, dict)), {}); reconciled=payload("Reconcile repaired graph proposal") or payload("Reconcile fields with graph policy"); response=reconciled.get("response") or {}; proof=response.get("proof") or {}; proposal=response.get("proposal") or {}; decision=reconciled.get("decision") or {}; summary={"decision_intent": decision.get("intent"), "decision_route": decision.get("route"), "proposal_branch_action": proposal.get("branch_action"), "proposal_branch_anchor_node_id": proposal.get("branch_anchor_node_id"), "proposal_next_question_node_id": proposal.get("next_question_node_id"), "proof_mode": proof.get("mode"), "proof_valid": proof.get("valid"), "proof_errors": proof.get("errors") or [], "proof_gating_errors": proof.get("gating_errors") or [], "proof_repair_requirements": proof.get("repair_requirements") or [], "proof_accepted_fact_keys": [fact.get("field_key") for fact in proof.get("accepted_facts") or []], "proof_next_active_branch_node_ids": proof.get("next_active_branch_node_ids") or [], "proof_next_question_node_id": proof.get("next_question_node_id")}; print("WA_VALIDATOR_PROOF_DIAGNOSTIC=" + json.dumps(summary, ensure_ascii=True, sort_keys=True))' \
+                  "$session_id" || true
+                "${compose[@]}" exec -T "$active_api_service" \
+                  python -c 'import json,sys; from services import wa_validator_service as w; session=w.get_session(sys.argv[1]); turns=((session.get("output") or {}).get("conversation") or []); keep=("role","text","intent","route","handoff","semantic_audit"); summary=[{key: turn.get(key) for key in keep if key in turn} for turn in turns]; print("WA_VALIDATOR_CONVERSATION_DIAGNOSTIC=" + json.dumps(summary, ensure_ascii=True, sort_keys=True))' \
+                  "$session_id" || true
+                echo "WA Validator ended with status=$status" >&2
+                exit 1
+              fi
+              sleep 5
+            done
+            echo "WA Validator timed out: $session_id" >&2
+            exit 1

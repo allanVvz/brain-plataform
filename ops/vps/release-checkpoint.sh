@@ -12,13 +12,16 @@ case "$CHECKPOINT_ROOT" in /|/var|/var/backups|/var/backups/brain-ai) exit 2 ;; 
 DEST="$CHECKPOINT_ROOT/$(date -u +%Y%m%dT%H%M%SZ)-$LABEL"
 mkdir -m 0700 "$DEST"
 COMPOSE=(docker compose --env-file "$ENV_FILE")
+COMPOSE_BG=(docker compose --env-file "$ENV_FILE" --profile blue-green)
+active_api_service="$(tr -d '\r\n' < .deploy/api-active-slot 2>/dev/null || true)"
+[[ "$active_api_service" == "api-candidate" ]] || active_api_service=api
 cd "$ROOT_DIR"
 
 cp .deploy/release-source-sha "$DEST/source-sha.txt"
 cp .deploy/release-directory "$DEST/release-directory.txt"
 "${COMPOSE[@]}" config --images | sort -u > "$DEST/configured-images.txt"
-for service in api workers migrate; do
-  cid="$("${COMPOSE[@]}" ps -q "$service")"
+for service in "$active_api_service" workers migrate; do
+  cid="$("${COMPOSE_BG[@]}" ps -q "$service")"
   [[ -n "$cid" ]] || continue
   docker inspect --format '{{.Config.Image}} {{.Image}}' "$cid" >> "$DEST/running-image-digests.txt"
 done

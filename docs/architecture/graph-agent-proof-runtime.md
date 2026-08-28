@@ -1,5 +1,36 @@
 # Runtime de conversa orientado pelo grafo
 
+## Divida de dominio e resultado terminal
+
+Tock Fatal vende produtos, nao servicos. Os identificadores `service_*`,
+`service_slug` e equivalentes permanecem somente como compatibilidade legada.
+A decomposicao futura deve publicar `offering` e `branch` no GraphBundle, sem
+usar nomes legados para redefinir o dominio comercial e sem reconstruir
+Product/Offer/Copy a cada inbound.
+
+Todo inbound processado termina em uma resposta comprovada ou em handoff
+observavel. Se o contexto inteiro nao for confiavel, o runtime registra a causa
+nao secreta e aciona handoff ou pausa observavel. Silencio nao e resultado
+valido de processamento.
+
+## Limite de autoridade
+
+O GraphBundle publicado e a autoridade para conhecimento, fatos comerciais e
+limites. Produto, Offer, Copy e FAQ pertencem a publicacao compilada e nao sao
+reconstruidos por turno. O modelo e dono de explicacao, recomendacao, linguagem,
+fluxo natural e proxima pergunta; ele nao pode inventar fato ou limite.
+
+Proof valida somente a evidencia publicada que a resposta cita e o isolamento de
+persona/agente. Ele nao seleciona FAQ, nao forca `missing_fields[0]` e nao
+substitui resposta valida do modelo. `missing_fields` e completude, nao roteiro.
+CAS e exactly-once preservam um inbound canonico -> uma decisao -> um commit ->
+no maximo um outbound, sem decidir o conteudo da conversa.
+
+Pre-publicacao valida acumulacao top-down de FAQs de evidencia (caminho ativo
+da Persona, fonte/status e escopo persona/agente). Aurora e Tock Fatal usam
+GraphBundle e runtime v3, mantendo publicacao, checksum, binding e memoria
+isolados por persona.
+
 O runtime de conversa usa o Graph JSON publicado como autoridade estrutural.
 O modelo continua escolhendo como conversar; o backend apenas valida a
 proposta antes do commit.
@@ -72,14 +103,50 @@ declaração correspondente usa `accepts_unknown=true`.
 
 ## Proof checker e reparo
 
-O modelo retorna `ConversationProposal`. O checker comprova branch e checksum,
-escopo dos nodes citados, ownership dos fatos, pergunta pendente, dependências,
-conclusão, autorização de handoff e evidência de preço.
+O modelo retorna `ConversationProposal`. O checker comprova checksum, escopo
+persona/agente dos nodes citados e evidência publicada para fatos e limites
+comerciais. Ele preserva CAS e o limite de um inbound canônico -> uma decisão ->
+um commit -> no máximo um outbound; não seleciona FAQ, não impõe a primeira
+pergunta pendente e não reescreve uma resposta válida do modelo.
+
+Erro de branch, fato ou pergunta nao autoriza proof a descartar ou reescrever a
+reply do modelo. Proof valida evidencia e isolamento, registra o diagnostico e
+orienta o proximo passo seguro. Quando nao houver contexto confiavel para uma
+resposta comprovada, o proximo passo e handoff ou pausa observavel, nunca um
+turno silencioso.
+
+`field_questions` prova cobertura e ancora a auditoria semantica; nao fornece
+texto para composicao do backend. O modelo pode perguntar naturalmente e usar
+`next_question_node_id` apenas como metadata correspondente. Um id presente em
+`asked_question_node_ids` nao volta a ser emitido, mesmo com parafrase ou ponte
+contextual. A primeira violacao aciona uma reparacao pelo modelo; a segunda
+aciona handoff observavel sem publicar a pergunta repetida. Fatos validos e
+memoria sobrevivem a ambos os diagnosticos.
 
 Uma citação válida que ficou fora do pacote dispara uma expansão do mesmo
-galho e uma segunda chamada ao modelo. Se a segunda proposta ainda falhar, o
-runtime usa exatamente a pergunta publicada do primeiro campo pendente e
-registra `fallback_used`; falha de retrieval não cria handoff comercial.
+galho e uma segunda chamada ao modelo. Se continuar sem prova, o runtime pede
+clarificação neutra ou faz handoff seguro quando a política publicada autorizar;
+falha de retrieval não cria fato comercial, FAQ selecionada por algoritmo ou
+resposta substituta.
+
+### Confirmação não é prioridade sobre uma dúvida
+
+O componente `confirmation` continua apto a fechar o ledger, mas somente quando
+o modelo recomenda handoff/close, pede o handoff e a mesma mensagem não contém
+uma pergunta comercial. Se houver pergunta, a interpretação segue pelo caminho
+normal para que os chunks recuperados sustentem primeiro a resposta. Em ambos os
+casos, a transição pode alterar rota e metadados, nunca o texto do modelo.
+
+### Dívida técnica registrada
+
+- renomear progressivamente `service_*` para `branch/offering`, preservando as
+  fachadas legadas enquanto produtos, públicos e serviços compartilham anchors;
+- decompor o runtime grande em recuperação, memória, reconciliação, proof,
+  handoff e orquestração;
+- transformar proof em serviço de evidência/isolamento sem composição de fala;
+- mover repetição e qualidade estilística para avaliação offline;
+- suportar assets, fotos, vídeos e links publicados como chunks multimodais,
+  sem carregar catálogo completo no prompt.
 
 O template canônico é
 `api/n8n-workflows/persona-conversation-template.json` (`graph_agentic_v3`) e

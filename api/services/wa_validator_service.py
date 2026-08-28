@@ -1747,6 +1747,39 @@ async def _wait_for_reply_delivered(
     )
 
 
+def _conversation_v3_invariant_errors(audit: dict) -> list[str]:
+    """Return commit-level invariant failures for one canonical inbound.
+
+    A proposal plus one model repair is still one persisted decision.  The
+    exactly-once boundary is the decision/proof/commit/outbound ledger, not the
+    number of model calls used to produce the proof-valid proposal.
+    """
+    errors: list[str] = []
+    for key, expected in (
+        ("inbound_count", 1), ("decision_count", 1),
+        ("proof_count", 1), ("valid_proof_count", 1),
+    ):
+        if int(audit.get(key) or 0) != expected:
+            errors.append(f"{key}={audit.get(key)}")
+    if int(audit.get("outbound_count") or 0) > 1:
+        errors.append(f"outbound_count={audit.get('outbound_count')}")
+    if audit.get("outbound_released_after_proof") is not True:
+        errors.append("outbound_released_before_proof")
+    if audit.get("commit_state") != "completed":
+        errors.append(f"commit_state={audit.get('commit_state')}")
+
+    model_calls = max(1, int(audit.get("model_calls") or 0))
+    prompt_tokens = max(
+        int(audit.get("prompt_tokens") or 0),
+        int(audit.get("prompt_estimated_tokens") or 0),
+    )
+    if prompt_tokens > 24_000 * model_calls:
+        errors.append(f"prompt_tokens={prompt_tokens}")
+    if int(audit.get("model_calls") or 0) > 2:
+        errors.append(f"model_calls={audit.get('model_calls')}")
+    return errors
+
+
 async def _wait_for_turn_audit_v3(
     inbound_buffer_id: str,
     *,
@@ -1979,21 +2012,21 @@ def _semantic_turn_audit(
     missing = [str(value) for value in proof.get("missing_fields") or []]
     question_id = str(proof.get("next_question_node_id") or "") or None
     first_missing = missing[0] if missing else None
-    first_field = next(
-        (
-            field for field in contract.get("fields") or []
-            if str(field.get("key") or "") in missing
-            and not any(
-                fact.get("status") == "unknown"
-                and str(fact.get("owner_node_id") or "")
-                == str(field.get("owner_node_id") or "")
-                for fact in facts_by_key.get(str(field.get("key") or "")) or []
-            )
-        ),
-        None,
+    askable_fields = graph_proof_checker_v3.exclude_asked_questions([
+        field
+        for field in graph_proof_checker_v3.askable_pending_fields(
+            contract, facts_after,
+        )
+        if str(field.get("key") or "") in set(missing)
+    ], ledger_before.get("asked_question_node_ids") or [])
+    askable_question_ids = {
+        str(field.get("question_node_id") or "")
+        for field in askable_fields
+        if str(field.get("question_node_id") or "")
+    }
+    first_askable = (
+        str(askable_fields[0].get("key") or "") if askable_fields else None
     )
-    first_askable = str((first_field or {}).get("key") or "") or None
-    expected_question_id = str((first_field or {}).get("question_node_id") or "") or None
     question = (contract.get("questions") or {}).get(question_id or "") or {}
     previous_question = (
         (contract.get("questions") or {}).get(previous_question_node_id or "") or {}
@@ -2010,7 +2043,18 @@ def _semantic_turn_audit(
     actual_evidence = set(turn.get("evidence_node_ids") or []) | set(
         decision.get("evidence_node_ids") or []
     )
-    asked_owner = str(question.get("owner_node_id") or (first_field or {}).get("owner_node_id") or "")
+    asked_field_contract = next(
+        (
+            field for field in askable_fields
+            if str(field.get("question_node_id") or "") == str(question_id or "")
+        ),
+        {},
+    )
+    asked_owner = str(
+        question.get("owner_node_id")
+        or asked_field_contract.get("owner_node_id")
+        or ""
+    )
     asked_fact_already_known = any(
         fact.get("status") == "known"
         and (not asked_owner or str(fact.get("owner_node_id") or "") == asked_owner)
@@ -2206,7 +2250,7 @@ def _semantic_turn_audit(
         question_text=question_text,
         asked_question_node_ids=ledger_before.get("asked_question_node_ids") or [],
         max_attempts=repetition_policy.get("max_attempts", 0),
-        field_pending=bool(first_askable and question_id == expected_question_id),
+        field_pending=bool(question_id and question_id in askable_question_ids),
         terminal_intent=terminal_intent,
         previous_terminal_intent=str(
             ((ledger_before.get("terminal_handoff") or {}).get("intent") or "")
@@ -2235,8 +2279,9 @@ def _semantic_turn_audit(
             and proof.get("explicit_confirmation") is True
         ),
         "received_content_acknowledged": not intended or bool(declarative_parts),
-        "first_missing_field_only": (
+        "question_semantically_askable": (
             (not missing and question_id is None)
+            or (missing and not askable_fields and question_id is None)
             or (
                 proof.get("confirmation_state") == "field_confirmation"
                 and proof.get("pending_confirmation")
@@ -2248,9 +2293,13 @@ def _semantic_turn_audit(
                 and first_askable is None
             )
             or (
-                question_id == expected_question_id
+                question_id in askable_question_ids
                 and bool(question_text)
-                and graph_proof_checker_v3._question_already_asked(question_text, reply)
+                # The proof already bound this model-owned wording to an
+                # askable graph field through next_question_node_id.  The
+                # Validator must not infer the number of fields from the
+                # number of natural interrogative clauses in the reply.
+                and "?" in reply
             )
         ),
         "known_fact_not_reasked": not asked_fact_already_known,
@@ -2258,10 +2307,10 @@ def _semantic_turn_audit(
             repetition_failures & {"semantic_repetition", "terminal_repetition"}
         ),
         "question_repetition_budget": (
-            "question_attempt_budget_exceeded" not in repetition_failures
+            "question_already_asked" not in repetition_failures
         ),
         "contextual_retry_valid": not bool(
-            repetition_failures & {"contextual_bridge_required", "question_field_not_pending"}
+            repetition_failures & {"question_already_asked", "question_field_not_pending"}
         ),
         "terminal_not_repeated": "terminal_repetition" not in repetition_failures,
         "model_reconciled_without_fallback": (
@@ -2308,6 +2357,12 @@ def _semantic_turn_audit(
                 )
             )
             == set(customer_step.get("expected_active_branch_node_ids") or [])
+            or (
+                qualification_complete
+                and handoff_observed
+                and set(proof.get("confirmed_branch_node_ids") or [])
+                == set(customer_step.get("expected_active_branch_node_ids") or [])
+            )
         ),
         "question_advanced": (
             not previous_question_node_id
@@ -2951,31 +3006,7 @@ async def run_session_direct(
                         turn["timeout"] = True
                     if pipeline_contract == "conversation_v3":
                         audit = turn_audit or supabase_client.audit_conversation_turn_v3(buffer_uuid)
-                        invariant_errors: list[str] = []
-                        for key, expected in (
-                            ("inbound_count", 1), ("decision_count", 1),
-                            ("proof_count", 1), ("valid_proof_count", 1),
-                        ):
-                            if int(audit.get(key) or 0) != expected:
-                                invariant_errors.append(f"{key}={audit.get(key)}")
-                        if int(audit.get("outbound_count") or 0) > 1:
-                            invariant_errors.append(f"outbound_count={audit.get('outbound_count')}")
-                        if audit.get("outbound_released_after_proof") is not True:
-                            invariant_errors.append("outbound_released_before_proof")
-                        if audit.get("commit_state") != "completed":
-                            invariant_errors.append(f"commit_state={audit.get('commit_state')}")
-                        prompt_tokens = max(
-                            int(audit.get("prompt_tokens") or 0),
-                            int(audit.get("prompt_estimated_tokens") or 0),
-                        )
-                        # Token usage is aggregated across proposal and repair
-                        # calls. Keep the 24k ceiling per model call instead of
-                        # rejecting a valid repaired turn on its summed usage.
-                        model_calls = max(1, int(audit.get("model_calls") or 0))
-                        if prompt_tokens > 24_000 * model_calls:
-                            invariant_errors.append(f"prompt_tokens={prompt_tokens}")
-                        if audit.get("deterministic_branch_match") and int(audit.get("model_calls") or 0) > 1:
-                            invariant_errors.append(f"model_calls={audit.get('model_calls')}")
+                        invariant_errors = _conversation_v3_invariant_errors(audit)
                         turn["turn_audit"] = audit
                         if invariant_errors:
                             raise RuntimeError(

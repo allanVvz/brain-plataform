@@ -1,6 +1,14 @@
 {
 	email {$ACME_EMAIL}
-	admin off
+	# Local-only admin endpoint is required for graceful blue-green reloads.
+	# Port 2019 is not published by Compose and remains inside the container.
+	admin 127.0.0.1:2019
+}
+
+# Stable Docker-network origin used by n8n. The blue-green deploy rewrites
+# this upstream together with the public API sites before the graceful reload.
+http://caddy {
+	reverse_proxy api:8080
 }
 
 {$API_DOMAIN}, {$API_DOMAIN_SECONDARY} {
@@ -17,7 +25,7 @@
 		Referrer-Policy "strict-origin-when-cross-origin"
 		-Server
 	}
-	import /etc/caddy/dynamic/public-upstream.caddy
+	import /etc/caddy/public-upstream.caddy
 }
 
 {$STORAGE_DOMAIN} {
@@ -96,5 +104,5 @@
 
 # Private stable names used by the gateway and service-to-service clients.
 # The generated file points each path at the currently active blue/green slot.
-import /etc/caddy/dynamic/internal-upstreams.caddy
+import /etc/caddy/internal-upstreams.caddy
 

@@ -77,11 +77,8 @@ produção (`POST /personas`), nenhum `workflow_bindings`, nenhuma ativação.
 - `FLUXOS_SDR_TIRZEPATIDA.md` reenviado, sem corrupção.
 - Confirmação do slug/nome final da persona.
 - Se o operador quiser reabrir pessoa física: base regulatória documentada.
-- Depois disso: criar a persona de verdade pela API administrativa
-  (`POST /personas`), atualizar o UUID no bundle, recompilar e aprovar os dois
-  checksums, e então rodar `api/scripts/publish_graph_bundle.py` — mesmo
-  processo usado para a Tock Fatal, gate por gate. Número de WhatsApp, binding,
-  workflow e retomada de transporte são etapas posteriores, independentes e
-  com autorização própria; não são pré-requisito para publicar o conteúdo.
-  Enquanto esses recursos não existirem, a nova persona permanece inerte sem
-  exigir pausa de outras personas.
+- Depois disso: criar a persona de verdade (`POST /personas` ou insert),
+  número de WhatsApp, `workflow_bindings` com
+  `runtime_version=graph_agent_runtime_v3`, e só então rodar
+  `api/scripts/publish_graph_bundle.py` — mesmo processo usado para a Tock
+  Fatal nesta sessão, gate por gate, cada um com aprovação própria.

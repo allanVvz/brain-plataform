@@ -81,13 +81,6 @@
             "enabled_from": "2026-08-12T00:00:00Z",
             "after_seconds": 300
           },
-          "question_repetition": {
-            "max_attempts": 1,
-            "restart_requires": [
-              "qualification_confirmed",
-              "purchase_completed"
-            ]
-          },
           "service_clarification": {
             "add_or_switch_question": "Você quer trocar o serviço atual ou adicionar {candidate} ao pedido?",
             "retry_question": "Acho que não estou conseguindo entender direitinho o que você quer. Você quer trocar o serviço atual ou adicionar {candidate} ao pedido?",
@@ -114,7 +107,6 @@
           },
           "doubt_handling": {
             "answer_before_qualification": "Responda primeiro com a resposta factual aprovada da FAQ publicada.",
-            "continue_with_first_missing_field": "Depois da resposta, faça exatamente a pergunta publicada para missing_fields[0].",
             "deferred_response": "O atendente vai te passar esse detalhe assim que concluirmos estas perguntas."
           }
         },
@@ -142,8 +134,8 @@
           "conditional_fields": {},
           "field_question_paraphrases": {
             "nome_cliente": [
-              "Como você prefere que eu te chame?",
-              "Me diz seu nome completo, por favor."
+              "Qual nome você prefere usar no atendimento?",
+              "Como você prefere que eu te chame? O sobrenome é opcional."
             ],
             "servico": [
               "Qual desses serviços faz mais sentido pra você agora?",
@@ -180,7 +172,7 @@
             ]
           },
           "field_questions": {
-            "nome_cliente": "Qual é o seu nome, por favor?",
+            "nome_cliente": "Como você prefere que eu te chame? O sobrenome é opcional.",
             "servico": "Qual serviço você procura para o veículo?",
             "objective": "O que você espera melhorar ou proteger no veículo?",
             "can_visit_in_person": "Você consegue trazer o veículo para uma avaliação presencial?",
@@ -220,9 +212,9 @@
               "Deixa eu confirmar: {candidate}, certo?"
             ],
             "name": [
-              "Entendi. {candidate} é o seu nome completo?",
+              "Posso te chamar de {candidate}?",
               "Só pra eu anotar certo: é {candidate} mesmo?",
-              "Anotei {candidate} — escrevi do jeito certo?"
+              "Anotei {candidate} — está certo assim?"
             ],
             "service_selection": "Você quer seguir com {candidate}?",
             "service_addition": "Você quer adicionar {candidate} aos serviços do pedido?",
@@ -2206,7 +2198,7 @@
         "source": "briefing_atendimento_conversacional_aurora_2026_08_07",
         "status": "validated",
         "question": "E se eu não conseguir levar o carro aí?",
-        "answer": "Sem problema — nesse caso consigo te orientar à distância. Me diz o modelo e o ano do carro, a cor, se você costuma rodar em estrada de chão ou carregar algo que suja e, se possível, me manda fotos das áreas que mais te incomodam.",
+        "answer": "Sem problema — a avaliação também pode seguir à distância com as informações e imagens do veículo.",
         "source_node_id": "aurora-rule-atendimento",
         "source_node_type": "rule",
         "markdown_document": true,
@@ -3361,8 +3353,14 @@
         "aliases": [
           "lavagem de motor",
           "lavagem do motor",
+          "lavar o motor",
+          "lavar motor",
+          "limpeza do motor",
+          "limpar motor",
+          "lavagem do cofre",
           "limpeza do cofre",
           "lavar o cofre",
+          "limpar o cofre",
           "limpar o motor"
         ],
         "summary": "Lavagem técnica do motor e do cofre, qualificada com atenção a vazamento de óleo, uso em estrada de chão e condição atual.",
@@ -3408,7 +3406,7 @@
       "parent_id": "aurora-services",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Quais serviços vocês fazem?",
         "question_aliases": [
           "quais serviços vocês fazem",
@@ -3463,7 +3461,7 @@
       "parent_id": "aurora-rule-price-human-only",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Quanto custa?",
         "question_aliases": [
           "quanto custa",
@@ -3512,7 +3510,7 @@
       "parent_id": "aurora-rule-operation",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Aceita pix?",
         "question_aliases": [
           "aceita pix",
@@ -3561,7 +3559,7 @@
       "parent_id": "aurora-rule-operation",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Parcela sem juros?",
         "question_aliases": [
           "parcela sem juros",
@@ -3610,7 +3608,7 @@
       "parent_id": "aurora-rule-operation",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Parcela em dez vezes?",
         "question_aliases": [
           "parcela em dez vezes",
@@ -3659,7 +3657,7 @@
       "parent_id": "aurora-rule-operation",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Precisa dar entrada?",
         "question_aliases": [
           "precisa dar entrada",
@@ -3708,7 +3706,7 @@
       "parent_id": "aurora-rule-operation",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Posso cancelar?",
         "question_aliases": [
           "posso cancelar",
@@ -3757,7 +3755,7 @@
       "parent_id": "aurora-rule-operation",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Quantos carros por dia?",
         "question_aliases": [
           "quantos carros por dia",
@@ -3806,7 +3804,7 @@
       "parent_id": "aurora-rule-operation",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Pode agendar agora?",
         "question_aliases": [
           "pode agendar agora",
@@ -3855,7 +3853,7 @@
       "parent_id": "aurora-rule-operation",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Tem horário hoje?",
         "question_aliases": [
           "tem horário hoje",
@@ -3904,7 +3902,7 @@
       "parent_id": "aurora-rule-operation",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Quanto tempo demora?",
         "question_aliases": [
           "quanto tempo demora",
@@ -3953,7 +3951,7 @@
       "parent_id": "aurora-rule-operation",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Dá para avaliar por whatsapp?",
         "question_aliases": [
           "dá para avaliar por whatsapp",
@@ -4002,7 +4000,7 @@
       "parent_id": "aurora-rule-operation",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Foto é suficiente?",
         "question_aliases": [
           "foto é suficiente",
@@ -4051,7 +4049,7 @@
       "parent_id": "aurora-rule-atendimento",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Posso fazer dois serviços?",
         "question_aliases": [
           "posso fazer dois serviços",
@@ -4100,7 +4098,7 @@
       "parent_id": "aurora-rule-price-human-only",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Pacote tem desconto?",
         "question_aliases": [
           "pacote tem desconto",
@@ -4149,7 +4147,7 @@
       "parent_id": "aurora-rule-atendimento",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Posso mandar áudio?",
         "question_aliases": [
           "posso mandar áudio",
@@ -4198,7 +4196,7 @@
       "parent_id": "aurora-rule-atendimento",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Por que pergunta meu objetivo?",
         "question_aliases": [
           "por que pergunta meu objetivo",
@@ -4247,7 +4245,7 @@
       "parent_id": "aurora-rule-atendimento",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Por que precisa do meu nome?",
         "question_aliases": [
           "por que precisa do meu nome",
@@ -4296,7 +4294,7 @@
       "parent_id": "aurora-rule-atendimento",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Já falei isso?",
         "question_aliases": [
           "já falei isso",
@@ -4345,7 +4343,7 @@
       "parent_id": "aurora-product-wash",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Fazem lavagem detalhada?",
         "question_aliases": [
           "fazem lavagem detalhada",
@@ -4400,7 +4398,7 @@
       "parent_id": "aurora-product-wash",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Lavagem serve para meu caso?",
         "question_aliases": [
           "lavagem serve para meu caso",
@@ -4455,7 +4453,7 @@
       "parent_id": "aurora-product-wash",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Preço da lavagem detalhada?",
         "question_aliases": [
           "preço da lavagem detalhada",
@@ -4510,7 +4508,7 @@
       "parent_id": "aurora-product-engine-wash",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Lavam motor?",
         "question_aliases": [
           "lavam motor",
@@ -4565,7 +4563,7 @@
       "parent_id": "aurora-product-engine-wash",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Tem problema lavar com vazamento?",
         "question_aliases": [
           "tem problema lavar com vazamento",
@@ -4620,7 +4618,7 @@
       "parent_id": "aurora-product-engine-wash",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Estrada de chão influencia?",
         "question_aliases": [
           "estrada de chão influencia",
@@ -4675,7 +4673,7 @@
       "parent_id": "aurora-product-interior",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Fazem higienização interna?",
         "question_aliases": [
           "fazem higienização interna",
@@ -4730,7 +4728,7 @@
       "parent_id": "aurora-product-interior",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Importa ser couro?",
         "question_aliases": [
           "importa ser couro",
@@ -4785,7 +4783,7 @@
       "parent_id": "aurora-product-interior",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Estrada de chão afeta interior?",
         "question_aliases": [
           "estrada de chão afeta interior",
@@ -4840,7 +4838,7 @@
       "parent_id": "aurora-product-interior",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Quanto custa higienizar?",
         "question_aliases": [
           "quanto custa higienizar",
@@ -4895,7 +4893,7 @@
       "parent_id": "aurora-product-polish",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Fazem polimento técnico?",
         "question_aliases": [
           "fazem polimento técnico",
@@ -4950,7 +4948,7 @@
       "parent_id": "aurora-product-polish",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Vocês fazem espelhamento?",
         "question_aliases": [
           "vocês fazem espelhamento",
@@ -5005,7 +5003,7 @@
       "parent_id": "aurora-product-polish",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Já poli antes importa?",
         "question_aliases": [
           "já poli antes importa",
@@ -5060,7 +5058,7 @@
       "parent_id": "aurora-product-polish",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Quero tirar riscos?",
         "question_aliases": [
           "quero tirar riscos",
@@ -5115,7 +5113,7 @@
       "parent_id": "aurora-product-polish",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Precisa avaliar para polir?",
         "question_aliases": [
           "precisa avaliar para polir",
@@ -5170,7 +5168,7 @@
       "parent_id": "aurora-product-polish-commercial",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Comercial ou técnico?",
         "question_aliases": [
           "comercial ou técnico",
@@ -5225,7 +5223,7 @@
       "parent_id": "aurora-product-polish",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Fazem one step?",
         "question_aliases": [
           "fazem one step",
@@ -5280,7 +5278,7 @@
       "parent_id": "aurora-product-vitrification",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Fazem vitrificação?",
         "question_aliases": [
           "fazem vitrificação",
@@ -5335,7 +5333,7 @@
       "parent_id": "aurora-product-vitrification",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Precisa avaliar para vitrificar?",
         "question_aliases": [
           "precisa avaliar para vitrificar",
@@ -5390,7 +5388,7 @@
       "parent_id": "aurora-product-vitrification",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Valor da vitrificação?",
         "question_aliases": [
           "valor da vitrificação",
@@ -5445,7 +5443,7 @@
       "parent_id": "aurora-product-ppf",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Aplicam ppf?",
         "question_aliases": [
           "aplicam ppf",
@@ -5500,7 +5498,7 @@
       "parent_id": "aurora-product-ppf",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Ppf serve no meu carro?",
         "question_aliases": [
           "ppf serve no meu carro",
@@ -5555,7 +5553,7 @@
       "parent_id": "aurora-product-ppf",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Quanto custa ppf?",
         "question_aliases": [
           "quanto custa ppf",
@@ -5610,7 +5608,7 @@
       "parent_id": "aurora-product-glass-polish",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Fazem polimento no vidro?",
         "question_aliases": [
           "fazem polimento no vidro",
@@ -5665,7 +5663,7 @@
       "parent_id": "aurora-product-glass-polish",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Polimento tira minha mancha?",
         "question_aliases": [
           "polimento tira minha mancha",
@@ -5720,7 +5718,7 @@
       "parent_id": "aurora-product-polish-headlight",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Restauram farol?",
         "question_aliases": [
           "restauram farol",
@@ -5775,7 +5773,7 @@
       "parent_id": "aurora-product-polish-headlight",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Farol fica novo?",
         "question_aliases": [
           "farol fica novo",
@@ -5830,7 +5828,7 @@
       "parent_id": "aurora-product-polish-headlight",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Tem proteção uv?",
         "question_aliases": [
           "tem proteção uv",
@@ -5885,7 +5883,7 @@
       "parent_id": "aurora-product-bodywork",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Fazem chapeação?",
         "question_aliases": [
           "fazem chapeação",
@@ -5940,7 +5938,7 @@
       "parent_id": "aurora-product-bodywork",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Orçamento de chapeação por foto?",
         "question_aliases": [
           "orçamento de chapeação por foto",
@@ -5995,7 +5993,7 @@
       "parent_id": "aurora-product-bodywork",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Quanto custa chapeação?",
         "question_aliases": [
           "quanto custa chapeação",
@@ -6050,7 +6048,7 @@
       "parent_id": "aurora-product-paint",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Vocês fazem pintura?",
         "question_aliases": [
           "vocês fazem pintura",
@@ -6105,7 +6103,7 @@
       "parent_id": "aurora-product-paint",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Orçamento de pintura por foto?",
         "question_aliases": [
           "orçamento de pintura por foto",
@@ -6160,7 +6158,7 @@
       "parent_id": "aurora-product-paint",
       "data": {
         "source": "aurora_review_plan_2026_08_21",
-        "status": "pending_validation",
+        "status": "validated",
         "question": "Quanto custa pintar?",
         "question_aliases": [
           "quanto custa pintar",

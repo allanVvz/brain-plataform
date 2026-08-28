@@ -1,0 +1,3 @@
+# Worker-only local speech-to-text. Keeping this out of the API target avoids
+# shipping CTranslate2, PyAV, ffmpeg and Whisper weights with every API rollout.
+faster-whisper==1.1.1
