@@ -14,7 +14,7 @@
   "current_main_commits": {
     "brain-contracts": "0a1c05389388fcf392dab7041e30e1c1132379b8",
     "brain-control-plane": "ccf4f2f8e097d57c41609a0611ed4e3c639b50a0",
-    "brain-conversation-runtime": "3c775e367fa493321795fa1c5203ccff6d1a3edb",
+    "brain-conversation-runtime": "674e787e56f7abcd92b5a41d171d1554198c15e3",
     "brain-transport": "a1bb075cf1415e163e953d561f543e50cabbc594"
   },
   "route_map_checksum": "sha256:d1733cb225a648ef1d78c33081fc78c55f557ed85613a71dd0e53be60461f331",
