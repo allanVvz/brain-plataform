@@ -3,13 +3,16 @@ on:
   workflow_dispatch:
     inputs:
       manifest_sha: {description: Commit containing the immutable release manifest, required: true}
+      manifest_path: {description: Release manifest path, required: true, default: ops/microservices/release-manifest.json}
+permissions:
+  contents: read
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with: {ref: "${{ inputs.manifest_sha }}"}
-      - run: python -m json.tool ops/microservices/source-import-manifest.json >/dev/null
+      - run: python ops/microservices/validate-release-manifest.py "${{ inputs.manifest_path }}"
       - run: python -m json.tool ops/microservices/route-map.json >/dev/null
       - run: python ops/microservices/validate-route-map.py
   dispatch:
@@ -18,7 +21,19 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        repo: [brain-control-plane, brain-conversation-runtime, brain-transport]
+        include:
+          - {service: control-plane, repo: brain-control-plane}
+          - {service: conversation-runtime, repo: brain-conversation-runtime}
+          - {service: transport, repo: brain-transport}
     steps:
-      - run: gh workflow run release.yml -R "allanVvz/${{ matrix.repo }}" -f manifest_sha="${{ inputs.manifest_sha }}"
+      - uses: actions/checkout@v4
+        with: {ref: "${{ inputs.manifest_sha }}"}
+      - name: Dispatch exact service SHA from manifest
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          service_sha="$(jq -r '.services["${{ matrix.service }}"].sha' "${{ inputs.manifest_path }}")"
+          [[ "$service_sha" =~ ^[0-9a-f]{40}$ ]]
+          gh workflow run release.yml -R "allanVvz/${{ matrix.repo }}" --ref "$service_sha" \
+            -f manifest_sha="${{ inputs.manifest_sha }}"
         env: {GH_TOKEN: "${{ secrets.MICROSERVICE_RELEASE_TOKEN }}"}

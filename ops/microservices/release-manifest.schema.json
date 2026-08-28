@@ -5,7 +5,7 @@
   "properties": {
     "source_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
     "contracts_version": {"const": "1.0.0"},
-    "schema_version": {"type": "integer", "minimum": 130},
+    "schema_version": {"type": "integer", "minimum": 131},
     "route_map_checksum": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "n8n_checksum": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "services": {
@@ -18,7 +18,7 @@
           "repository": {"type": "string"},
           "sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
           "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
-          "required_schema_version": {"type": "integer"}
+          "required_schema_version": {"type": "integer", "minimum": 131}
         }
       }
     }
