@@ -60,8 +60,15 @@ where filename in (
   '127_sdr_name_service_confirmation.sql',
   '128_confirm_branch_offering_within_journey.sql',
   '129_carry_over_facts_by_lead.sql',
-  '130_shared_lead_memory_and_journey_commit_v4.sql'
+  '130_shared_lead_memory_and_journey_commit_v4.sql',
+  '131_microservice_role_grants.sql'
 ) order by filename;
+
+select 'microservice_role' metric,
+       rolname || ':login=' || rolcanlogin::text || ':bypassrls=' || rolbypassrls::text value
+from pg_roles
+where rolname in ('brain_gateway','brain_control_plane','brain_runtime','brain_transport')
+order by rolname;
 
 select 'unsafe_table_grants' metric, count(*)::text value
 from information_schema.role_table_grants
@@ -118,8 +125,32 @@ begin
       '127_sdr_name_service_confirmation.sql',
       '128_confirm_branch_offering_within_journey.sql',
       '129_carry_over_facts_by_lead.sql',
-      '130_shared_lead_memory_and_journey_commit_v4.sql')) <> 19 then
-    raise exception 'release migrations 112-130 are incomplete';
+      '130_shared_lead_memory_and_journey_commit_v4.sql',
+      '131_microservice_role_grants.sql')) <> 20 then
+    raise exception 'release migrations 112-131 are incomplete';
+  end if;
+  if (select count(*) from pg_roles
+      where rolname in ('brain_gateway','brain_control_plane','brain_runtime','brain_transport')
+        and not rolcanlogin and rolbypassrls) <> 4 then
+    raise exception 'microservice database roles are missing or unsafe';
+  end if;
+  if (select count(*)
+      from pg_auth_members membership
+      join pg_roles granted_role on granted_role.oid=membership.roleid
+      join pg_roles member_role on member_role.oid=membership.member
+      where member_role.rolname='authenticator'
+        and granted_role.rolname in ('brain_gateway','brain_control_plane','brain_runtime','brain_transport')) <> 4 then
+    raise exception 'authenticator cannot assume every microservice role';
+  end if;
+  if exists (
+    select 1
+    from pg_auth_members membership
+    join pg_roles granted_role on granted_role.oid=membership.roleid
+    join pg_roles member_role on member_role.oid=membership.member
+    where granted_role.rolname='service_role'
+      and member_role.rolname in ('brain_gateway','brain_control_plane','brain_runtime','brain_transport')
+  ) then
+    raise exception 'microservice role inherits universal service_role';
   end if;
   if exists (
     select 1 from information_schema.role_table_grants
