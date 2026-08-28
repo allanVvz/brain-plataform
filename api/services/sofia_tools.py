@@ -290,17 +290,20 @@ def tool_set_expansion_policy(session: dict, **_args: Any) -> dict:
 
 
 def tool_generate_faq_from_branch(session: dict, **args: Any) -> dict:
-    """Gera entries de FAQ lendo o galho ancestral do `parent_slug` no plano + grafo.
+    """Gera entries de FAQ reais lendo o galho ancestral do `parent_slug` no plano.
 
     Em modo CRIAR o galho fica no `session.normalized_plan`. Esta tool:
-      * Caminha do `parent_slug` até a persona via `metadata.parent_slug`
-        ou links primários, coletando título/content/tags.
+      * Caminha do `parent_slug` até a persona via `metadata.parent_slug`,
+        coletando título/content/tags.
       * Calcula `branch_hash` (sha256 do dump canônico) para curadoria.
-      * Cria N entries `faq` placeholder com `metadata.parent_slug=parent_slug`,
-        `metadata.generate_via='branch'`, `metadata.source_branch_hash=hash`,
-        `status='pendente_validacao'`. O conteúdo real (perguntas) é
-        preenchido pelo worker da Janela 4 após salvar (ou pelo /save inline
-        quando o operador clicar Salvar).
+      * Chama `services.faq_bulk_generator.generate_faqs_for_chain` para
+        gerar as perguntas/respostas de verdade (LLM, grounded só no que
+        está no galho, com o contexto das skills de tom já validadas no
+        repositório) e cria uma entry `faq` por par, cada uma com
+        `status='pendente_validacao'` (curadoria continua exigida antes de
+        publicar). Se a geração falhar (LLM indisponível, saída
+        inaparseável), cai de volta para uma única entry placeholder, como
+        antes.
     """
     import hashlib
     import json as _json
@@ -347,49 +350,82 @@ def tool_generate_faq_from_branch(session: dict, **args: Any) -> dict:
     branch_payload = _json.dumps(chain, ensure_ascii=False, sort_keys=True)
     branch_hash = hashlib.sha256(branch_payload.encode("utf-8")).hexdigest()[:16]
 
+    from services import faq_bulk_generator
+
     kb = _kb()
     parent_entry = chain[0]
     base_title = parent_entry.get("title") or parent_entry.get("slug") or parent_slug
-    faq_title = f"FAQ — {base_title}"
     base_slug = f"faq-{kb._slug_for_plan_entry(base_title)}"
-    slug = base_slug
-    suffix = 1
-    while _find_entry(plan, slug):
-        suffix += 1
-        slug = f"{base_slug}-{suffix}"
 
-    placeholder_md = (
-        f"<!-- FAQ placeholder gerado de generate_faq_from_branch.\n"
-        f"O conteudo real (max {max_questions} perguntas) sera preenchido pelo "
-        f"worker faq_refresh ou pelo /kb-intake/save, lendo o galho ancestral. -->\n"
-        f"## {faq_title}\n\nPerguntas serao geradas a partir do galho:\n"
-        + "\n".join(
-            f"- {c.get('content_type')}: {c.get('title')}" for c in chain
+    def _next_slug(base: str) -> str:
+        slug = base
+        suffix = 1
+        while _find_entry(plan, slug):
+            suffix += 1
+            slug = f"{base}-{suffix}"
+        return slug
+
+    pairs = faq_bulk_generator.generate_faqs_for_chain(chain, max_questions=max_questions)
+    created_slugs: list[str] = []
+
+    if pairs:
+        for pair in pairs:
+            slug = _next_slug(base_slug)
+            entry = kb._normalize_plan_entry({
+                "content_type": "faq",
+                "title": pair["question"],
+                "slug": slug,
+                "status": "pendente_validacao",
+                "content": pair["answer"],
+                "tags": ["faq", "auto-from-branch"],
+                "metadata": {
+                    "parent_slug": parent_slug,
+                    "question": pair["question"],
+                    "answer": pair["answer"],
+                    "generate_via": "branch",
+                    "source_branch_hash": branch_hash,
+                    "branch_chain": [c.get("slug") for c in chain if c.get("slug")],
+                },
+            })
+            plan["entries"].append(entry)
+            created_slugs.append(slug)
+        message = f"{len(created_slugs)} FAQs geradas para o galho de {parent_slug}"
+    else:
+        # LLM indisponível ou saída inaparseável -- volta pro placeholder
+        # antigo em vez de deixar o operador sem nada.
+        slug = _next_slug(base_slug)
+        faq_title = f"FAQ — {base_title}"
+        placeholder_md = (
+            "<!-- Geração automática indisponível no momento; revise manualmente. -->\n"
+            f"## {faq_title}\n\nPerguntas pendentes para o galho:\n"
+            + "\n".join(f"- {c.get('content_type')}: {c.get('title')}" for c in chain)
         )
-    )
-    entry = kb._normalize_plan_entry({
-        "content_type": "faq",
-        "title": faq_title,
-        "slug": slug,
-        "status": "pendente_validacao",
-        "content": placeholder_md,
-        "tags": ["faq", "auto-from-branch"],
-        "metadata": {
-            "parent_slug": parent_slug,
-            "generate_via": "branch",
-            "source_branch_hash": branch_hash,
-            "branch_chain": [c.get("slug") for c in chain if c.get("slug")],
-            "max_questions": max_questions,
-        },
-    })
-    plan["entries"].append(entry)
+        entry = kb._normalize_plan_entry({
+            "content_type": "faq",
+            "title": faq_title,
+            "slug": slug,
+            "status": "pendente_validacao",
+            "content": placeholder_md,
+            "tags": ["faq", "auto-from-branch", "generation-failed"],
+            "metadata": {
+                "parent_slug": parent_slug,
+                "generate_via": "branch",
+                "source_branch_hash": branch_hash,
+                "branch_chain": [c.get("slug") for c in chain if c.get("slug")],
+                "max_questions": max_questions,
+            },
+        })
+        plan["entries"].append(entry)
+        created_slugs.append(slug)
+        message = f"Geração automática falhou; criei um placeholder para o galho de {parent_slug}"
+
     plan_state = _commit(
-        session, plan, last_change=f"tool:generate_faq_from_branch {slug}<-{parent_slug}",
+        session, plan, last_change=f"tool:generate_faq_from_branch {parent_slug}",
     )
     return _ok(
-        f"FAQ placeholder criada para o galho de {parent_slug}",
+        message,
         plan_state,
-        slug=slug,
+        slugs=created_slugs,
         branch_hash=branch_hash,
         branch_depth=len(chain),
     )

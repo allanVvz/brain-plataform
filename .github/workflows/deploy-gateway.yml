@@ -1,0 +1,12 @@
+name: Deploy gateway
+on:
+  workflow_dispatch:
+    inputs:
+      manifest_sha: {description: Immutable platform SHA, required: true}
+      manifest_path: {description: Manifest path, required: true, default: ops/microservices/release-manifest.json}
+      action: {type: choice, options: [dry-run, deploy, rollback], default: dry-run}
+jobs:
+  deploy:
+    uses: ./.github/workflows/_deploy-microservice.yml
+    with: {service: gateway, manifest_sha: "${{ inputs.manifest_sha }}", manifest_path: "${{ inputs.manifest_path }}", action: "${{ inputs.action }}"}
+    secrets: inherit

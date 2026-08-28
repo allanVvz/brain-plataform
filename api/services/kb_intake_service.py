@@ -20,6 +20,12 @@ from services import graph_document_publisher
 from services import knowledge_graph
 from services import knowledge_lifecycle
 from services import graph_validation
+from services import graph_agent_runtime_v3
+from services import graph_bundle
+from services import graph_bundle_adapter
+from services import graph_bundle_error_translations
+from services import graph_bundle_publisher
+from services import graph_compiler_v3
 from schemas.graph_json_v2 import GraphJson
 from services.catalog_crawler import crawl_catalog_url
 from services.vault_sync import run_sync, VAULT_PATH, ensure_persona_vault_structure, persona_folder_name
@@ -84,7 +90,6 @@ _BOOTSTRAP_PROMPT = (
 )
 
 _sessions: dict[str, dict] = {}
-_SESSION_DIR = Path(os.environ.get("KB_INTAKE_SESSION_DIR", ".runtime/kb-intake-sessions"))
 _BLOCK_COUNT_KEYS = ("brand", "briefing", "campaign", "audience", "product", "offer", "copy", "faq", "rule", "tone", "asset")
 _OFFER_CONTENT_TYPES = {"offer", "product_variant", "purchase_option"}
 _INVALID_CRIAR_PERSONAS = {"", "all", "todos", "global"}
@@ -931,6 +936,185 @@ def normalized_plan_to_graph_json(plan: dict, session: dict) -> GraphJson:
             "validation": {"is_valid": True, "errors": []},
         }
     )
+
+
+def _active_workflow_binding(persona_id: str) -> dict:
+    """Same routing switch api.routes.personas._active_binding reads --
+    duplicated locally (4 lines) rather than importing a route module from a
+    service module."""
+    if not persona_id:
+        return {}
+    for binding in supabase_client.get_workflow_bindings(persona_id):
+        if binding.get("active"):
+            return binding
+    return {}
+
+
+def _persona_uses_graph_bundle_pipeline(persona_id: str) -> bool:
+    return graph_agent_runtime_v3.binding_uses_v3(_active_workflow_binding(persona_id))
+
+
+def _current_persona_base_bundle(persona_id: str, persona_slug: str) -> dict | None:
+    """Compile the persona's live graph into a base bundle + compiled
+    document, so a new Sofia plan can be diffed/staged additively instead of
+    overwriting the persona's existing knowledge. Mirrors the manual process
+    used to activate the Tock Fatal two-brand graph this session. Returns
+    None if the persona has no live graph yet (first-ever bundle for it)."""
+    persona = supabase_client.get_persona_by_id(persona_id)
+    if not persona:
+        return None
+    node_rows, edge_rows = supabase_client.list_all_knowledge_graph(
+        persona_id=persona_id, limit_nodes=10000
+    )
+    if not node_rows:
+        return None
+    id_by_projection: dict[str, str] = {}
+    base_nodes: list[dict[str, Any]] = []
+    for row in node_rows:
+        metadata = dict(row.get("metadata") or {})
+        bundle_node_id = str(
+            metadata.pop("graph_json_node_id", None)
+            or f"{row.get('node_type')}:{row.get('slug')}"
+        )
+        metadata.pop("graph_bundle_draft_checksum", None)
+        id_by_projection[str(row.get("id"))] = bundle_node_id
+        base_nodes.append({
+            "id": bundle_node_id,
+            "node_type": str(row.get("node_type") or ""),
+            "slug": str(row.get("slug") or ""),
+            "title": str(row.get("title") or ""),
+            "summary": str(row.get("summary") or ""),
+            "tags": list(row.get("tags") or []),
+            "status": str(row.get("status") or "validated"),
+            "projection_node_id": str(row.get("id")),
+            "data": metadata,
+        })
+    base_edges: list[dict[str, Any]] = []
+    for row in edge_rows:
+        metadata = dict(row.get("metadata") or {})
+        if metadata.get("active", True) is False:
+            continue
+        source_id = id_by_projection.get(str(row.get("source_node_id")))
+        target_id = id_by_projection.get(str(row.get("target_node_id")))
+        if not source_id or not target_id:
+            continue
+        edge_id = str(metadata.pop("graph_json_edge_id", None) or row.get("id"))
+        metadata.pop("graph_bundle_draft_checksum", None)
+        metadata.pop("primary_tree", None)
+        base_edges.append({
+            "id": edge_id,
+            "source": source_id,
+            "target": target_id,
+            "relation_type": str(row.get("relation_type") or "contains"),
+            "weight": float(row.get("weight") or 1.0),
+            "metadata": metadata,
+        })
+    return {"nodes": base_nodes, "edges": base_edges}
+
+
+def _save_via_graph_bundle(
+    session: dict,
+    session_id: str,
+    plan_payload: dict,
+    plan_state: dict,
+    plan_warnings: list[dict],
+) -> dict:
+    """The v3 counterpart to the graph_json_v2_store save path above: builds
+    a GraphBundle from the confirmed plan entries, computes a
+    PublicationPlan, and stops there for explicit human approval instead of
+    auto-publishing -- staging/activation only happen via a follow-up call to
+    POST /kb-intake/{session_id}/approve-publication with the exact
+    checksums shown here (see api/routes/kb_intake.py)."""
+    persona_id = str(session.get("persona_id") or "").strip()
+    persona_slug = str(session.get("persona_slug") or "").strip()
+    try:
+        if not persona_id or not persona_slug:
+            raise ValueError("session is missing persona_id/persona_slug")
+        base_bundle = _current_persona_base_bundle(persona_id, persona_slug)
+        adapted = graph_bundle_adapter.normalized_plan_to_graph_bundle(
+            plan_payload, session, base_bundle=base_bundle,
+        )
+        bundle = graph_bundle_adapter.ensure_branch_reachability(adapted["bundle"])
+        held_back = adapted["held_back"]
+        current_document = None
+        if base_bundle is not None:
+            persona = supabase_client.get_persona_by_id(persona_id)
+            node_rows, edge_rows = supabase_client.list_all_knowledge_graph(
+                persona_id=persona_id, limit_nodes=10000
+            )
+            current_document = graph_compiler_v3.compile_graph(
+                persona=persona, node_rows=node_rows, edge_rows=edge_rows,
+                embedding_profile=bundle["metadata"]["embedding_profile"],
+            )
+        plan = graph_bundle.build_publication_plan(
+            bundle, current_document=current_document, next_version=1,
+        )
+    except Exception as exc:
+        response = {
+            "error": "Nao foi possivel montar o GraphBundle a partir do plano da Sofia.",
+            "error_code": "GRAPH_BUNDLE_BUILD_FAILED",
+            "errors": [str(exc)],
+            "plan_state": plan_state,
+        }
+        _emit_kb_event(
+            "kb_intake_dialog_rejected", session=session, source="kb-intake.save",
+            status="rejected", transcript=True, result=response,
+        )
+        return response
+
+    if plan.get("validation_errors"):
+        response = {
+            "error": "O GraphBundle ainda nao pode ser publicado -- corrija os itens abaixo.",
+            "error_code": "GRAPH_BUNDLE_VALIDATION_FAILED",
+            "requires_sofia_intervention": True,
+            "graph_bundle_validation": {
+                "blocking": plan["validation_errors"],
+                "translated": graph_bundle_error_translations.translate_errors(plan["validation_errors"]),
+            },
+            "held_back": held_back,
+            "plan_state": plan_state,
+        }
+        _emit_kb_event(
+            "kb_intake_dialog_rejected", session=session, source="kb-intake.save",
+            status="rejected", transcript=True, result=response,
+        )
+        return response
+
+    session["stage"] = "awaiting_publication_approval"
+    session["status"] = "pending_approval"
+    session["pending_graph_bundle"] = bundle
+    session["pending_publication_plan"] = plan
+    _save_session(session)
+    completion_payload = {
+        "status": "pending_approval",
+        "success": True,
+        "warnings": plan_warnings,
+        "held_back": held_back,
+        "publication_plan": plan,
+        "plan_state": plan_state,
+        "plan_hash": plan_state.get("plan_hash"),
+        "approval_instructions": (
+            "Publicacao nao foi ativada. Revise publication_plan (nodes/edges "
+            "adicionados, breaking_contract_changes) e chame "
+            "POST /kb-intake/{session_id}/approve-publication com "
+            "draft_checksum e runtime_checksum exatamente como aparecem aqui."
+        ),
+    }
+    _emit_kb_event(
+        "kb_intake_dialog_completed", session=session, source="kb-intake.save",
+        status="completed", transcript=True, result=completion_payload,
+    )
+    return {
+        "ok": True,
+        "success": True,
+        "status": "pending_approval",
+        "warnings": plan_warnings,
+        "held_back": held_back,
+        "publication_plan": plan,
+        "plan_state": plan_state,
+        "plan_hash": plan_state.get("plan_hash"),
+        "approval_instructions": completion_payload["approval_instructions"],
+    }
 
 
 def _plan_validation(violations: list[str] | None = None, warnings: list[str] | None = None) -> dict[str, Any]:
@@ -3403,19 +3587,35 @@ def _terminal_faq_parents(entries: list[dict]) -> list[dict]:
     return [entry for entry in entries if _entry_type(entry) == "product" and entry.get("slug")][:1]
 
 
+def _has_real_faq_content(entry: dict) -> bool:
+    """True for a `faq` entry already carrying a generated question/answer
+    pair (services.faq_bulk_generator, via sofia_tools.tool_generate_faq_
+    from_branch) -- as opposed to the older placeholder shape this function
+    otherwise consolidates into one grouped golden-dataset entry. Without
+    this check, a real generated FAQ gets silently deleted the next time the
+    plan is renormalized (every _commit call), because the code below used
+    to treat ALL `faq` entries as disposable placeholders."""
+    metadata = entry.get("metadata") or {}
+    return bool(str(metadata.get("question") or "").strip() and str(metadata.get("answer") or "").strip())
+
+
 def _ensure_faq_golden_datasets_by_branch(plan: dict, session: dict) -> None:
-    if _requested_variation_count(session, "faq", 0) <= 0 and not any(_entry_type(entry) == "faq" for entry in (plan.get("entries") or [])):
-        return
     entries = [entry for entry in (plan.get("entries") or []) if isinstance(entry, dict)]
+    if any(_entry_type(entry) == "faq" and _has_real_faq_content(entry) for entry in entries):
+        # At least one FAQ already has real generated content (services.
+        # faq_bulk_generator) -- leave the plan untouched instead of
+        # replacing it with a content-free grouped placeholder.
+        return
+    if _requested_variation_count(session, "faq", 0) <= 0 and not any(_entry_type(entry) == "faq" for entry in entries):
+        return
     non_faq_entries = [entry for entry in entries if _entry_type(entry) != "faq"]
-    entries_by_slug = {str(entry.get("slug")): entry for entry in non_faq_entries if entry.get("slug")}
     parents = _terminal_faq_parents(non_faq_entries)
     if not parents:
         plan["entries"] = non_faq_entries
         return
-    used = {str(entry.get("slug")) for entry in non_faq_entries if entry.get("slug")}
-    faq_entries = [_build_grouped_faq_golden_dataset_entry(parents[0], non_faq_entries, used, session)]
-    plan["entries"] = [*non_faq_entries, *faq_entries]
+    used = {str(entry.get("slug")) for entry in entries if entry.get("slug")}
+    golden_entries = [_build_grouped_faq_golden_dataset_entry(parents[0], non_faq_entries, used, session)]
+    plan["entries"] = [*non_faq_entries, *golden_entries]
     plan["faq_count_policy"] = "grouped"
     plan["faq_parent_type"] = _entry_type(parents[0]) if parents else "copy"
     plan["faq_count_per_parent"] = 1
@@ -3976,11 +4176,6 @@ def _rewrite_visible_plan_summary(message: str, plan_payload: Optional[dict]) ->
     return summary_line
 
 
-def _session_path(session_id: str) -> Path:
-    safe = re.sub(r"[^a-zA-Z0-9_-]", "", session_id)
-    return _SESSION_DIR / f"{safe}.json"
-
-
 def _serialize_session(session: dict) -> dict:
     data = json.loads(json.dumps(session, default=str))
     raw = session.get("classification", {}).get("file_bytes")
@@ -3992,21 +4187,16 @@ def _serialize_session(session: dict) -> dict:
 
 def _save_session(session: dict) -> None:
     try:
-        _SESSION_DIR.mkdir(parents=True, exist_ok=True)
-        _session_path(session["id"]).write_text(
-            json.dumps(_serialize_session(session), ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        supabase_client.upsert_kb_intake_session(_serialize_session(session))
     except Exception:
         pass
 
 
 def _load_session(session_id: str) -> Optional[dict]:
-    path = _session_path(session_id)
-    if not path.exists():
-        return None
     try:
-        session = json.loads(path.read_text(encoding="utf-8"))
+        session = supabase_client.get_kb_intake_session(session_id)
+        if not session:
+            return None
         b64 = session.get("classification", {}).pop("file_bytes_b64", None)
         if b64:
             session["classification"]["file_bytes"] = base64.b64decode(b64)
@@ -4238,19 +4428,13 @@ def _session_matches_resume_candidate(
     return True
 
 
-def _latest_local_resume_session(initial_context: str, agent_key: str) -> Optional[dict]:
+def _latest_persisted_resume_session(initial_context: str, agent_key: str) -> Optional[dict]:
     persona_slug = _context_persona_slug(initial_context)
     objective = _context_objective(initial_context)
     source_url = _source_url_from_context(initial_context)
-    candidates: list[tuple[float, dict]] = []
+    candidates: list[dict] = []
     try:
-        if not _SESSION_DIR.exists():
-            return None
-        for path in _SESSION_DIR.glob("*.json"):
-            try:
-                session = json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
-                continue
+        for session in supabase_client.list_kb_intake_sessions(limit=500):
             if not _session_matches_resume_candidate(
                 session,
                 persona_slug=persona_slug,
@@ -4259,13 +4443,12 @@ def _latest_local_resume_session(initial_context: str, agent_key: str) -> Option
                 source_url=source_url,
             ):
                 continue
-            candidates.append((path.stat().st_mtime, session))
+            candidates.append(session)
     except Exception:
         return None
     if not candidates:
         return None
-    candidates.sort(key=lambda item: item[0], reverse=True)
-    return candidates[0][1]
+    return candidates[0]
 
 
 def _resume_summary_from_payload(payload: dict[str, Any]) -> str:
@@ -4309,7 +4492,7 @@ def _latest_persisted_resume(initial_context: str, agent_key: str) -> Optional[d
 
 
 def _build_resume_metadata(initial_context: str, agent_key: str) -> dict[str, Any]:
-    local_session = _latest_local_resume_session(initial_context, agent_key)
+    local_session = _latest_persisted_resume_session(initial_context, agent_key)
     if local_session:
         payload = _build_event_payload(local_session, status=str(local_session.get("stage") or "chatting"))
         return {
@@ -6778,6 +6961,10 @@ def save(session_id: str, content_text: str = "", plan_override: Optional[dict] 
     ]
 
     if str(session.get("mode") or "").strip().lower() == "criar":
+        if _persona_uses_graph_bundle_pipeline(str(session.get("persona_id") or "")):
+            return _save_via_graph_bundle(
+                session, session_id, plan_payload, plan_state, plan_warnings,
+            )
         try:
             graph_doc = GraphJson.model_validate(plan_state.get("graph_json") or normalized_plan_to_graph_json(plan_payload, session).model_dump())
             publication = graph_document_publisher.publish(

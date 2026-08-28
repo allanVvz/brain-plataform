@@ -57,7 +57,11 @@ def test_release_validator_requires_this_release_migration_and_exact_sha():
     assert "128_confirm_branch_offering_within_journey.sql" in VALIDATOR
     assert "129_carry_over_facts_by_lead.sql" in VALIDATOR
     assert "130_shared_lead_memory_and_journey_commit_v4.sql" in VALIDATOR
-    assert "release migrations 112-130 are incomplete" in VALIDATOR
+    assert "131_microservice_role_grants.sql" in VALIDATOR
+    assert "release migrations 112-131 are incomplete" in VALIDATOR
+    assert "microservice database roles are missing or unsafe" in VALIDATOR
+    assert "authenticator cannot assume every microservice role" in VALIDATOR
+    assert "microservice role inherits universal service_role" in VALIDATOR
     assert "EXPECTED_RELEASE_SHA" in VALIDATOR
     assert "release_source_identity" in VALIDATOR
 

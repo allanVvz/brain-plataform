@@ -1,5 +1,10 @@
 import os
 import re
+import base64
+import hashlib
+import hmac
+import json
+import time
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -31,6 +36,51 @@ PUBLIC_EXACT_PATHS = {
 ADMIN_TOKEN_HEADER = "x-ai-brain-admin-token"
 AUTHORIZATION_HEADER = "authorization"
 ADMIN_TOKEN_ENV_NAMES = ("QA", "qa", "preview", "PREVIEW", "test", "TEST")
+INTERNAL_PRINCIPAL_HEADER = "x-brain-principal"
+INTERNAL_SIGNATURE_HEADER = "x-brain-principal-signature"
+
+
+def _internal_principal_user(request: Request) -> tuple[dict, list] | None:
+    """Verify the gateway-issued short-lived principal.
+
+    The edge gateway must remove both headers from the client request before
+    issuing its own values. Services still enforce persona scope in-route/DB.
+    """
+    encoded = (request.headers.get(INTERNAL_PRINCIPAL_HEADER) or "").strip()
+    signature = (request.headers.get(INTERNAL_SIGNATURE_HEADER) or "").strip()
+    secret = (os.environ.get("BRAIN_INTERNAL_AUTH_SECRET") or "").encode("utf-8")
+    if not encoded or not signature:
+        return None
+    if len(secret) < 32:
+        return None
+    expected = hmac.new(secret, encoded.encode("ascii"), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(signature, expected):
+        return None
+    try:
+        raw = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
+        claims = json.loads(raw)
+        now = int(time.time())
+        if claims.get("iss") != "brain-gateway" or int(claims.get("exp") or 0) <= now:
+            return None
+        if int(claims.get("iat") or 0) > now + 5:
+            return None
+        role = str(claims.get("role") or "")
+        if role not in {"admin", "user", "operator", "viewer", "service"}:
+            return None
+        subject = str(claims.get("sub") or "")
+        if not subject:
+            return None
+        persona_ids = [str(value) for value in claims.get("persona_ids") or []]
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return None
+    return ({
+        "id": subject,
+        "email": claims.get("email"),
+        "username": claims.get("username"),
+        "role": role,
+        "is_active": True,
+        "auth_method": "internal_principal",
+    }, [{"persona_id": value} for value in persona_ids])
 
 
 def _disable_auth_response_cache(response):
@@ -122,6 +172,11 @@ async def auth_middleware(request: Request, call_next):
     if request.method == "OPTIONS" or is_public_path(path):
         response = await call_next(request)
         return _disable_auth_response_cache(response) if is_auth_path else response
+
+    internal = _internal_principal_user(request)
+    if internal:
+        request.state.user, request.state.persona_access = internal
+        return await call_next(request)
 
     token_user = _admin_test_token_user(request)
     if token_user:

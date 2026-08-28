@@ -27,28 +27,34 @@ WORKERS = {
 
 
 async def _run(selected: list[str]) -> None:
-    instances = [WORKERS[name]() for name in selected]
-    tasks = [asyncio.create_task(worker.start()) for worker in instances]
-    shutdown = asyncio.Event()
+    workers = [WORKERS[name]() for name in selected]
+    tasks = [asyncio.create_task(worker.start()) for worker in workers]
+    loop = asyncio.get_running_loop()
+    stopping = asyncio.Event()
 
     def request_shutdown() -> None:
-        if shutdown.is_set():
+        if stopping.is_set():
             return
-        shutdown.set()
-        for worker in instances:
+        stopping.set()
+        for worker in workers:
             worker.request_stop()
 
-    loop = asyncio.get_running_loop()
-    for signal_name in (signal.SIGTERM, signal.SIGINT):
+    for signame in (signal.SIGTERM, signal.SIGINT):
         try:
-            loop.add_signal_handler(signal_name, request_shutdown)
-        except (NotImplementedError, RuntimeError):
-            signal.signal(signal_name, lambda *_: request_shutdown())
+            loop.add_signal_handler(signame, request_shutdown)
+        except (NotImplementedError, RuntimeError):  # Windows test runner
+            signal.signal(signame, lambda *_: request_shutdown())
     try:
         await asyncio.gather(*tasks)
     finally:
         request_shutdown()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.gather(
+            *(worker.wait_for_drain() for worker in workers),
+            return_exceptions=True,
+        )
+        for task in tasks:
+            if not task.done():
+                task.cancel()
 
 
 def main() -> None:

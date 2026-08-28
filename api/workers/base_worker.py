@@ -20,31 +20,34 @@ class BaseWorker:
 
     def __init__(self):
         self._failures = 0
-        self._stop_event: asyncio.Event | None = None
-        self._stop_requested = False
+        self._stop_requested = asyncio.Event()
+        self._cycle_active = asyncio.Event()
+
+    @property
+    def accepting_claims(self) -> bool:
+        """False as soon as graceful shutdown starts.
+
+        Worker implementations that claim more than once per cycle must check
+        this property immediately before every claim.
+        """
+        return not self._stop_requested.is_set()
 
     def request_stop(self) -> None:
-        self._stop_requested = True
-        if self._stop_event is not None:
-            self._stop_event.set()
+        self._stop_requested.set()
 
-    async def _wait_or_stop(self, delay: float) -> None:
-        if self._stop_event is None:
+    async def wait_for_drain(self, timeout: float = 90.0) -> None:
+        """Wait for the current lease/cycle without cancelling it."""
+        if not self._cycle_active.is_set():
             return
-        try:
-            await asyncio.wait_for(
-                self._stop_event.wait(), timeout=max(0.0, delay),
-            )
-        except TimeoutError:
-            pass
+        async with asyncio.timeout(timeout):
+            while self._cycle_active.is_set():
+                await asyncio.sleep(0.1)
 
     async def start(self) -> None:
-        self._stop_event = asyncio.Event()
-        if self._stop_requested:
-            self._stop_event.set()
         sre_logger.info(self.name, f"started — interval={self.interval}s")
-        while not self._stop_event.is_set():
+        while self.accepting_claims:
             try:
+                self._cycle_active.set()
                 await asyncio.to_thread(self._run_cycle)
                 if self._failures > 0:
                     sre_logger.info(self.name, f"recovered after {self._failures} consecutive failures")
@@ -62,12 +65,17 @@ class BaseWorker:
                         self.name,
                         f"too many consecutive failures — backing off {backoff}s",
                     )
-                    await self._wait_or_stop(backoff)
+                    await asyncio.sleep(backoff)
                     self._failures = 0
                     continue
+            finally:
+                self._cycle_active.clear()
 
-            await self._wait_or_stop(self.interval)
-        sre_logger.info(self.name, "stopped gracefully")
+            try:
+                await asyncio.wait_for(self._stop_requested.wait(), timeout=self.interval)
+            except TimeoutError:
+                pass
+        sre_logger.info(self.name, "stopped after graceful drain")
 
     def _run_cycle(self) -> None:
         raise NotImplementedError(f"{self.name}._run_cycle() must be implemented")

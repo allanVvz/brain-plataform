@@ -413,6 +413,128 @@ def gallery_assets(request: Request, persona_id: str = Query(None), limit: int =
     return supabase_client.list_gallery_assets(persona_id=persona_id, limit=limit)
 
 
+class GenerateFaqsBody(BaseModel):
+    max_questions: int = 8
+
+
+@router.post("/graph/{node_id}/generate-faqs")
+def generate_faqs_for_graph_node(node_id: str, body: GenerateFaqsBody, request: Request):
+    """Sidebar action on the Graph screen: generate real FAQ content for an
+    already-published node's branch, outside any Sofia chat session.
+
+    Builds the same GraphBundle + PublicationPlan shape a Sofia session
+    would produce, and stores it as a synthetic kb-intake session so the
+    existing `POST /kb-intake/{session_id}/approve-publication` gate (same
+    checksum/breaking-change discipline, same dashboard approval flow) is
+    the only path that ever activates it -- this route only proposes."""
+    from services import faq_bulk_generator, graph_bundle, graph_compiler_v3
+    from services.kb_intake_service import _current_persona_base_bundle, _save_session
+    import uuid as _uuid
+
+    node = supabase_client.get_knowledge_node(node_id)
+    if not node:
+        raise HTTPException(404, "Node not found")
+    persona_id = str(node.get("persona_id") or "")
+    if not persona_id:
+        raise HTTPException(400, "Node has no persona_id")
+    auth_service.assert_persona_access(request, persona_id=persona_id)
+    persona = supabase_client.get_persona_by_id(persona_id)
+    if not persona:
+        raise HTTPException(404, "Persona not found")
+    persona_slug = str(persona.get("slug") or "")
+
+    node_rows, edge_rows = supabase_client.list_all_knowledge_graph(persona_id=persona_id, limit_nodes=10000)
+    chain = faq_bulk_generator.build_chain_from_live_graph(node_rows, edge_rows, node_id)
+    if not chain:
+        raise HTTPException(400, "Could not resolve this node's branch in the live graph")
+    pairs = faq_bulk_generator.generate_faqs_for_chain(chain, max_questions=body.max_questions)
+    if not pairs:
+        return {"ok": False, "faqs": [], "error": "FAQ generation produced no usable output"}
+
+    base = _current_persona_base_bundle(persona_id, persona_slug)
+    if base is None:
+        raise HTTPException(409, "Persona has no live GraphBundle-materialized graph yet")
+    metadata = (node.get("metadata") or {})
+    parent_bundle_id = str(metadata.get("graph_json_node_id") or f"{node.get('node_type')}:{node.get('slug')}")
+    base_node_ids = {n["id"] for n in base["nodes"]}
+    new_nodes = []
+    new_edges = []
+    for i, pair in enumerate(pairs, start=1):
+        faq_id = f"faq:{node.get('slug')}-auto-{i}"
+        suffix = 1
+        while faq_id in base_node_ids:
+            suffix += 1
+            faq_id = f"faq:{node.get('slug')}-auto-{i}-{suffix}"
+        base_node_ids.add(faq_id)
+        new_nodes.append({
+            "id": faq_id, "node_type": "faq", "slug": faq_id.split(":", 1)[1],
+            "title": pair["question"], "summary": pair["answer"], "tags": ["faq", "auto-from-branch"],
+            # Unlike Sofia's chat path (where a "pendente_validacao" entry is
+            # held back from the bundle until the operator confirms it in a
+            # follow-up turn), this route has no such follow-up turn -- the
+            # `faqs` list in the response IS the review surface, and
+            # approve-publication is the confirmation gate. Marking these
+            # "pending_validation" here would make build_publication_plan
+            # reject the whole bundle with no way to ever un-block it.
+            "status": "validated",
+            "data": {"question": pair["question"], "answer": pair["answer"], "source": "knowledge_graph_sidebar_generate_faqs"},
+        })
+        new_edges.append({
+            "id": f"edge:{parent_bundle_id}->{faq_id}", "source": parent_bundle_id, "target": faq_id,
+            "relation_type": "contains", "weight": 1.0, "metadata": {},
+        })
+
+    bundle = {
+        "bundle_version": "1.0",
+        "persona": {"id": persona_id, "slug": persona_slug},
+        "metadata": {
+            "purpose": f"faq_bulk_generation_{persona_slug}",
+            "source": "knowledge_graph_sidebar_generate_faqs",
+            "publication_allowed": True,
+            "embedding_profile": {
+                "embedding_provider": "local",
+                "embedding_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+                "embedding_dimension": graph_compiler_v3.EMBEDDING_DIMENSION,
+            },
+        },
+        "nodes": base["nodes"] + new_nodes,
+        "edges": base["edges"] + new_edges,
+    }
+    from services.graph_bundle_adapter import ensure_branch_reachability
+    bundle = ensure_branch_reachability(bundle)
+    current_document = graph_compiler_v3.compile_graph(
+        persona=persona, node_rows=node_rows, edge_rows=edge_rows,
+        embedding_profile={
+            "embedding_provider": "local",
+            "embedding_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+            "embedding_dimension": graph_compiler_v3.EMBEDDING_DIMENSION,
+        },
+    )
+    plan = graph_bundle.build_publication_plan(bundle, current_document=current_document, next_version=1)
+
+    user = auth_service.current_user(request)
+    session_id = f"faq-bulk-{_uuid.uuid4().hex}"
+    session = {
+        "id": session_id, "user_id": user.get("id"), "persona_id": persona_id, "persona_slug": persona_slug,
+        "stage": "awaiting_publication_approval" if not plan.get("validation_errors") else "blocked",
+        "status": "pending_approval",
+        "pending_graph_bundle": bundle,
+        "pending_publication_plan": plan,
+        "source": "knowledge_graph_sidebar_generate_faqs",
+    }
+    _save_session(session)
+
+    from services.graph_bundle_error_translations import translate_errors
+
+    return {
+        "ok": not plan.get("validation_errors"),
+        "session_id": session_id,
+        "faqs": pairs,
+        "publication_plan": plan,
+        "translated_errors": translate_errors(plan.get("validation_errors") or []),
+    }
+
+
 @router.get("/queue/{item_id}")
 def get_queue_item(item_id: str, request: Request):
     try:

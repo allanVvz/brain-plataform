@@ -14,18 +14,22 @@ usar uma stack Docker local para implementar, auditar ou testar este projeto.
 - Comecar qualquer operacao produtiva por auditoria read-only e dry-run.
 - Deploy, migration e limpeza exigem suas etapas explicitas de
   revisao/autorizacao. Uma autorizacao nao implica as outras.
-- O WA Validator e uma ferramenta diagnostica opcional, nunca um gate
-  obrigatorio de deploy, publicacao ou retomada. Quando solicitado, ele deve
-  rodar direto/interno, sem WhatsApp real.
-- Manter transporte e IAs pausados durante auditoria, deploy e validacao; so
-  retomar mediante autorizacao explicita posterior e gates tecnicos de SHA,
-  digest, fila critica, proof, exactly-once e isolamento.
+- Mudancas de conversa devem ser testadas somente pelo WA Validator
+  direto/interno, sem WhatsApp real.
+- Aplicar pausa no menor escopo afetado pela operacao. Em release de
+  codigo/infra do runtime compartilhado, manter todos os transportes e IAs
+  pausados. Em publicacao de conteudo isolada por persona, pausar somente o
+  binding/IA da persona alvo quando ele existir; personas nao envolvidas
+  continuam operando. Persona nova sem binding/workflow/transporte ja e inerte
+  e nao exige pausar outras personas. So retomar o que foi pausado mediante
+  autorizacao explicita posterior.
 - Retencao e limpeza permanecem em dry-run ate autorizacao especifica. Nunca
   inferir permissao para apagar dados a partir de uma autorizacao de deploy.
 
 ### Auditoria
-1. Confirmar SHA, release, health/readiness e estado pausado via endpoints e
-   scripts oficiais de producao.
+1. Confirmar SHA, release, health/readiness e o estado operacional no escopo da
+   operacao via endpoints e scripts oficiais de producao. Release compartilhada
+   exige pausa global; publicacao de conteudo exige isolamento da persona alvo.
 2. Executar dry-run da operacao solicitada e registrar contagens/IDs tecnicos
    nao secretos.
 3. Revisar o resultado antes de qualquer mutacao produtiva adicional.
@@ -640,47 +644,24 @@ Se nao aparece no grafo, esta incompleto.
   `data.appointment_policy.field_questions`.
 - Cada campo obrigatorio comum ou presente em `product.data.booking.required_fields`
   deve ter uma pergunta nao vazia no mapa da Persona.
-- `field_questions` continua necessario na autoria para provar cobertura,
-  semantica e pertencimento ao grafo. Ele nao e copy de runtime e nunca
-  autoriza o backend a anexar `field_questions[missing_fields[0]]` na resposta.
-- `missing_fields` define completude e elegibilidade, nao um roteiro de fala:
-  o modelo escolhe a proxima pergunta natural, explicacao, recomendacao e
-  linguagem dentro dos fatos/limites publicados. O runtime nao pode forcar
-  `missing_fields[0]`, selecionar deterministicamente uma FAQ, nem substituir
-  uma resposta valida do modelo por uma pergunta pronta.
+- A proxima pergunta e sempre resolvida por
+  `field_questions[missing_fields[0]]`; o backend nao pode conter fallback de
+  copy comercial, nome de campo ou pergunta de fixture.
 - Grafo de agendamento incompleto deve falhar na validacao antes da publicacao.
-- Cada `question_node_id` pode ser emitido uma unica vez no estado compativel
-  da jornada. `asked_question_node_ids` permanece ledger interno; o prompt do
-  modelo recebe apenas os `asked_topics` semanticos, sem ids nem copy das
-  perguntas. Ponte contextual ou parafrase nao autoriza repetir o campo.
-- A saida canonica do modelo e uma unica mensagem publica completa em
-  `response.answer`, com no maximo uma pergunta natural. `response.question`
-  existe apenas para leitura compativel de workflow antigo e nunca e anexado a
-  `answer`. Se a pergunta dentro da mensagem for repetida ou invalida, preservar
-  fatos, memoria e branch e fazer no maximo uma reparacao pelo modelo antes do
-  commit; o backend nao tenta separar/recompor prosa, nao gera pergunta e nao
-  publica o turno defeituoso. Uma segunda falha segue para handoff observavel.
 - Sofia deve auxiliar o operador a preencher a matriz campo/pergunta, preservar
   fonte/status e nao copiar perguntas de outra persona ou exemplo.
 
-## 28. Limite central do runtime conversacional
+## 28. Fronteiras de microsservicos e cutover
 
-- O GraphBundle publicado fornece conhecimento, fatos comerciais e limites
-  autorizados; produto, oferta, copy e FAQ sao compilados/publicados, nunca
-  recriados a cada turno.
-- O modelo e dono da explicacao, recomendacao, linguagem, fluxo natural da
-  conversa e proxima pergunta. Ele nao pode inventar fato, preco, estoque,
-  prazo, politica ou limite ausente do grafo publicado.
-- Proof valida apenas evidencias publicadas citadas e isolamento de
-  persona/agente; nao escolhe FAQ, nao roteiriza a conversa e nao reescreve uma
-  resposta valida do modelo.
-- CAS, claim atomico e ledger preservam exatamente um inbound -> uma decisao ->
-  um commit -> no maximo um outbound. Exactly-once previne duplicidade; nao e
-  licenca para tornar a conversa deterministica.
-- Antes de publicar, validar acumulacao top-down de FAQs: cada FAQ aprovada
-  precisa de caminho hierarquico ativo da Persona ate ela, fontes/status
-  validos e escopo de persona/agente sem cruzamento. FAQ fora desse caminho nao
-  vira evidencia comercial.
-- Aurora e Tock Fatal usam `graph_agent_runtime_v3`, cada uma com publicacao,
-  checksum, binding e memoria isolados. O runtime/template comum nao mistura
-  contratos, fatos ou contexto entre as duas personas.
+- `brain-plataform` conserva dashboard, gateway `/api-brain`, migrations,
+  route map e manifests de release.
+- Control plane, conversation runtime e transport usam imagens, health,
+  rollback e roles de banco independentes; nenhum importa codigo de outro.
+- Contratos entre servicos vem somente de `brain-contracts` em versao exata.
+- Deploy de servico nunca executa migration e readiness falha abaixo de
+  `REQUIRED_SCHEMA_VERSION`.
+- Antes do cutover inicial, release compartilhada continua exigindo pausa
+  global. A janela de ate 8 horas, migrations, troca de trafego, limpeza e
+  retomada exigem autorizacoes explicitas e separadas.
+- Depois da prova produtiva registrada, release compativel usa blue/green sem
+  pausa; falha de GraphBundle pausa somente a persona alvo.

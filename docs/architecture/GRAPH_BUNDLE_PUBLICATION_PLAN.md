@@ -1,7 +1,9 @@
 # GraphBundle e PublicationPlan
 
-Status: primeiro slice local/dry-run implementado em 2026-08-20. Não publica,
-não persiste, não gera embeddings e não ativa runtime.
+Status: compilação/dry-run e publisher em duas fases implementados. O plano é
+puro; `graph_bundle_publisher.stage_bundle` materializa e cria a publicação
+inativa, e `activate_staged_bundle` ativa somente com os dois checksums
+aprovados. Embeddings incrementais por chunk ainda estão pendentes.
 
 ## Objetivo
 
@@ -12,7 +14,9 @@ GraphBundle declarativo
   -> normalização determinística
   -> graph_compiler_v3.compile_graph (puro)
   -> PublicationPlan
-  -> aprovação humana (gate; ainda não implementa publish)
+  -> aprovação humana dos checksums
+  -> staging inativo
+  -> ativação explícita
 ```
 
 O contrato vive em `api/services/graph_bundle.py`. Ele adapta nodes/edges do
@@ -49,13 +53,59 @@ fontes aprovadas e `publication_allowed=true` pode terminar em
 `awaiting_approval`. Aprovação do plano não autoriza publish, deploy, migration,
 ativação de IA ou transporte.
 
+## Escopo operacional por persona
+
+GraphBundle é publicado no escopo exato de `persona.id` + `persona.slug`.
+`stage_bundle` recusa `persona_scope_mismatch`, lê e materializa apenas o grafo
+da persona alvo, e não consulta nem altera `workflow_bindings`. Ativar uma
+publicação v3 também não cria binding, workflow, credencial ou transporte.
+
+Consequências operacionais:
+
+- personas não envolvidas continuam operando e não devem ser pausadas;
+- se a persona alvo já tiver binding operacional, somente esse binding fica
+  pausado durante staging, ativação e validação;
+- uma persona nova sem binding/workflow/transporte já é inerte e não exige
+  pausa adicional;
+- publicação ativa não significa agente pronto: readiness continua bloqueada
+  enquanto faltarem binding, workflow ou contrato de runtime.
+
+Pausa global é gate de release de código/infra que altera o runtime
+compartilhado, não de publicação isolada de conteúdo.
+
+## Publicação aprovada
+
+O workflow `.github/workflows/publish-content.yml` pertence ao pipeline de
+Markdown/Graph JSON v2 e chama `publish_persona_documents.py`. Ele não publica
+GraphBundle e não aceita o par de checksums draft/runtime.
+
+Para GraphBundle v3, depois do dry-run limpo e da aprovação humana dos dois
+checksums, executar no runtime de API aprovado em produção:
+
+```text
+python scripts/publish_graph_bundle.py <bundle.json> \
+  --approved-draft-checksum <draft_checksum> \
+  --approved-runtime-checksum <runtime_checksum> \
+  --actor <identidade-auditavel> \
+  --apply --activate
+```
+
+Omitir `--activate` quando a autorização cobrir somente staging. Se a checagem
+do runtime falhar depois do staging, preservar a publicação inativa e parar;
+não corrigir nem apagar automaticamente. Até existir workflow dedicado para
+GraphBundle no environment `production-content`, o relatório da operação deve
+registrar a autorização explícita, os dois checksums, persona UUID/slug,
+publication ID e versão.
+
 ## Gates ainda abertos
 
 1. O P0 Aurora continua aberto no roadmap até existir a evidência formal exigida
-   pelo WA Validator interno. Este slice local não fecha P0.
-2. Graph JSON v2.1 e `graph_publications` v3 ainda têm publishers separados.
-3. O publisher v3 ainda recompila embeddings integralmente e ativa por default
-   no caminho mutante legado.
+   pelo WA Validator interno, mas não bloqueia publicação de conteúdo de outra
+   persona quando o escopo e os checksums são independentes.
+2. Graph JSON v2.1 e `graph_publications` v3 têm publishers separados e não
+   podem ser tratados como um único workflow.
+3. O publisher v3 ainda recompila embeddings integralmente; staging e ativação
+   já são fases separadas e `--activate` é explícito.
 4. Runtime e template n8n ainda contêm partes do contrato nomeadas como
    `servico`/`service_operations`.
 5. O WA Validator de `business_model=sales` ainda produz evidência
@@ -140,10 +190,10 @@ bloqueia o plano.
 
 | Fase | Entrega | Gate de saída |
 | --- | --- | --- |
-| 1 | GraphBundle puro + PublicationPlan + exemplo + skill | testes locais e zero mutação |
+| 1 | GraphBundle puro + PublicationPlan + exemplo + skill | concluído: testes locais e zero mutação |
 | 2 | Adapter Graph JSON v2.1 -> bundle/runtime v3 | checksum determinístico e validação canônica |
-| 3 | Staging com embeddings incrementais | checksum aprovado igual ao staged |
-| 4 | Ativação explícita separada | aprovação humana + RPC atômica |
+| 3 | Staging separado; embeddings incrementais ainda pendentes | checksum aprovado igual ao staged |
+| 4 | Ativação explícita separada | concluído: dois checksums + RPC atômica |
 | 5 | Driver semântico `sales` no WA Validator | varejo/atacado com technical e quality pass |
 | 6 | Bundle Tock Fatal real | fontes comerciais aprovadas, sem fixture contaminada |
 | 7 | Regressão Aurora e preparação de release | P0 fechado e exactly-once/proof preservados |

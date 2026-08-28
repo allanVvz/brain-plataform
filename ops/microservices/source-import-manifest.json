@@ -1,0 +1,22 @@
+{
+  "source_repository": "allanVvz/brain-plataform",
+  "source_sha": "b6ee5edc884e233cc0ff41798f4c19239e04fd88",
+  "schema_version": 130,
+  "contracts_version": "1.0.0",
+  "repositories": ["allanVvz/brain-contracts", "allanVvz/brain-control-plane", "allanVvz/brain-conversation-runtime", "allanVvz/brain-transport"],
+  "inventory_checksum": "sha256:0dcf6c79a809a84a10b006431d916fb97e4ad04e645f21567ac849071baad3ab",
+  "initial_commits": {
+    "brain-contracts": "0a1c05389388fcf392dab7041e30e1c1132379b8",
+    "brain-control-plane": "e45d74d27296045ba1b2293bd6f8ee26369f92a3",
+    "brain-conversation-runtime": "e3137f53594fa5daa304648f649d40f4721242ee",
+    "brain-transport": "c78ad64d7e9d9daef08a0b062766f44983cde3b3"
+  },
+  "current_main_commits": {
+    "brain-contracts": "0a1c05389388fcf392dab7041e30e1c1132379b8",
+    "brain-control-plane": "ccf4f2f8e097d57c41609a0611ed4e3c639b50a0",
+    "brain-conversation-runtime": "d6dd565290d4e5beaf3b47479d63becdf2652566",
+    "brain-transport": "a1bb075cf1415e163e953d561f543e50cabbc594"
+  },
+  "route_map_checksum": "sha256:d1733cb225a648ef1d78c33081fc78c55f557ed85613a71dd0e53be60461f331",
+  "n8n_checksum": "sha256:426296e5339741b85bd0711306b7738cb6051cdb7450d13dea36fa32d5690a5e"
+}

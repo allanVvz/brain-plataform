@@ -1,0 +1,95 @@
+name: Reusable microservice blue-green deployment
+on:
+  workflow_call:
+    inputs:
+      service: {required: true, type: string}
+      manifest_sha: {required: true, type: string}
+      manifest_path: {required: true, type: string}
+      action: {required: true, type: string}
+    secrets:
+      VPS_HOST: {required: true}
+      VPS_USER: {required: true}
+      VPS_SSH_KEY: {required: true}
+      VPS_PORT: {required: false}
+      VPS_APP_DIR: {required: false}
+      GHCR_USERNAME: {required: false}
+      GHCR_TOKEN: {required: false}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: {ref: "${{ inputs.manifest_sha }}"}
+      - run: python ops/microservices/validate-release-manifest.py "${{ inputs.manifest_path }}"
+      - name: Validate requested operation
+        shell: bash
+        run: |
+          [[ "${{ inputs.service }}" =~ ^(gateway|control-plane|conversation-runtime|transport)$ ]]
+          [[ "${{ inputs.action }}" =~ ^(dry-run|deploy|rollback)$ ]]
+
+  production-preflight:
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read-only production readiness audit
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          command_timeout: 10m
+          script: |
+            set -Eeuo pipefail
+            cd "${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}"
+            test -s .env.compose
+            test -s .env.microservices/gateway.env
+            test -s .env.microservices/control-plane.env
+            test -s .env.microservices/runtime.env
+            test -s .env.microservices/transport.env
+            bash ops/vps/validate-production-release.sh
+
+  mutate:
+    needs: production-preflight
+    if: inputs.action != 'dry-run'
+    environment: production-${{ inputs.service }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: {ref: "${{ inputs.manifest_sha }}"}
+      - name: Synchronize approved release controls
+        uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          source: docker-compose.yml,infra/Caddyfile,infra/caddy-dynamic,infra/microservices,ops/microservices,ops/vps/deploy-microservice-blue-green.sh,${{ inputs.manifest_path }}
+          target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+          overwrite: true
+      - name: Deploy or rollback one service by immutable digest
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        env:
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          command_timeout: 15m
+          envs: GHCR_USERNAME,GHCR_TOKEN
+          script: |
+            set -Eeuo pipefail
+            cd "${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}"
+            if [[ -n "${GHCR_TOKEN:-}" ]]; then
+              printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+            fi
+            mode=--apply
+            [[ "${{ inputs.action }}" == "rollback" ]] && mode=--rollback
+            bash ops/vps/deploy-microservice-blue-green.sh \
+              "${{ inputs.manifest_path }}" "${{ inputs.service }}" "$mode"

@@ -2392,8 +2392,8 @@ def commit(
         active_branch = response.cart_state.get("active_branch_node_id")
         valid_owners = {active_branch} if active_branch else set()
         if active_branch:
-            publication = supabase_client.get_active_graph_publication(
-                str(persona.get("id") or "")
+            publication = supabase_client.get_graph_publication_by_id(
+                str(context.publication_id or "")
             ) or {}
             v3_document = publication.get("document_json") or {}
             contract = (v3_document.get("branch_contracts") or {}).get(active_branch) or {}
@@ -2655,7 +2655,9 @@ def commit(
         active_branch = response.cart_state.get("active_branch_node_id")
         branch_contract: dict[str, Any] = {}
         if response.handoff_required and handoff_level == "full" and active_branch:
-            publication = supabase_client.get_active_graph_publication(str(persona.get("id") or "")) or {}
+            publication = supabase_client.get_graph_publication_by_id(
+                str(context.publication_id or "")
+            ) or {}
             branch_contract = ((publication.get("document_json") or {}).get("branch_contracts") or {}).get(active_branch) or {}
         reset_facts = _handoff_branch_reset_facts(
             handoff_required=response.handoff_required,

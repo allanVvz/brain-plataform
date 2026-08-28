@@ -7,6 +7,13 @@ STATE_DIR="$ROOT_DIR/.deploy"
 TARGET_TAG="${1:?usage: deploy.sh <image-tag>}"
 [[ "$TARGET_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] || { echo "Invalid Docker image tag: $TARGET_TAG" >&2; exit 2; }
 mkdir -p "$STATE_DIR"
+mkdir -p "$STATE_DIR/caddy"
+if [[ ! -s "$STATE_DIR/caddy/public-upstream.caddy" ]]; then
+  cp "$ROOT_DIR/infra/caddy-dynamic/public-upstream.caddy" "$STATE_DIR/caddy/public-upstream.caddy"
+fi
+if [[ ! -s "$STATE_DIR/caddy/internal-upstreams.caddy" ]]; then
+  cp "$ROOT_DIR/infra/caddy-dynamic/internal-upstreams.caddy" "$STATE_DIR/caddy/internal-upstreams.caddy"
+fi
 
 python3 "$ROOT_DIR/ops/vps/validate_env.py" "$ENV_FILE"
 cd "$ROOT_DIR"

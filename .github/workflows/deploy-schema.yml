@@ -1,0 +1,24 @@
+name: Deploy schema
+on:
+  workflow_dispatch:
+    inputs:
+      manifest_sha: {description: Integrated release manifest SHA, required: true}
+      manifest_path: {description: Release manifest path, required: true, default: ops/microservices/release-manifest.json}
+permissions:
+  contents: read
+jobs:
+  dry-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: "${{ inputs.manifest_sha }}"}
+      - name: Validate immutable release manifest
+        run: python ops/microservices/validate-release-manifest.py "${{ inputs.manifest_path }}"
+      - name: Build deterministic schema plan
+        run: python ops/microservices/plan-schema-release.py "${{ inputs.manifest_path }}" > schema-release-plan.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: schema-release-plan-${{ inputs.manifest_sha }}
+          path: schema-release-plan.json
+          if-no-files-found: error
+          retention-days: 30

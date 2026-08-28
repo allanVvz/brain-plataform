@@ -4316,6 +4316,16 @@ def get_active_graph_publication(persona_id: str) -> Optional[dict]:
     )
 
 
+def get_graph_publication_by_id(publication_id: str) -> Optional[dict]:
+    """Load the immutable turn-pinned publication, regardless of active status."""
+    if not publication_id:
+        return None
+    return _one(
+        get_client().table("graph_publications").select("*")
+        .eq("id", publication_id).maybe_single()
+    )
+
+
 def get_graph_turn_context_batch_v3(
     *, persona_id: str, lead_ref: int, message_limit: int = 8,
 ) -> dict:
@@ -6663,6 +6673,52 @@ def upsert_sofia_plan_session(
     except Exception:
         return None
     return (result.data or [None])[0] if result else None
+
+
+def get_kb_intake_session(session_id: str) -> Optional[dict]:
+    row = _one(
+        get_client().table("agent_sessions").select("selected_context")
+        .eq("id", session_id).eq("coordinator_key", "sofia_kb_intake")
+        .maybe_single()
+    )
+    state = (row or {}).get("selected_context") or {}
+    value = state.get("kb_intake_session")
+    return value if isinstance(value, dict) else None
+
+
+def upsert_kb_intake_session(session: dict) -> Optional[dict]:
+    session_id = str(session.get("id") or "").strip()
+    if not session_id:
+        return None
+    persona_slug = str((session.get("classification") or {}).get("persona_slug") or "")
+    persona = get_persona(persona_slug) if persona_slug else None
+    row = {
+        "id": session_id,
+        "coordinator_key": "sofia_kb_intake",
+        "persona_id": (persona or {}).get("id"),
+        "selected_context": {"kb_intake_session": session},
+        "status": "completed" if session.get("complete") else "active",
+    }
+    result = _execute_with_retry(
+        get_client().table("agent_sessions").upsert(row, on_conflict="id")
+    )
+    return (result.data or [None])[0] if result else None
+
+
+def list_kb_intake_sessions(limit: int = 500) -> list[dict]:
+    rows = _q(
+        get_client().table("agent_sessions").select("id,selected_context,updated_at")
+        .eq("coordinator_key", "sofia_kb_intake")
+        .order("updated_at", desc=True).limit(max(1, min(limit, 500)))
+    )
+    return [
+        {
+            **dict(((row.get("selected_context") or {}).get("kb_intake_session") or {})),
+            "_updated_at": row.get("updated_at"),
+        }
+        for row in rows
+        if isinstance((row.get("selected_context") or {}).get("kb_intake_session"), dict)
+    ]
 
 # â”€â”€ Knowledge Items: multi-status query â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
