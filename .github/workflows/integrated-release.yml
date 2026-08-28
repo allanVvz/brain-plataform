@@ -4,6 +4,7 @@ on:
     inputs:
       manifest_sha: {description: Commit containing the immutable release manifest, required: true}
       manifest_path: {description: Release manifest path, required: true, default: ops/microservices/release-manifest.json}
+      action: {description: Safe default is dry-run; deploy requires environment approvals, type: choice, options: [dry-run, deploy], default: dry-run}
 permissions:
   contents: read
 jobs:
@@ -15,25 +16,23 @@ jobs:
       - run: python ops/microservices/validate-release-manifest.py "${{ inputs.manifest_path }}"
       - run: python -m json.tool ops/microservices/route-map.json >/dev/null
       - run: python ops/microservices/validate-route-map.py
-  dispatch:
+  control-plane:
     needs: validate
-    environment: production-integrated-release
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - {service: control-plane, repo: brain-control-plane}
-          - {service: conversation-runtime, repo: brain-conversation-runtime}
-          - {service: transport, repo: brain-transport}
-    steps:
-      - uses: actions/checkout@v4
-        with: {ref: "${{ inputs.manifest_sha }}"}
-      - name: Dispatch exact service SHA from manifest
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          service_sha="$(jq -r '.services["${{ matrix.service }}"].sha' "${{ inputs.manifest_path }}")"
-          [[ "$service_sha" =~ ^[0-9a-f]{40}$ ]]
-          gh workflow run release.yml -R "allanVvz/${{ matrix.repo }}" --ref "$service_sha" \
-            -f manifest_sha="${{ inputs.manifest_sha }}"
-        env: {GH_TOKEN: "${{ secrets.MICROSERVICE_RELEASE_TOKEN }}"}
+    uses: ./.github/workflows/_deploy-microservice.yml
+    with: {service: control-plane, manifest_sha: "${{ inputs.manifest_sha }}", manifest_path: "${{ inputs.manifest_path }}", action: "${{ inputs.action }}"}
+    secrets: inherit
+  runtime:
+    needs: control-plane
+    uses: ./.github/workflows/_deploy-microservice.yml
+    with: {service: conversation-runtime, manifest_sha: "${{ inputs.manifest_sha }}", manifest_path: "${{ inputs.manifest_path }}", action: "${{ inputs.action }}"}
+    secrets: inherit
+  transport:
+    needs: runtime
+    uses: ./.github/workflows/_deploy-microservice.yml
+    with: {service: transport, manifest_sha: "${{ inputs.manifest_sha }}", manifest_path: "${{ inputs.manifest_path }}", action: "${{ inputs.action }}"}
+    secrets: inherit
+  gateway:
+    needs: transport
+    uses: ./.github/workflows/_deploy-microservice.yml
+    with: {service: gateway, manifest_sha: "${{ inputs.manifest_sha }}", manifest_path: "${{ inputs.manifest_path }}", action: "${{ inputs.action }}"}
+    secrets: inherit

@@ -566,11 +566,10 @@ services:
       - "443:443/udp"
     volumes:
       - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./.deploy/caddy:/etc/caddy/dynamic:ro
       - caddy-data:/data
       - caddy-config:/config
     depends_on:
-      api:
-        condition: service_healthy
       kong:
         condition: service_healthy
       n8n:

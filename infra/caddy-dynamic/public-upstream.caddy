@@ -1,0 +1,5 @@
+# Safe pre-cutover default. The cutover runner replaces this atomically only
+# after the gateway slot and all of its dependencies pass readiness.
+handle {
+	reverse_proxy api:8080
+}

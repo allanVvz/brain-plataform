@@ -24,6 +24,62 @@ IDENTITY_HEADERS = {"x-brain-principal", "x-brain-principal-signature"}
 HOP_HEADERS = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
                "te", "trailers", "transfer-encoding", "upgrade", "host", "content-length"}
 PUBLIC_PREFIXES = ("/health", "/auth/", "/webhooks/", "/api/menu/")
+UPSTREAM_ENVIRONMENTS = {
+    "control-plane": "BRAIN_CONTROL_PLANE_URL",
+    "conversation-runtime": "BRAIN_RUNTIME_URL",
+    "transport": "BRAIN_TRANSPORT_URL",
+}
+
+
+def _build_payload(*, ready: bool, dependencies: dict | None = None) -> dict:
+    payload = {
+        "service": "brain-gateway",
+        "status": "ready" if ready else "not_ready",
+        "ready": ready,
+        "source_sha": (os.environ.get("SOURCE_SHA") or "0" * 40).strip(),
+        "build_digest": (os.environ.get("BUILD_DIGEST") or "unknown").strip(),
+        "contracts_version": (os.environ.get("BRAIN_CONTRACTS_VERSION") or "1.0.0").strip(),
+        "required_schema_version": int(os.environ.get("REQUIRED_SCHEMA_VERSION") or "131"),
+        "slot": (os.environ.get("BRAIN_SLOT") or "unknown").strip(),
+    }
+    if dependencies is not None:
+        payload["dependencies"] = dependencies
+    return payload
+
+
+@app.get("/health")
+async def health() -> dict:
+    return _build_payload(ready=True)
+
+
+@app.get("/health/ready")
+async def readiness() -> Response:
+    dependencies: dict[str, dict] = {}
+    async with httpx.AsyncClient(timeout=10) as client:
+        for service, environment in UPSTREAM_ENVIRONMENTS.items():
+            base_url = (os.environ.get(environment) or "").rstrip("/")
+            if not base_url:
+                dependencies[service] = {"ready": False, "error": "url_not_configured"}
+                continue
+            try:
+                response = await client.get(f"{base_url}/health/ready")
+                is_json = response.headers.get("content-type", "").startswith("application/json")
+                body = response.json() if is_json else {}
+                dependencies[service] = {
+                    "ready": response.status_code == 200 and (
+                        body.get("ready") is True or body.get("status") == "ready"
+                    ),
+                    "status_code": response.status_code,
+                    "source_sha": body.get("source_sha") or body.get("build_sha"),
+                    "build_digest": body.get("build_digest") or body.get("image_digest"),
+                    "contracts_version": body.get("contracts_version"),
+                    "schema_version": body.get("schema_version"),
+                }
+            except httpx.HTTPError as exc:
+                dependencies[service] = {"ready": False, "error": type(exc).__name__}
+    ready = all(item.get("ready") is True for item in dependencies.values())
+    payload = _build_payload(ready=ready, dependencies=dependencies)
+    return JSONResponse(payload, status_code=200 if ready else 503)
 
 
 def _upstream(path: str) -> str:

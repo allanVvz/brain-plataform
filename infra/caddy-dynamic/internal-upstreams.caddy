@@ -1,0 +1,4 @@
+# Safe pre-cutover default: no microservice is active on the private router.
+:8090 {
+	respond 503
+}

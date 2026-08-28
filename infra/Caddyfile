@@ -17,12 +17,7 @@
 		Referrer-Policy "strict-origin-when-cross-origin"
 		-Server
 	}
-	handle /webhooks/whatsapp* {
-		reverse_proxy api:8080
-	}
-	handle {
-		reverse_proxy api:8080
-	}
+	import /etc/caddy/dynamic/public-upstream.caddy
 }
 
 {$STORAGE_DOMAIN} {
@@ -98,4 +93,8 @@
 	}
 	respond 404
 }
+
+# Private stable names used by the gateway and service-to-service clients.
+# The generated file points each path at the currently active blue/green slot.
+import /etc/caddy/dynamic/internal-upstreams.caddy
 

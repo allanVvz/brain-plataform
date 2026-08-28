@@ -1,70 +1,231 @@
+x-api: &api
+  restart: unless-stopped
+  stop_grace_period: 2m
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health/ready', timeout=4)"]
+    interval: 10s
+    timeout: 5s
+    retries: 18
+    start_period: 20s
+  networks: [backend]
+
+x-private-urls: &private-urls
+  BRAIN_CONTROL_PLANE_URL: http://caddy:8090/control-plane
+  BRAIN_RUNTIME_URL: http://caddy:8090/conversation-runtime
+  BRAIN_TRANSPORT_URL: http://caddy:8090/transport
+
 services:
   gateway-blue: &gateway
+    <<: *api
     image: ${GATEWAY_IMAGE_BLUE:?digest required}
-    env_file:
-      - ${GATEWAY_ENV_FILE:?gateway env file required}
+    env_file: ["${GATEWAY_ENV_FILE:?gateway env file required}"]
     environment:
+      <<: *private-urls
       BRAIN_SLOT: blue
-      BRAIN_CONTROL_PLANE_URL: ${BRAIN_CONTROL_PLANE_INTERNAL_URL:?control-plane URL required}
-      BRAIN_RUNTIME_URL: ${BRAIN_RUNTIME_INTERNAL_URL:?runtime URL required}
-      BRAIN_TRANSPORT_URL: ${BRAIN_TRANSPORT_INTERNAL_URL:?transport URL required}
-    stop_grace_period: 2m
+      SOURCE_SHA: ${GATEWAY_SHA:?gateway SHA required}
+      BUILD_DIGEST: ${GATEWAY_DIGEST:?gateway digest required}
+      BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
+      REQUIRED_SCHEMA_VERSION: "131"
+    labels: {brain.service: gateway, brain.slot: blue}
   gateway-green:
     <<: *gateway
     image: ${GATEWAY_IMAGE_GREEN:?digest required}
     environment:
+      <<: *private-urls
       BRAIN_SLOT: green
-      BRAIN_CONTROL_PLANE_URL: ${BRAIN_CONTROL_PLANE_INTERNAL_URL:?control-plane URL required}
-      BRAIN_RUNTIME_URL: ${BRAIN_RUNTIME_INTERNAL_URL:?runtime URL required}
-      BRAIN_TRANSPORT_URL: ${BRAIN_TRANSPORT_INTERNAL_URL:?transport URL required}
+      SOURCE_SHA: ${GATEWAY_SHA:?gateway SHA required}
+      BUILD_DIGEST: ${GATEWAY_DIGEST:?gateway digest required}
+      BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
+      REQUIRED_SCHEMA_VERSION: "131"
+    labels: {brain.service: gateway, brain.slot: green}
 
   control-plane-blue: &control-plane
+    <<: *api
     image: ${CONTROL_PLANE_IMAGE_BLUE:?digest required}
-    env_file:
-      - ${CONTROL_PLANE_ENV_FILE:?control-plane env file required}
+    env_file: ["${CONTROL_PLANE_ENV_FILE:?control-plane env file required}"]
     environment:
+      <<: *private-urls
       BRAIN_SLOT: blue
+      SOURCE_SHA: ${CONTROL_PLANE_SHA:?control-plane SHA required}
+      BUILD_DIGEST: ${CONTROL_PLANE_DIGEST:?control-plane digest required}
+      BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
       REQUIRED_SCHEMA_VERSION: "131"
-      BRAIN_RUNTIME_URL: ${BRAIN_RUNTIME_INTERNAL_URL:?runtime URL required}
-      BRAIN_TRANSPORT_URL: ${BRAIN_TRANSPORT_INTERNAL_URL:?transport URL required}
-    stop_grace_period: 2m
+    labels: {brain.service: control-plane, brain.slot: blue}
   control-plane-green:
     <<: *control-plane
     image: ${CONTROL_PLANE_IMAGE_GREEN:?digest required}
     environment:
+      <<: *private-urls
       BRAIN_SLOT: green
+      SOURCE_SHA: ${CONTROL_PLANE_SHA:?control-plane SHA required}
+      BUILD_DIGEST: ${CONTROL_PLANE_DIGEST:?control-plane digest required}
+      BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
       REQUIRED_SCHEMA_VERSION: "131"
-      BRAIN_RUNTIME_URL: ${BRAIN_RUNTIME_INTERNAL_URL:?runtime URL required}
-      BRAIN_TRANSPORT_URL: ${BRAIN_TRANSPORT_INTERNAL_URL:?transport URL required}
+    labels: {brain.service: control-plane, brain.slot: green}
 
   runtime-blue: &runtime
+    <<: *api
     image: ${RUNTIME_IMAGE_BLUE:?digest required}
-    env_file:
-      - ${RUNTIME_ENV_FILE:?runtime env file required}
+    env_file: ["${RUNTIME_ENV_FILE:?runtime env file required}"]
     environment:
+      <<: *private-urls
       BRAIN_SLOT: blue
+      SOURCE_SHA: ${RUNTIME_SHA:?runtime SHA required}
+      BUILD_DIGEST: ${RUNTIME_DIGEST:?runtime digest required}
+      BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
       REQUIRED_SCHEMA_VERSION: "131"
-    stop_grace_period: 2m
+    labels: {brain.service: conversation-runtime, brain.slot: blue}
   runtime-green:
     <<: *runtime
     image: ${RUNTIME_IMAGE_GREEN:?digest required}
     environment:
+      <<: *private-urls
       BRAIN_SLOT: green
+      SOURCE_SHA: ${RUNTIME_SHA:?runtime SHA required}
+      BUILD_DIGEST: ${RUNTIME_DIGEST:?runtime digest required}
+      BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
       REQUIRED_SCHEMA_VERSION: "131"
+    labels: {brain.service: conversation-runtime, brain.slot: green}
 
   transport-blue: &transport
+    <<: *api
     image: ${TRANSPORT_IMAGE_BLUE:?digest required}
-    env_file:
-      - ${TRANSPORT_ENV_FILE:?transport env file required}
+    env_file: ["${TRANSPORT_ENV_FILE:?transport env file required}"]
     environment:
+      <<: *private-urls
       BRAIN_SLOT: blue
+      SOURCE_SHA: ${TRANSPORT_SHA:?transport SHA required}
+      BUILD_DIGEST: ${TRANSPORT_DIGEST:?transport digest required}
+      BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
       REQUIRED_SCHEMA_VERSION: "131"
-      BRAIN_RUNTIME_URL: ${BRAIN_RUNTIME_INTERNAL_URL:?runtime URL required}
-    stop_grace_period: 2m
+    labels: {brain.service: transport, brain.slot: blue}
   transport-green:
     <<: *transport
     image: ${TRANSPORT_IMAGE_GREEN:?digest required}
     environment:
+      <<: *private-urls
       BRAIN_SLOT: green
+      SOURCE_SHA: ${TRANSPORT_SHA:?transport SHA required}
+      BUILD_DIGEST: ${TRANSPORT_DIGEST:?transport digest required}
+      BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
       REQUIRED_SCHEMA_VERSION: "131"
-      BRAIN_RUNTIME_URL: ${BRAIN_RUNTIME_INTERNAL_URL:?runtime URL required}
+    labels: {brain.service: transport, brain.slot: green}
+
+  control-plane-knowledge-blue: &control-plane-knowledge
+    <<: *control-plane
+    command: ["python", "-m", "workers.runner", "--worker", "kb_sync"]
+    healthcheck: {disable: true}
+    labels: {brain.service: control-plane, brain.slot: blue, brain.worker-group: knowledge}
+  control-plane-knowledge-green:
+    <<: *control-plane-knowledge
+    image: ${CONTROL_PLANE_IMAGE_GREEN:?digest required}
+    environment:
+      <<: *private-urls
+      BRAIN_SLOT: green
+      SOURCE_SHA: ${CONTROL_PLANE_SHA:?control-plane SHA required}
+      BUILD_DIGEST: ${CONTROL_PLANE_DIGEST:?control-plane digest required}
+      BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
+      REQUIRED_SCHEMA_VERSION: "131"
+    labels: {brain.service: control-plane, brain.slot: green, brain.worker-group: knowledge}
+
+  control-plane-integrations-blue: &control-plane-integrations
+    <<: *control-plane
+    command: ["python", "-m", "workers.runner", "--worker", "n8n_mirror"]
+    healthcheck: {disable: true}
+    labels: {brain.service: control-plane, brain.slot: blue, brain.worker-group: integrations}
+  control-plane-integrations-green:
+    <<: *control-plane-integrations
+    image: ${CONTROL_PLANE_IMAGE_GREEN:?digest required}
+    environment:
+      <<: *private-urls
+      BRAIN_SLOT: green
+      SOURCE_SHA: ${CONTROL_PLANE_SHA:?control-plane SHA required}
+      BUILD_DIGEST: ${CONTROL_PLANE_DIGEST:?control-plane digest required}
+      BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
+      REQUIRED_SCHEMA_VERSION: "131"
+    labels: {brain.service: control-plane, brain.slot: green, brain.worker-group: integrations}
+
+  control-plane-validator-blue: &control-plane-validator
+    <<: *control-plane
+    command: ["python", "-m", "workers.runner", "--worker", "flow_validator"]
+    healthcheck: {disable: true}
+    labels: {brain.service: control-plane, brain.slot: blue, brain.worker-group: validator}
+  control-plane-validator-green:
+    <<: *control-plane-validator
+    image: ${CONTROL_PLANE_IMAGE_GREEN:?digest required}
+    environment:
+      <<: *private-urls
+      BRAIN_SLOT: green
+      SOURCE_SHA: ${CONTROL_PLANE_SHA:?control-plane SHA required}
+      BUILD_DIGEST: ${CONTROL_PLANE_DIGEST:?control-plane digest required}
+      BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
+      REQUIRED_SCHEMA_VERSION: "131"
+    labels: {brain.service: control-plane, brain.slot: green, brain.worker-group: validator}
+
+  runtime-conversation-blue: &runtime-conversation
+    <<: *runtime
+    command: ["python", "-m", "workers.runner", "--worker", "inactivity_recovery"]
+    healthcheck: {disable: true}
+    labels: {brain.service: conversation-runtime, brain.slot: blue, brain.worker-group: conversation}
+  runtime-conversation-green:
+    <<: *runtime-conversation
+    image: ${RUNTIME_IMAGE_GREEN:?digest required}
+    environment:
+      <<: *private-urls
+      BRAIN_SLOT: green
+      SOURCE_SHA: ${RUNTIME_SHA:?runtime SHA required}
+      BUILD_DIGEST: ${RUNTIME_DIGEST:?runtime digest required}
+      BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
+      REQUIRED_SCHEMA_VERSION: "131"
+    labels: {brain.service: conversation-runtime, brain.slot: green, brain.worker-group: conversation}
+
+  runtime-validator-blue: &runtime-validator
+    <<: *runtime
+    command: ["python", "-m", "workers.runner", "--worker", "wa_validator"]
+    healthcheck: {disable: true}
+    labels: {brain.service: conversation-runtime, brain.slot: blue, brain.worker-group: validator}
+  runtime-validator-green:
+    <<: *runtime-validator
+    image: ${RUNTIME_IMAGE_GREEN:?digest required}
+    environment:
+      <<: *private-urls
+      BRAIN_SLOT: green
+      SOURCE_SHA: ${RUNTIME_SHA:?runtime SHA required}
+      BUILD_DIGEST: ${RUNTIME_DIGEST:?runtime digest required}
+      BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
+      REQUIRED_SCHEMA_VERSION: "131"
+    labels: {brain.service: conversation-runtime, brain.slot: green, brain.worker-group: validator}
+
+  transport-dispatch-blue: &transport-dispatch
+    <<: *transport
+    command: ["python", "-m", "workers.runner", "--worker", "whatsapp_dispatch"]
+    healthcheck: {disable: true}
+    labels: {brain.service: transport, brain.slot: blue, brain.worker-group: transport}
+  transport-dispatch-green:
+    <<: *transport-dispatch
+    image: ${TRANSPORT_IMAGE_GREEN:?digest required}
+    environment:
+      <<: *private-urls
+      BRAIN_SLOT: green
+      SOURCE_SHA: ${TRANSPORT_SHA:?transport SHA required}
+      BUILD_DIGEST: ${TRANSPORT_DIGEST:?transport digest required}
+      BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
+      REQUIRED_SCHEMA_VERSION: "131"
+    labels: {brain.service: transport, brain.slot: green, brain.worker-group: transport}
+
+  transport-media-blue: &transport-media
+    <<: *transport
+    command: ["python", "-m", "workers.runner", "--worker", "media_ingest"]
+    healthcheck: {disable: true}
+    labels: {brain.service: transport, brain.slot: blue, brain.worker-group: media}
+  transport-media-green:
+    <<: *transport-media
+    image: ${TRANSPORT_IMAGE_GREEN:?digest required}
+    environment:
+      <<: *private-urls
+      BRAIN_SLOT: green
+      SOURCE_SHA: ${TRANSPORT_SHA:?transport SHA required}
+      BUILD_DIGEST: ${TRANSPORT_DIGEST:?transport digest required}
+      BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
+      REQUIRED_SCHEMA_VERSION: "131"
+    labels: {brain.service: transport, brain.slot: green, brain.worker-group: media}
