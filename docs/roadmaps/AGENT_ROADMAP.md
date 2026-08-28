@@ -1,5 +1,8 @@
 # Roadmap de Agentes de IA — Brain AI
 
+Publicações de conteúdo isoladas pausam somente a persona alvo. Personas não
+envolvidas continuam operando.
+
 > **Este documento é a autoridade máxima do projeto.**
 > Quando qualquer outro arquivo contradiz este, este vence. Um agente que
 > encontrar contradição deve **reportar o conflito**, nunca escolher em silêncio.
