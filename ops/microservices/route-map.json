@@ -3,8 +3,8 @@
   "base_path": "/api-brain",
   "default": "control-plane",
   "routes": {
-    "transport": ["/webhooks/evolution/*", "/webhooks/whatsapp*", "/messages*", "/messaging*", "/process"],
-    "conversation-runtime": ["/internal/conversations/*", "/internal/agents/*", "/agents*", "/agent-harness*", "/insights*", "/leads*", "/wa-validator*", "/qa/*"],
+    "transport": ["/webhooks/evolution/*", "/webhooks/whatsapp*", "/messages*", "/messaging*"],
+    "conversation-runtime": ["/process", "/internal/conversations/*", "/internal/agents/*", "/agents*", "/agent-harness*", "/insights*", "/leads*", "/wa-validator*", "/qa/*"],
     "control-plane": ["/auth*", "/access*", "/portal*", "/personas*", "/integrations*", "/kb*", "/knowledge*", "/pipeline*", "/generate*", "/graph-*", "/marketing*", "/audiences*", "/assets*", "/api/menu/*", "/api/public-site-formats*", "/logs*"]
   }
 }

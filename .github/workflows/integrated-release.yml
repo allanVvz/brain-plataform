@@ -11,6 +11,7 @@ jobs:
         with: {ref: "${{ inputs.manifest_sha }}"}
       - run: python -m json.tool ops/microservices/source-import-manifest.json >/dev/null
       - run: python -m json.tool ops/microservices/route-map.json >/dev/null
+      - run: python ops/microservices/validate-route-map.py
   dispatch:
     needs: validate
     environment: production-integrated-release
