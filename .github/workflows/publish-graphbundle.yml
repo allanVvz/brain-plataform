@@ -4,24 +4,39 @@ on:
     inputs:
       bundle_path: {description: Versioned GraphBundle path, required: true}
       persona_slug: {description: Target persona, required: true}
-      activate: {description: Activate after shadow evidence, type: boolean, default: false}
+      approved_draft_checksum: {description: Human-approved draft checksum, required: true}
+      approved_runtime_checksum: {description: Human-approved runtime checksum, required: true}
+permissions:
+  contents: read
 jobs:
   plan:
     runs-on: ubuntu-latest
-    outputs: {plan: "${{ steps.compile.outputs.plan }}"}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: "3.12"}
       - run: pip install -r api/requirements.txt
-      - id: compile
-        run: python api/scripts/compile_graph_bundle.py "${{ inputs.bundle_path }}"
+      - name: Compile without publication
+        run: python api/scripts/compile_graph_bundle.py "${{ inputs.bundle_path }}" > publication-plan.json
+      - name: Verify persona scope, checksums, and publication gates
+        run: |
+          python ops/microservices/validate-graphbundle-plan.py \
+            --bundle "${{ inputs.bundle_path }}" \
+            --plan publication-plan.json \
+            --persona-slug "${{ inputs.persona_slug }}" \
+            --approved-draft-checksum "${{ inputs.approved_draft_checksum }}" \
+            --approved-runtime-checksum "${{ inputs.approved_runtime_checksum }}" \
+            > graphbundle-review.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: graphbundle-plan-${{ inputs.persona_slug }}
+          path: publication-plan.json
+          if-no-files-found: error
+          retention-days: 30
   review:
     needs: plan
     environment: production-content
     runs-on: ubuntu-latest
     steps:
-      - run: echo "persona=${{ inputs.persona_slug }} activate=${{ inputs.activate }}"
-      - name: Activation remains explicit
-        if: inputs.activate == true
-        run: echo "Activation requires staged checksums and direct WA Validator evidence."
+      - run: echo "GraphBundle plan validated for one persona; no staging or activation was performed."
+      - run: echo "Staging and activation require separate authorization, shadow validation, and direct WA Validator evidence."
