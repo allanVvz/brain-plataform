@@ -49,3 +49,5 @@ def test_blue_green_has_gateway_and_role_separated_env_files():
     assert services["control-plane-blue"]["env_file"] != services["transport-blue"]["env_file"]
     assert "BRAIN_RUNTIME_URL" in services["control-plane-blue"]["environment"]
     assert "BRAIN_TRANSPORT_URL" in services["control-plane-blue"]["environment"]
+    assert "BRAIN_RUNTIME_URL" in services["transport-blue"]["environment"]
+    assert "BRAIN_RUNTIME_URL" in services["transport-green"]["environment"]

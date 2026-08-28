@@ -59,6 +59,7 @@ services:
     environment:
       BRAIN_SLOT: blue
       REQUIRED_SCHEMA_VERSION: "130"
+      BRAIN_RUNTIME_URL: ${BRAIN_RUNTIME_INTERNAL_URL:?runtime URL required}
     stop_grace_period: 2m
   transport-green:
     <<: *transport
@@ -66,3 +67,4 @@ services:
     environment:
       BRAIN_SLOT: green
       REQUIRED_SCHEMA_VERSION: "130"
+      BRAIN_RUNTIME_URL: ${BRAIN_RUNTIME_INTERNAL_URL:?runtime URL required}
