@@ -1,0 +1,27 @@
+name: Publish GraphBundle
+on:
+  workflow_dispatch:
+    inputs:
+      bundle_path: {description: Versioned GraphBundle path, required: true}
+      persona_slug: {description: Target persona, required: true}
+      activate: {description: Activate after shadow evidence, type: boolean, default: false}
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs: {plan: "${{ steps.compile.outputs.plan }}"}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install -r api/requirements.txt
+      - id: compile
+        run: python api/scripts/compile_graph_bundle.py "${{ inputs.bundle_path }}"
+  review:
+    needs: plan
+    environment: production-content
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "persona=${{ inputs.persona_slug }} activate=${{ inputs.activate }}"
+      - name: Activation remains explicit
+        if: inputs.activate == true
+        run: echo "Activation requires staged checksums and direct WA Validator evidence."
