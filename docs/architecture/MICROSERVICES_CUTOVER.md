@@ -24,3 +24,9 @@ new turns only. Shadow or proof failure pauses only the target persona.
 Database migrations remain here. Service images declare schema 130 as their
 minimum and use only `brain_control_plane`, `brain_runtime`, or `brain_transport`
 credentials. Grants and roles require a separately reviewed migration.
+
+Each slot receives a separate, host-managed environment file. The control-plane,
+runtime and transport files contain only their own `BRAIN_DB_JWT`; the gateway
+file has no database credential. Control-plane calls runtime and transport over
+the configured private URLs. The same internal token is delivered through the
+service environment files and is never stored in this repository.

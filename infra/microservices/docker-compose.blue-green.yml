@@ -1,25 +1,68 @@
 services:
+  gateway-blue: &gateway
+    image: ${GATEWAY_IMAGE_BLUE:?digest required}
+    env_file:
+      - ${GATEWAY_ENV_FILE:?gateway env file required}
+    environment:
+      BRAIN_SLOT: blue
+      BRAIN_CONTROL_PLANE_URL: ${BRAIN_CONTROL_PLANE_INTERNAL_URL:?control-plane URL required}
+      BRAIN_RUNTIME_URL: ${BRAIN_RUNTIME_INTERNAL_URL:?runtime URL required}
+      BRAIN_TRANSPORT_URL: ${BRAIN_TRANSPORT_INTERNAL_URL:?transport URL required}
+    stop_grace_period: 2m
+  gateway-green:
+    <<: *gateway
+    image: ${GATEWAY_IMAGE_GREEN:?digest required}
+    environment:
+      BRAIN_SLOT: green
+      BRAIN_CONTROL_PLANE_URL: ${BRAIN_CONTROL_PLANE_INTERNAL_URL:?control-plane URL required}
+      BRAIN_RUNTIME_URL: ${BRAIN_RUNTIME_INTERNAL_URL:?runtime URL required}
+      BRAIN_TRANSPORT_URL: ${BRAIN_TRANSPORT_INTERNAL_URL:?transport URL required}
+
   control-plane-blue: &control-plane
     image: ${CONTROL_PLANE_IMAGE_BLUE:?digest required}
-    environment: {BRAIN_SLOT: blue, REQUIRED_SCHEMA_VERSION: "130"}
+    env_file:
+      - ${CONTROL_PLANE_ENV_FILE:?control-plane env file required}
+    environment:
+      BRAIN_SLOT: blue
+      REQUIRED_SCHEMA_VERSION: "130"
+      BRAIN_RUNTIME_URL: ${BRAIN_RUNTIME_INTERNAL_URL:?runtime URL required}
+      BRAIN_TRANSPORT_URL: ${BRAIN_TRANSPORT_INTERNAL_URL:?transport URL required}
     stop_grace_period: 2m
   control-plane-green:
     <<: *control-plane
     image: ${CONTROL_PLANE_IMAGE_GREEN:?digest required}
-    environment: {BRAIN_SLOT: green, REQUIRED_SCHEMA_VERSION: "130"}
+    environment:
+      BRAIN_SLOT: green
+      REQUIRED_SCHEMA_VERSION: "130"
+      BRAIN_RUNTIME_URL: ${BRAIN_RUNTIME_INTERNAL_URL:?runtime URL required}
+      BRAIN_TRANSPORT_URL: ${BRAIN_TRANSPORT_INTERNAL_URL:?transport URL required}
+
   runtime-blue: &runtime
     image: ${RUNTIME_IMAGE_BLUE:?digest required}
-    environment: {BRAIN_SLOT: blue, REQUIRED_SCHEMA_VERSION: "130"}
+    env_file:
+      - ${RUNTIME_ENV_FILE:?runtime env file required}
+    environment:
+      BRAIN_SLOT: blue
+      REQUIRED_SCHEMA_VERSION: "130"
     stop_grace_period: 2m
   runtime-green:
     <<: *runtime
     image: ${RUNTIME_IMAGE_GREEN:?digest required}
-    environment: {BRAIN_SLOT: green, REQUIRED_SCHEMA_VERSION: "130"}
+    environment:
+      BRAIN_SLOT: green
+      REQUIRED_SCHEMA_VERSION: "130"
+
   transport-blue: &transport
     image: ${TRANSPORT_IMAGE_BLUE:?digest required}
-    environment: {BRAIN_SLOT: blue, REQUIRED_SCHEMA_VERSION: "130"}
+    env_file:
+      - ${TRANSPORT_ENV_FILE:?transport env file required}
+    environment:
+      BRAIN_SLOT: blue
+      REQUIRED_SCHEMA_VERSION: "130"
     stop_grace_period: 2m
   transport-green:
     <<: *transport
     image: ${TRANSPORT_IMAGE_GREEN:?digest required}
-    environment: {BRAIN_SLOT: green, REQUIRED_SCHEMA_VERSION: "130"}
+    environment:
+      BRAIN_SLOT: green
+      REQUIRED_SCHEMA_VERSION: "130"

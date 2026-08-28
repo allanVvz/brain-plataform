@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import yaml
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -30,3 +32,20 @@ def test_gateway_routes_decisions_to_runtime_not_transport():
 def test_canonical_n8n_template_has_no_microservice_fork():
     templates = list((ROOT / "api/n8n-workflows").glob("persona-conversation-template.json"))
     assert len(templates) == 1
+
+
+def test_blue_green_has_gateway_and_role_separated_env_files():
+    compose = yaml.safe_load(
+        (ROOT / "infra/microservices/docker-compose.blue-green.yml").read_text(encoding="utf-8")
+    )
+    services = compose["services"]
+    assert set(services) == {
+        "gateway-blue", "gateway-green",
+        "control-plane-blue", "control-plane-green",
+        "runtime-blue", "runtime-green",
+        "transport-blue", "transport-green",
+    }
+    assert services["gateway-blue"]["env_file"] != services["runtime-blue"]["env_file"]
+    assert services["control-plane-blue"]["env_file"] != services["transport-blue"]["env_file"]
+    assert "BRAIN_RUNTIME_URL" in services["control-plane-blue"]["environment"]
+    assert "BRAIN_TRANSPORT_URL" in services["control-plane-blue"]["environment"]
