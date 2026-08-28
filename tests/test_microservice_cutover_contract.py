@@ -52,6 +52,11 @@ def test_blue_green_has_gateway_and_role_separated_env_files():
     assert "BRAIN_TRANSPORT_URL" in services["control-plane-blue"]["environment"]
     assert "BRAIN_RUNTIME_URL" in services["transport-blue"]["environment"]
     assert "BRAIN_RUNTIME_URL" in services["transport-green"]["environment"]
+    for service in (
+        "control-plane-blue", "control-plane-green", "runtime-blue",
+        "runtime-green", "transport-blue", "transport-green",
+    ):
+        assert services[service]["environment"]["REQUIRED_SCHEMA_VERSION"] == "131"
 
 
 def test_source_import_manifest_tracks_merged_service_heads():
