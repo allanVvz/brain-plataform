@@ -1,0 +1,25 @@
+services:
+  control-plane-blue: &control-plane
+    image: ${CONTROL_PLANE_IMAGE_BLUE:?digest required}
+    environment: {BRAIN_SLOT: blue, REQUIRED_SCHEMA_VERSION: "130"}
+    stop_grace_period: 2m
+  control-plane-green:
+    <<: *control-plane
+    image: ${CONTROL_PLANE_IMAGE_GREEN:?digest required}
+    environment: {BRAIN_SLOT: green, REQUIRED_SCHEMA_VERSION: "130"}
+  runtime-blue: &runtime
+    image: ${RUNTIME_IMAGE_BLUE:?digest required}
+    environment: {BRAIN_SLOT: blue, REQUIRED_SCHEMA_VERSION: "130"}
+    stop_grace_period: 2m
+  runtime-green:
+    <<: *runtime
+    image: ${RUNTIME_IMAGE_GREEN:?digest required}
+    environment: {BRAIN_SLOT: green, REQUIRED_SCHEMA_VERSION: "130"}
+  transport-blue: &transport
+    image: ${TRANSPORT_IMAGE_BLUE:?digest required}
+    environment: {BRAIN_SLOT: blue, REQUIRED_SCHEMA_VERSION: "130"}
+    stop_grace_period: 2m
+  transport-green:
+    <<: *transport
+    image: ${TRANSPORT_IMAGE_GREEN:?digest required}
+    environment: {BRAIN_SLOT: green, REQUIRED_SCHEMA_VERSION: "130"}

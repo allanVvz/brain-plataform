@@ -650,3 +650,18 @@ Se nao aparece no grafo, esta incompleto.
 - Grafo de agendamento incompleto deve falhar na validacao antes da publicacao.
 - Sofia deve auxiliar o operador a preencher a matriz campo/pergunta, preservar
   fonte/status e nao copiar perguntas de outra persona ou exemplo.
+
+## 28. Fronteiras de microsservicos e cutover
+
+- `brain-plataform` conserva dashboard, gateway `/api-brain`, migrations,
+  route map e manifests de release.
+- Control plane, conversation runtime e transport usam imagens, health,
+  rollback e roles de banco independentes; nenhum importa codigo de outro.
+- Contratos entre servicos vem somente de `brain-contracts` em versao exata.
+- Deploy de servico nunca executa migration e readiness falha abaixo de
+  `REQUIRED_SCHEMA_VERSION`.
+- Antes do cutover inicial, release compartilhada continua exigindo pausa
+  global. A janela de ate 8 horas, migrations, troca de trafego, limpeza e
+  retomada exigem autorizacoes explicitas e separadas.
+- Depois da prova produtiva registrada, release compativel usa blue/green sem
+  pausa; falha de GraphBundle pausa somente a persona alvo.

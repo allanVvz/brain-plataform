@@ -1,0 +1,16 @@
+{
+  "source_repository": "allanVvz/brain-plataform",
+  "source_sha": "b6ee5edc884e233cc0ff41798f4c19239e04fd88",
+  "schema_version": 130,
+  "contracts_version": "1.0.0",
+  "repositories": ["allanVvz/brain-contracts", "allanVvz/brain-control-plane", "allanVvz/brain-conversation-runtime", "allanVvz/brain-transport"],
+  "inventory_checksum": "sha256:0dcf6c79a809a84a10b006431d916fb97e4ad04e645f21567ac849071baad3ab",
+  "initial_commits": {
+    "brain-contracts": "0a1c05389388fcf392dab7041e30e1c1132379b8",
+    "brain-control-plane": "e45d74d27296045ba1b2293bd6f8ee26369f92a3",
+    "brain-conversation-runtime": "e3137f53594fa5daa304648f649d40f4721242ee",
+    "brain-transport": "c78ad64d7e9d9daef08a0b062766f44983cde3b3"
+  },
+  "route_map_checksum": "sha256:5a39d07bb6867c9d2e705c67360c3ce8a67190e4fa4f6020d9bc9578ec0d37b4",
+  "n8n_checksum": "sha256:b4456123ef983207fc9d70e415443424eb973fe93ddb266b4bde405a3d4e8e11"
+}

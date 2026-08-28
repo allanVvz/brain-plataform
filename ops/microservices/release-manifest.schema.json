@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["source_sha", "contracts_version", "schema_version", "route_map_checksum", "n8n_checksum", "services"],
+  "properties": {
+    "source_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "contracts_version": {"const": "1.0.0"},
+    "schema_version": {"type": "integer", "minimum": 130},
+    "route_map_checksum": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "n8n_checksum": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "services": {
+      "type": "object",
+      "required": ["gateway", "control-plane", "conversation-runtime", "transport"],
+      "additionalProperties": {
+        "type": "object",
+        "required": ["repository", "sha", "digest", "required_schema_version"],
+        "properties": {
+          "repository": {"type": "string"},
+          "sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+          "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+          "required_schema_version": {"type": "integer"}
+        }
+      }
+    }
+  }
+}

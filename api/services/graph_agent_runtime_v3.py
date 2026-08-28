@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import time
 import unicodedata
@@ -4416,6 +4417,32 @@ def _service_request_summary(
     return template.replace("{services}", ", ".join(titles)).strip() if template else ""
 
 
+def _turn_publication(context: ConversationContext) -> dict[str, Any]:
+    """Load the immutable publication captured at turn start.
+
+    The active fallback exists only for offline/rolling QA fixtures that lack
+    the by-ID repository method. Production always fails closed.
+    """
+    try:
+        publication = supabase_client.get_graph_publication_by_id(
+            str(context.publication_id or "")
+        )
+    except (KeyError, RuntimeError):
+        publication = None
+    if publication:
+        return publication
+    runtime = (os.environ.get("ENV") or os.environ.get("ENVIRONMENT") or "").lower()
+    if runtime == "production":
+        raise RuntimeError("turn-pinned GraphRAG publication not found")
+    persona = supabase_client.get_persona(context.persona_slug) or {}
+    publication = supabase_client.get_active_graph_publication(
+        str(persona.get("id") or "")
+    ) or {}
+    if str(publication.get("id") or "") != str(context.publication_id or ""):
+        raise RuntimeError("turn-pinned GraphRAG publication not found")
+    return publication
+
+
 def _deterministic_pending_service_clarification(
     context: ConversationContext,
 ) -> tuple[ConversationDecision, AgentResponse] | None:
@@ -4452,10 +4479,7 @@ def _deterministic_pending_service_clarification(
     ):
         return None
 
-    persona = supabase_client.get_persona(context.persona_slug) or {}
-    publication = supabase_client.get_active_graph_publication(
-        str(persona.get("id") or "")
-    ) or {}
+    publication = _turn_publication(context)
     if (
         str(publication.get("id") or "") != str(context.publication_id or "")
         or str(publication.get("checksum") or "") != str(context.graph_checksum)
@@ -4659,8 +4683,7 @@ def _deterministic_pending_fact_confirmation(
     if not pending or not (accepted_confirmation or rejected_confirmation):
         return None
 
-    persona = supabase_client.get_persona(context.persona_slug) or {}
-    publication = supabase_client.get_active_graph_publication(str(persona.get("id") or "")) or {}
+    publication = _turn_publication(context)
     if (
         str(publication.get("id") or "") != str(context.publication_id or "")
         or str(publication.get("checksum") or "") != str(context.graph_checksum)
@@ -5747,8 +5770,7 @@ def _decide(
         )
     if parse_errors:
         return _invalid_proposal_fallback(context, raw, parse_errors)
-    persona = supabase_client.get_persona(context.persona_slug) or {}
-    publication = supabase_client.get_active_graph_publication(str(persona.get("id") or "")) or {}
+    publication = _turn_publication(context)
     if str(publication.get("id")) != str(context.publication_id) or publication.get("checksum") != context.graph_checksum:
         raise RuntimeError("GraphRAG publication changed during turn")
     document = publication.get("document_json") or {}
