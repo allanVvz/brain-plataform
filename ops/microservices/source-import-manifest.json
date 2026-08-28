@@ -13,9 +13,9 @@
   },
   "current_main_commits": {
     "brain-contracts": "0a1c05389388fcf392dab7041e30e1c1132379b8",
-    "brain-control-plane": "c1457d398dff40368e07b6bf35f883ed750e3813",
-    "brain-conversation-runtime": "2751551735179b5edc2f928bc2ecf1f018c871b8",
-    "brain-transport": "65ea8e79aa8a0a53cc017f6e4fb16d49c6d906f6"
+    "brain-control-plane": "aee6d4d5c615d0914ffce843edbfbb11ea303d06",
+    "brain-conversation-runtime": "ceaf68f191a00b12823097196434f0951eb439ff",
+    "brain-transport": "fd1adb501628b6d9d791b0a89a253cbd76303387"
   },
   "route_map_checksum": "sha256:d1733cb225a648ef1d78c33081fc78c55f557ed85613a71dd0e53be60461f331",
   "n8n_checksum": "sha256:426296e5339741b85bd0711306b7738cb6051cdb7450d13dea36fa32d5690a5e"
