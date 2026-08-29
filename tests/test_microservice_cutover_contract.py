@@ -115,6 +115,21 @@ def test_release_audit_accepts_missing_legacy_worker_only_under_valid_pause():
     assert 'check_container_digest workers .deploy/release-worker-digest true' in audit
 
 
+def test_microservice_resume_never_starts_legacy_worker_and_rolls_back_pause():
+    script = (ROOT / "ops" / "vps" / "resume-microservice-workers.sh").read_text()
+    workflow = (ROOT / ".github" / "workflows" / "resume-microservice-workers.yml").read_text()
+    assert 'MODE="${1:---dry-run}"' in script
+    assert "legacy monolith worker is running" in script
+    assert 'docker start "$name"' in script
+    assert 'docker stop -t 120 "$name"' in script
+    assert 'cp "$pause_evidence" "$PAUSE_FILE"' in script
+    assert "MICROSERVICE_WORKERS_RESUMED=passed" in script
+    assert "worker_groups\": 7" in script
+    assert "options: [dry-run, resume]" in workflow
+    assert "validate-production-release.sh" in workflow
+    assert "resume-production-workers.sh" not in workflow
+
+
 def test_microservice_preflight_runs_immutable_auditor_without_sync():
     workflow = (ROOT / ".github/workflows/_deploy-microservice.yml").read_text(encoding="utf-8")
     preflight = workflow.split("  mutate:", 1)[0]
