@@ -27,6 +27,8 @@ PY
 slot="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["conversation-runtime"]["active"])' "$STATE_FILE")"
 runtime_name="brain-ai-runtime-${slot}-1"
 validator_name="brain-ai-runtime-validator-${slot}-1"
+validator_service="runtime-validator-${slot}"
+COMPOSE=(docker compose --env-file "$ROOT_DIR/.env.compose" -f "$ROOT_DIR/docker-compose.yml" -f "$ROOT_DIR/infra/microservices/docker-compose.blue-green.yml")
 
 for service in gateway control-plane conversation-runtime transport; do
   service_slot="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))[sys.argv[2]]["active"])' "$STATE_FILE" "$service")"
@@ -63,7 +65,11 @@ if [[ "$MODE" == "--dry-run" ]]; then
   exit 0
 fi
 
-validator_was_running="$(docker inspect -f '{{.State.Running}}' "$validator_name")"
+validator_cid="$(docker ps -aq --filter "name=^/${validator_name}$" | head -n 1)"
+validator_was_running=false
+if [[ -n "$validator_cid" ]]; then
+  validator_was_running="$(docker inspect -f '{{.State.Running}}' "$validator_cid")"
+fi
 cleanup() {
   local status="$?"
   if [[ "$validator_was_running" != "true" ]]; then
@@ -86,7 +92,7 @@ until [[ "$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{els
 done
 
 if [[ "$validator_was_running" != "true" ]]; then
-  docker start "$validator_name" >/dev/null
+  "${COMPOSE[@]}" up -d --no-deps "$validator_service" >/dev/null
 fi
 [[ "$(docker inspect -f '{{.State.Running}}' "$validator_name")" == "true" ]] || { echo "validator worker failed to start" >&2; exit 1; }
 
