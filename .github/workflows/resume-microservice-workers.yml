@@ -43,7 +43,7 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
-          source: ops/vps/resume-microservice-workers.sh
+          source: ops/vps/resume-microservice-workers.sh,ops/microservices/release-manifest.json,infra/microservices/docker-compose.blue-green.yml,docker-compose.yml
           target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           overwrite: true
       - name: Validate or resume active microservice worker groups
@@ -53,12 +53,13 @@ jobs:
           AUTHORIZATION_ACTOR: ${{ github.actor }}
           AUTHORIZATION_REASON: ${{ inputs.authorization_reason }}
           RESUME_ACTION: ${{ inputs.action }}
+          RELEASE_MANIFEST: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}/ops/microservices/release-manifest.json
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
-          envs: AUDIT_ROOT,AUTHORIZATION_ACTOR,AUTHORIZATION_REASON,RESUME_ACTION
+          envs: AUDIT_ROOT,AUTHORIZATION_ACTOR,AUTHORIZATION_REASON,RESUME_ACTION,RELEASE_MANIFEST
           command_timeout: 10m
           script: |
             set -Eeuo pipefail
