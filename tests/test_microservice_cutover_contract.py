@@ -97,10 +97,11 @@ def test_release_audit_accepts_missing_legacy_worker_only_under_valid_pause():
     assert 'check_container_digest workers .deploy/release-worker-digest true' in audit
 
 
-def test_microservice_preflight_syncs_auditor_from_immutable_sha():
+def test_microservice_preflight_runs_immutable_auditor_without_sync():
     workflow = (ROOT / ".github/workflows/_deploy-microservice.yml").read_text(encoding="utf-8")
-    assert "Synchronize immutable audit control" in workflow
-    assert "source: ops/vps/validate-production-release.sh" in workflow
+    preflight = workflow.split("  mutate:", 1)[0]
+    assert "script_path: ops/vps/validate-production-release.sh" in preflight
+    assert "scp-action" not in preflight
     assert 'with: {ref: "${{ inputs.manifest_sha }}"}' in workflow
 
 
