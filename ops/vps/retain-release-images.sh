@@ -25,6 +25,13 @@ if [[ -d "$ROOT_DIR/.releases" ]]; then
   printf 'RELEASE_DETAIL_INVENTORY_END\n'
 fi
 printf 'RELEASE_ROOT_INVENTORY_END\n'
+printf 'FILESYSTEM_INVENTORY_BEGIN\n'
+for inventory_root in /var /var/lib /var/log /var/cache /tmp /opt; do
+  [[ -d "$inventory_root" ]] || continue
+  printf 'FILESYSTEM_ROOT\t%s\n' "$inventory_root"
+  du -x -d 1 "$inventory_root" 2>/dev/null | sort -n || true
+done
+printf 'FILESYSTEM_INVENTORY_END\n'
 printf 'CACHE_INVENTORY_BEGIN\n'
 docker system df
 docker image ls --filter dangling=true --no-trunc \
