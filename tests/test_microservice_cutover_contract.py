@@ -96,7 +96,8 @@ def test_validator_uses_only_active_runtime_validator_and_stops_it_after_run():
     assert 'MODE="${1:---dry-run}"' in script
     assert 'runtime_name="brain-ai-runtime-${slot}-1"' in script
     assert 'validator_name="brain-ai-runtime-validator-${slot}-1"' in script
-    assert 'claims_paused=true' in script
+    assert 'validator_operational_state=claims_paused' in script
+    assert 'validator_operational_state=workers_resumed' in script
     assert 'docker start "$validator_name"' in script
     assert 'docker stop -t 120 "$validator_name"' in script
     assert 'docker start "$runner_cid"' in script
@@ -106,6 +107,20 @@ def test_validator_uses_only_active_runtime_validator_and_stops_it_after_run():
     assert "options: [dry-run, run]" in workflow
     assert "run-microservice-wa-validator.sh" in workflow
     assert "release_lifecycle.py show" not in workflow
+
+
+def test_wa_validator_runner_is_an_immutable_internal_image():
+    compose = (ROOT / "docker-compose.yml").read_text()
+    build = (ROOT / ".github" / "workflows" / "build-wa-validator-image.yml").read_text()
+    provision = (ROOT / "ops" / "vps" / "provision-wa-validator-runner.sh").read_text()
+    assert "image: ${WA_VALIDATOR_IMAGE" in compose
+    assert "Dockerfile.wa-validator" not in compose
+    assert "ghcr.io/allanvvz/brain-wa-validator" in build
+    assert 'MODE="${1:---dry-run}"' in provision
+    assert "docker compose" in provision
+    assert "up -d --no-deps wa-validator" in provision
+    assert "exposure=internal" in provision
+    assert "ports:" not in compose[compose.index("  wa-validator:"):compose.index("  grafana:")]
 
 
 def test_release_audit_accepts_missing_legacy_worker_only_under_valid_pause():

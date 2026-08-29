@@ -39,15 +39,24 @@ done
 
 python3 - <<'PY'
 import json
-value = json.load(open(".deploy/control/claims-paused.json", encoding="utf-8"))
-assert value.get("paused") is True, "global claims are not paused"
+from pathlib import Path
+pause = Path(".deploy/control/claims-paused.json")
+if pause.exists():
+    value = json.loads(pause.read_text(encoding="utf-8"))
+    assert value.get("paused") is True, "invalid global pause marker"
+    print("PASS validator_operational_state=claims_paused")
+else:
+    state = json.loads(Path(".deploy/microservices/resume-state.json").read_text(encoding="utf-8"))
+    assert state.get("status") == "workers_resumed", "neither claims pause nor verified resume state exists"
+    assert state.get("legacy_worker") == "stopped", "legacy worker resume is forbidden"
+    print("PASS validator_operational_state=workers_resumed")
 PY
 
 runner_cid="$(docker ps -aq --filter label=com.docker.compose.project=brain-ai --filter label=com.docker.compose.service=wa-validator | head -n 1)"
 [[ -n "$runner_cid" ]] || { echo "WA Validator runner container does not exist" >&2; exit 1; }
 runner_name="$(docker inspect -f '{{.Name}}' "$runner_cid" | sed 's#^/##')"
 runner_was_running="$(docker inspect -f '{{.State.Running}}' "$runner_cid")"
-echo "PASS claims_paused=true validator_runner_exists=true runtime=$runtime_name worker=$validator_name"
+echo "PASS validator_runner_exists=true runtime=$runtime_name worker=$validator_name"
 
 if [[ "$MODE" == "--dry-run" ]]; then
   echo "WA_VALIDATOR_DRY_RUN=passed"
