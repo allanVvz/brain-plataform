@@ -190,6 +190,59 @@ retain_release_history() {
 retain_release_history
 printf 'DISK_RELEASE_HISTORY\tpercent=%s\n' "$(disk_percent)"
 
+retain_release_backups() {
+  local root="/var/backups/brain-ai/releases"
+  [[ -d "$root" ]] || return 0
+  root="$(realpath "$root")"
+  [[ "$root" == "/var/backups/brain-ai/releases" ]] || {
+    echo "Refusing unexpected release backup root: $root" >&2
+    exit 2
+  }
+  local current_tag previous_tag index directory name stamp label week month bytes resolved reason
+  local week_count=0 month_count=0 candidate_count=0 candidate_bytes=0
+  current_tag="$(tr -d '\r\n' < "$ROOT_DIR/.deploy/current-tag" 2>/dev/null || true)"
+  previous_tag="$(tr -d '\r\n' < "$ROOT_DIR/.deploy/previous-tag" 2>/dev/null || true)"
+  declare -A weeks=() months=()
+  mapfile -t directories < <(find "$root" -mindepth 1 -maxdepth 1 -type d \
+    -printf '%f\t%p\n' | awk -F '\t' '$1 ~ /^20[0-9]{6}T[0-9]{6}Z-[A-Za-z0-9._-]+$/' | sort -r | cut -f2-)
+  for index in "${!directories[@]}"; do
+    directory="${directories[$index]}"
+    name="$(basename "$directory")"
+    stamp="${name%%-*}"
+    label="${name#*-}"
+    reason=""
+    if (( index < 3 )); then reason="recent"; fi
+    week="$(date -u -d "${stamp:0:4}-${stamp:4:2}-${stamp:6:2}" +%G-W%V)"
+    month="${stamp:0:6}"
+    if (( week_count < 2 )) && [[ -z "${weeks[$week]:-}" ]]; then
+      weeks["$week"]=1; week_count=$((week_count + 1)); reason="${reason:+$reason,}weekly"
+    fi
+    if (( month_count < 3 )) && [[ -z "${months[$month]:-}" ]]; then
+      months["$month"]=1; month_count=$((month_count + 1)); reason="${reason:+$reason,}monthly"
+    fi
+    if [[ "$label" == "$current_tag" || "$label" == "${current_tag:0:12}" ]]; then reason="${reason:+$reason,}current"; fi
+    if [[ "$label" == "$previous_tag" || "$label" == "${previous_tag:0:12}" ]]; then reason="${reason:+$reason,}previous"; fi
+    if [[ -e "$directory/.keep" ]]; then reason="${reason:+$reason,}keep_marker"; fi
+    bytes="$(du -sb "$directory" | awk '{print $1}')"
+    if [[ -n "$reason" ]]; then
+      printf 'RELEASE_BACKUP_KEEP\t%s\tbytes=%s\treason=%s\n' "$directory" "$bytes" "$reason"
+      continue
+    fi
+    resolved="$(realpath "$directory")"
+    [[ "$resolved" =~ ^${root}/20[0-9]{6}T[0-9]{6}Z-[A-Za-z0-9._-]+$ ]] || {
+      echo "Refusing unsafe release backup candidate: $resolved" >&2; exit 2;
+    }
+    printf 'RELEASE_BACKUP_CANDIDATE\t%s\tbytes=%s\n' "$resolved" "$bytes"
+    candidate_count=$((candidate_count + 1)); candidate_bytes=$((candidate_bytes + bytes))
+    if [[ "$MODE" == "--apply" ]]; then rm -rf -- "$resolved"; fi
+  done
+  printf 'RELEASE_BACKUP_SUMMARY\tmode=%s\tcandidates=%s\tbytes=%s\tpolicy=3_recent+2_weekly+3_monthly\n' \
+    "$MODE" "$candidate_count" "$candidate_bytes"
+}
+
+retain_release_backups
+printf 'DISK_RELEASE_BACKUPS\tpercent=%s\n' "$(disk_percent)"
+
 removed=0
 preserved=0
 while IFS=$'\t' read -r reference image_id; do

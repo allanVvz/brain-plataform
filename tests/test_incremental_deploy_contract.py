@@ -130,3 +130,12 @@ def test_release_history_retention_preserves_active_and_periodic_evidence():
     assert '[[ "$resolved" =~ ^${release_root}/[0-9a-f]{40}$ ]]' in RETENTION
     assert '[[ "$resolved" =~ ^${artifact_root}/brain-release-' in RETENTION
     assert "policy=3_recent+2_weekly+3_monthly" in RETENTION
+
+
+def test_release_backup_retention_is_separate_from_database_backups():
+    assert 'local root="/var/backups/brain-ai/releases"' in RETENTION
+    assert "RELEASE_BACKUP_CANDIDATE" in RETENTION
+    assert "RELEASE_BACKUP_SUMMARY" in RETENTION
+    assert '"$label" == "$current_tag"' in RETENTION
+    assert '"$label" == "$previous_tag"' in RETENTION
+    assert '[[ "$resolved" =~ ^${root}/20[0-9]{6}T' in RETENTION
