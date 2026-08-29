@@ -43,9 +43,11 @@ value = json.load(open(".deploy/control/claims-paused.json", encoding="utf-8"))
 assert value.get("paused") is True, "global claims are not paused"
 PY
 
-runner_cid="$(docker ps -q --filter label=com.docker.compose.project=brain-ai --filter label=com.docker.compose.service=wa-validator | head -n 1)"
-[[ -n "$runner_cid" ]] || { echo "WA Validator runner is not running" >&2; exit 1; }
-echo "PASS claims_paused=true validator_runner=running runtime=$runtime_name worker=$validator_name"
+runner_cid="$(docker ps -aq --filter label=com.docker.compose.project=brain-ai --filter label=com.docker.compose.service=wa-validator | head -n 1)"
+[[ -n "$runner_cid" ]] || { echo "WA Validator runner container does not exist" >&2; exit 1; }
+runner_name="$(docker inspect -f '{{.Name}}' "$runner_cid" | sed 's#^/##')"
+runner_was_running="$(docker inspect -f '{{.State.Running}}' "$runner_cid")"
+echo "PASS claims_paused=true validator_runner_exists=true runtime=$runtime_name worker=$validator_name"
 
 if [[ "$MODE" == "--dry-run" ]]; then
   echo "WA_VALIDATOR_DRY_RUN=passed"
@@ -58,9 +60,21 @@ cleanup() {
   if [[ "$validator_was_running" != "true" ]]; then
     docker stop -t 120 "$validator_name" >/dev/null || true
   fi
+  if [[ "$runner_was_running" != "true" ]]; then
+    docker stop -t 120 "$runner_cid" >/dev/null || true
+  fi
   exit "$status"
 }
 trap cleanup EXIT
+
+if [[ "$runner_was_running" != "true" ]]; then
+  docker start "$runner_cid" >/dev/null
+fi
+runner_deadline=$((SECONDS + 120))
+until [[ "$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$runner_cid")" == "healthy" ]]; do
+  (( SECONDS < runner_deadline )) || { echo "$runner_name did not become healthy" >&2; exit 1; }
+  sleep 3
+done
 
 if [[ "$validator_was_running" != "true" ]]; then
   docker start "$validator_name" >/dev/null

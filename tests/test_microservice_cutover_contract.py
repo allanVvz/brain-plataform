@@ -99,6 +99,9 @@ def test_validator_uses_only_active_runtime_validator_and_stops_it_after_run():
     assert 'claims_paused=true' in script
     assert 'docker start "$validator_name"' in script
     assert 'docker stop -t 120 "$validator_name"' in script
+    assert 'docker start "$runner_cid"' in script
+    assert 'docker stop -t 120 "$runner_cid"' in script
+    assert "runner_deadline=$((SECONDS + 120))" in script
     assert "WA_VALIDATOR_RESULT=passed" in script
     assert "options: [dry-run, run]" in workflow
     assert "run-microservice-wa-validator.sh" in workflow
