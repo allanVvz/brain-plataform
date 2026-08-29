@@ -98,7 +98,8 @@ def test_validator_uses_only_active_runtime_validator_and_stops_it_after_run():
     assert 'validator_name="brain-ai-runtime-validator-${slot}-1"' in script
     assert 'validator_operational_state=claims_paused' in script
     assert 'validator_operational_state=workers_resumed' in script
-    assert 'docker start "$validator_name"' in script
+    assert 'validator_service="runtime-validator-${slot}"' in script
+    assert '"${COMPOSE[@]}" up -d --no-deps "$validator_service"' in script
     assert 'docker stop -t 120 "$validator_name"' in script
     assert 'docker start "$runner_cid"' in script
     assert 'docker stop -t 120 "$runner_cid"' in script
