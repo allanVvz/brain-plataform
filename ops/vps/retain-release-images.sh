@@ -105,3 +105,66 @@ if [[ "$MODE" == "--apply" ]]; then
 fi
 printf 'DISK_AFTER\tpercent=%s\n' "$(disk_percent)"
 printf 'SUMMARY\tmode=%s\tcandidates=%s\tpreserved=%s\n' "$MODE" "$removed" "$preserved"
+
+backup_root="${BACKUP_ROOT:-/var/backups/brain-ai}"
+if [[ -d "$backup_root" ]]; then
+  backup_root="$(realpath "$backup_root")"
+  [[ "$backup_root" == "/var/backups/brain-ai" ]] || {
+    echo "Refusing unexpected backup root: $backup_root" >&2
+    exit 2
+  }
+  latest_target="$(realpath "$backup_root/latest" 2>/dev/null || true)"
+  restore_target="$(awk '{for (i=1;i<=NF;i++) if ($i ~ /^backup=/) {sub(/^backup=/,"",$i); print $i}}' \
+    "$backup_root/restore-tests/LAST_SUCCESS" 2>/dev/null || true)"
+  if [[ -n "$restore_target" ]]; then
+    restore_target="$(realpath "$restore_target" 2>/dev/null || true)"
+  fi
+  declare -A backup_keep=() weekly_seen=() monthly_seen=()
+  mapfile -t backup_dirs < <(find "$backup_root" -mindepth 1 -maxdepth 1 -type d \
+    -printf '%f\t%p\n' | awk -F '\t' '$1 ~ /^[0-9]{8}T[0-9]{6}Z$/' | sort -r | cut -f2-)
+  for index in "${!backup_dirs[@]}"; do
+    directory="${backup_dirs[$index]}"
+    stamp="$(basename "$directory")"
+    if (( index < 3 )); then
+      backup_keep["$directory"]="recent"
+    fi
+    week="$(date -u -d "${stamp:0:4}-${stamp:4:2}-${stamp:6:2}" +%G-W%V)"
+    month="${stamp:0:6}"
+    if (( ${#weekly_seen[@]} < 2 )) && [[ -z "${weekly_seen[$week]:-}" ]]; then
+      weekly_seen["$week"]=1; backup_keep["$directory"]="${backup_keep[$directory]:+${backup_keep[$directory]},}weekly"
+    fi
+    if (( ${#monthly_seen[@]} < 3 )) && [[ -z "${monthly_seen[$month]:-}" ]]; then
+      monthly_seen["$month"]=1; backup_keep["$directory"]="${backup_keep[$directory]:+${backup_keep[$directory]},}monthly"
+    fi
+    if [[ "$directory" == "$latest_target" ]]; then
+      backup_keep["$directory"]="${backup_keep[$directory]:+${backup_keep[$directory]},}latest"
+    fi
+    if [[ "$directory" == "$restore_target" ]]; then
+      backup_keep["$directory"]="${backup_keep[$directory]:+${backup_keep[$directory]},}last_restore"
+    fi
+    if [[ -e "$directory/.keep" ]]; then
+      backup_keep["$directory"]="${backup_keep[$directory]:+${backup_keep[$directory]},}keep_marker"
+    fi
+  done
+  backup_candidates=0
+  backup_bytes=0
+  for directory in "${backup_dirs[@]}"; do
+    bytes="$(du -sb "$directory" | awk '{print $1}')"
+    if [[ -n "${backup_keep[$directory]:-}" ]]; then
+      printf 'BACKUP_KEEP\t%s\tbytes=%s\treason=%s\n' "$directory" "$bytes" "${backup_keep[$directory]}"
+      continue
+    fi
+    resolved="$(realpath "$directory")"
+    [[ "$resolved" == "$backup_root"/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z ]] || {
+      echo "Refusing unsafe backup candidate: $resolved" >&2; exit 2;
+    }
+    printf 'BACKUP_CANDIDATE\t%s\tbytes=%s\n' "$resolved" "$bytes"
+    backup_candidates=$((backup_candidates + 1)); backup_bytes=$((backup_bytes + bytes))
+    if [[ "$MODE" == "--apply" ]]; then
+      rm -rf -- "$resolved"
+    fi
+  done
+  printf 'BACKUP_SUMMARY\tmode=%s\tcandidates=%s\tbytes=%s\tpolicy=3_recent+2_weekly+3_monthly\n' \
+    "$MODE" "$backup_candidates" "$backup_bytes"
+  printf 'DISK_FINAL\tpercent=%s\n' "$(disk_percent)"
+fi
