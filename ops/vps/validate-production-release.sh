@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT_DIR="${AUDIT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env.compose}"
 BACKUP_ROOT="${BACKUP_ROOT:-/var/backups/brain-ai}"
 RESTORE_MARKER="${RESTORE_MARKER:-$BACKUP_ROOT/restore-tests/LAST_SUCCESS}"
@@ -37,6 +37,14 @@ check_file() {
 
 check_file .deploy/release-source-sha release_source_sha
 check_file .deploy/release-directory release_directory
+for required in \
+  .env.compose \
+  .env.microservices/gateway.env \
+  .env.microservices/control-plane.env \
+  .env.microservices/runtime.env \
+  .env.microservices/transport.env; do
+  check_file "$required" "production_config_$(basename "$required")"
+done
 if [[ -n "${EXPECTED_RELEASE_SHA:-}" && -s .deploy/release-source-sha ]]; then
   installed_sha="$(tr -d '\r\n' < .deploy/release-source-sha)"
   if [[ "$installed_sha" == "$EXPECTED_RELEASE_SHA" ]]; then
