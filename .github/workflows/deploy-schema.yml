@@ -4,6 +4,7 @@ on:
     inputs:
       manifest_sha: {description: Integrated release manifest SHA, required: true}
       manifest_path: {description: Release manifest path, required: true, default: ops/microservices/release-manifest.json}
+      action: {description: Dry-run or separately authorized apply, type: choice, options: [dry-run, apply], default: dry-run}
 permissions:
   contents: read
 jobs:
@@ -22,3 +23,33 @@ jobs:
           path: schema-release-plan.json
           if-no-files-found: error
           retention-days: 30
+  apply:
+    needs: dry-run
+    if: inputs.action == 'apply'
+    environment: production
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: "${{ inputs.manifest_sha }}"}
+      - name: Synchronize authorized schema controls
+        uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          source: ops/microservices/bootstrap-service-envs.py,ops/microservices/validate-release-manifest.py,ops/vps/apply-microservice-schema.sh,ops/vps/backup.sh,ops/vps/restore.sh,ops/vps/drain-worker-claims.sh,ops/vps/release_lifecycle.py,supabase/migrations/131_microservice_role_grants.sql,${{ inputs.manifest_path }}
+          target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+          overwrite: true
+      - name: Apply migration 131 with backup and isolated restore
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          command_timeout: 30m
+          script: |
+            set -Eeuo pipefail
+            cd "${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}"
+            bash ops/vps/apply-microservice-schema.sh "${{ inputs.manifest_path }}" --apply

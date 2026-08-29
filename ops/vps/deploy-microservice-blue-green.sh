@@ -98,7 +98,14 @@ if [[ "$ACTION" == "--rollback" ]]; then
   "${COMPOSE[@]}" start "${target_services[@]}"
 else
   "${COMPOSE[@]}" pull "${target_services[@]}"
-  "${COMPOSE[@]}" up -d --no-deps --force-recreate "${target_services[@]}"
+  if [[ -s "$ROOT_DIR/.deploy/control/claims-paused.json" && ${#target_services[@]} -gt 1 ]]; then
+    "${COMPOSE[@]}" up -d --no-deps --force-recreate "$target_service"
+    "${COMPOSE[@]}" stop -t 120 "${target_services[@]:1}" >/dev/null 2>&1 || true
+    workers_paused=true
+  else
+    "${COMPOSE[@]}" up -d --no-deps --force-recreate "${target_services[@]}"
+    workers_paused=false
+  fi
 fi
 
 deadline=$((SECONDS + 180))
@@ -106,12 +113,14 @@ until [[ "$("${COMPOSE[@]}" ps --format json "$target_service" | python3 -c 'imp
   (( SECONDS < deadline )) || { echo "readiness timeout for $target_service" >&2; exit 1; }
   sleep 3
 done
-for candidate_service in "${target_services[@]:1}"; do
-  [[ "$("${COMPOSE[@]}" ps --status running --services "$candidate_service")" == "$candidate_service" ]] || {
-    echo "worker group failed to remain running: $candidate_service" >&2
-    exit 1
-  }
-done
+if [[ "${workers_paused:-false}" != "true" ]]; then
+  for candidate_service in "${target_services[@]:1}"; do
+    [[ "$("${COMPOSE[@]}" ps --status running --services "$candidate_service")" == "$candidate_service" ]] || {
+      echo "worker group failed to remain running: $candidate_service" >&2
+      exit 1
+    }
+  done
+fi
 
 candidate="$STATE_DIR/slots.candidate.json"
 python3 - "$STATE_FILE" "$candidate" "$SERVICE" "$target" "$active" <<'PY'
@@ -148,4 +157,4 @@ if [[ "$active" =~ ^(blue|green)$ && "$active" != "$target" ]]; then
   esac
   "${COMPOSE[@]}" stop -t 120 "${old_services[@]}"
 fi
-echo "activated service=$SERVICE slot=$target; previous=${active:-none}"
+echo "activated service=$SERVICE slot=$target; previous=${active:-none} workers_paused=${workers_paused:-false}"
