@@ -1,0 +1,92 @@
+name: Pause production microservice workers
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Read-only preflight or authorized global pause
+        type: choice
+        options: [dry-run, pause]
+        default: dry-run
+      reason:
+        description: Auditable pause reason
+        required: true
+        default: authorized conversation runtime release
+
+permissions:
+  contents: read
+
+concurrency:
+  group: brain-ai-production
+  cancel-in-progress: false
+
+jobs:
+  pause:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Synchronize approved pause controls
+        if: ${{ inputs.action == 'pause' }}
+        uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          source: ops/vps/release_lifecycle.py,ops/vps/pause-worker-claims.sh,ops/vps/drain-worker-claims.sh
+          target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+          overwrite: true
+      - name: Audit, pause and drain microservice workers
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        env:
+          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+          PAUSE_ACTION: ${{ inputs.action }}
+          PAUSE_REASON: ${{ inputs.reason }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          envs: VPS_APP_DIR,PAUSE_ACTION,PAUSE_REASON
+          command_timeout: 10m
+          script: |
+            set -Eeuo pipefail
+            cd "$VPS_APP_DIR"
+            [[ "$PAUSE_ACTION" == dry-run || "$PAUSE_ACTION" == pause ]]
+            disk_used="$(df -P "$VPS_APP_DIR" | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
+            (( disk_used < 35 )) || { echo "disk gate failed: ${disk_used}% required <35%" >&2; exit 1; }
+            compose=(docker compose --env-file .env.compose -f docker-compose.yml -f infra/microservices/docker-compose.blue-green.yml)
+            mapfile -t slots < <(python3 - <<'PY'
+            import json
+            state = json.load(open('.deploy/microservices/slots.json', encoding='utf-8'))
+            for service in ('gateway', 'control-plane', 'conversation-runtime', 'transport'):
+                slot = (state.get(service) or {}).get('active')
+                if slot not in {'blue', 'green'}:
+                    raise SystemExit(f'{service} has no active slot')
+                print(f'{service}={slot}')
+            PY
+            )
+            for row in "${slots[@]}"; do
+              service="${row%%=*}"; slot="${row#*=}"; compose_name="${service/conversation-runtime/runtime}"
+              health="$(docker inspect -f '{{.State.Health.Status}}' "brain-ai-${compose_name}-${slot}-1")"
+              [[ "$health" == healthy ]] || { echo "$service is not healthy: $health" >&2; exit 1; }
+            done
+            critical="$(printf '%s\n' "select count(*) from public.lead_buffer where status in ('processing','awaiting_proof');" | "${compose[@]}" exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atq')"
+            [[ "$critical" =~ ^[0-9]+$ ]]
+            echo "MICROSERVICE_PAUSE_PREFLIGHT=passed disk=${disk_used}% critical=${critical} slots=${#slots[@]}"
+            [[ "$PAUSE_ACTION" == pause ]] || exit 0
+            bash ops/vps/pause-worker-claims.sh "$PAUSE_REASON" --safety-pause
+            bash ops/vps/drain-worker-claims.sh
+            runtime_slot="$(printf '%s\n' "${slots[@]}" | sed -n 's/^conversation-runtime=//p')"
+            transport_slot="$(printf '%s\n' "${slots[@]}" | sed -n 's/^transport=//p')"
+            control_slot="$(printf '%s\n' "${slots[@]}" | sed -n 's/^control-plane=//p')"
+            workers=(
+              "runtime-conversation-$runtime_slot" "runtime-validator-$runtime_slot"
+              "transport-dispatch-$transport_slot" "transport-media-$transport_slot"
+              "control-plane-knowledge-$control_slot" "control-plane-integrations-$control_slot"
+              "control-plane-validator-$control_slot"
+            )
+            "${compose[@]}" stop -t 120 "${workers[@]}"
+            python3 -c 'import json; v=json.load(open(".deploy/control/claims-paused.json", encoding="utf-8")); assert v.get("paused") is True'
+            echo "MICROSERVICE_WORKERS_PAUSED=passed groups=${#workers[@]} critical=0"

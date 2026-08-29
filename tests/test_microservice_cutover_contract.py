@@ -130,6 +130,22 @@ def test_wa_validator_runner_is_an_immutable_internal_image():
     assert "ports:" not in compose[compose.index("  wa-validator:"):compose.index("  grafana:")]
 
 
+def test_shared_runtime_release_has_audited_global_microservice_pause():
+    workflow = (
+        ROOT / ".github" / "workflows" / "pause-microservice-workers.yml"
+    ).read_text()
+
+    assert "options: [dry-run, pause]" in workflow
+    assert "disk gate failed" in workflow
+    assert "pause-worker-claims.sh" in workflow
+    assert "drain-worker-claims.sh" in workflow
+    assert "status in ('processing','awaiting_proof')" in workflow
+    assert "runtime-conversation-$runtime_slot" in workflow
+    assert "transport-dispatch-$transport_slot" in workflow
+    assert "control-plane-knowledge-$control_slot" in workflow
+    assert "MICROSERVICE_WORKERS_PAUSED=passed" in workflow
+
+
 def test_release_audit_accepts_missing_legacy_worker_only_under_valid_pause():
     audit = (ROOT / "ops/vps/validate-production-release.sh").read_text(encoding="utf-8")
     assert 'allow_paused_missing="${3:-false}"' in audit
