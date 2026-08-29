@@ -81,3 +81,30 @@ def test_source_import_manifest_tracks_merged_service_heads():
         "brain-transport",
     }
     assert all(len(sha) == 40 for sha in heads.values())
+
+
+def test_cutover_keeps_new_worker_groups_stopped_while_claims_are_paused():
+    deploy = (ROOT / "ops/vps/deploy-microservice-blue-green.sh").read_text(encoding="utf-8")
+    assert '.deploy/control/claims-paused.json' in deploy
+    assert 'workers_paused=true' in deploy
+    assert 'stop -t 120 "${target_services[@]:1}"' in deploy
+
+
+def test_service_env_bootstrap_never_distributes_universal_database_secrets():
+    bootstrap = (ROOT / "ops/microservices/bootstrap-service-envs.py").read_text(encoding="utf-8")
+    assert 'values["BRAIN_DB_JWT"] = mint(jwt_secret, role)' in bootstrap
+    assert 'role="brain_control_plane"' in bootstrap
+    assert 'role="brain_runtime"' in bootstrap
+    assert 'role="brain_transport"' in bootstrap
+    assert '"SERVICE_ROLE_KEY"' not in bootstrap
+    assert '"POSTGRES_PASSWORD"' not in bootstrap
+
+
+def test_schema_apply_is_backup_restore_and_pause_gated():
+    schema = (ROOT / "ops/vps/apply-microservice-schema.sh").read_text(encoding="utf-8")
+    for evidence in (
+        "pause-claims", "stop -t 180 workers", "drain-worker-claims.sh",
+        "backup.sh", "restore.sh", "--single-transaction",
+        "131_microservice_role_grants.sql",
+    ):
+        assert evidence in schema
