@@ -37,6 +37,34 @@ for inventory_files_root in /var/backups/brain-ai /var/cache/apt /tmp; do
     -printf 'FILESYSTEM_FILE\t%p\tbytes=%s\tmodified=%TY-%Tm-%TdT%TH:%TM:%TSZ\n' 2>/dev/null | sort || true
 done
 printf 'FILESYSTEM_INVENTORY_END\n'
+
+apt_cache_candidates() {
+  local target resolved bytes
+  local candidates=(
+    /var/cache/apt/pkgcache.bin
+    /var/cache/apt/srcpkgcache.bin
+  )
+  for target in "${candidates[@]}"; do
+    [[ -e "$target" ]] || continue
+    [[ -f "$target" && ! -L "$target" ]] || {
+      echo "Refusing unsafe APT cache candidate: $target" >&2
+      exit 2
+    }
+    resolved="$(realpath -e "$target")"
+    [[ "$resolved" == "$target" ]] || {
+      echo "Refusing unexpected APT cache path: $resolved" >&2
+      exit 2
+    }
+    bytes="$(stat -c '%s' "$resolved")"
+    printf 'APT_CACHE_CANDIDATE\t%s\tbytes=%s\n' "$resolved" "$bytes"
+    if [[ "$MODE" == "--apply" && "${CLEAN_APT_METADATA:-false}" == "true" ]]; then
+      rm -f -- "$resolved"
+      printf 'APT_CACHE_REMOVED\t%s\tbytes=%s\n' "$resolved" "$bytes"
+    fi
+  done
+}
+
+apt_cache_candidates
 printf 'CACHE_INVENTORY_BEGIN\n'
 docker system df
 docker image ls --filter dangling=true --no-trunc \

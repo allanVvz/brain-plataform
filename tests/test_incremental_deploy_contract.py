@@ -110,6 +110,20 @@ def test_retention_inventories_then_prunes_only_unreferenced_cache_without_volum
     assert "DISK_AFTER" in RETENTION
 
 
+def test_retention_cleanup_limits_apt_metadata_to_reviewed_literal_paths():
+    workflow = (
+        ROOT / ".github" / "workflows" / "retain-production-images.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "/var/cache/apt/pkgcache.bin" in RETENTION
+    assert "/var/cache/apt/srcpkgcache.bin" in RETENTION
+    assert "CLEAN_APT_METADATA" in RETENTION
+    assert "! -L" in RETENTION
+    assert "APT_CACHE_REMOVED" in RETENTION
+    assert "clean_apt_metadata:" in workflow
+    assert "CLEAN_APT_METADATA: ${{ inputs.clean_apt_metadata }}" in workflow
+
+
 def test_backup_retention_is_exact_and_preserves_restore_evidence():
     assert "policy=3_recent+2_weekly+3_monthly" in RETENTION
     assert 'directory" == "$latest_target' in RETENTION
