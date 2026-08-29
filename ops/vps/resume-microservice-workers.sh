@@ -6,6 +6,7 @@ MODE="${1:---dry-run}"
 ACTOR="${AUTHORIZATION_ACTOR:-unknown}"
 REASON="${AUTHORIZATION_REASON:-}"
 STATE_FILE="$ROOT_DIR/.deploy/microservices/slots.json"
+MANIFEST="${RELEASE_MANIFEST:-$ROOT_DIR/ops/microservices/release-manifest.json}"
 CONTROL_DIR="$ROOT_DIR/.deploy/control"
 PAUSE_FILE="$CONTROL_DIR/claims-paused.json"
 DISK_MAX_PERCENT="${DISK_MAX_PERCENT:-35}"
@@ -13,6 +14,24 @@ DISK_MAX_PERCENT="${DISK_MAX_PERCENT:-35}"
 [[ "$MODE" == "--dry-run" || "$MODE" == "--apply" ]] || { echo "invalid mode" >&2; exit 2; }
 [[ -n "$REASON" ]] || { echo "authorization reason is required" >&2; exit 2; }
 cd "$ROOT_DIR"
+
+manifest_value() {
+  python3 -c 'import json,sys; data=json.load(open(sys.argv[1], encoding="utf-8")); print(data["services"][sys.argv[2]][sys.argv[3]])' "$MANIFEST" "$@"
+}
+export BRAIN_CONTRACTS_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["contracts_version"])' "$MANIFEST")"
+export GATEWAY_SHA="$(manifest_value gateway sha)" GATEWAY_DIGEST="$(manifest_value gateway digest)"
+export CONTROL_PLANE_SHA="$(manifest_value control-plane sha)" CONTROL_PLANE_DIGEST="$(manifest_value control-plane digest)"
+export RUNTIME_SHA="$(manifest_value conversation-runtime sha)" RUNTIME_DIGEST="$(manifest_value conversation-runtime digest)"
+export TRANSPORT_SHA="$(manifest_value transport sha)" TRANSPORT_DIGEST="$(manifest_value transport digest)"
+export GATEWAY_IMAGE_BLUE="ghcr.io/allanvvz/brain-gateway@$GATEWAY_DIGEST" GATEWAY_IMAGE_GREEN="ghcr.io/allanvvz/brain-gateway@$GATEWAY_DIGEST"
+export CONTROL_PLANE_IMAGE_BLUE="ghcr.io/allanvvz/brain-control-plane@$CONTROL_PLANE_DIGEST" CONTROL_PLANE_IMAGE_GREEN="ghcr.io/allanvvz/brain-control-plane@$CONTROL_PLANE_DIGEST"
+export RUNTIME_IMAGE_BLUE="ghcr.io/allanvvz/brain-conversation-runtime@$RUNTIME_DIGEST" RUNTIME_IMAGE_GREEN="ghcr.io/allanvvz/brain-conversation-runtime@$RUNTIME_DIGEST"
+export TRANSPORT_IMAGE_BLUE="ghcr.io/allanvvz/brain-transport@$TRANSPORT_DIGEST" TRANSPORT_IMAGE_GREEN="ghcr.io/allanvvz/brain-transport@$TRANSPORT_DIGEST"
+export GATEWAY_ENV_FILE="${GATEWAY_ENV_FILE:-$ROOT_DIR/.env.microservices/gateway.env}"
+export CONTROL_PLANE_ENV_FILE="${CONTROL_PLANE_ENV_FILE:-$ROOT_DIR/.env.microservices/control-plane.env}"
+export RUNTIME_ENV_FILE="${RUNTIME_ENV_FILE:-$ROOT_DIR/.env.microservices/runtime.env}"
+export TRANSPORT_ENV_FILE="${TRANSPORT_ENV_FILE:-$ROOT_DIR/.env.microservices/transport.env}"
+COMPOSE=(docker compose --env-file "$ROOT_DIR/.env.compose" -f "$ROOT_DIR/docker-compose.yml" -f "$ROOT_DIR/infra/microservices/docker-compose.blue-green.yml")
 
 python3 - "$STATE_FILE" <<'PY'
 import json, sys
@@ -39,14 +58,14 @@ api_names=(
   "brain-ai-runtime-${runtime_slot}-1"
   "brain-ai-transport-${transport_slot}-1"
 )
-worker_names=(
-  "brain-ai-control-plane-knowledge-${control_slot}-1"
-  "brain-ai-control-plane-integrations-${control_slot}-1"
-  "brain-ai-control-plane-validator-${control_slot}-1"
-  "brain-ai-runtime-conversation-${runtime_slot}-1"
-  "brain-ai-runtime-validator-${runtime_slot}-1"
-  "brain-ai-transport-dispatch-${transport_slot}-1"
-  "brain-ai-transport-media-${transport_slot}-1"
+worker_services=(
+  "control-plane-knowledge-${control_slot}"
+  "control-plane-integrations-${control_slot}"
+  "control-plane-validator-${control_slot}"
+  "runtime-conversation-${runtime_slot}"
+  "runtime-validator-${runtime_slot}"
+  "transport-dispatch-${transport_slot}"
+  "transport-media-${transport_slot}"
 )
 
 for name in "${api_names[@]}"; do
@@ -54,8 +73,9 @@ for name in "${api_names[@]}"; do
   [[ "$health" == "healthy" ]] || { echo "$name is not healthy: $health" >&2; exit 1; }
 done
 
-for name in "${worker_names[@]}"; do
-  docker inspect "$name" >/dev/null
+"${COMPOSE[@]}" config --quiet
+for image in "$CONTROL_PLANE_IMAGE_BLUE" "$RUNTIME_IMAGE_BLUE" "$TRANSPORT_IMAGE_BLUE"; do
+  docker image inspect "$image" >/dev/null
 done
 
 legacy_worker="$(docker ps -q --filter label=com.docker.compose.project=brain-ai --filter label=com.docker.compose.service=workers | head -n 1)"
@@ -81,7 +101,7 @@ claimable_with_commit="$(psql_scalar "select count(*) from public.lead_buffer wh
   exit 1
 }
 
-echo "MICROSERVICE_RESUME_PREFLIGHT=passed disk=${disk_used}% workers=${#worker_names[@]} legacy_worker=stopped"
+echo "MICROSERVICE_RESUME_PREFLIGHT=passed disk=${disk_used}% workers=${#worker_services[@]} legacy_worker=stopped"
 if [[ "$MODE" == "--dry-run" ]]; then
   exit 0
 fi
@@ -94,7 +114,7 @@ released=false
 rollback() {
   local status="$?"
   if [[ "$status" != 0 ]]; then
-    for name in "${started[@]}"; do docker stop -t 120 "$name" >/dev/null || true; done
+    if (( ${#started[@]} )); then "${COMPOSE[@]}" stop -t 120 "${started[@]}" >/dev/null || true; fi
     if [[ "$released" == true && -f "$pause_evidence" ]]; then
       cp "$pause_evidence" "$PAUSE_FILE"
       chmod 0644 "$PAUSE_FILE"
@@ -119,12 +139,11 @@ PY
 
 mv "$PAUSE_FILE" "$pause_evidence"
 released=true
-for name in "${worker_names[@]}"; do
-  docker start "$name" >/dev/null
-  started+=("$name")
-done
-for name in "${worker_names[@]}"; do
-  [[ "$(docker inspect -f '{{.State.Running}}' "$name")" == true ]] || { echo "$name failed to remain running" >&2; exit 1; }
+"${COMPOSE[@]}" up -d --no-deps "${worker_services[@]}"
+started=("${worker_services[@]}")
+for service in "${worker_services[@]}"; do
+  cid="$("${COMPOSE[@]}" ps -q "$service")"
+  [[ -n "$cid" && "$(docker inspect -f '{{.State.Running}}' "$cid")" == true ]] || { echo "$service failed to remain running" >&2; exit 1; }
 done
 
 sleep "${RESUME_OBSERVE_SECONDS:-120}"

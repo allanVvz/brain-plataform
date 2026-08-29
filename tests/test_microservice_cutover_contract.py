@@ -120,8 +120,10 @@ def test_microservice_resume_never_starts_legacy_worker_and_rolls_back_pause():
     workflow = (ROOT / ".github" / "workflows" / "resume-microservice-workers.yml").read_text()
     assert 'MODE="${1:---dry-run}"' in script
     assert "legacy monolith worker is running" in script
-    assert 'docker start "$name"' in script
-    assert 'docker stop -t 120 "$name"' in script
+    assert '"${COMPOSE[@]}" up -d --no-deps "${worker_services[@]}"' in script
+    assert '"${COMPOSE[@]}" stop -t 120 "${started[@]}"' in script
+    assert "docker image inspect" in script
+    assert "release-manifest.json" in script
     assert 'cp "$pause_evidence" "$PAUSE_FILE"' in script
     assert "MICROSERVICE_WORKERS_RESUMED=passed" in script
     assert "worker_groups\": 7" in script
