@@ -89,3 +89,16 @@ def test_retention_only_removes_stopped_stale_release_containers():
     assert "KEEP_CONTAINER" in RETENTION
     assert "STALE_CONTAINER" in RETENTION
     assert 'docker container rm "${removable_containers[@]}"' in RETENTION
+
+
+def test_retention_inventories_then_prunes_only_unreferenced_cache_without_volumes():
+    inventory = RETENTION.index("CACHE_INVENTORY_BEGIN")
+    prune = RETENTION.index("docker image prune --force")
+    assert inventory < prune
+    assert "docker system df" in RETENTION
+    assert "docker builder du" in RETENTION
+    assert "docker builder prune --force" in RETENTION
+    assert "docker system prune" not in RETENTION
+    assert "docker volume prune" not in RETENTION
+    assert "DISK_BEFORE" in RETENTION
+    assert "DISK_AFTER" in RETENTION
