@@ -28,7 +28,8 @@ python3 ops/vps/release_lifecycle.py prepare \
   --candidate-sha "$candidate_sha" --previous-sha "$previous_sha" \
   --impact-class migration --pause-reason "authorized initial microservice cutover" \
   --force --force-reason "owner authorized migration 131 and cutover" >/dev/null
-python3 ops/vps/release_lifecycle.py pause-claims --reason "authorized initial microservice cutover" >/dev/null
+python3 ops/vps/release_lifecycle.py pause-claims --safety-pause \
+  --reason "authorized initial microservice cutover" >/dev/null
 "${COMPOSE[@]}" stop -t 180 workers
 bash ops/vps/drain-worker-claims.sh
 
