@@ -525,9 +525,7 @@ services:
     networks: [backend]
 
   wa-validator:
-    build:
-      context: ./dashboard
-      dockerfile: Dockerfile.wa-validator
+    image: ${WA_VALIDATOR_IMAGE:-ghcr.io/allanvvz/brain-wa-validator:unprovisioned}
     environment:
       WA_VALIDATOR_RUNNER_TOKEN: ${AI_BRAIN_WEBHOOK_TOKEN:?set AI_BRAIN_WEBHOOK_TOKEN}
       WA_VALIDATOR_HEADLESS: ${WA_VALIDATOR_HEADLESS:-true}

@@ -1,0 +1,37 @@
+name: Build WA Validator runner
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - dashboard/Dockerfile.wa-validator
+      - dashboard/scripts/wa-validator.mjs
+      - dashboard/scripts/wa-validator-server.mjs
+      - dashboard/package.json
+      - dashboard/package-lock.json
+      - .github/workflows/build-wa-validator-image.yml
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        id: build
+        with:
+          context: dashboard
+          file: dashboard/Dockerfile.wa-validator
+          push: true
+          tags: ghcr.io/allanvvz/brain-wa-validator:${{ github.sha }}
+          labels: org.opencontainers.image.revision=${{ github.sha }}
+      - run: echo "digest=${{ steps.build.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"

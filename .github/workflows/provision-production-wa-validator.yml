@@ -1,0 +1,67 @@
+name: Provision production WA Validator runner
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_digest:
+        description: Immutable brain-wa-validator image digest
+        required: true
+      action:
+        type: choice
+        options: [dry-run, deploy]
+        default: dry-run
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: brain-ai-production-validator
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Validate immutable digest
+        env:
+          IMAGE_DIGEST: ${{ inputs.image_digest }}
+        run: '[[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]'
+      - name: Synchronize approved runner controls
+        uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          source: docker-compose.yml,ops/vps/provision-wa-validator-runner.sh
+          target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+          overwrite: true
+      - name: Validate or provision internal runner
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        env:
+          AUDIT_ROOT: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+          IMAGE_DIGEST: ${{ inputs.image_digest }}
+          PROVISION_ACTION: ${{ inputs.action }}
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          envs: AUDIT_ROOT,IMAGE_DIGEST,PROVISION_ACTION,GHCR_USERNAME,GHCR_TOKEN
+          command_timeout: 15m
+          script: |
+            set -Eeuo pipefail
+            cd "$AUDIT_ROOT"
+            mode=--dry-run
+            if [[ "$PROVISION_ACTION" == deploy ]]; then
+              mode=--apply
+              if [[ -n "${GHCR_TOKEN:-}" ]]; then
+                printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+              fi
+            fi
+            bash ops/vps/provision-wa-validator-runner.sh "$mode" "$IMAGE_DIGEST"
