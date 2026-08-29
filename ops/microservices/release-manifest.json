@@ -3,7 +3,7 @@
   "contracts_version": "1.0.0",
   "schema_version": 131,
   "route_map_checksum": "sha256:0146765a3fed6f690566d212fee29d1a324183ce2106429bf52f891403fd5c64",
-  "n8n_checksum": "sha256:766f30a09ea4dcbf91a688adb69fa5dd0643932f2d3d2a65681bb6a9e11727b7",
+  "n8n_checksum": "sha256:9580a2a4d6139ee0d1624545ad0a6375098ece55321da8a4340b465550ad59d2",
   "services": {
     "gateway": {
       "repository": "allanVvz/brain-plataform",
