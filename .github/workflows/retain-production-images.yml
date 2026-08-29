@@ -7,6 +7,10 @@ on:
         description: Apply the reviewed inventory (false remains read-only)
         type: boolean
         default: false
+      clean_apt_metadata:
+        description: Remove only the two reviewed APT metadata cache files
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -43,10 +47,11 @@ jobs:
           BRAIN_RELEASE_ROOT: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           RETENTION_MODE: --apply
           CLEANUP_AUTHORIZED: "true"
+          CLEAN_APT_METADATA: ${{ inputs.clean_apt_metadata }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
-          envs: BRAIN_RELEASE_ROOT,RETENTION_MODE,CLEANUP_AUTHORIZED
+          envs: BRAIN_RELEASE_ROOT,RETENTION_MODE,CLEANUP_AUTHORIZED,CLEAN_APT_METADATA
           script_path: ops/vps/retain-release-images.sh
