@@ -10,6 +10,18 @@ if [[ "$MODE" == "--apply" && "${CLEANUP_AUTHORIZED:-false}" != "true" ]]; then
 fi
 cd "$ROOT_DIR"
 
+disk_percent() {
+  df -P "$ROOT_DIR" | awk 'NR==2 {gsub(/%/, "", $5); print $5}'
+}
+
+printf 'DISK_BEFORE\tpercent=%s\n' "$(disk_percent)"
+printf 'CACHE_INVENTORY_BEGIN\n'
+docker system df
+docker image ls --filter dangling=true --no-trunc \
+  --format 'DANGLING_IMAGE\t{{.ID}}\t{{.Size}}\tcreated={{.CreatedSince}}'
+docker builder du 2>/dev/null || true
+printf 'CACHE_INVENTORY_END\n'
+
 declare -A keep=()
 record_component() {
   local component="$1" value="$2"
@@ -85,4 +97,11 @@ while IFS=$'\t' read -r reference image_id; do
   fi
   removed=$((removed + 1))
 done < <(docker image ls --no-trunc --format '{{.Repository}}:{{.Tag}}\t{{.ID}}')
+if [[ "$MODE" == "--apply" ]]; then
+  # These commands never prune volumes. Docker itself limits image pruning to
+  # unreferenced dangling layers and builder pruning to unused build cache.
+  docker image prune --force
+  docker builder prune --force
+fi
+printf 'DISK_AFTER\tpercent=%s\n' "$(disk_percent)"
 printf 'SUMMARY\tmode=%s\tcandidates=%s\tpreserved=%s\n' "$MODE" "$removed" "$preserved"
