@@ -119,6 +119,13 @@ def test_wa_validator_runner_is_an_immutable_internal_image():
     assert 'MODE="${1:---dry-run}"' in provision
     assert "docker compose" in provision
     assert "up -d --no-deps wa-validator" in provision
+    assert 'MODE" == "--deprovision"' in provision
+    assert "WA_VALIDATOR_DEPROVISIONED=passed" in provision
+    assert "volumes=preserved" in provision
+    assert "docker volume" not in provision
+    assert "options: [dry-run, deploy, deprovision]" in (
+        ROOT / ".github" / "workflows" / "provision-production-wa-validator.yml"
+    ).read_text()
     assert "exposure=internal" in provision
     assert "ports:" not in compose[compose.index("  wa-validator:"):compose.index("  grafana:")]
 
