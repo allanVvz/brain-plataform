@@ -26,10 +26,15 @@ if [[ -d "$ROOT_DIR/.releases" ]]; then
 fi
 printf 'RELEASE_ROOT_INVENTORY_END\n'
 printf 'FILESYSTEM_INVENTORY_BEGIN\n'
-for inventory_root in /var /var/lib /var/log /var/cache /tmp /opt; do
+for inventory_root in /var /var/lib /var/log /var/cache /var/cache/apt /var/backups /var/backups/brain-ai /tmp /opt; do
   [[ -d "$inventory_root" ]] || continue
   printf 'FILESYSTEM_ROOT\t%s\n' "$inventory_root"
   du -x -d 1 "$inventory_root" 2>/dev/null | sort -n || true
+done
+for inventory_files_root in /var/backups/brain-ai /var/cache/apt /tmp; do
+  [[ -d "$inventory_files_root" ]] || continue
+  find "$inventory_files_root" -mindepth 1 -maxdepth 1 -type f \
+    -printf 'FILESYSTEM_FILE\t%p\tbytes=%s\tmodified=%TY-%Tm-%TdT%TH:%TM:%TSZ\n' 2>/dev/null | sort || true
 done
 printf 'FILESYSTEM_INVENTORY_END\n'
 printf 'CACHE_INVENTORY_BEGIN\n'
