@@ -46,11 +46,17 @@ jobs:
           script: |
             set -Eeuo pipefail
             cd "${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}"
-            test -s .env.compose
-            test -s .env.microservices/gateway.env
-            test -s .env.microservices/control-plane.env
-            test -s .env.microservices/runtime.env
-            test -s .env.microservices/transport.env
+            for required in \
+              .env.compose \
+              .env.microservices/gateway.env \
+              .env.microservices/control-plane.env \
+              .env.microservices/runtime.env \
+              .env.microservices/transport.env; do
+              if [[ ! -s "$required" ]]; then
+                echo "missing required production configuration: $required" >&2
+                exit 1
+              fi
+            done
             bash ops/vps/validate-production-release.sh
 
   mutate:
