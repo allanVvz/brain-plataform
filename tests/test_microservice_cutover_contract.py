@@ -97,6 +97,13 @@ def test_release_audit_accepts_missing_legacy_worker_only_under_valid_pause():
     assert 'check_container_digest workers .deploy/release-worker-digest true' in audit
 
 
+def test_microservice_preflight_syncs_auditor_from_immutable_sha():
+    workflow = (ROOT / ".github/workflows/_deploy-microservice.yml").read_text(encoding="utf-8")
+    assert "Synchronize immutable audit control" in workflow
+    assert "source: ops/vps/validate-production-release.sh" in workflow
+    assert 'with: {ref: "${{ inputs.manifest_sha }}"}' in workflow
+
+
 def test_service_env_bootstrap_never_distributes_universal_database_secrets():
     bootstrap = (ROOT / "ops/microservices/bootstrap-service-envs.py").read_text(encoding="utf-8")
     assert 'source.setdefault("SUPABASE_URL", "http://kong:8000")' in bootstrap
