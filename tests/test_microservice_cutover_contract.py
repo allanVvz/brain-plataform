@@ -104,7 +104,7 @@ def test_service_env_bootstrap_never_distributes_universal_database_secrets():
 def test_schema_apply_is_backup_restore_and_pause_gated():
     schema = (ROOT / "ops/vps/apply-microservice-schema.sh").read_text(encoding="utf-8")
     for evidence in (
-        "pause-claims", "stop -t 180 workers", "drain-worker-claims.sh",
+        "pause-claims --safety-pause", "stop -t 180 workers", "drain-worker-claims.sh",
         "backup.sh", "restore.sh", "--single-transaction",
         "131_microservice_role_grants.sql",
     ):
