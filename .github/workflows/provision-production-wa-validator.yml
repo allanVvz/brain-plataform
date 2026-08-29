@@ -8,7 +8,7 @@ on:
         required: true
       action:
         type: choice
-        options: [dry-run, deploy]
+        options: [dry-run, deploy, deprovision]
         default: dry-run
 
 permissions:
@@ -63,5 +63,7 @@ jobs:
               if [[ -n "${GHCR_TOKEN:-}" ]]; then
                 printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
               fi
+            elif [[ "$PROVISION_ACTION" == deprovision ]]; then
+              mode=--deprovision
             fi
             bash ops/vps/provision-wa-validator-runner.sh "$mode" "$IMAGE_DIGEST"
