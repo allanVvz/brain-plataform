@@ -8,6 +8,9 @@ DEPLOY = (ROOT / "ops" / "vps" / "deploy-incremental.sh").read_text(encoding="ut
 BLUE_GREEN = (ROOT / "ops" / "vps" / "deploy-api-blue-green.sh").read_text(encoding="utf-8")
 RESUME = (ROOT / "ops" / "vps" / "resume-production-workers.sh").read_text(encoding="utf-8")
 RETENTION = (ROOT / "ops" / "vps" / "retain-release-images.sh").read_text(encoding="utf-8")
+GATEWAY_DIAGNOSTIC = (
+    ROOT / "ops" / "vps" / "diagnose-gateway-readiness.sh"
+).read_text(encoding="utf-8")
 
 
 def test_api_has_two_slots_and_candidate_uses_alternate_local_port():
@@ -139,3 +142,14 @@ def test_release_backup_retention_is_separate_from_database_backups():
     assert '"$label" == "$current_tag"' in RETENTION
     assert '"$label" == "$previous_tag"' in RETENTION
     assert '[[ "$resolved" =~ ^${root}/20[0-9]{6}T' in RETENTION
+
+
+def test_gateway_readiness_diagnostic_is_read_only_and_probes_every_dependency():
+    assert "docker inspect" in GATEWAY_DIAGNOSTIC
+    assert "docker exec" in GATEWAY_DIAGNOSTIC
+    assert "gateway-ready" in GATEWAY_DIAGNOSTIC
+    assert "control-plane/health/ready" in GATEWAY_DIAGNOSTIC
+    assert "conversation-runtime/health/ready" in GATEWAY_DIAGNOSTIC
+    assert "transport/health/ready" in GATEWAY_DIAGNOSTIC
+    for mutation in ("docker stop", "docker rm", "docker restart", "docker compose"):
+        assert mutation not in GATEWAY_DIAGNOSTIC
