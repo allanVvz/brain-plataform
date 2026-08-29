@@ -116,6 +116,8 @@ def test_backup_retention_is_exact_and_preserves_restore_evidence():
 
 def test_release_history_retention_preserves_active_and_periodic_evidence():
     assert "RELEASE_ROOT_INVENTORY_BEGIN" in RETENTION
+    assert "RELEASE_DETAIL_INVENTORY_BEGIN" in RETENTION
+    assert "RELEASE_FILE" in RETENTION
     assert 'release_root="$ROOT_DIR/.releases"' in RETENTION
     assert 'artifact_root="$ROOT_DIR/.release"' in RETENTION
     assert "RELEASE_CANDIDATE" in RETENTION
