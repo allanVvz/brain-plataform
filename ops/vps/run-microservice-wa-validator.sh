@@ -7,6 +7,7 @@ PERSONA_SLUG="${2:?persona slug required}"
 FLOW_ID="${3:?flow id required}"
 INITIAL_STATE="${4:-cold}"
 STATE_FILE="$ROOT_DIR/.deploy/microservices/slots.json"
+MANIFEST="$ROOT_DIR/ops/microservices/release-manifest.json"
 
 [[ "$MODE" == "--dry-run" || "$MODE" == "--run" ]] || { echo "invalid mode" >&2; exit 2; }
 [[ "$PERSONA_SLUG" =~ ^(aurora|tock-fatal)$ ]] || { echo "invalid persona slug" >&2; exit 2; }
@@ -15,6 +16,7 @@ STATE_FILE="$ROOT_DIR/.deploy/microservices/slots.json"
 
 cd "$ROOT_DIR"
 [[ -s "$STATE_FILE" ]] || { echo "microservice slot state missing" >&2; exit 1; }
+[[ -s "$MANIFEST" ]] || { echo "microservice release manifest missing" >&2; exit 1; }
 python3 - "$STATE_FILE" <<'PY'
 import json, sys
 state = json.load(open(sys.argv[1], encoding="utf-8"))
@@ -28,6 +30,31 @@ slot="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding=
 runtime_name="brain-ai-runtime-${slot}-1"
 validator_name="brain-ai-runtime-validator-${slot}-1"
 validator_service="runtime-validator-${slot}"
+
+manifest_value() {
+  python3 -c 'import json,sys; data=json.load(open(sys.argv[1], encoding="utf-8")); print(data[sys.argv[2]] if sys.argv[2] != "service" else data["services"][sys.argv[3]][sys.argv[4]])' "$MANIFEST" "$@"
+}
+export BRAIN_CONTRACTS_VERSION="$(manifest_value contracts_version)"
+export GATEWAY_SHA="$(manifest_value service gateway sha)"
+export GATEWAY_DIGEST="$(manifest_value service gateway digest)"
+export CONTROL_PLANE_SHA="$(manifest_value service control-plane sha)"
+export CONTROL_PLANE_DIGEST="$(manifest_value service control-plane digest)"
+export RUNTIME_SHA="$(manifest_value service conversation-runtime sha)"
+export RUNTIME_DIGEST="$(manifest_value service conversation-runtime digest)"
+export TRANSPORT_SHA="$(manifest_value service transport sha)"
+export TRANSPORT_DIGEST="$(manifest_value service transport digest)"
+export GATEWAY_IMAGE_BLUE="ghcr.io/allanvvz/brain-gateway@$GATEWAY_DIGEST"
+export GATEWAY_IMAGE_GREEN="$GATEWAY_IMAGE_BLUE"
+export CONTROL_PLANE_IMAGE_BLUE="ghcr.io/allanvvz/brain-control-plane@$CONTROL_PLANE_DIGEST"
+export CONTROL_PLANE_IMAGE_GREEN="$CONTROL_PLANE_IMAGE_BLUE"
+export RUNTIME_IMAGE_BLUE="ghcr.io/allanvvz/brain-conversation-runtime@$RUNTIME_DIGEST"
+export RUNTIME_IMAGE_GREEN="$RUNTIME_IMAGE_BLUE"
+export TRANSPORT_IMAGE_BLUE="ghcr.io/allanvvz/brain-transport@$TRANSPORT_DIGEST"
+export TRANSPORT_IMAGE_GREEN="$TRANSPORT_IMAGE_BLUE"
+export GATEWAY_ENV_FILE="$ROOT_DIR/.env.microservices/gateway.env"
+export CONTROL_PLANE_ENV_FILE="$ROOT_DIR/.env.microservices/control-plane.env"
+export RUNTIME_ENV_FILE="$ROOT_DIR/.env.microservices/runtime.env"
+export TRANSPORT_ENV_FILE="$ROOT_DIR/.env.microservices/transport.env"
 COMPOSE=(docker compose --env-file "$ROOT_DIR/.env.compose" -f "$ROOT_DIR/docker-compose.yml" -f "$ROOT_DIR/infra/microservices/docker-compose.blue-green.yml")
 
 for service in gateway control-plane conversation-runtime transport; do

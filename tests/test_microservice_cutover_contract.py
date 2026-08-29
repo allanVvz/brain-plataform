@@ -99,6 +99,10 @@ def test_validator_uses_only_active_runtime_validator_and_stops_it_after_run():
     assert 'validator_operational_state=claims_paused' in script
     assert 'validator_operational_state=workers_resumed' in script
     assert 'validator_service="runtime-validator-${slot}"' in script
+    assert 'MANIFEST="$ROOT_DIR/ops/microservices/release-manifest.json"' in script
+    assert 'export RUNTIME_DIGEST="$(manifest_value service conversation-runtime digest)"' in script
+    assert 'export RUNTIME_ENV_FILE="$ROOT_DIR/.env.microservices/runtime.env"' in script
+    assert 'export TRANSPORT_ENV_FILE="$ROOT_DIR/.env.microservices/transport.env"' in script
     assert '"${COMPOSE[@]}" up -d --no-deps "$validator_service"' in script
     assert 'docker stop -t 120 "$validator_name"' in script
     assert 'docker start "$runner_cid"' in script
