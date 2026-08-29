@@ -17,6 +17,13 @@ disk_percent() {
 printf 'DISK_BEFORE\tpercent=%s\n' "$(disk_percent)"
 printf 'RELEASE_ROOT_INVENTORY_BEGIN\n'
 du -x -d 1 "$ROOT_DIR" 2>/dev/null | sort -n || true
+if [[ -d "$ROOT_DIR/.releases" ]]; then
+  printf 'RELEASE_DETAIL_INVENTORY_BEGIN\n'
+  du -x -d 1 "$ROOT_DIR/.releases" 2>/dev/null | sort -n || true
+  find "$ROOT_DIR/.releases" -mindepth 1 -maxdepth 1 -type f \
+    -printf 'RELEASE_FILE\t%p\tbytes=%s\n' 2>/dev/null | sort || true
+  printf 'RELEASE_DETAIL_INVENTORY_END\n'
+fi
 printf 'RELEASE_ROOT_INVENTORY_END\n'
 printf 'CACHE_INVENTORY_BEGIN\n'
 docker system df
