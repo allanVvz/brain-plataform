@@ -112,3 +112,16 @@ def test_backup_retention_is_exact_and_preserves_restore_evidence():
     assert "BACKUP_CANDIDATE" in RETENTION
     assert '[[ "$resolved" == "$backup_root"/' in RETENTION
     assert 'rm -rf -- "$resolved"' in RETENTION
+
+
+def test_release_history_retention_preserves_active_and_periodic_evidence():
+    assert "RELEASE_ROOT_INVENTORY_BEGIN" in RETENTION
+    assert 'release_root="$ROOT_DIR/.releases"' in RETENTION
+    assert 'artifact_root="$ROOT_DIR/.release"' in RETENTION
+    assert "RELEASE_CANDIDATE" in RETENTION
+    assert "ARTIFACT_CANDIDATE" in RETENTION
+    assert '"$sha" == "$current_tag"' in RETENTION
+    assert '"$sha" == "$previous_tag"' in RETENTION
+    assert '[[ "$resolved" =~ ^${release_root}/[0-9a-f]{40}$ ]]' in RETENTION
+    assert '[[ "$resolved" =~ ^${artifact_root}/brain-release-' in RETENTION
+    assert "policy=3_recent+2_weekly+3_monthly" in RETENTION
