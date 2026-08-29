@@ -90,6 +90,21 @@ def test_cutover_keeps_new_worker_groups_stopped_while_claims_are_paused():
     assert 'stop -t 120 "${target_services[@]:1}"' in deploy
 
 
+def test_validator_uses_only_active_runtime_validator_and_stops_it_after_run():
+    script = (ROOT / "ops" / "vps" / "run-microservice-wa-validator.sh").read_text()
+    workflow = (ROOT / ".github" / "workflows" / "run-production-wa-validator.yml").read_text()
+    assert 'MODE="${1:---dry-run}"' in script
+    assert 'runtime_name="brain-ai-runtime-${slot}-1"' in script
+    assert 'validator_name="brain-ai-runtime-validator-${slot}-1"' in script
+    assert 'claims_paused=true' in script
+    assert 'docker start "$validator_name"' in script
+    assert 'docker stop -t 120 "$validator_name"' in script
+    assert "WA_VALIDATOR_RESULT=passed" in script
+    assert "options: [dry-run, run]" in workflow
+    assert "run-microservice-wa-validator.sh" in workflow
+    assert "release_lifecycle.py show" not in workflow
+
+
 def test_release_audit_accepts_missing_legacy_worker_only_under_valid_pause():
     audit = (ROOT / "ops/vps/validate-production-release.sh").read_text(encoding="utf-8")
     assert 'allow_paused_missing="${3:-false}"' in audit
