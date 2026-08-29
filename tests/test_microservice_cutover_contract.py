@@ -108,3 +108,9 @@ def test_schema_apply_is_backup_restore_and_pause_gated():
         "131_microservice_role_grants.sql",
     ):
         assert evidence in schema
+
+
+def test_schema_workflow_syncs_manifest_checksum_inputs():
+    workflow = (ROOT / ".github/workflows/deploy-schema.yml").read_text(encoding="utf-8")
+    assert "ops/microservices/route-map.json" in workflow
+    assert "api/n8n-workflows/persona-conversation-template.json" in workflow
