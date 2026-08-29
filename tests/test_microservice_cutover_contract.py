@@ -90,6 +90,13 @@ def test_cutover_keeps_new_worker_groups_stopped_while_claims_are_paused():
     assert 'stop -t 120 "${target_services[@]:1}"' in deploy
 
 
+def test_release_audit_accepts_missing_legacy_worker_only_under_valid_pause():
+    audit = (ROOT / "ops/vps/validate-production-release.sh").read_text(encoding="utf-8")
+    assert 'allow_paused_missing="${3:-false}"' in audit
+    assert 'Path(".deploy/control/claims-paused.json")' in audit
+    assert 'check_container_digest workers .deploy/release-worker-digest true' in audit
+
+
 def test_service_env_bootstrap_never_distributes_universal_database_secrets():
     bootstrap = (ROOT / "ops/microservices/bootstrap-service-envs.py").read_text(encoding="utf-8")
     assert 'source.setdefault("SUPABASE_URL", "http://kong:8000")' in bootstrap
