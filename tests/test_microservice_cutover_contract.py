@@ -92,6 +92,7 @@ def test_cutover_keeps_new_worker_groups_stopped_while_claims_are_paused():
 
 def test_service_env_bootstrap_never_distributes_universal_database_secrets():
     bootstrap = (ROOT / "ops/microservices/bootstrap-service-envs.py").read_text(encoding="utf-8")
+    assert 'source.setdefault("SUPABASE_URL", "http://kong:8000")' in bootstrap
     assert 'values["BRAIN_DB_JWT"] = mint(jwt_secret, role)' in bootstrap
     assert 'role="brain_control_plane"' in bootstrap
     assert 'role="brain_runtime"' in bootstrap

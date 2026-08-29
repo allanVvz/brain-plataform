@@ -109,6 +109,9 @@ def main() -> int:
     if not SOURCE.is_file():
         raise SystemExit(".env.compose is missing")
     source = parse_env(SOURCE)
+    # The production Compose stack injects this fixed internal endpoint directly
+    # into containers, so it is intentionally absent from .env.compose.
+    source.setdefault("SUPABASE_URL", "http://kong:8000")
     jwt_secret = source.get("JWT_SECRET", "")
     if len(jwt_secret) < 32:
         raise SystemExit("JWT_SECRET is missing or too short")
