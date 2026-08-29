@@ -17,7 +17,8 @@ SPEC.loader.exec_module(MODULE)
 
 
 def _sha256(path: Path) -> str:
-    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+    canonical = path.read_bytes().replace(b"\r\n", b"\n")
+    return "sha256:" + hashlib.sha256(canonical).hexdigest()
 
 
 def _manifest() -> dict:

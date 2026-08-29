@@ -26,7 +26,10 @@ def _require(condition: bool, message: str) -> None:
 
 
 def _checksum(path: Path) -> str:
-    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+    # Git checks out text with platform-specific line endings. Release
+    # identity must remain stable between Windows authoring and Linux CI/VPS.
+    canonical = path.read_bytes().replace(b"\r\n", b"\n")
+    return "sha256:" + hashlib.sha256(canonical).hexdigest()
 
 
 def validate(path: Path, *, verify_checkout_artifacts: bool = True) -> dict:
