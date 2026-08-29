@@ -102,3 +102,13 @@ def test_retention_inventories_then_prunes_only_unreferenced_cache_without_volum
     assert "docker volume prune" not in RETENTION
     assert "DISK_BEFORE" in RETENTION
     assert "DISK_AFTER" in RETENTION
+
+
+def test_backup_retention_is_exact_and_preserves_restore_evidence():
+    assert "policy=3_recent+2_weekly+3_monthly" in RETENTION
+    assert 'directory" == "$latest_target' in RETENTION
+    assert 'directory" == "$restore_target' in RETENTION
+    assert '[[ -e "$directory/.keep" ]]' in RETENTION
+    assert "BACKUP_CANDIDATE" in RETENTION
+    assert '[[ "$resolved" == "$backup_root"/' in RETENTION
+    assert 'rm -rf -- "$resolved"' in RETENTION
