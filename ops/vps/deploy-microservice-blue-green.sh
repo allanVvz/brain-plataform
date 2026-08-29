@@ -94,6 +94,41 @@ if [[ ! -s "$STATE_FILE" ]]; then
   printf '%s\n' '{"gateway":{"active":"legacy","previous":null}}' > "$STATE_FILE"
 fi
 
+# The split services depend on the private :8090 listener. Older production
+# releases can have a valid active Caddyfile that predates that listener even
+# though the generated internal-upstreams file is already current. Install the
+# approved base config atomically before waiting on gateway readiness, while
+# preserving the current public-upstream file (and therefore legacy traffic).
+install_active_caddy_config() {
+  local approved="$ROOT_DIR/infra/Caddyfile"
+  local active="$CADDY_DIR/Caddyfile"
+  local previous="$STATE_DIR/Caddyfile.previous"
+  local candidate
+
+  [[ -s "$approved" ]] || { echo "missing approved Caddyfile: $approved" >&2; return 1; }
+  [[ -s "$active" ]] || { echo "missing active Caddyfile: $active" >&2; return 1; }
+  cmp -s "$approved" "$active" && return 0
+
+  cp "$active" "$previous"
+  candidate="$(mktemp "$CADDY_DIR/.Caddyfile.microservice.XXXXXX")"
+  cp "$approved" "$candidate"
+  chmod 0644 "$candidate"
+  mv -f "$candidate" "$active"
+
+  if ! "${COMPOSE[@]}" exec -T caddy caddy validate --config /etc/caddy/Caddyfile; then
+    cp "$previous" "$active"
+    return 1
+  fi
+  if ! "${COMPOSE[@]}" exec -T caddy caddy reload --config /etc/caddy/Caddyfile; then
+    cp "$previous" "$active"
+    "${COMPOSE[@]}" exec -T caddy caddy reload --config /etc/caddy/Caddyfile || true
+    return 1
+  fi
+  echo "installed approved Caddy base config; public upstream unchanged"
+}
+
+install_active_caddy_config
+
 if [[ "$ACTION" == "--rollback" ]]; then
   "${COMPOSE[@]}" start "${target_services[@]}"
 else

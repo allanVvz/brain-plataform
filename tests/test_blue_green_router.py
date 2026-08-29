@@ -44,6 +44,17 @@ def test_deployer_defaults_to_dry_run_and_requires_explicit_apply():
     assert 'stop -t 120' in source
 
 
+def test_deployer_installs_private_caddy_listener_before_gateway_readiness():
+    source = (ROOT / "ops/vps/deploy-microservice-blue-green.sh").read_text()
+    install = source.index("install_active_caddy_config\n")
+    readiness = source.index("deadline=$((SECONDS + 180))")
+    assert install < readiness
+    assert 'local approved="$ROOT_DIR/infra/Caddyfile"' in source
+    assert 'local active="$CADDY_DIR/Caddyfile"' in source
+    assert "public upstream unchanged" in source
+    assert 'cp "$previous" "$active"' in source
+
+
 def test_workflow_audits_before_sync_or_mutation():
     source = (ROOT / ".github/workflows/_deploy-microservice.yml").read_text()
     preflight, mutate = source.split("  mutate:", 1)

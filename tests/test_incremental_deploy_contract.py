@@ -8,6 +8,9 @@ DEPLOY = (ROOT / "ops" / "vps" / "deploy-incremental.sh").read_text(encoding="ut
 BLUE_GREEN = (ROOT / "ops" / "vps" / "deploy-api-blue-green.sh").read_text(encoding="utf-8")
 RESUME = (ROOT / "ops" / "vps" / "resume-production-workers.sh").read_text(encoding="utf-8")
 RETENTION = (ROOT / "ops" / "vps" / "retain-release-images.sh").read_text(encoding="utf-8")
+MICROSERVICE_DEPLOY = (
+    ROOT / "ops" / "vps" / "deploy-microservice-blue-green.sh"
+).read_text(encoding="utf-8")
 GATEWAY_DIAGNOSTIC = (
     ROOT / "ops" / "vps" / "diagnose-gateway-readiness.sh"
 ).read_text(encoding="utf-8")
@@ -153,3 +156,13 @@ def test_gateway_readiness_diagnostic_is_read_only_and_probes_every_dependency()
     assert "transport/health/ready" in GATEWAY_DIAGNOSTIC
     for mutation in ("docker stop", "docker rm", "docker restart", "docker compose"):
         assert mutation not in GATEWAY_DIAGNOSTIC
+
+
+def test_microservice_deploy_bootstraps_internal_caddy_without_switching_public_route():
+    install = MICROSERVICE_DEPLOY.index("install_active_caddy_config\n")
+    readiness = MICROSERVICE_DEPLOY.index("deadline=$((SECONDS + 180))")
+    route_switch = MICROSERVICE_DEPLOY.index(
+        'cp "$rendered/public-upstream.caddy" "$CADDY_DIR/public-upstream.caddy"'
+    )
+    assert install < readiness < route_switch
+    assert "public upstream unchanged" in MICROSERVICE_DEPLOY
