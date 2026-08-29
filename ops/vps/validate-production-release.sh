@@ -58,7 +58,7 @@ if [[ -s .deploy/release-directory ]]; then
 fi
 
 check_container_digest() {
-  local service="$1" digest_file="$2" expected cid image_id
+  local service="$1" digest_file="$2" allow_paused_missing="${3:-false}" expected cid image_id
   if [[ ! -s "$digest_file" ]]; then
     printf 'FAIL\t%s_digest\tmissing evidence\n' "$service"; failed=1; return
   fi
@@ -68,6 +68,22 @@ check_container_digest() {
   fi
   cid="$("${COMPOSE_BG[@]}" ps -q "$service")"
   if [[ -z "$cid" ]]; then
+    if [[ "$allow_paused_missing" == "true" ]] && python3 - <<'PY'
+import json
+from pathlib import Path
+
+path = Path(".deploy/control/claims-paused.json")
+try:
+    paused = json.loads(path.read_text(encoding="utf-8")).get("paused") is True
+except (OSError, json.JSONDecodeError, AttributeError):
+    paused = False
+raise SystemExit(0 if paused else 1)
+PY
+    then
+      printf 'PASS\t%s_digest\tcontainer intentionally stopped; claims paused; expected=%s\n' \
+        "$service" "$expected"
+      return
+    fi
     printf 'FAIL\t%s_digest\tcontainer missing\n' "$service"; failed=1; return
   fi
   image_id="$(docker inspect -f '{{.Image}}' "$cid")"
@@ -78,7 +94,7 @@ check_container_digest() {
   fi
 }
 check_container_digest "$active_api_service" .deploy/release-api-digest
-check_container_digest workers .deploy/release-worker-digest
+check_container_digest workers .deploy/release-worker-digest true
 
 "${COMPOSE[@]}" ps
 "${COMPOSE[@]}" exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -P pager=off' <<'SQL'
