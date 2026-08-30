@@ -140,8 +140,10 @@ def test_legacy_runtime_retirement_requires_microservice_cutover_and_pause():
     assert "reverse_proxy gateway-${gateway_slot}:8080" in script
     assert "! grep -Eq 'reverse_proxy api:8080'" in script
     assert 'value.get("paused") is True' in script
-    assert "brain-ai-api-1" in script and "brain-ai-workers-1" in script
-    assert "docker rm -f" in script and "docker image rm" in script
+    assert 'docker ps -aq --filter "ancestor=$image_id"' in script
+    assert '"$status" == "running" && "$name" != "/brain-ai-api-1"' in script
+    assert 'docker image rm "$image_id"' in script
+    assert 'docker stop --time 30 "$cid"' in script and 'docker rm "$cid"' in script
     assert "volumes=preserved" in script
     assert "(( used < 40 ))" in script
 

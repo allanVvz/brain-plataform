@@ -35,13 +35,22 @@ for service in gateway control-plane conversation-runtime transport; do
   echo "PASS service=$service slot=$slot health=$health"
 done
 
-mapfile -t legacy_containers < <(
-  { docker ps -aq --filter 'name=^/brain-ai-api-1$'; docker ps -aq --filter 'name=^/brain-ai-workers-1$'; } | sort -u
-)
 mapfile -t legacy_images < <(docker image ls --format '{{.Repository}} {{.ID}}' | awk '$1=="ghcr.io/allanvvz/brain-plataform/brain-api" || $1=="ghcr.io/allanvvz/brain-plataform/brain-workers" {print $2}' | sort -u)
+mapfile -t legacy_containers < <(
+  for image_id in "${legacy_images[@]}"; do
+    [[ -n "$image_id" ]] && docker ps -aq --filter "ancestor=$image_id"
+  done | sort -u
+)
 for cid in "${legacy_containers[@]}"; do
   [[ -n "$cid" ]] || continue
-  docker inspect -f 'LEGACY_CONTAINER\t{{.Name}}\timage={{.Image}}\tstatus={{.State.Status}}' "$cid"
+  name="$(docker inspect -f '{{.Name}}' "$cid")"
+  status="$(docker inspect -f '{{.State.Status}}' "$cid")"
+  image_ref="$(docker inspect -f '{{.Image}}' "$cid")"
+  echo -e "LEGACY_CONTAINER\t${cid}\t${name}\timage=${image_ref}\tstatus=${status}"
+  if [[ "$status" == "running" && "$name" != "/brain-ai-api-1" ]]; then
+    echo "refusing to remove unexpected running legacy container: $name ($cid)" >&2
+    exit 1
+  fi
 done
 for image_id in "${legacy_images[@]}"; do
   [[ -n "$image_id" ]] || continue
@@ -55,7 +64,14 @@ if [[ "$MODE" == "--dry-run" ]]; then
 fi
 [[ "${LEGACY_DEPROVISION_AUTHORIZED:-}" == "true" ]] || { echo "authorization marker missing" >&2; exit 2; }
 for cid in "${legacy_containers[@]}"; do
-  [[ -n "$cid" ]] && docker rm -f "$cid"
+  [[ -n "$cid" ]] || continue
+  name="$(docker inspect -f '{{.Name}}' "$cid")"
+  status="$(docker inspect -f '{{.State.Status}}' "$cid")"
+  if [[ "$status" == "running" ]]; then
+    [[ "$name" == "/brain-ai-api-1" ]] || { echo "running-container safety check changed: $name" >&2; exit 1; }
+    docker stop --time 30 "$cid"
+  fi
+  docker rm "$cid"
 done
 for image_id in "${legacy_images[@]}"; do
   [[ -n "$image_id" ]] && docker image rm "$image_id"
