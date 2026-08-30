@@ -24,27 +24,75 @@ def parse(path: Path) -> dict[str, str]:
     return values
 
 
+def replace_env(path: Path, key: str, value: str) -> None:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    replaced = False
+    result: list[str] = []
+    for line in lines:
+        is_target = (
+            "=" in line
+            and not line.lstrip().startswith("#")
+            and line.split("=", 1)[0].strip() == key
+        )
+        if is_target:
+            if not replaced:
+                result.append(f"{key}={value}")
+                replaced = True
+        else:
+            result.append(line)
+    if not replaced:
+        result.append(f"{key}={value}")
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text("\n".join(result) + "\n", encoding="utf-8")
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, path)
+
+
+def sqlite_registry() -> tuple[list[str], list[str]]:
+    container = json.loads(subprocess.check_output(
+        ["docker", "inspect", "brain-ai-n8n-1"], text=True
+    ))[0]
+    env = dict(item.split("=", 1) for item in container["Config"]["Env"] if "=" in item)
+    if env.get("DB_TYPE", "sqlite") != "sqlite":
+        raise SystemExit("registry synchronization currently requires sqlite metadata")
+    user_folder = env.get("N8N_USER_FOLDER", "/home/node/.n8n")
+    database_path = f"{user_folder.rstrip('/')}/database.sqlite"
+    node = """const {DatabaseSync}=require('node:sqlite');const db=new DatabaseSync(process.argv[1],{readOnly:true});const columns=db.prepare(\"SELECT m.name AS table_name,p.name AS column_name FROM sqlite_master m JOIN pragma_table_info(m.name) p WHERE m.type='table' AND (lower(p.name) LIKE '%apikey%' OR (lower(p.name) LIKE '%api%' AND lower(p.name) LIKE '%key%')) ORDER BY m.name,p.name\").all();const keys=db.prepare(\"SELECT apiKey FROM user_api_keys ORDER BY rowid DESC\").all().map(x=>x.apiKey);console.log(JSON.stringify({columns,keys}));db.close();"""
+    output = subprocess.check_output(
+        ["docker", "exec", "brain-ai-n8n-1", "node", "-e", node, database_path],
+        text=True,
+    )
+    data = json.loads(output)
+    columns = [f"{row['table_name']}.{row['column_name']}" for row in data["columns"]]
+    keys = [value for value in data["keys"] if isinstance(value, str) and value]
+    return columns, keys
+
+
 def main() -> int:
     mode = sys.argv[1] if len(sys.argv) > 1 else "--dry-run"
-    if mode not in {"--dry-run", "--audit-registry", "--apply"} or ROOT != Path("/opt/brain-ai"):
+    if mode not in {"--dry-run", "--audit-registry", "--sync-registry", "--apply"} or ROOT != Path("/opt/brain-ai"):
         raise SystemExit("invalid mode or production root")
-    if mode == "--audit-registry":
+    if mode in {"--audit-registry", "--sync-registry"}:
         container = json.loads(subprocess.check_output(
             ["docker", "inspect", "brain-ai-n8n-1"], text=True
         ))[0]
         env = dict(item.split("=", 1) for item in container["Config"]["Env"] if "=" in item)
         database_type = env.get("DB_TYPE", "sqlite")
         if database_type == "sqlite":
-            user_folder = env.get("N8N_USER_FOLDER", "/home/node/.n8n")
-            database_path = f"{user_folder.rstrip('/')}/database.sqlite"
-            node = """const {DatabaseSync}=require('node:sqlite');const db=new DatabaseSync(process.argv[1],{readOnly:true});const q=\"SELECT m.name AS table_name,p.name AS column_name FROM sqlite_master m JOIN pragma_table_info(m.name) p WHERE m.type='table' AND (lower(p.name) LIKE '%apikey%' OR (lower(p.name) LIKE '%api%' AND lower(p.name) LIKE '%key%')) ORDER BY m.name,p.name\";console.log(JSON.stringify(db.prepare(q).all()));db.close();"""
-            output = subprocess.check_output(
-                ["docker", "exec", "brain-ai-n8n-1", "node", "-e", node, database_path],
-                text=True,
-            )
-            rows = json.loads(output)
-            columns = [f"{row['table_name']}.{row['column_name']}" for row in rows]
-            print("N8N_API_KEY_REGISTRY_AUDIT database=sqlite columns=" + ",".join(columns))
+            columns, keys = sqlite_registry()
+            configured = parse(SOURCE).get("N8N_API_KEY", "")
+            print("N8N_API_KEY_REGISTRY_AUDIT database=sqlite columns=" + ",".join(columns) + f" key_count={len(keys)} configured_match={str(configured in keys).lower()}")
+            if mode == "--audit-registry":
+                return 0
+            if os.environ.get("N8N_CREDENTIAL_SYNC_AUTHORIZED") != "true":
+                raise SystemExit("authorization marker missing")
+            if not keys:
+                raise SystemExit("n8n API key registry is empty")
+            replace_env(SOURCE, "N8N_API_KEY", keys[0])
+            replace_env(TARGET, "N8N_API_KEY", keys[0])
+            if parse(SOURCE).get("N8N_API_KEY") != keys[0] or parse(TARGET).get("N8N_API_KEY") != keys[0]:
+                raise SystemExit("registry credential verification failed")
+            print("N8N_REGISTRY_CREDENTIAL_SYNC_RESULT=passed value=redacted files=2 mode=0600")
             return 0
         if database_type not in {"postgresdb", "postgres"}:
             raise SystemExit("unsupported n8n database type")
