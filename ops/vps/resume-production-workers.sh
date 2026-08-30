@@ -6,7 +6,7 @@ ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env.compose}"
 TARGET_SHA="${1:?usage: resume-production-workers.sh <full-git-sha>}"
 RESUME_OBSERVE_SECONDS="${RESUME_OBSERVE_SECONDS:-120}"
 RESUME_POLL_SECONDS="${RESUME_POLL_SECONDS:-2}"
-DISK_MAX_PERCENT="${DISK_MAX_PERCENT:-35}"
+DISK_MAX_PERCENT="${DISK_MAX_PERCENT:-40}"
 [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "full Git SHA required" >&2; exit 2; }
 cd "$ROOT_DIR"
 

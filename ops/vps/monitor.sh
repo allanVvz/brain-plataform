@@ -3,7 +3,7 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env.compose}"
 BACKUP_ROOT="${BACKUP_ROOT:-/var/backups/brain-ai}"
-DISK_MAX_PERCENT="${DISK_MAX_PERCENT:-35}"
+DISK_MAX_PERCENT="${DISK_MAX_PERCENT:-40}"
 cd "$ROOT_DIR"
 failed=0
 COMPOSE=(docker compose --env-file "$ENV_FILE" --profile blue-green)

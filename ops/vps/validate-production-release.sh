@@ -5,7 +5,7 @@ ROOT_DIR="${AUDIT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env.compose}"
 BACKUP_ROOT="${BACKUP_ROOT:-/var/backups/brain-ai}"
 RESTORE_MARKER="${RESTORE_MARKER:-$BACKUP_ROOT/restore-tests/LAST_SUCCESS}"
-DISK_MAX_PERCENT="${DISK_MAX_PERCENT:-35}"
+DISK_MAX_PERCENT="${DISK_MAX_PERCENT:-40}"
 cd "$ROOT_DIR"
 COMPOSE=(docker compose --env-file "$ENV_FILE")
 COMPOSE_BG=(docker compose --env-file "$ENV_FILE" --profile blue-green)

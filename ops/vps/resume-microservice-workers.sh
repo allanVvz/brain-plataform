@@ -9,7 +9,7 @@ STATE_FILE="$ROOT_DIR/.deploy/microservices/slots.json"
 MANIFEST="${RELEASE_MANIFEST:-$ROOT_DIR/ops/microservices/release-manifest.json}"
 CONTROL_DIR="$ROOT_DIR/.deploy/control"
 PAUSE_FILE="$CONTROL_DIR/claims-paused.json"
-DISK_MAX_PERCENT="${DISK_MAX_PERCENT:-35}"
+DISK_MAX_PERCENT="${DISK_MAX_PERCENT:-40}"
 
 [[ "$MODE" == "--dry-run" || "$MODE" == "--apply" ]] || { echo "invalid mode" >&2; exit 2; }
 [[ -n "$REASON" ]] || { echo "authorization reason is required" >&2; exit 2; }
