@@ -61,12 +61,26 @@ jobs:
             esac
             python3 -c 'import json; value=json.load(open(".deploy/control/claims-paused.json", encoding="utf-8")); assert value.get("paused") is True, "claims are not paused"'
 
-            active_api_service="$(tr -d '\r\n' < .deploy/api-active-slot 2>/dev/null || true)"
-            [[ "$active_api_service" == "api-candidate" ]] || active_api_service=api
-            compose=(docker compose --env-file .env.compose)
+            state_file=.deploy/microservices/slots.json
+            [[ -s "$state_file" ]] || {
+              echo "microservice slot state is missing" >&2
+              exit 1
+            }
+            control_slot="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["control-plane"]["active"])' "$state_file")"
+            [[ "$control_slot" == "blue" || "$control_slot" == "green" ]] || {
+              echo "invalid active control-plane slot: $control_slot" >&2
+              exit 1
+            }
+            control_service="control-plane-$control_slot"
+            control_container="brain-ai-control-plane-$control_slot-1"
+            [[ "$(docker inspect -f '{{.State.Health.Status}}' "$control_container")" == "healthy" ]] || {
+              echo "active control plane is not healthy" >&2
+              exit 1
+            }
+            compose=(docker compose --env-file .env.compose -f docker-compose.yml -f infra/microservices/docker-compose.blue-green.yml)
 
             audit_template() {
-              "${compose[@]}" exec -T "$active_api_service" python -c 'import json,sys; from scripts import resync_graph_agent_workflows as r; from services import deepseek_n8n_service as d, n8n_client, supabase_client; slug=sys.argv[1]; persona=supabase_client.get_persona(slug); binding=r._binding(persona, require_active=True); connection=supabase_client.get_persona_integration_connection(str(persona["id"]), "deepseek") or {}; config=r._resolved_config(persona, connection, binding); expected=d._workflow_for_persona(persona, credential_id=str(config["n8n_credential_id"]), credential_name="Brain DeepSeek \u2014 " + slug, model_binding={"model": config.get("model"), "endpoint": config.get("endpoint"), "reply_source": config.get("reply_source")}); live=n8n_client.get_workflow(str(config["n8n_workflow_id"])) or {}; expected_checksum=d._workflow_checksum(expected); live_checksum=d._workflow_checksum(live) if live else None; print(json.dumps({"persona_slug": slug, "workflow_id": config.get("n8n_workflow_id"), "active": live.get("active"), "stored_checksum": config.get("workflow_checksum"), "live_checksum": live_checksum, "candidate_checksum": expected_checksum, "would_change": live_checksum != expected_checksum}, ensure_ascii=True, sort_keys=True))' "$PERSONA_SLUG"
+              "${compose[@]}" exec -T "$control_service" python -c 'import json,sys; from scripts import resync_graph_agent_workflows as r; from services import deepseek_n8n_service as d, n8n_client, supabase_client; slug=sys.argv[1]; persona=supabase_client.get_persona(slug); binding=r._binding(persona, require_active=True); connection=supabase_client.get_persona_integration_connection(str(persona["id"]), "deepseek") or {}; config=r._resolved_config(persona, connection, binding); expected=d._workflow_for_persona(persona, credential_id=str(config["n8n_credential_id"]), credential_name="Brain DeepSeek \u2014 " + slug, model_binding={"model": config.get("model"), "endpoint": config.get("endpoint"), "reply_source": config.get("reply_source")}); live=n8n_client.get_workflow(str(config["n8n_workflow_id"])) or {}; expected_checksum=d._workflow_checksum(expected); live_checksum=d._workflow_checksum(live) if live else None; print(json.dumps({"persona_slug": slug, "workflow_id": config.get("n8n_workflow_id"), "active": live.get("active"), "stored_checksum": config.get("workflow_checksum"), "live_checksum": live_checksum, "candidate_checksum": expected_checksum, "would_change": live_checksum != expected_checksum}, ensure_ascii=True, sort_keys=True))' "$PERSONA_SLUG"
             }
 
             echo "N8N_TEMPLATE_AUDIT_BEFORE=$(audit_template)"
@@ -74,7 +88,7 @@ jobs:
               exit 0
             fi
 
-            "${compose[@]}" exec -T "$active_api_service" \
+            "${compose[@]}" exec -T "$control_service" \
               python scripts/resync_graph_agent_workflows.py \
               "$PERSONA_SLUG" --active-persona "$PERSONA_SLUG"
             after="$(audit_template)"

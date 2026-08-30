@@ -148,6 +148,17 @@ def test_legacy_runtime_retirement_requires_microservice_cutover_and_pause():
     assert "(( used < 40 ))" in script
 
 
+def test_n8n_workflow_management_runs_in_active_control_plane_slot():
+    workflow = (
+        ROOT / ".github" / "workflows" / "manage-production-conversation-workflow.yml"
+    ).read_text()
+    assert '.deploy/microservices/slots.json' in workflow
+    assert '["control-plane"]["active"]' in workflow
+    assert 'control_service="control-plane-$control_slot"' in workflow
+    assert 'infra/microservices/docker-compose.blue-green.yml' in workflow
+    assert 'active_api_service' not in workflow
+
+
 def test_release_audit_accepts_retired_monolith_only_with_active_microservices():
     script = (ROOT / "ops" / "vps" / "validate-production-release.sh").read_text()
     assert 'gateway_slot" =~ ^(blue|green)$' in script
