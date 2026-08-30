@@ -109,7 +109,10 @@ def test_validator_uses_only_active_runtime_validator_and_stops_it_after_run():
     assert 'docker stop -t 120 "$runner_cid"' in script
     assert "runner_deadline=$((SECONDS + 120))" in script
     assert "WA_VALIDATOR_RESULT=passed" in script
-    assert "options: [dry-run, run]" in workflow
+    assert "options: [dry-run, run, inspect]" in workflow
+    assert '[[ "$VALIDATOR_ACTION" == "inspect" ]] && mode=--inspect' in workflow
+    assert "WA_VALIDATOR_INSPECTION=" in script
+    assert "WA_VALIDATOR_INSPECT_RESULT=passed" in script
     assert "run-microservice-wa-validator.sh" in workflow
     assert "release_lifecycle.py show" not in workflow
 

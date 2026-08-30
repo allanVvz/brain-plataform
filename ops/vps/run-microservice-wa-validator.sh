@@ -6,13 +6,17 @@ MODE="${1:---dry-run}"
 PERSONA_SLUG="${2:?persona slug required}"
 FLOW_ID="${3:?flow id required}"
 INITIAL_STATE="${4:-cold}"
+SESSION_ID="${5:-}"
 STATE_FILE="$ROOT_DIR/.deploy/microservices/slots.json"
 MANIFEST="$ROOT_DIR/ops/microservices/release-manifest.json"
 
-[[ "$MODE" == "--dry-run" || "$MODE" == "--run" ]] || { echo "invalid mode" >&2; exit 2; }
+[[ "$MODE" == "--dry-run" || "$MODE" == "--run" || "$MODE" == "--inspect" ]] || { echo "invalid mode" >&2; exit 2; }
 [[ "$PERSONA_SLUG" =~ ^(aurora|tock-fatal)$ ]] || { echo "invalid persona slug" >&2; exit 2; }
 [[ "$FLOW_ID" =~ ^[a-z0-9_]{2,100}$ ]] || { echo "invalid flow id" >&2; exit 2; }
 [[ "$INITIAL_STATE" == "cold" || "$INITIAL_STATE" == "known_name" ]] || { echo "invalid initial state" >&2; exit 2; }
+if [[ "$MODE" == "--inspect" ]]; then
+  [[ "$SESSION_ID" =~ ^[A-Za-z0-9_-]{8,160}$ ]] || { echo "valid session id required for inspect" >&2; exit 2; }
+fi
 
 cd "$ROOT_DIR"
 [[ -s "$STATE_FILE" ]] || { echo "microservice slot state missing" >&2; exit 1; }
@@ -80,6 +84,12 @@ else:
     assert state.get("legacy_worker") == "stopped", "legacy worker resume is forbidden"
     print("PASS validator_operational_state=workers_resumed")
 PY
+
+if [[ "$MODE" == "--inspect" ]]; then
+  docker exec "$runtime_name" python -c 'import json,sys; from services import wa_validator_service as w; s=w.get_session(sys.argv[1]); turns=[]; keep=("role","text","intent","route","handoff","message_id","pipeline_contract","graph_version","graph_checksum","journey_state","turn_audit","semantic_audit"); [turns.append({k:t.get(k) for k in keep if k in t}) for t in (((s.get("output") or {}).get("conversation") or []))]; result={"id":s.get("id"),"persona_slug":s.get("persona_slug"),"publication_id":s.get("publication_id"),"status":s.get("status"),"error":s.get("error"),"technical_pass":s.get("technical_pass"),"quality_pass":s.get("quality_pass"),"quality_scope":s.get("quality_scope"),"turns":turns}; print("WA_VALIDATOR_INSPECTION="+json.dumps(result, ensure_ascii=True, sort_keys=True))' "$SESSION_ID"
+  echo "WA_VALIDATOR_INSPECT_RESULT=passed"
+  exit 0
+fi
 
 runner_cid="$(docker ps -aq --filter label=com.docker.compose.project=brain-ai --filter label=com.docker.compose.service=wa-validator | head -n 1)"
 [[ -n "$runner_cid" ]] || { echo "WA Validator runner container does not exist" >&2; exit 1; }

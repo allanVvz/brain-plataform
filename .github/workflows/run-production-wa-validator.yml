@@ -17,10 +17,13 @@ on:
         options: [cold, known_name]
         default: cold
       action:
-        description: Validate prerequisites or run the internal session
+        description: Validate prerequisites, run, or inspect one terminal session
         type: choice
-        options: [dry-run, run]
+        options: [dry-run, run, inspect]
         default: dry-run
+      session_id:
+        description: Existing terminal session UUID (required only for inspect)
+        required: false
 
 permissions:
   contents: read
@@ -53,17 +56,20 @@ jobs:
           FLOW_ID: ${{ inputs.flow_id }}
           INITIAL_STATE: ${{ inputs.initial_state }}
           VALIDATOR_ACTION: ${{ inputs.action }}
+          VALIDATOR_SESSION_ID: ${{ inputs.session_id }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
-          envs: VPS_APP_DIR,PERSONA_SLUG,FLOW_ID,INITIAL_STATE,VALIDATOR_ACTION
+          envs: VPS_APP_DIR,PERSONA_SLUG,FLOW_ID,INITIAL_STATE,VALIDATOR_ACTION,VALIDATOR_SESSION_ID
           command_timeout: 20m
           script: |
             set -Eeuo pipefail
             cd "$VPS_APP_DIR"
             mode=--dry-run
             [[ "$VALIDATOR_ACTION" == "run" ]] && mode=--run
+            [[ "$VALIDATOR_ACTION" == "inspect" ]] && mode=--inspect
             bash ops/vps/run-microservice-wa-validator.sh \
-              "$mode" "$PERSONA_SLUG" "$FLOW_ID" "$INITIAL_STATE"
+              "$mode" "$PERSONA_SLUG" "$FLOW_ID" "$INITIAL_STATE" \
+              "$VALIDATOR_SESSION_ID"
