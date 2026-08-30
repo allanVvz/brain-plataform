@@ -167,6 +167,15 @@ def test_control_plane_receives_internal_n8n_endpoint_in_both_slots():
     assert compose.count("N8N_BASE_URL: ${N8N_BASE_URL:-http://n8n:5678}") == 2
 
 
+def test_control_plane_n8n_credential_sync_is_redacted_and_authorized():
+    script = (ROOT / "ops" / "microservices" / "sync-control-plane-n8n-credential.py").read_text()
+    workflow = (ROOT / ".github" / "workflows" / "sync-production-control-plane-n8n-credential.yml").read_text()
+    assert "N8N_CREDENTIAL_SYNC_AUTHORIZED" in script and "N8N_CREDENTIAL_SYNC_AUTHORIZED" in workflow
+    assert "value=redacted" in script
+    assert 'value.get("paused") is True' in workflow
+    assert "options: [dry-run, apply]" in workflow
+
+
 def test_release_audit_accepts_retired_monolith_only_with_active_microservices():
     script = (ROOT / "ops" / "vps" / "validate-production-release.sh").read_text()
     assert 'gateway_slot" =~ ^(blue|green)$' in script
