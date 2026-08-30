@@ -25,8 +25,8 @@
     },
     "transport": {
       "repository": "allanVvz/brain-transport",
-      "sha": "52c87bb9b6ce51fd2b7a2b90340853e448e29bad",
-      "digest": "sha256:95075caa5fd88d20024d1bc699bfc562db00d133e65877f325bea95b1f9f6a20",
+      "sha": "78fee9a329f5d751b63657388e5cc1f3b41a9903",
+      "digest": "sha256:ff9b8436ff590c57415494b9043dccf5e7cd15c23fd0ba3a543112f92550268e",
       "required_schema_version": 131
     }
   }
