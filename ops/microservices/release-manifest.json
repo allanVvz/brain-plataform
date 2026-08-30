@@ -19,14 +19,14 @@
     },
     "conversation-runtime": {
       "repository": "allanVvz/brain-conversation-runtime",
-      "sha": "cf23f17aaf2ea33a56bf95f9c383e4221dfcd306",
-      "digest": "sha256:2cbbd58be9ccf9777e61a9feaec0fae528e1686d2ecb6611ebff140f2c9cf250",
+      "sha": "11137cffe3f5d97e68f78de15929e14016c6e3a7",
+      "digest": "sha256:2c6ebd56f3d5c69c1c44cdb6698212120979cdc7541ec5641376c4bc5e31dc61",
       "required_schema_version": 131
     },
     "transport": {
       "repository": "allanVvz/brain-transport",
-      "sha": "5e9dd30851624eec8fb80f63b437c6e782e3fec7",
-      "digest": "sha256:172d6f38f9b19686aca255f81389e8b40c936d848096a8d95dc0117e754eb0cb",
+      "sha": "52c87bb9b6ce51fd2b7a2b90340853e448e29bad",
+      "digest": "sha256:95075caa5fd88d20024d1bc699bfc562db00d133e65877f325bea95b1f9f6a20",
       "required_schema_version": 131
     }
   }
