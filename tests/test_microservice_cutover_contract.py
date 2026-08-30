@@ -114,6 +114,19 @@ def test_validator_uses_only_active_runtime_validator_and_stops_it_after_run():
     assert "WA_VALIDATOR_INSPECTION=" in script
     assert "WA_VALIDATOR_INSPECT_RESULT=passed" in script
     assert "run-microservice-wa-validator.sh" in workflow
+
+
+def test_production_backup_workflow_is_bounded_and_restore_verified():
+    workflow = (
+        ROOT / ".github" / "workflows" / "verify-production-backup.yml"
+    ).read_text()
+    assert "options: [dry-run, run]" in workflow
+    assert "environment: production" in workflow
+    assert "bash ops/vps/backup.sh" in workflow
+    assert "--confirm-isolated-restore" in workflow
+    assert "^/var/backups/brain-ai/[0-9]{8}T[0-9]{6}Z$" in workflow
+    assert "(( used < 40 ))" in workflow
+    assert "BACKUP_VERIFY_RESULT=passed" in workflow
     assert "release_lifecycle.py show" not in workflow
 
 

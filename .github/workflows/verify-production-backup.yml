@@ -1,0 +1,81 @@
+name: Verify production data-only backup
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Read-only preflight or create and restore-verify a new backup
+        type: choice
+        options: [dry-run, run]
+        default: dry-run
+
+permissions:
+  contents: read
+
+concurrency:
+  group: brain-ai-production-backup
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read-only backup preflight
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        env:
+          AUDIT_ROOT: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          envs: AUDIT_ROOT
+          script: |
+            set -Eeuo pipefail
+            cd "$AUDIT_ROOT"
+            root="$(realpath /var/backups/brain-ai)"
+            [[ "$root" == /var/backups/brain-ai ]]
+            docker compose --env-file .env.compose ps --status running db
+            used="$(df -P / | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
+            (( used < 40 ))
+            echo "BACKUP_DRY_RUN=passed disk_usage=${used}% root=$root"
+
+  backup-and-restore:
+    needs: preflight
+    if: inputs.action == 'run'
+    environment: production
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Synchronize approved backup controls
+        uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          source: ops/vps/backup.sh,ops/vps/restore.sh
+          target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+          overwrite: true
+      - name: Create data-only backup and prove isolated restore
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        env:
+          AUDIT_ROOT: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          envs: AUDIT_ROOT
+          command_timeout: 20m
+          script: |
+            set -Eeuo pipefail
+            cd "$AUDIT_ROOT"
+            bash ops/vps/backup.sh
+            backup_dir="$(realpath /var/backups/brain-ai/latest)"
+            [[ "$backup_dir" =~ ^/var/backups/brain-ai/[0-9]{8}T[0-9]{6}Z$ ]]
+            target="brain_restore_release_$(date -u +%Y%m%d%H%M%S)"
+            bash ops/vps/restore.sh "$backup_dir" "$target" --confirm-isolated-restore
+            used="$(df -P / | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
+            (( used < 40 ))
+            echo "BACKUP_VERIFY_RESULT=passed disk_usage=${used}% backup=$backup_dir"
