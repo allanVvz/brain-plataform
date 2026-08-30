@@ -157,6 +157,8 @@ def test_n8n_workflow_management_runs_in_active_control_plane_slot():
     assert 'control_service="control-plane-$control_slot"' in workflow
     assert 'infra/microservices/docker-compose.blue-green.yml' in workflow
     assert 'queue_drained|candidate_healthy' in workflow
+    assert 'before="$(audit_template)"' in workflow
+    assert 'required=("persona_slug","workflow_id","active","live_checksum","candidate_checksum","would_change")' in workflow
     assert 'active_api_service' not in workflow
 
 
