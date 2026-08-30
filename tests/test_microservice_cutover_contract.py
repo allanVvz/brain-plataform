@@ -162,6 +162,11 @@ def test_n8n_workflow_management_runs_in_active_control_plane_slot():
     assert 'active_api_service' not in workflow
 
 
+def test_control_plane_receives_internal_n8n_endpoint_in_both_slots():
+    compose = (ROOT / "infra" / "microservices" / "docker-compose.blue-green.yml").read_text()
+    assert compose.count("N8N_BASE_URL: ${N8N_BASE_URL:-http://n8n:5678}") == 2
+
+
 def test_release_audit_accepts_retired_monolith_only_with_active_microservices():
     script = (ROOT / "ops" / "vps" / "validate-production-release.sh").read_text()
     assert 'gateway_slot" =~ ^(blue|green)$' in script
