@@ -33,7 +33,20 @@ def main() -> int:
             ["docker", "inspect", "brain-ai-n8n-1"], text=True
         ))[0]
         env = dict(item.split("=", 1) for item in container["Config"]["Env"] if "=" in item)
-        if env.get("DB_TYPE") not in {"postgresdb", "postgres"}:
+        database_type = env.get("DB_TYPE", "sqlite")
+        if database_type == "sqlite":
+            user_folder = env.get("N8N_USER_FOLDER", "/home/node/.n8n")
+            database_path = f"{user_folder.rstrip('/')}/database.sqlite"
+            node = """const sqlite3=require('sqlite3').verbose();const db=new sqlite3.Database(process.argv[1],sqlite3.OPEN_READONLY);const q=\"SELECT m.name AS table_name,p.name AS column_name FROM sqlite_master m JOIN pragma_table_info(m.name) p WHERE m.type='table' AND (lower(p.name) LIKE '%apikey%' OR (lower(p.name) LIKE '%api%' AND lower(p.name) LIKE '%key%')) ORDER BY m.name,p.name\";db.all(q,(e,r)=>{if(e){console.error(e.message);process.exit(1)}console.log(JSON.stringify(r));db.close()});"""
+            output = subprocess.check_output(
+                ["docker", "exec", "brain-ai-n8n-1", "node", "-e", node, database_path],
+                text=True,
+            )
+            rows = json.loads(output)
+            columns = [f"{row['table_name']}.{row['column_name']}" for row in rows]
+            print("N8N_API_KEY_REGISTRY_AUDIT database=sqlite columns=" + ",".join(columns))
+            return 0
+        if database_type not in {"postgresdb", "postgres"}:
             raise SystemExit("unsupported n8n database type")
         database = env.get("DB_POSTGRESDB_DATABASE", "")
         username = env.get("DB_POSTGRESDB_USER", "")
