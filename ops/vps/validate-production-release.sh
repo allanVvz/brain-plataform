@@ -101,7 +101,40 @@ PY
     printf 'FAIL\t%s_digest\texpected=%s\n' "$service" "$expected"; failed=1
   fi
 }
-check_container_digest "$active_api_service" .deploy/release-api-digest
+microservice_state=".deploy/microservices/slots.json"
+microservice_manifest="ops/microservices/release-manifest.json"
+gateway_slot=""
+if [[ -s "$microservice_state" ]]; then
+  gateway_slot="$(python3 -c 'import json,sys; print((json.load(open(sys.argv[1], encoding="utf-8")).get("gateway") or {}).get("active") or "")' "$microservice_state")"
+fi
+if [[ "$gateway_slot" =~ ^(blue|green)$ && -s "$microservice_manifest" ]]; then
+  for service in gateway control-plane conversation-runtime transport; do
+    slot="$(python3 -c 'import json,sys; print((json.load(open(sys.argv[1], encoding="utf-8")).get(sys.argv[2]) or {}).get("active") or "")' "$microservice_state" "$service")"
+    [[ "$slot" =~ ^(blue|green)$ ]] || { printf 'FAIL\t%s_slot\t%s\n' "$service" "$slot"; failed=1; continue; }
+    compose_name="${service/conversation-runtime/runtime}"
+    container_name="brain-ai-${compose_name}-${slot}-1"
+    expected="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["services"][sys.argv[2]]["digest"])' "$microservice_manifest" "$service")"
+    cid="$(docker ps -q --filter "name=^/${container_name}$")"
+    if [[ -z "$cid" ]]; then
+      printf 'FAIL\t%s_microservice\tcontainer missing: %s\n' "$service" "$container_name"; failed=1; continue
+    fi
+    health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$cid")"
+    image_id="$(docker inspect -f '{{.Image}}' "$cid")"
+    if [[ "$health" == "healthy" ]] && docker image inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' "$image_id" | grep -Fq "@$expected"; then
+      printf 'PASS\t%s_microservice\tslot=%s digest=%s\n' "$service" "$slot" "$expected"
+    else
+      printf 'FAIL\t%s_microservice\tslot=%s health=%s expected=%s\n' "$service" "$slot" "$health" "$expected"; failed=1
+    fi
+  done
+  legacy_api_cid="$(docker ps -aq --filter 'name=^/brain-ai-api-1$')"
+  if [[ -n "$legacy_api_cid" ]]; then
+    printf 'WARN\tlegacy_api\tcontainer remains during cutover\n'
+  else
+    printf 'PASS\tlegacy_api\tretired\n'
+  fi
+else
+  check_container_digest "$active_api_service" .deploy/release-api-digest
+fi
 check_container_digest workers .deploy/release-worker-digest true
 
 "${COMPOSE[@]}" ps
