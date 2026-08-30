@@ -129,10 +129,25 @@ install_active_caddy_config() {
 
 install_active_caddy_config
 
+pull_candidate_images() {
+  local pull_attempt
+  for pull_attempt in 1 2 3 4; do
+    if "${COMPOSE[@]}" pull "${target_services[@]}"; then
+      return 0
+    fi
+    if (( pull_attempt == 4 )); then
+      echo "image pull failed after ${pull_attempt} attempts" >&2
+      return 1
+    fi
+    echo "image pull attempt ${pull_attempt} failed; retrying" >&2
+    sleep $((pull_attempt * 5))
+  done
+}
+
 if [[ "$ACTION" == "--rollback" ]]; then
   "${COMPOSE[@]}" start "${target_services[@]}"
 else
-  "${COMPOSE[@]}" pull "${target_services[@]}"
+  pull_candidate_images
   if [[ -s "$ROOT_DIR/.deploy/control/claims-paused.json" && ${#target_services[@]} -gt 1 ]]; then
     "${COMPOSE[@]}" up -d --no-deps --force-recreate "$target_service"
     "${COMPOSE[@]}" stop -t 120 "${target_services[@]:1}" >/dev/null 2>&1 || true
