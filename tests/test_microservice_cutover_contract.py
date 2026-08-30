@@ -173,7 +173,7 @@ def test_control_plane_n8n_credential_sync_is_redacted_and_authorized():
     assert "N8N_CREDENTIAL_SYNC_AUTHORIZED" in script and "N8N_CREDENTIAL_SYNC_AUTHORIZED" in workflow
     assert "value=redacted" in script
     assert 'value.get("paused") is True' in workflow
-    assert "options: [dry-run, audit-registry, sync-registry, apply]" in workflow
+    assert "options: [dry-run, audit-registry, sync-registry, rotate-registry, apply]" in workflow
     assert "N8N_API_KEY_REGISTRY_AUDIT" in script
     assert "N8N_REGISTRY_CREDENTIAL_SYNC_RESULT=passed value=redacted" in script
 
