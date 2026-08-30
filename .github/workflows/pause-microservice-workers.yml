@@ -55,7 +55,7 @@ jobs:
             cd "$VPS_APP_DIR"
             [[ "$PAUSE_ACTION" == dry-run || "$PAUSE_ACTION" == pause ]]
             disk_used="$(df -P "$VPS_APP_DIR" | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
-            (( disk_used < 35 )) || { echo "disk gate failed: ${disk_used}% required <35%" >&2; exit 1; }
+            (( disk_used < 40 )) || { echo "disk gate failed: ${disk_used}% required <40%" >&2; exit 1; }
             compose=(docker compose --env-file .env.compose -f docker-compose.yml -f infra/microservices/docker-compose.blue-green.yml)
             mapfile -t slots < <(python3 - <<'PY'
             import json

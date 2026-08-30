@@ -119,7 +119,7 @@ um contrato impossível, por isso o gate correto compara cada container ao seu
 SHA/digest aprovado no release.
 
 Retenção preserva atual, rollback e imagens em uso. Apply de limpeza continua
-separado do deploy e exige autorização própria. O limite de disco é `<35%`.
+separado do deploy e exige autorização própria. O limite de disco é `<40%`.
 O soak conversacional de no mínimo 30 minutos é durável e não entra no tempo
 ativo do deploy: a instalação chega a `candidate_healthy`, o validador interno
 é registrado, e outra operação completa o soak e pede autorização de resume.

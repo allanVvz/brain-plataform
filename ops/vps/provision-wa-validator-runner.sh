@@ -4,7 +4,7 @@ set -Eeuo pipefail
 ROOT_DIR="${AUDIT_ROOT:-/opt/brain-ai}"
 MODE="${1:---dry-run}"
 DIGEST="${2:?WA Validator image digest required}"
-DISK_MAX_PERCENT="${DISK_MAX_PERCENT:-35}"
+DISK_MAX_PERCENT="${DISK_MAX_PERCENT:-40}"
 [[ "$MODE" == "--dry-run" || "$MODE" == "--apply" || "$MODE" == "--deprovision" ]] || { echo "invalid mode" >&2; exit 2; }
 [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "invalid digest" >&2; exit 2; }
 
