@@ -6,6 +6,7 @@ ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env.compose}"
 BACKUP_ROOT="${BACKUP_ROOT:-/var/backups/brain-ai}"
 RESTORE_MARKER="${RESTORE_MARKER:-$BACKUP_ROOT/restore-tests/LAST_SUCCESS}"
 DISK_MAX_PERCENT="${DISK_MAX_PERCENT:-40}"
+ALLOW_PENDING_MICROSERVICE_DIGESTS="${ALLOW_PENDING_MICROSERVICE_DIGESTS:-false}"
 cd "$ROOT_DIR"
 COMPOSE=(docker compose --env-file "$ENV_FILE")
 COMPOSE_BG=(docker compose --env-file "$ENV_FILE" --profile blue-green)
@@ -25,6 +26,10 @@ if [[ -z "$require_fresh_backup" ]]; then
 fi
 [[ "$require_fresh_backup" == "true" || "$require_fresh_backup" == "false" ]] || {
   echo "REQUIRE_FRESH_BACKUP must be true or false" >&2
+  exit 2
+}
+[[ "$ALLOW_PENDING_MICROSERVICE_DIGESTS" == "true" || "$ALLOW_PENDING_MICROSERVICE_DIGESTS" == "false" ]] || {
+  echo "ALLOW_PENDING_MICROSERVICE_DIGESTS must be true or false" >&2
   exit 2
 }
 failed=0
@@ -122,6 +127,9 @@ if [[ "$gateway_slot" =~ ^(blue|green)$ && -s "$microservice_manifest" ]]; then
     image_id="$(docker inspect -f '{{.Image}}' "$cid")"
     if [[ "$health" == "healthy" ]] && docker image inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' "$image_id" | grep -Fq "@$expected"; then
       printf 'PASS\t%s_microservice\tslot=%s digest=%s\n' "$service" "$slot" "$expected"
+    elif [[ "$health" == "healthy" && "$ALLOW_PENDING_MICROSERVICE_DIGESTS" == "true" ]]; then
+      printf 'WARN\t%s_microservice\tcurrent slot=%s healthy; candidate digest pending=%s\n' \
+        "$service" "$slot" "$expected"
     else
       printf 'FAIL\t%s_microservice\tslot=%s health=%s expected=%s\n' "$service" "$slot" "$health" "$expected"; failed=1
     fi

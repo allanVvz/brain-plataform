@@ -186,6 +186,13 @@ def test_release_audit_accepts_retired_monolith_only_with_active_microservices()
         assert service in script
 
 
+def test_release_audit_allows_only_healthy_digest_drift_during_preflight():
+    script = (ROOT / "ops" / "vps" / "validate-production-release.sh").read_text()
+    assert 'ALLOW_PENDING_MICROSERVICE_DIGESTS="${ALLOW_PENDING_MICROSERVICE_DIGESTS:-false}"' in script
+    assert '"$health" == "healthy" && "$ALLOW_PENDING_MICROSERVICE_DIGESTS" == "true"' in script
+    assert "candidate digest pending" in script
+
+
 def test_wa_validator_runner_is_an_immutable_internal_image():
     compose = (ROOT / "docker-compose.yml").read_text()
     build = (ROOT / ".github" / "workflows" / "build-wa-validator-image.yml").read_text()
@@ -252,6 +259,8 @@ def test_microservice_preflight_runs_immutable_auditor_without_sync():
     preflight = workflow.split("  mutate:", 1)[0]
     assert "script_path: ops/vps/validate-production-release.sh" in preflight
     assert "scp-action" not in preflight
+    assert 'ALLOW_PENDING_MICROSERVICE_DIGESTS: "true"' in preflight
+    assert "AUDIT_ROOT,ALLOW_PENDING_MICROSERVICE_DIGESTS" in preflight
     assert 'with: {ref: "${{ inputs.manifest_sha }}"}' in workflow
 
 

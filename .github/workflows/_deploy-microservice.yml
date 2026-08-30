@@ -41,13 +41,14 @@ jobs:
         uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
         env:
           AUDIT_ROOT: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+          ALLOW_PENDING_MICROSERVICE_DIGESTS: "true"
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
           command_timeout: 10m
-          envs: AUDIT_ROOT
+          envs: AUDIT_ROOT,ALLOW_PENDING_MICROSERVICE_DIGESTS
           script_path: ops/vps/validate-production-release.sh
 
   mutate:
