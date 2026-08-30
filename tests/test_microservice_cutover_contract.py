@@ -114,6 +114,7 @@ def test_validator_uses_only_active_runtime_validator_and_stops_it_after_run():
     assert "WA_VALIDATOR_INSPECTION=" in script
     assert "WA_VALIDATOR_INSPECT_RESULT=passed" in script
     assert "run-microservice-wa-validator.sh" in workflow
+    assert "release_lifecycle.py show" not in workflow
 
 
 def test_production_backup_workflow_is_bounded_and_restore_verified():
@@ -127,7 +128,30 @@ def test_production_backup_workflow_is_bounded_and_restore_verified():
     assert "^/var/backups/brain-ai/[0-9]{8}T[0-9]{6}Z$" in workflow
     assert "(( used < 40 ))" in workflow
     assert "BACKUP_VERIFY_RESULT=passed" in workflow
-    assert "release_lifecycle.py show" not in workflow
+
+
+def test_legacy_runtime_retirement_requires_microservice_cutover_and_pause():
+    script = (ROOT / "ops" / "vps" / "deprovision-legacy-runtime.sh").read_text()
+    workflow = (
+        ROOT / ".github" / "workflows" / "deprovision-production-legacy-runtime.yml"
+    ).read_text()
+    assert "options: [dry-run, deprovision]" in workflow
+    assert "LEGACY_DEPROVISION_AUTHORIZED" in workflow
+    assert "reverse_proxy gateway-${gateway_slot}:8080" in script
+    assert "! grep -Eq 'reverse_proxy api:8080'" in script
+    assert 'value.get("paused") is True' in script
+    assert "brain-ai-api-1" in script and "brain-ai-workers-1" in script
+    assert "docker rm -f" in script and "docker image rm" in script
+    assert "volumes=preserved" in script
+    assert "(( used < 40 ))" in script
+
+
+def test_release_audit_accepts_retired_monolith_only_with_active_microservices():
+    script = (ROOT / "ops" / "vps" / "validate-production-release.sh").read_text()
+    assert 'gateway_slot" =~ ^(blue|green)$' in script
+    assert "PASS\\tlegacy_api\\tretired" in script
+    for service in ("gateway", "control-plane", "conversation-runtime", "transport"):
+        assert service in script
 
 
 def test_wa_validator_runner_is_an_immutable_internal_image():
