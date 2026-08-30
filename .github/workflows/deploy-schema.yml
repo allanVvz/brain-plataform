@@ -38,10 +38,10 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
-          source: ops/microservices/bootstrap-service-envs.py,ops/microservices/validate-release-manifest.py,ops/microservices/route-map.json,api/n8n-workflows/persona-conversation-template.json,ops/vps/apply-microservice-schema.sh,ops/vps/backup.sh,ops/vps/restore.sh,ops/vps/drain-worker-claims.sh,ops/vps/release_lifecycle.py,supabase/migrations/131_microservice_role_grants.sql,${{ inputs.manifest_path }}
+          source: ops/microservices/validate-release-manifest.py,ops/microservices/route-map.json,api/n8n-workflows/persona-conversation-template.json,ops/vps/apply-runtime-vector-grant.sh,ops/vps/backup.sh,ops/vps/restore.sh,supabase/migrations/132_runtime_vector_distance_grant.sql,${{ inputs.manifest_path }}
           target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           overwrite: true
-      - name: Apply migration 131 with backup and isolated restore
+      - name: Apply migration 132 with backup and isolated restore
         uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -52,4 +52,4 @@ jobs:
           script: |
             set -Eeuo pipefail
             cd "${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}"
-            bash ops/vps/apply-microservice-schema.sh "${{ inputs.manifest_path }}" --apply
+            bash ops/vps/apply-runtime-vector-grant.sh "${{ inputs.manifest_path }}" --apply
