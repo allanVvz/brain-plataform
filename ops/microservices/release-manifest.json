@@ -3,7 +3,7 @@
   "contracts_version": "1.0.0",
   "schema_version": 132,
   "route_map_checksum": "sha256:0146765a3fed6f690566d212fee29d1a324183ce2106429bf52f891403fd5c64",
-  "n8n_checksum": "sha256:9580a2a4d6139ee0d1624545ad0a6375098ece55321da8a4340b465550ad59d2",
+  "n8n_checksum": "sha256:fa59665fa688bc723aba7de08d2f6c2136c778485eb29fbda61b149a8e133da2",
   "services": {
     "gateway": {
       "repository": "allanVvz/brain-plataform",
@@ -13,8 +13,8 @@
     },
     "control-plane": {
       "repository": "allanVvz/brain-control-plane",
-      "sha": "68975fac40e38fb594a22b10c1077fc97c65571a",
-      "digest": "sha256:91791da78b26a7a81156568e466c14888af66115a450fd23591c90c3df812b3f",
+      "sha": "754606966c9647c1a1b68c8d2635d0f881b36595",
+      "digest": "sha256:f978298700ac107208ae15bd507614024993200a54e990edddc99fea04b270bc",
       "required_schema_version": 131
     },
     "conversation-runtime": {

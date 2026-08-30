@@ -433,6 +433,10 @@ def test_canonical_agentic_workflow_uses_compact_graph_context():
     assert "context_cards" in code and "approved_chunks" in code
     assert "rendered_content" not in code
     assert "prompt_budget_exceeded" in code
+    assert "const promptTargetTokens = 19000" in code
+    assert "prompt.approved_chunks.length > 1" in code
+    assert "prompt.approved_chunks.pop()" in code
+    assert "retained_chunk_count" in code
 
 
 def test_canonical_agentic_workflow_forwards_semantic_observations():

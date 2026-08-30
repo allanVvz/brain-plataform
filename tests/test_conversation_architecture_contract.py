@@ -212,7 +212,9 @@ def test_model_prompt_is_compact_and_budgeted_before_both_calls():
     assert "agent_activity" not in initial
     assert "journey_outcomes" not in initial
     assert "historical_facts" not in initial
-    assert "promptEstimatedTokens > 22000" in initial
+    assert "const promptTargetTokens = 19000" in initial
+    assert "promptEstimatedTokens > promptTargetTokens" in initial
+    assert "prompt.approved_chunks.pop()" in initial
     assert "messages: [...original.messages" not in repair
     assert "const originalPrompt = JSON.parse(original.messages[1].content" in repair
     assert "Correct only the invalid component" in repair
