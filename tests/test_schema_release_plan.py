@@ -16,7 +16,9 @@ SPEC.loader.exec_module(MODULE)
 
 
 def _checksum(path: Path) -> str:
-    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+    return "sha256:" + hashlib.sha256(
+        path.read_bytes().replace(b"\r\n", b"\n")
+    ).hexdigest()
 
 
 def _manifest() -> dict:
@@ -31,7 +33,7 @@ def _manifest() -> dict:
     return {
         "source_sha": source_sha,
         "contracts_version": "1.0.0",
-        "schema_version": 131,
+        "schema_version": 132,
         "route_map_checksum": _checksum(ROOT / "ops/microservices/route-map.json"),
         "n8n_checksum": _checksum(ROOT / "api/n8n-workflows/persona-conversation-template.json"),
         "services": {
@@ -46,9 +48,9 @@ def test_schema_plan_ends_at_manifest_version_and_is_checksummed(tmp_path):
     path = tmp_path / "release.json"
     path.write_text(json.dumps(_manifest()), encoding="utf-8")
     plan = MODULE.build_plan(path)
-    assert plan["schema_version"] == 131
-    assert plan["target_migration"] == "131_microservice_role_grants.sql"
-    assert plan["migrations"][-1]["version"] == 131
+    assert plan["schema_version"] == 132
+    assert plan["target_migration"] == "132_runtime_vector_distance_grant.sql"
+    assert plan["migrations"][-1]["version"] == 132
     assert plan["inventory_checksum"].startswith("sha256:")
 
 
