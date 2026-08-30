@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -24,8 +26,28 @@ def parse(path: Path) -> dict[str, str]:
 
 def main() -> int:
     mode = sys.argv[1] if len(sys.argv) > 1 else "--dry-run"
-    if mode not in {"--dry-run", "--apply"} or ROOT != Path("/opt/brain-ai"):
+    if mode not in {"--dry-run", "--audit-registry", "--apply"} or ROOT != Path("/opt/brain-ai"):
         raise SystemExit("invalid mode or production root")
+    if mode == "--audit-registry":
+        container = json.loads(subprocess.check_output(
+            ["docker", "inspect", "brain-ai-n8n-1"], text=True
+        ))[0]
+        env = dict(item.split("=", 1) for item in container["Config"]["Env"] if "=" in item)
+        if env.get("DB_TYPE") not in {"postgresdb", "postgres"}:
+            raise SystemExit("unsupported n8n database type")
+        database = env.get("DB_POSTGRESDB_DATABASE", "")
+        username = env.get("DB_POSTGRESDB_USER", "")
+        password = env.get("DB_POSTGRESDB_PASSWORD", "")
+        if not database or not username or not password:
+            raise SystemExit("n8n postgres binding is incomplete")
+        sql = "select table_schema||'.'||table_name||'.'||column_name from information_schema.columns where lower(column_name) like '%apikey%' or (lower(column_name) like '%api%' and lower(column_name) like '%key%') order by 1"
+        output = subprocess.check_output(
+            ["docker", "exec", "-e", f"PGPASSWORD={password}", "brain-ai-db-1", "psql", "-X", "-A", "-t", "-U", username, "-d", database, "-c", sql],
+            text=True,
+        )
+        columns = [line.strip() for line in output.splitlines() if line.strip()]
+        print("N8N_API_KEY_REGISTRY_AUDIT database=postgres columns=" + ",".join(columns))
+        return 0
     source = parse(SOURCE)
     target = parse(TARGET)
     source_key = source.get("N8N_API_KEY", "")
