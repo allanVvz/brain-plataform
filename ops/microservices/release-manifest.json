@@ -13,8 +13,8 @@
     },
     "control-plane": {
       "repository": "allanVvz/brain-control-plane",
-      "sha": "c6554db4e37e132558c92493590982b91e77d3ed",
-      "digest": "sha256:48f5f02fd574e4108b1def04d017b694d10cd95727f79f91945a9b8630b4708d",
+      "sha": "5e17443620a2604a70fd16803baf7976ffefc3a0",
+      "digest": "sha256:8616c5288b7f50cfa3a1b26fb3751d63185526e5534bb811905427510f202d11",
       "required_schema_version": 131
     },
     "conversation-runtime": {
