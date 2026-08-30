@@ -37,7 +37,7 @@ def main() -> int:
         if database_type == "sqlite":
             user_folder = env.get("N8N_USER_FOLDER", "/home/node/.n8n")
             database_path = f"{user_folder.rstrip('/')}/database.sqlite"
-            node = """const sqlite3=require('sqlite3').verbose();const db=new sqlite3.Database(process.argv[1],sqlite3.OPEN_READONLY);const q=\"SELECT m.name AS table_name,p.name AS column_name FROM sqlite_master m JOIN pragma_table_info(m.name) p WHERE m.type='table' AND (lower(p.name) LIKE '%apikey%' OR (lower(p.name) LIKE '%api%' AND lower(p.name) LIKE '%key%')) ORDER BY m.name,p.name\";db.all(q,(e,r)=>{if(e){console.error(e.message);process.exit(1)}console.log(JSON.stringify(r));db.close()});"""
+            node = """const {DatabaseSync}=require('node:sqlite');const db=new DatabaseSync(process.argv[1],{readOnly:true});const q=\"SELECT m.name AS table_name,p.name AS column_name FROM sqlite_master m JOIN pragma_table_info(m.name) p WHERE m.type='table' AND (lower(p.name) LIKE '%apikey%' OR (lower(p.name) LIKE '%api%' AND lower(p.name) LIKE '%key%')) ORDER BY m.name,p.name\";console.log(JSON.stringify(db.prepare(q).all()));db.close();"""
             output = subprocess.check_output(
                 ["docker", "exec", "brain-ai-n8n-1", "node", "-e", node, database_path],
                 text=True,
