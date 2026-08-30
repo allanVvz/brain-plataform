@@ -68,10 +68,86 @@ def sqlite_registry() -> tuple[list[str], list[str]]:
     return columns, keys
 
 
+def rotate_sqlite_registry_key() -> str:
+    container = json.loads(subprocess.check_output(
+        ["docker", "inspect", "brain-ai-n8n-1"], text=True
+    ))[0]
+    env = dict(item.split("=", 1) for item in container["Config"]["Env"] if "=" in item)
+    user_folder = env.get("N8N_USER_FOLDER", "/home/node/.n8n")
+    database_path = f"{user_folder.rstrip('/')}/database.sqlite"
+    node = r"""
+const fs = require('node:fs');
+const crypto = require('node:crypto');
+const { DatabaseSync } = require('node:sqlite');
+const jwt = require('/usr/local/lib/node_modules/n8n/node_modules/jsonwebtoken');
+const databasePath = process.argv[1];
+const config = JSON.parse(fs.readFileSync('/home/node/.n8n/config', 'utf8'));
+const encryptionKey = process.env.N8N_ENCRYPTION_KEY || config.encryptionKey;
+if (typeof encryptionKey !== 'string' || encryptionKey.length < 32) throw new Error('n8n encryption key is unavailable');
+let baseKey = '';
+for (let i = 0; i < encryptionKey.length; i += 2) baseKey += encryptionKey[i];
+const jwtSecret = crypto.createHash('sha256').update(baseKey).digest('hex');
+const db = new DatabaseSync(databasePath);
+const previous = db.prepare("SELECT userId,scopes,audience FROM user_api_keys WHERE audience='public-api' ORDER BY rowid DESC LIMIT 1").get();
+if (!previous) throw new Error('n8n API key registry is empty');
+const user = db.prepare('SELECT disabled FROM user WHERE id=?').get(previous.userId);
+if (!user || Number(user.disabled) !== 0) throw new Error('n8n API key owner is unavailable');
+const id = crypto.randomBytes(12).toString('base64url');
+const label = 'brain-api-production-rotated-' + new Date().toISOString().slice(0, 10);
+const apiKey = jwt.sign({ sub: previous.userId, iss: 'n8n', aud: 'public-api' }, jwtSecret);
+const stamp = new Date().toISOString().replace('T', ' ').replace('Z', '');
+try {
+  db.exec('BEGIN IMMEDIATE');
+  db.prepare('INSERT INTO user_api_keys (id,userId,label,apiKey,createdAt,updatedAt,scopes,audience,lastUsedAt) VALUES (?,?,?,?,?,?,?,?,NULL)').run(id, previous.userId, label, apiKey, stamp, stamp, previous.scopes, previous.audience);
+  db.exec('COMMIT');
+} catch (error) {
+  try { db.exec('ROLLBACK'); } catch (_) {}
+  db.close();
+  throw error;
+}
+db.close();
+(async () => {
+  const response = await fetch('http://127.0.0.1:5678/api/v1/workflows?limit=1', { headers: { 'X-N8N-API-KEY': apiKey } });
+  if (response.status !== 200) {
+    const cleanup = new DatabaseSync(databasePath);
+    cleanup.prepare('DELETE FROM user_api_keys WHERE id=?').run(id);
+    cleanup.close();
+    throw new Error('new n8n API key failed validation with HTTP ' + response.status);
+  }
+  process.stdout.write(JSON.stringify({ id, apiKey }));
+})().catch((error) => { console.error(error.message); process.exit(1); });
+"""
+    output = subprocess.check_output(
+        ["docker", "exec", "brain-ai-n8n-1", "node", "-e", node, database_path],
+        text=True,
+    )
+    value = json.loads(output)
+    api_key = value.get("apiKey", "")
+    if not isinstance(api_key, str) or not api_key:
+        raise SystemExit("rotated n8n API key was not returned")
+    return api_key
+
+
 def main() -> int:
     mode = sys.argv[1] if len(sys.argv) > 1 else "--dry-run"
-    if mode not in {"--dry-run", "--audit-registry", "--sync-registry", "--apply"} or ROOT != Path("/opt/brain-ai"):
+    if mode not in {"--dry-run", "--audit-registry", "--sync-registry", "--rotate-registry", "--apply"} or ROOT != Path("/opt/brain-ai"):
         raise SystemExit("invalid mode or production root")
+    if mode == "--rotate-registry":
+        if os.environ.get("N8N_CREDENTIAL_SYNC_AUTHORIZED") != "true":
+            raise SystemExit("authorization marker missing")
+        container = json.loads(subprocess.check_output(
+            ["docker", "inspect", "brain-ai-n8n-1"], text=True
+        ))[0]
+        env = dict(item.split("=", 1) for item in container["Config"]["Env"] if "=" in item)
+        if env.get("DB_TYPE", "sqlite") != "sqlite":
+            raise SystemExit("registry rotation currently requires sqlite metadata")
+        api_key = rotate_sqlite_registry_key()
+        replace_env(SOURCE, "N8N_API_KEY", api_key)
+        replace_env(TARGET, "N8N_API_KEY", api_key)
+        if parse(SOURCE).get("N8N_API_KEY") != api_key or parse(TARGET).get("N8N_API_KEY") != api_key:
+            raise SystemExit("rotated credential verification failed")
+        print("N8N_REGISTRY_CREDENTIAL_ROTATION_RESULT=passed value=redacted files=2 mode=0600")
+        return 0
     if mode in {"--audit-registry", "--sync-registry"}:
         container = json.loads(subprocess.check_output(
             ["docker", "inspect", "brain-ai-n8n-1"], text=True
