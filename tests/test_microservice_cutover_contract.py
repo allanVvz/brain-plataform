@@ -264,6 +264,13 @@ def test_microservice_preflight_runs_immutable_auditor_without_sync():
     assert 'with: {ref: "${{ inputs.manifest_sha }}"}' in workflow
 
 
+def test_microservice_mutation_syncs_manifest_checksum_inputs():
+    workflow = (ROOT / ".github/workflows/_deploy-microservice.yml").read_text(encoding="utf-8")
+    mutate = workflow.split("  mutate:", 1)[1]
+    assert "ops/microservices" in mutate
+    assert "api/n8n-workflows/persona-conversation-template.json" in mutate
+
+
 def test_service_env_bootstrap_never_distributes_universal_database_secrets():
     bootstrap = (ROOT / "ops/microservices/bootstrap-service-envs.py").read_text(encoding="utf-8")
     assert 'source.setdefault("SUPABASE_URL", "http://kong:8000")' in bootstrap
