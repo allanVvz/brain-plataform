@@ -1,0 +1,52 @@
+name: Diagnose microservice readiness
+
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: Microservice owner
+        required: true
+        type: choice
+        options: [gateway, control-plane, conversation-runtime, transport]
+      slot:
+        description: Blue/green slot to inspect
+        required: true
+        type: choice
+        options: [blue, green]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: brain-ai-production-read-only
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect candidate without mutation
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        env:
+          DIAG_SERVICE: ${{ inputs.service }}
+          DIAG_SLOT: ${{ inputs.slot }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          command_timeout: 5m
+          envs: DIAG_SERVICE,DIAG_SLOT
+          script: |
+            set -Eeuo pipefail
+            [[ "$DIAG_SERVICE" =~ ^(gateway|control-plane|conversation-runtime|transport)$ ]]
+            [[ "$DIAG_SLOT" =~ ^(blue|green)$ ]]
+            compose_name="${DIAG_SERVICE/conversation-runtime/runtime}"
+            container="brain-ai-${compose_name}-${DIAG_SLOT}-1"
+            docker ps -a --filter "name=^/${container}$" --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
+            docker inspect -f 'state={{.State.Status}} exit={{.State.ExitCode}} error={{.State.Error}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container"
+            docker logs --tail 200 "$container" 2>&1
+            if [[ "$(docker inspect -f '{{.State.Running}}' "$container")" == true ]]; then
+              docker exec "$container" python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8080/health/live', timeout=4).read().decode())" || true
+              docker exec "$container" python -c "import http.client; c=http.client.HTTPConnection('127.0.0.1',8080,timeout=4); c.request('GET','/health/ready'); r=c.getresponse(); print(r.status, r.read().decode())" || true
+            fi
