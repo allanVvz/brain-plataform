@@ -207,13 +207,13 @@ def _decide(document, context, *, repaired=False):
 
 
 def test_confirmacao_de_servico_nao_engole_a_resposta_da_duvida(monkeypatch):
-    """`reply = confirmation_text` levava junto a explicacao do servico."""
+    """Uma dúvida preserva a reply do modelo, mesmo sem abrir serviço."""
     document, pub = _fixture(monkeypatch)
     _decision, first = _decide(
         document, _context(document, pub, message_id="msg:1", asked=["q:servico"]),
     )
-    assert first.reply_text is None
-    assert first.proof["repair_required"] is True
+    assert first.reply_text == ANSWER
+    assert first.proof["repair_required"] is False
 
     _decision, response = _decide(
         document,
@@ -245,7 +245,7 @@ def test_duvida_respondida_nao_gasta_o_orcamento_de_pergunta(monkeypatch):
 
 
 def test_reparo_do_modelo_preserva_conteudo_novo_sem_repetir_campo(monkeypatch):
-    """A segunda chamada preserva a resposta e remove a pergunta repetida."""
+    """A avaliação advisory não apaga a resposta já composta pelo modelo."""
     document, pub = _fixture(monkeypatch)
     context = _context(
         document, pub, message_id="msg:3",
@@ -257,8 +257,8 @@ def test_reparo_do_modelo_preserva_conteudo_novo_sem_repetir_campo(monkeypatch):
     )
 
     _decision, first = _decide(document, context)
-    assert first.reply_text is None
-    assert first.proof["repair_required"] is True
+    assert first.reply_text == ANSWER
+    assert first.proof["repair_required"] is False
 
     _decision, response = _decide(document, context, repaired=True)
 
@@ -267,7 +267,7 @@ def test_reparo_do_modelo_preserva_conteudo_novo_sem_repetir_campo(monkeypatch):
 
 
 def test_contrato_segmentado_publica_a_duvida_sem_repetir_campo(monkeypatch):
-    """No v2, uma pergunta ruim nao exige reparo nem descarta a resposta."""
+    """O validador registra a repetição sem recortar a fala do modelo."""
     document, pub = _fixture(monkeypatch)
     context = _context(
         document, pub, message_id="msg:semantic-v2", asked=["q:servico"],
@@ -288,8 +288,8 @@ def test_contrato_segmentado_publica_a_duvida_sem_repetir_campo(monkeypatch):
     )
 
     assert decision.route.value != "HUMAN"
-    assert response.reply_text == ANSWER
-    assert response.proof["question_discarded"] is True
+    assert response.reply_text == f"{ANSWER} Qual servico te interessa"
+    assert response.proof["model_reply_preserved"] is True
     assert response.proof["repair_required"] is False
     assert response.cart_state["asked_question_node_ids"] == ["q:servico"]
 

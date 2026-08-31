@@ -63,6 +63,7 @@ def _response() -> AgentResponse:
         reply_text="Ola!",
         role=ConversationRoute.SDR,
         cart_state={},
+        proof={"valid": True, "delivery_authorized": True},
     )
 
 
@@ -512,7 +513,7 @@ def test_v3_commercial_note_drops_stale_field_from_a_different_branch(monkeypatc
     )
     monkeypatch.setattr(
         conversation_runtime.supabase_client,
-        "commit_graph_turn_and_outbox_v3",
+        "commit_graph_turn_and_outbox_v5",
         lambda **_kwargs: {"graph_turn": {"proof_id": "proof-1", "ledger_revision": 1}},
     )
     monkeypatch.setattr(
@@ -655,7 +656,7 @@ def test_v3_commercial_note_includes_a_shared_field_owned_by_the_persona(monkeyp
     )
     monkeypatch.setattr(
         conversation_runtime.supabase_client,
-        "commit_graph_turn_and_outbox_v3",
+        "commit_graph_turn_and_outbox_v5",
         lambda **_kwargs: {"graph_turn": {"proof_id": "proof-1", "ledger_revision": 1}},
     )
     monkeypatch.setattr(
@@ -829,7 +830,7 @@ def test_validation_lead_commit_persists_the_reply_without_a_real_send(monkeypat
 
     monkeypatch.setattr(
         conversation_runtime.supabase_client,
-        "commit_graph_turn_and_outbox_v3",
+        "commit_graph_turn_and_outbox_v5",
         fake_atomic_commit,
     )
 
@@ -908,7 +909,7 @@ def test_invalid_branch_proof_still_commits_individually_accepted_persona_fact(m
     )
     captured = {}
     monkeypatch.setattr(
-        conversation_runtime.supabase_client, "commit_graph_turn_and_outbox_v3",
+        conversation_runtime.supabase_client, "commit_graph_turn_and_outbox_v5",
         lambda **kwargs: captured.update(kwargs) or {
             "graph_turn": {"ledger_revision": 1},
             "outbound_buffer_id": "outbound-1",
@@ -928,6 +929,7 @@ def test_invalid_branch_proof_still_commits_individually_accepted_persona_fact(m
     response = _response().model_copy(update={
         "proof": {
             "valid": False, "errors": ["keep_without_active_branch"],
+            "delivery_authorized": True,
             "accepted_facts": [fact],
         },
         "cart_state": {"facts": {}, "asked_question_node_ids": []},

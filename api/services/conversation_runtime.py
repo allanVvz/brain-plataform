@@ -1557,7 +1557,10 @@ def decide(
         observation.get("output_truncated") or finish_reason == "length"
     )
     unsafe_confirmation = _reply_confirms_price_or_schedule(response.reply_text)
-    if unsafe_confirmation or output_truncated:
+    if (
+        context.runtime_version == graph_agent_runtime_v3.RUNTIME_VERSION
+        and (unsafe_confirmation or output_truncated)
+    ):
         issue = (
             "unsafe_price_date_time_confirmation"
             if unsafe_confirmation else "model_output_truncated"
@@ -2149,13 +2152,18 @@ def commit(
     n8n_execution_id: str | None = None,
 ) -> dict[str, Any]:
     if context.runtime_version == graph_agent_runtime_v3.RUNTIME_VERSION:
+        model_reply = str(response.reply_text or "").strip()
         delivery_authorized = bool(
             response.proof.get("delivery_authorized", response.proof.get("valid"))
         )
+        # A v3 turn may commit facts and proof telemetry without an outbound.
+        # Apply the delivery gate only when a model reply would be delivered.
         if (
-            not delivery_authorized
-            or not str(response.reply_text or "").strip()
-            or _reply_confirms_price_or_schedule(response.reply_text)
+            model_reply
+            and (
+                not delivery_authorized
+                or _reply_confirms_price_or_schedule(model_reply)
+            )
         ):
             raise ConversationCommitFailed(
                 failed_step="delivery_authorization",
