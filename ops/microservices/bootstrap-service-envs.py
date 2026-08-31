@@ -49,6 +49,7 @@ TRANSPORT = COMMON | {
     # base URL in its least-privilege environment so direct-binding validation
     # and dispatch agree on the same endpoint.
     "N8N_BASE_URL",
+    "AI_BRAIN_SECRETS_KEY",
     "META_WHATSAPP_ACCESS_TOKEN", "META_WHATSAPP_APP_SECRET", "META_WHATSAPP_VERIFY_TOKEN",
     "EVOLUTION_API_URL", "EVOLUTION_API_KEY",
     "EVOLUTION_ENABLED", "WHISPER_MODEL", "WHISPER_DEVICE", "WHISPER_COMPUTE_TYPE",

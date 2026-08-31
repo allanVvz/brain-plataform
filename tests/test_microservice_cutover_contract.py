@@ -162,9 +162,11 @@ def test_n8n_workflow_management_runs_in_active_control_plane_slot():
     assert 'active_api_service' not in workflow
 
 
-def test_control_plane_receives_internal_n8n_endpoint_in_both_slots():
+def test_control_plane_and_transport_receive_internal_n8n_endpoint_in_both_slots():
     compose = (ROOT / "infra" / "microservices" / "docker-compose.blue-green.yml").read_text()
-    assert compose.count("N8N_BASE_URL: ${N8N_BASE_URL:-http://n8n:5678}") == 2
+    # Both API services need the explicit endpoint in each blue/green slot:
+    # control plane manages n8n bindings and transport dispatch validates them.
+    assert compose.count("N8N_BASE_URL: ${N8N_BASE_URL:-http://n8n:5678}") == 4
 
 
 def test_control_plane_n8n_credential_sync_is_redacted_and_authorized():
@@ -280,6 +282,7 @@ def test_service_env_bootstrap_never_distributes_universal_database_secrets():
     assert 'role="brain_transport"' in bootstrap
     assert 'TRANSPORT = COMMON | {\n    # The transport dispatch worker invokes' in bootstrap
     assert '    "N8N_BASE_URL",' in bootstrap
+    assert '    "AI_BRAIN_SECRETS_KEY",' in bootstrap
     assert '"SERVICE_ROLE_KEY"' not in bootstrap
     assert '"POSTGRES_PASSWORD"' not in bootstrap
 
