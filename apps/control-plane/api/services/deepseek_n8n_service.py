@@ -11,13 +11,27 @@ from typing import Any
 from services import event_emitter, n8n_client
 
 
-_REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
-_TEMPLATE = Path(
-    os.environ.get(
-        "BRAIN_CONVERSATION_TEMPLATE_PATH",
-        str(_REPOSITORY_ROOT / "apps" / "conversation-runtime" / "n8n" / "persona-conversation-template.json"),
-    )
-)
+def _resolve_conversation_template_path() -> Path:
+    configured = (os.environ.get("BRAIN_CONVERSATION_TEMPLATE_PATH") or "").strip()
+    if configured:
+        return Path(configured)
+
+    for parent in Path(__file__).resolve().parents:
+        for candidate in (
+            parent / "n8n" / "persona-conversation-template.json",
+            parent
+            / "apps"
+            / "conversation-runtime"
+            / "n8n"
+            / "persona-conversation-template.json",
+        ):
+            if candidate.is_file():
+                return candidate
+
+    return Path("/opt/brain/n8n/persona-conversation-template.json")
+
+
+_TEMPLATE = _resolve_conversation_template_path()
 _TEMPLATE_VERSION = "graph_agentic_v3"
 _REQUIRED_NODE_IDS = {
     "inbound", "binding", "context", "policy", "model_request",

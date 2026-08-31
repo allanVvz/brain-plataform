@@ -94,3 +94,10 @@ jobs:
           name: image-digest-${{ matrix.app }}
           path: image-digest/${{ matrix.app }}.txt
           if-no-files-found: error
+      - name: Smoke-test deployable application import
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          docker run --rm --entrypoint python \
+            "ghcr.io/allanvvz/brain-${{ matrix.app }}:${{ github.sha }}" \
+            -c "import main; assert hasattr(main, 'app')"
