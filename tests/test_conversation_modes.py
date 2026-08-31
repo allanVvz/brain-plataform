@@ -378,7 +378,7 @@ def test_technical_failure_captures_which_node_failed_and_why_without_handoff():
         assert "reason: 'workflow_step_failed'," not in body
 
 
-def test_technical_failure_finalizes_processing_commit_before_dead_letter(monkeypatch):
+def test_recoverable_technical_failure_retries_same_canonical_inbound(monkeypatch):
     calls: list[tuple] = []
     monkeypatch.setenv("AI_BRAIN_WEBHOOK_TOKEN", "test-token")
     monkeypatch.setattr(
@@ -390,7 +390,14 @@ def test_technical_failure_finalizes_processing_commit_before_dead_letter(monkey
         conversations.conversation_runtime.supabase_client,
         "fail_conversation_commit",
         lambda buffer_id, reason: calls.append(("commit", buffer_id, reason))
-        or {"updated": True, "status": "failed"},
+        or {"updated": True, "status": "retry", "attempt_count": 3},
+    )
+    monkeypatch.setattr(
+        conversations.conversation_runtime.supabase_client,
+        "release_whatsapp_buffer",
+        lambda buffer_id, status, **kwargs: calls.append(
+            ("release", buffer_id, status, kwargs)
+        ),
     )
     monkeypatch.setattr(
         conversations.conversation_runtime.supabase_client,
@@ -421,22 +428,26 @@ def test_technical_failure_finalizes_processing_commit_before_dead_letter(monkey
     )
 
     assert calls[0] == ("commit", "inbound:test", "workflow_step_failed:commit")
-    assert calls[1][:3] == ("buffer", "inbound:test", "dead_letter")
+    assert calls[1][:3] == ("release", "inbound:test", "retry")
+    assert calls[1][3]["delay_seconds"] == 60
     assert result["technical_failure"] is True
-    assert result["workflow_outcome"] == "technical_failure"
-    assert result["commit_state"] == "failed"
+    assert result["workflow_outcome"] == "retry"
+    assert result["commit_state"] == "retry"
+    assert result["alert_emitted"] is True
 
 
-def test_canonical_agentic_workflow_uses_compact_graph_context():
+def test_canonical_agentic_workflow_uses_provider_managed_token_limits():
     workflow = json.loads((ROOT / "api/n8n-workflows/persona-conversation-template.json").read_text(encoding="utf-8"))
     code = next(node for node in workflow["nodes"] if node["name"] == "Build graph grounded agent request")["parameters"]["jsCode"]
     assert "context_cards" in code and "approved_chunks" in code
     assert "rendered_content" not in code
-    assert "prompt_budget_exceeded" in code
-    assert "const promptTargetTokens = 19000" in code
-    assert "prompt.approved_chunks.length > 1" in code
-    assert "prompt.approved_chunks.pop()" in code
-    assert "retained_chunk_count" in code
+    assert "prompt_budget_exceeded" not in code
+    assert ".slice(-6)" in code
+    assert ".slice(0, 10)" not in code
+    assert "const remaining = 4500 - ragTokens" not in code
+    assert "token_limits: 'provider_managed'" in code
+    assert "max_tokens: 1200" not in code
+    assert "prompt_context_manifest" in code
 
 
 def test_canonical_agentic_workflow_forwards_semantic_observations():
@@ -447,9 +458,29 @@ def test_canonical_agentic_workflow_forwards_semantic_observations():
     # `facts` alone would also match facts_by_key/accepted_facts, so assert the
     # interpretation contract itself: the schema the model is handed and the
     # parse that turns its answer back into facts.
-    assert "'intents','state_relation'" in request
+    assert "contract: 'conversation_envelope_v3'" in request
+    assert "envelope_version" in request
+    assert "customer_questions" in request
+    assert "response.answer" not in request
     assert "Array.isArray(parsed.facts)" in validate
+    assert "typeof parsed.reply === 'string' ? parsed.reply : ''" in validate
+    assert ".trim()" not in validate
     assert "response: $json.response" in persist
+
+
+def test_canonical_agentic_workflow_has_one_repair_and_no_automatic_fallback():
+    workflow = json.loads((ROOT / "api/n8n-workflows/persona-conversation-template.json").read_text(encoding="utf-8"))
+    all_code = "\n".join(
+        node.get("parameters", {}).get("jsCode", "")
+        for node in workflow["nodes"]
+    )
+    assert workflow["meta"]["envelope_version"] == "3"
+    assert workflow["meta"]["automatic_deterministic_failover"] is False
+    assert workflow["meta"]["policy_feedback_contract"]["on_second_validation_failure"] == "durable_retry_without_outbound"
+    assert "repair_attempt: 1" in all_code
+    assert "published_fallback" not in all_code
+    assert "questionOnlyRepair" not in all_code
+    assert "response_format" in all_code and "json_schema" in all_code and "json_object" in all_code
 
 
 def test_canonical_agentic_workflow_does_not_duplicate_the_price_safety_check():
@@ -491,7 +522,8 @@ def test_canonical_agentic_workflow_uses_graph_branch_identity_for_service():
     workflow = json.loads((ROOT / "api/n8n-workflows/persona-conversation-template.json").read_text(encoding="utf-8"))
     request = next(node for node in workflow["nodes"] if node["name"] == "Build graph grounded agent request")["parameters"]["jsCode"]
     validate = next(node for node in workflow["nodes"] if node["name"] == "Validate agent response")["parameters"]["jsCode"]
-    assert "branch_anchor_node_id" in request and "branch_anchor_node_id" in validate
+    assert "branch_anchor_node_id" in request
+    assert "branch_selections" in validate
 
 
 def test_wa_validator_generates_from_graph_without_model_or_allowlist(monkeypatch):

@@ -256,7 +256,7 @@ def test_nome_com_caixa_alta_do_cliente_tambem_e_aceito(monkeypatch):
     assert response.proof["next_question_node_id"] == "q:servico"
 
 
-def test_repetir_o_candidato_pendente_confirma_e_avanca(monkeypatch):
+def test_repetir_o_candidato_pendente_sem_envelope_completo_nao_confirma(monkeypatch):
     document, pub = _fixture(monkeypatch)
     pending = {
         "field_key": "nome", "owner_node_id": "persona:generic",
@@ -278,11 +278,8 @@ def test_repetir_o_candidato_pendente_confirma_e_avanca(monkeypatch):
         message_id="msg:2",
     ).model_copy(update={"pending_confirmation_ref": "fact:nome:persona:generic"})
 
-    # Repeating the pending candidate value used to confirm it on its own
-    # (`_restates_pending_candidate`, now dead code). Confirmation now comes
-    # from the model's semantic reading of the same message, so the customer
-    # restating "allan rodrigues" must surface as an explicit confirmation
-    # intent bound to the pending fact's ref.
+    # A partial legacy interpretation lacks reply and fact mutation. It must
+    # not cause the backend to infer a confirmation from the repeated text.
     _decision, response = graph_agent_runtime_v3.decide(
         context, model_observation={
             "interpretation": {
@@ -297,13 +294,8 @@ def test_repetir_o_candidato_pendente_confirma_e_avanca(monkeypatch):
         },
     )
 
-    assert response.proof["mode"] == "deterministic_field_confirmation"
-    fact = next(
-        item for item in response.proof["accepted_facts"]
-        if item["field_key"] == "nome"
-    )
-    assert fact["status"] == "known"
-    assert fact["value"] == "Allan Rodrigues"
+    assert response.proof["mode"] == "discovery"
+    assert response.proof["accepted_facts"] == []
 
 
 def test_saudacao_livre_aceita_pergunta_natural_vinculada_ao_campo(monkeypatch):

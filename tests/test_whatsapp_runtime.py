@@ -147,7 +147,7 @@ def test_delivery_callback_routes_every_observation_through_binding(monkeypatch)
 
 
 def test_retry_backoff_and_dead_letter_are_bounded(monkeypatch):
-    assert [_retry_delay(n) for n in (1, 2, 3, 20)] == [5, 10, 20, 300]
+    assert [_retry_delay(n) for n in (1, 2, 3, 4, 5, 20)] == [15, 30, 60, 120, 300, 300]
     released: list[dict] = []
     dead: list[dict] = []
     monkeypatch.setattr("workers.whatsapp_dispatch_worker.supabase_client.release_whatsapp_buffer", lambda *args, **kwargs: released.append({"args": args, **kwargs}))
@@ -156,7 +156,7 @@ def test_retry_backoff_and_dead_letter_are_bounded(monkeypatch):
     worker._retry_or_dead_letter({"id": "a", "attempt_count": 2, "max_attempts": 3}, RuntimeError("temporary"))
     worker._retry_or_dead_letter({"id": "b", "attempt_count": 3, "max_attempts": 3}, RuntimeError("final"))
     assert released[0]["args"][:2] == ("a", "retry")
-    assert released[0]["delay_seconds"] == 10
+    assert released[0]["delay_seconds"] == 30
     assert dead[0]["args"][:2] == ("b", "dead_letter")
 
 

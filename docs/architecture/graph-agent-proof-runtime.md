@@ -146,7 +146,9 @@ casos, a transição pode alterar rota e metadados, nunca o texto do modelo.
 - transformar proof em serviço de evidência/isolamento sem composição de fala;
 - mover repetição e qualidade estilística para avaliação offline;
 - suportar assets, fotos, vídeos e links publicados como chunks multimodais,
-  sem carregar catálogo completo no prompt.
+  sem carregar catálogo completo no prompt (em progresso 2026-08-31 — ver
+  roadmap item 8a e o checkpoint de mídia; `send_media` Meta Cloud e o schema
+  `media_batch` já em `main`, retrieval multimodal e prova de asset pendentes).
 
 O template canônico é
 `api/n8n-workflows/persona-conversation-template.json` (`graph_agentic_v3`) e

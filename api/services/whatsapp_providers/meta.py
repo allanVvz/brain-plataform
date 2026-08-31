@@ -185,5 +185,78 @@ class MetaWhatsAppProvider:
     def logout_instance(self, binding: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError("Meta Cloud bindings have no local instance to log out")
 
+    # Meta message types that can carry a caption alongside the attachment.
+    _CAPTIONABLE = ("image", "video", "document")
+
     def send_media(self, binding: dict[str, Any], recipient: str, media: dict[str, Any]) -> dict[str, Any]:
-        raise NotImplementedError("Meta Cloud media send is not implemented yet")
+        """Send one attachment through Meta Cloud.
+
+        ``media`` mirrors the Evolution ``send_media`` shape so the dispatch
+        worker stays provider-agnostic:
+
+        - ``mediatype``: ``image`` | ``video`` | ``document`` | ``audio``
+        - ``mimetype``: the file's MIME type
+        - ``media``: a URL the bytes can be fetched from (a scoped storage
+          signed URL); required unless ``link`` is given
+        - ``link``: send Meta a public URL directly instead of uploading —
+          only for URLs that stay reachable long enough for Meta's async fetch
+        - ``fileName``: original filename (documents show it to the recipient)
+        - ``caption``: text shown with the attachment
+
+        Default path is upload-by-id: the signed storage URL expires and Meta
+        fetches a ``link`` asynchronously, so we resolve the bytes ourselves,
+        upload them once to ``/{phone_number_id}/media`` for a stable media id,
+        then reference that id in the message.
+        """
+        if not binding.get("whatsapp_phone_number_id"):
+            raise RuntimeError("Meta binding has no phone number id")
+        media_type = str(media.get("mediatype") or media.get("kind") or "").strip().lower()
+        if media_type not in self._MEDIA_TYPES:
+            raise RuntimeError(f"unsupported Meta media type: {media_type or '(empty)'}")
+        token, api_version = _credential(binding)
+        phone_number_id = binding["whatsapp_phone_number_id"]
+        base = f"https://graph.facebook.com/{api_version}/{phone_number_id}"
+        headers = {"Authorization": f"Bearer {token}"}
+        caption = str(media.get("caption") or "").strip()
+
+        node: dict[str, Any]
+        link = str(media.get("link") or "").strip()
+        if link:
+            node = {"link": link}
+        else:
+            source_url = str(media.get("media") or media.get("url") or "").strip()
+            if not source_url:
+                raise RuntimeError("Meta media send needs a source URL or an explicit link")
+            fetched = httpx.get(source_url, timeout=60.0, follow_redirects=True)
+            _raise_for_status_with_detail(fetched)
+            mime = str(media.get("mimetype") or fetched.headers.get("content-type") or "").split(";")[0].strip()
+            if not mime:
+                raise RuntimeError("Meta media upload needs a MIME type")
+            filename = str(media.get("fileName") or media.get("filename") or "upload")
+            upload = httpx.post(
+                f"{base}/media",
+                headers=headers,
+                data={"messaging_product": "whatsapp", "type": mime},
+                files={"file": (filename, fetched.content, mime)},
+                timeout=120.0,
+            )
+            _raise_for_status_with_detail(upload)
+            media_id = (upload.json() or {}).get("id")
+            if not media_id:
+                raise RuntimeError("Meta returned no media id after upload")
+            node = {"id": str(media_id)}
+
+        if caption and media_type in self._CAPTIONABLE:
+            node["caption"] = caption
+        if media_type == "document" and (media.get("fileName") or media.get("filename")):
+            node["filename"] = str(media.get("fileName") or media.get("filename"))
+
+        response = httpx.post(
+            f"{base}/messages",
+            headers=headers,
+            json={"messaging_product": "whatsapp", "to": recipient,
+                  "type": media_type, media_type: node},
+            timeout=30.0,
+        )
+        _raise_for_status_with_detail(response)
+        return response.json()

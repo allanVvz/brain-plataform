@@ -128,6 +128,31 @@ class ConversationCommitFailed(RuntimeError):
         self.inbound_id = inbound_id
         self.postgres_code = str(getattr(cause, "code", "") or "") or None
         self.constraint = str(getattr(cause, "constraint_name", "") or "") or None
+        raw_detail = (
+            getattr(cause, "details", None)
+            or getattr(cause, "detail", None)
+            or ""
+        )
+        self.detail = str(raw_detail or "")[:1000] or None
+        self.hint = str(getattr(cause, "hint", "") or "")[:500] or None
+        structured_detail: dict[str, Any] = {}
+        if self.detail:
+            try:
+                parsed_detail = json.loads(self.detail)
+                if isinstance(parsed_detail, dict):
+                    structured_detail = parsed_detail
+            except (TypeError, ValueError):
+                pass
+        self.reason_class = str(
+            structured_detail.get("reason_class")
+            or (
+                "delivery_authorization"
+                if failed_step == "delivery_authorization"
+                else "exactly_once_conflict"
+                if "outbound" in failed_step or "commit" in failed_step
+                else "technical_failure"
+            )
+        )[:120]
         self.correlation_id = correlation_id
         super().__init__(f"conversation commit failed at {failed_step}")
 
@@ -138,6 +163,9 @@ class ConversationCommitFailed(RuntimeError):
             "failed_step": self.failed_step,
             "postgres_code": self.postgres_code,
             "constraint": self.constraint,
+            "reason_class": self.reason_class,
+            "detail": self.detail,
+            "hint": self.hint,
             "canonical_inbound_id": self.inbound_id,
             "inbound_id": self.inbound_id,
             "correlation_id": self.correlation_id,
@@ -149,16 +177,16 @@ def _commit_graph_turn_and_outbox_or_raise(
     *, inbound_id: str | None, correlation_id: str, **payload: Any,
 ) -> dict:
     try:
-        return supabase_client.commit_graph_turn_and_outbox_v4(**payload)
+        return supabase_client.commit_graph_turn_and_outbox_v5(**payload)
     except Exception as exc:
         logger.exception(
-            "atomic conversation commit failed step=commit_graph_turn_and_outbox_v4 "
+            "atomic conversation commit failed step=commit_graph_turn_and_outbox_v5 "
             "inbound_id=%s correlation_id=%s",
             inbound_id,
             correlation_id,
         )
         raise ConversationCommitFailed(
-            failed_step="commit_graph_turn_and_outbox_v4",
+            failed_step="commit_graph_turn_and_outbox_v5",
             inbound_id=inbound_id,
             correlation_id=correlation_id,
             cause=exc,
@@ -167,6 +195,14 @@ def _commit_graph_turn_and_outbox_or_raise(
 
 class ModelDecisionError(RuntimeError):
     pass
+
+
+_CONVERSATION_RETRY_DELAYS = (15, 30, 60, 120, 300)
+
+
+def conversation_retry_delay(attempt: int) -> int:
+    index = max(0, min(int(attempt or 1) - 1, len(_CONVERSATION_RETRY_DELAYS) - 1))
+    return _CONVERSATION_RETRY_DELAYS[index]
 
 
 def _json_object(raw: str) -> dict[str, Any]:
@@ -1516,7 +1552,66 @@ def decide(
     decision, response = _decide_dispatch(context, model_observation=model_observation)
     observation = model_observation or {}
     is_repair = int(observation.get("repair_attempt") or 0) > 0
+    finish_reason = str(observation.get("finish_reason") or "") or None
+    output_truncated = bool(
+        observation.get("output_truncated") or finish_reason == "length"
+    )
+    unsafe_confirmation = _reply_confirms_price_or_schedule(response.reply_text)
+    if (
+        context.runtime_version == graph_agent_runtime_v3.RUNTIME_VERSION
+        and (unsafe_confirmation or output_truncated)
+    ):
+        issue = (
+            "unsafe_price_date_time_confirmation"
+            if unsafe_confirmation else "model_output_truncated"
+        )
+        repair_required = not is_repair
+        proof = {
+            **response.proof,
+            "valid": False,
+            "delivery_authorized": False,
+            "gating_errors": list(dict.fromkeys([
+                *(response.proof.get("gating_errors") or []), issue,
+            ])),
+            "repair_required": repair_required,
+            "repair_requirements": [
+                *(response.proof.get("repair_requirements") or []),
+                *([{
+                    "kind": "safety" if unsafe_confirmation else "provider",
+                    "issue": issue,
+                    "instruction": (
+                        "Rewrite the same reply without confirming a final price, "
+                        "date or time. Preserve all safe content."
+                        if unsafe_confirmation else
+                        "Return the compact v3 envelope with a complete reply."
+                    ),
+                }] if repair_required else []),
+            ],
+            "finish_reason": finish_reason,
+            "output_truncated": output_truncated,
+            "provider_failure_class": "length" if output_truncated else "other",
+            "durable_retry_required": bool(output_truncated and is_repair),
+            "model_reply_preserved": True,
+            "technical_pass": False,
+        }
+        response = response.model_copy(update={
+            "reply_text": None,
+            "handoff_required": False,
+            "proof": proof,
+        })
     token_usage = observation.get("token_usage") or (response.token_usage or {})
+    response = response.model_copy(update={
+        "proof": {
+            **response.proof,
+            "finish_reason": finish_reason,
+            "output_truncated": output_truncated,
+            "provider_failure_class": response.proof.get("provider_failure_class")
+            or observation.get("provider_failure_class"),
+            "prompt_context_manifest": observation.get("prompt_context_manifest") or {},
+            "attempt": int(observation.get("repair_attempt") or 0) + 1,
+            "actual_token_usage": token_usage or {},
+        },
+    })
     emit_turn_event(
         agent_name="conversation.repair_call" if is_repair else "conversation.decide_llm_call",
         trace_id=trace_id,
@@ -2056,6 +2151,29 @@ def commit(
     expected_decision_owner: str | None = None,
     n8n_execution_id: str | None = None,
 ) -> dict[str, Any]:
+    if context.runtime_version == graph_agent_runtime_v3.RUNTIME_VERSION:
+        model_reply = str(response.reply_text or "").strip()
+        delivery_authorized = bool(
+            response.proof.get("delivery_authorized", response.proof.get("valid"))
+        )
+        # A v3 turn may commit facts and proof telemetry without an outbound.
+        # Apply the delivery gate only when a model reply would be delivered.
+        if (
+            model_reply
+            and (
+                not delivery_authorized
+                or _reply_confirms_price_or_schedule(model_reply)
+            )
+        ):
+            raise ConversationCommitFailed(
+                failed_step="delivery_authorization",
+                inbound_id=inbound_buffer_id,
+                correlation_id=correlation_id,
+                cause=RuntimeError(
+                    "model reply is not authorized for outbound delivery"
+                ),
+            )
+
     if _reply_confirms_price_or_schedule(response.reply_text):
         if response.proposal is not None:
             authorized = bool(context.graph_contract.get("confirmation_required"))
@@ -2100,7 +2218,7 @@ def commit(
             )
 
     appointment_policy = _context_appointment_policy(context)
-    if _reply_states_a_price(
+    if context.runtime_version != graph_agent_runtime_v3.RUNTIME_VERSION and _reply_states_a_price(
         response.reply_text,
         appointment_policy,
         cited_nodes=_cited_context_nodes(context, decision),

@@ -41,7 +41,10 @@ def validate(path: Path, *, verify_checkout_artifacts: bool = True) -> dict:
     }
     _require(required <= manifest.keys(), f"missing fields: {sorted(required - manifest.keys())}")
     _require(bool(SHA.fullmatch(str(manifest["source_sha"]))), "invalid source_sha")
-    _require(manifest["contracts_version"] == "1.0.0", "contracts_version must be 1.0.0")
+    _require(
+        manifest["contracts_version"] in {"1.0.0", "1.1.0"},
+        "contracts_version must be 1.0.0 or 1.1.0 during the additive blue/green window",
+    )
     _require(isinstance(manifest["schema_version"], int) and manifest["schema_version"] >= 131,
              "schema_version must be at least 131")
     _require(bool(DIGEST.fullmatch(str(manifest["route_map_checksum"]))),

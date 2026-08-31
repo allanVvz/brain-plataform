@@ -189,7 +189,7 @@ def test_open_journey_seeds_every_profile_fact_with_origin() -> None:
     assert facts["vehicle_model"]["metadata"]["origin_journey_id"] == "old-journey"
 
 
-def test_generic_pending_fact_confirmation_has_no_field_name_handler(monkeypatch) -> None:
+def test_generic_pending_fact_confirmation_needs_a_complete_model_envelope(monkeypatch) -> None:
     document = {
         "branch_anchors": [], "node_by_id": {}, "coordinates": {},
         "branch_contracts": {},
@@ -244,10 +244,9 @@ def test_generic_pending_fact_confirmation_has_no_field_name_handler(monkeypatch
         },
     )
 
-    fact = response.proof["accepted_facts"][0]
-    assert fact["field_key"] == "fictional_field"
-    assert fact["status"] == "known"
-    assert fact["value"] == "valor inventado"
+    # A bare legacy interpretation contains no model-owned reply or fact
+    # mutation. The runtime must not manufacture a confirmation from it.
+    assert response.proof["accepted_facts"] == []
     assert response.proof["journey_action"] == "continue"
 
 
@@ -261,6 +260,6 @@ def test_v4_sql_and_template_keep_no_journey_exactly_once_contract() -> None:
     assert "journey_action=none" in migration
     assert "INSERT INTO public.conversation_turn_proofs" in migration
     assert "conversation_facts" not in migration.split("journey_action=none", 1)[1]
-    assert "intents" in template_text and "state_relation" in template_text
+    assert "envelope_version" in template_text
     assert "shared_memory" in template_text
-    assert "slice(-8)" in template_text
+    assert "slice(-6)" in template_text

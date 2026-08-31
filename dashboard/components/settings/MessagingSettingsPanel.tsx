@@ -541,13 +541,13 @@ function AgentesSubPanel({ personaSlug }: { personaSlug: string }) {
           {([
             {
               value: "deterministic",
-              title: "Determinístico",
-              description: "Usa o grafo e as regras publicadas, sem consumir um agente de IA.",
+              title: "Determinístico — seleção manual",
+              description: "Motor de regras disponível somente por escolha manual nesta persona.",
             },
             {
               value: "n8n_agents",
-              title: "n8n",
-              description: "O n8n compõe a resposta com um agente de IA, com decisões comerciais determinísticas.",
+              title: "n8n + IA — modelo compõe a conversa",
+              description: "O modelo escreve a resposta, a explicação e a próxima pergunta. O validador determinístico é advisory.",
             },
             {
               value: "orquestrador",
@@ -589,6 +589,15 @@ function AgentesSubPanel({ personaSlug }: { personaSlug: string }) {
           })}
         </div>
 
+        {routing?.conversation_mode === "n8n_agents" && (
+          <div className="mt-3 rounded-lg border border-sky-500/25 bg-sky-500/10 px-3 py-3 text-xs text-sky-100">
+            <p className="font-medium">Validador determinístico: advisory</p>
+            <p className="mt-1 text-sky-100/80">
+              Não existe failover automático. A troca para o motor determinístico ocorre somente por seleção manual nesta tela.
+            </p>
+          </div>
+        )}
+
         {routing?.readiness && routing.readiness.operational_state !== "ready" && (
           <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-3 text-xs text-amber-100">
             <p className="font-medium">
@@ -614,8 +623,8 @@ function AgentesSubPanel({ personaSlug }: { personaSlug: string }) {
         <h3 className="text-sm font-semibold text-obs-text">Agente de IA</h3>
         <p className="mt-1 text-xs leading-5 text-obs-subtle">
           {needsAgent
-            ? "Provedor de modelo que compõe as respostas quando o motor não é determinístico."
-            : "Só é usado pelos motores n8n/Orquestrador — o motor atual (Determinístico) não precisa de um agente de IA."}
+            ? "Provedor de modelo que compõe integralmente as respostas no modo n8n + IA."
+            : "Só é usado pelos motores n8n/Orquestrador. O motor determinístico foi selecionado manualmente."}
         </p>
         <div className="mt-3 grid gap-2 sm:grid-cols-3">
           {integrations.length === 0 && (

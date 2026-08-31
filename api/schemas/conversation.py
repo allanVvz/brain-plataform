@@ -304,6 +304,10 @@ class CustomerQuestionKind(StrEnum):
     SCHEDULE = "schedule"
     DEADLINE = "deadline"
     PRODUCT_DETAIL = "product_detail"
+    # The customer asked to see the product (photo / video / catalog link).
+    # The model only flags the request and the products; the backend resolves
+    # which published assets may be sent.
+    MEDIA = "media"
     OTHER = "other"
 
 
@@ -478,6 +482,28 @@ class ConversationDecision(StrictModel):
     evidence_node_ids: list[str] = Field(default_factory=list)
 
 
+class MediaItem(StrictModel):
+    """One published asset the backend authorized this turn to send.
+
+    Resolved by the runtime from graph-declared ``asset`` nodes (never by the
+    model): the customer message only names the products via a ``media``
+    question, and the backend picks the single primary asset each published
+    product carries. ``bucket``/``path`` point at private storage the dispatch
+    worker signs at send time; ``url`` is set instead for a published link.
+    """
+
+    product_node_id: str
+    asset_node_id: str
+    title: str = ""
+    kind: str = "image"
+    mime: str = ""
+    bucket: str = ""
+    path: str = ""
+    url: str = ""
+    filename: str = ""
+    sha256: str = ""
+
+
 class AgentResponse(StrictModel):
     reply_text: str | None
     role: ConversationRoute
@@ -489,6 +515,10 @@ class AgentResponse(StrictModel):
     proposal: ConversationProposal | None = None
     proof: dict[str, Any] = Field(default_factory=dict)
     repair_context_cards: list[dict[str, Any]] = Field(default_factory=list)
+    # One graph-proved reply may carry an ordered batch of published media.
+    # The commit boundary persists the whole batch atomically and releases
+    # only the first item; the dispatch worker sends the rest in order.
+    media_batch: list[MediaItem] = Field(default_factory=list)
     # Billed usage reported by the reply-drafting model call (e.g. DeepSeek's
     # OpenAI-compatible {prompt_tokens, completion_tokens, total_tokens}).
     # Optional because not every route (deterministic fallbacks, HUMAN

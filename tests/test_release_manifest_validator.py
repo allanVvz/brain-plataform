@@ -49,6 +49,25 @@ def test_validator_accepts_exact_release_boundary(tmp_path):
     assert MODULE.validate(path)["schema_version"] == 131
 
 
+def test_validator_accepts_additive_contract_1_1_during_blue_green(tmp_path):
+    manifest = _manifest()
+    manifest["contracts_version"] = "1.1.0"
+    path = tmp_path / "release.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    assert MODULE.validate(path)["contracts_version"] == "1.1.0"
+
+
+def test_validator_rejects_unknown_contract_version(tmp_path):
+    manifest = _manifest()
+    manifest["contracts_version"] = "2.0.0"
+    path = tmp_path / "release.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="contracts_version"):
+        MODULE.validate(path)
+
+
 @pytest.mark.parametrize("mutation", ["service", "schema", "checksum", "gateway_sha"])
 def test_validator_rejects_unreleasable_manifest(tmp_path, mutation):
     manifest = _manifest()

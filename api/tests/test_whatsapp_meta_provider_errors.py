@@ -109,3 +109,95 @@ def test_successful_send_is_unaffected(monkeypatch):
     result = provider.send_text(_binding(), "5551992623375", "oi")
 
     assert result["messages"][0]["id"] == "wamid.123"
+
+
+def _ok(url: str, body: dict, status: int = 200) -> httpx.Response:
+    return httpx.Response(status, json=body, request=httpx.Request("POST", url))
+
+
+def test_send_media_uploads_bytes_then_sends_by_id(monkeypatch):
+    """Default path: fetch the bytes, upload once for a stable id, reference it."""
+    monkeypatch.setattr(
+        "services.whatsapp_providers.meta.httpx.get",
+        lambda *_a, **_k: httpx.Response(
+            200, content=b"\xff\xd8\xff-jpeg-bytes",
+            headers={"content-type": "image/jpeg"},
+            request=httpx.Request("GET", "https://storage.example/signed"),
+        ),
+    )
+    calls: list[dict] = []
+
+    def fake_post(url, **kwargs):
+        calls.append({"url": url, **kwargs})
+        if url.endswith("/media"):
+            return _ok(url, {"id": "media-abc"})
+        return _ok(url, {"messages": [{"id": "wamid.img"}]})
+
+    monkeypatch.setattr("services.whatsapp_providers.meta.httpx.post", fake_post)
+
+    provider = MetaWhatsAppProvider()
+    result = provider.send_media(_binding(), "5551992623375", {
+        "mediatype": "image", "mimetype": "image/jpeg",
+        "media": "https://storage.example/signed",
+        "fileName": "body-rendado.jpeg", "caption": "Body rendado",
+    })
+
+    assert result["messages"][0]["id"] == "wamid.img"
+    upload, send = calls
+    assert upload["url"].endswith("/media")
+    assert upload["data"] == {"messaging_product": "whatsapp", "type": "image/jpeg"}
+    assert upload["files"]["file"][1] == b"\xff\xd8\xff-jpeg-bytes"
+    assert send["json"]["type"] == "image"
+    assert send["json"]["image"] == {"id": "media-abc", "caption": "Body rendado"}
+
+
+def test_send_media_by_link_skips_upload(monkeypatch):
+    calls: list[str] = []
+
+    def fake_post(url, **kwargs):
+        calls.append(url)
+        return _ok(url, {"messages": [{"id": "wamid.link"}]})
+
+    monkeypatch.setattr("services.whatsapp_providers.meta.httpx.post", fake_post)
+    monkeypatch.setattr(
+        "services.whatsapp_providers.meta.httpx.get",
+        lambda *_a, **_k: pytest.fail("link path must not fetch bytes"),
+    )
+
+    provider = MetaWhatsAppProvider()
+    result = provider.send_media(_binding(), "5551992623375", {
+        "mediatype": "document", "link": "https://cdn.example/catalogo.pdf",
+        "fileName": "catalogo.pdf", "caption": "Catálogo",
+    })
+
+    assert result["messages"][0]["id"] == "wamid.link"
+    assert calls == ["https://graph.facebook.com/v21.0/949967854877404/messages"]
+
+
+def test_send_media_rejects_unknown_type(monkeypatch):
+    provider = MetaWhatsAppProvider()
+    with pytest.raises(RuntimeError, match="unsupported Meta media type"):
+        provider.send_media(_binding(), "5551992623375", {"mediatype": "hologram"})
+
+
+def test_send_media_surfaces_upload_error(monkeypatch):
+    monkeypatch.setattr(
+        "services.whatsapp_providers.meta.httpx.get",
+        lambda *_a, **_k: httpx.Response(
+            200, content=b"x", headers={"content-type": "image/jpeg"},
+            request=httpx.Request("GET", "https://storage.example/signed"),
+        ),
+    )
+    monkeypatch.setattr(
+        "services.whatsapp_providers.meta.httpx.post",
+        lambda *_a, **_k: _ok("https://graph.facebook.com/v21.0/x/media",
+                              {"error": {"message": "media too large", "code": 131052}}, 400),
+    )
+
+    provider = MetaWhatsAppProvider()
+    with pytest.raises(httpx.HTTPStatusError) as exc:
+        provider.send_media(_binding(), "5551992623375", {
+            "mediatype": "image", "mimetype": "image/jpeg",
+            "media": "https://storage.example/signed",
+        })
+    assert "media too large" in str(exc.value)

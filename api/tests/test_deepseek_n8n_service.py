@@ -110,7 +110,8 @@ def test_model_request_is_built_in_code_and_http_body_is_simple():
 
     assert "context_cards" in request_node["parameters"]["jsCode"]
     assert "rendered_content" not in request_node["parameters"]["jsCode"]
-    assert "prompt_budget_exceeded" in request_node["parameters"]["jsCode"]
+    assert "prompt_budget_exceeded" not in request_node["parameters"]["jsCode"]
+    assert "token_limits: 'provider_managed'" in request_node["parameters"]["jsCode"]
     assert deepseek_node["parameters"]["body"] == "={{JSON.stringify($json.request_body)}}"
     assert "buffer_id" in fail_safe["parameters"]["body"]
     assert "correlation_id" in fail_safe["parameters"]["body"]
@@ -151,18 +152,17 @@ def test_model_proposal_is_proved_and_repaired_against_graph_before_commit():
     assert "response: $json.response" in commit["parameters"]["body"]
 
 
-def test_repeated_question_repair_is_compact_model_owned_and_preserves_interpretation():
+def test_repair_is_compact_model_owned_and_preserves_the_envelope():
     workflow = _live_workflow("cred-1")
     by_id = {node["id"]: node for node in workflow["nodes"]}
     request_code = by_id["repair_request"]["parameters"]["jsCode"]
     response_code = by_id["repair_response"]["parameters"]["jsCode"]
 
-    assert "questionOnlyRepair" in request_code
-    assert "Ask no question" in request_code
-    assert "invalid_answer" in request_code
-    assert "recent_messages" in request_code
-    assert "question_field_key: null" in response_code
-    assert "...firstInterpretation" in response_code
+    assert "original_envelope: first.interpretation" in request_code
+    assert "format or safety defect" in request_code
+    assert "questionOnlyRepair" not in request_code
+    assert "reconciled" in response_code
+    assert "acceptedFacts" in response_code
 
 
 def test_canonical_template_has_no_persona_or_business_hardcode():
