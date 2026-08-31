@@ -278,6 +278,8 @@ def test_service_env_bootstrap_never_distributes_universal_database_secrets():
     assert 'role="brain_control_plane"' in bootstrap
     assert 'role="brain_runtime"' in bootstrap
     assert 'role="brain_transport"' in bootstrap
+    assert 'TRANSPORT = COMMON | {\n    # The transport dispatch worker invokes' in bootstrap
+    assert '    "N8N_BASE_URL",' in bootstrap
     assert '"SERVICE_ROLE_KEY"' not in bootstrap
     assert '"POSTGRES_PASSWORD"' not in bootstrap
 
