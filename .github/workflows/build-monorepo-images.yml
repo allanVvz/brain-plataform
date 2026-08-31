@@ -65,6 +65,7 @@ jobs:
         if: github.event_name == 'push'
         with: {registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}"}
       - uses: docker/build-push-action@v6
+        id: build
         with:
           context: .
           file: apps/${{ matrix.app }}/Dockerfile
@@ -72,7 +73,19 @@ jobs:
           build-args: |
             SOURCE_SHA=${{ github.sha }}
             BRAIN_CONTRACTS_SHA=${{ steps.contracts.outputs.checksum }}
-          tags: ghcr.io/${{ github.repository_owner }}/brain-${{ matrix.app }}:${{ github.sha }}
+          tags: ghcr.io/allanvvz/brain-${{ matrix.app }}:${{ github.sha }}
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
             io.brain.contracts-checksum=${{ steps.contracts.outputs.checksum }}
+      - name: Record immutable image digest
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          mkdir -p image-digest
+          printf '%s\n' '${{ steps.build.outputs.digest }}' > "image-digest/${{ matrix.app }}.txt"
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'push'
+        with:
+          name: image-digest-${{ matrix.app }}
+          path: image-digest/${{ matrix.app }}.txt
+          if-no-files-found: error
