@@ -44,6 +44,11 @@ RUNTIME = COMMON | {
     "GRAPH_RAG_LOCAL_EMBEDDING_MODEL", "INSECURE_LLM_SSL",
 }
 TRANSPORT = COMMON | {
+    # The transport dispatch worker invokes the canonical n8n conversation
+    # workflow for bindings owned by ``n8n_agents``.  Keep the internal n8n
+    # base URL in its least-privilege environment so direct-binding validation
+    # and dispatch agree on the same endpoint.
+    "N8N_BASE_URL",
     "META_WHATSAPP_ACCESS_TOKEN", "META_WHATSAPP_APP_SECRET", "META_WHATSAPP_VERIFY_TOKEN",
     "EVOLUTION_API_URL", "EVOLUTION_API_KEY",
     "EVOLUTION_ENABLED", "WHISPER_MODEL", "WHISPER_DEVICE", "WHISPER_COMPUTE_TYPE",
