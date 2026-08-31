@@ -100,6 +100,7 @@ services:
       BUILD_DIGEST: ${TRANSPORT_DIGEST:?transport digest required}
       BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
       REQUIRED_SCHEMA_VERSION: "131"
+      N8N_BASE_URL: ${N8N_BASE_URL:-http://n8n:5678}
     labels: {brain.service: transport, brain.slot: blue}
   transport-green:
     <<: *transport
@@ -111,6 +112,7 @@ services:
       BUILD_DIGEST: ${TRANSPORT_DIGEST:?transport digest required}
       BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
       REQUIRED_SCHEMA_VERSION: "131"
+      N8N_BASE_URL: ${N8N_BASE_URL:-http://n8n:5678}
     labels: {brain.service: transport, brain.slot: green}
 
   control-plane-knowledge-blue: &control-plane-knowledge
