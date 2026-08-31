@@ -2,7 +2,7 @@
 
 ## Canonical source
 
-Treat `api/n8n-workflows/persona-conversation-template.json` as the only provisionable conversation workflow template.
+Treat `apps/conversation-runtime/n8n/persona-conversation-template.json` as the only provisionable conversation workflow template.
 
 Persona-specific exports such as `baita-vitoria.json` are audit fixtures only. Do not import, provision, clone or evolve them as runtime sources.
 

@@ -252,7 +252,7 @@ def test_generic_pending_fact_confirmation_needs_a_complete_model_envelope(monke
 
 def test_v4_sql_and_template_keep_no_journey_exactly_once_contract() -> None:
     migration = (ROOT / "supabase" / "migrations" / "130_shared_lead_memory_and_journey_commit_v4.sql").read_text(encoding="utf-8")
-    template = json.loads((ROOT / "api" / "n8n-workflows" / "persona-conversation-template.json").read_text(encoding="utf-8"))
+    template = json.loads((ROOT / "apps" / "conversation-runtime" / "n8n" / "persona-conversation-template.json").read_text(encoding="utf-8"))
     template_text = json.dumps(template, ensure_ascii=False)
 
     assert "graph_turn_context_batch_v4" in migration

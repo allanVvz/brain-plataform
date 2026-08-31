@@ -35,7 +35,7 @@ def _manifest() -> dict:
         "contracts_version": "1.1.0",
         "schema_version": 133,
         "route_map_checksum": _checksum(ROOT / "ops/microservices/route-map.json"),
-        "n8n_checksum": _checksum(ROOT / "api/n8n-workflows/persona-conversation-template.json"),
+        "n8n_checksum": _checksum(ROOT / "apps/conversation-runtime/n8n/persona-conversation-template.json"),
         "services": {
             name: {"repository": repository, "sha": sha, "digest": digest,
                    "required_schema_version": 133}

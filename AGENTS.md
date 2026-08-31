@@ -1,4 +1,4 @@
-﻿# AGENTS.md - Brain AI
+# AGENTS.md - Brain AI
 
 ## Operacao de producao sem Docker local
 
@@ -617,7 +617,7 @@ Se nao aparece no grafo, esta incompleto.
 
 ## 26. Template n8n reproduzivel e backend sem hardcoded
 
-- `api/n8n-workflows/persona-conversation-template.json` e a unica fonte
+- `apps/conversation-runtime/n8n/persona-conversation-template.json` e a unica fonte
   provisionavel para workflows de conversa `n8n_agents`.
 - O mesmo template deve atender qualquer persona sem fork de nodes ou codigo.
   Provisionamento substitui somente binding tecnico, webhook e credencial.

@@ -1,0 +1,10 @@
+{
+  "contract_package": "packages/brain-contracts",
+  "internal_prefix": "/internal/v1",
+  "apps": {
+    "gateway": {"owns": ["session", "signed-principal", "public-routing"]},
+    "control-plane": {"owns": ["graph", "rag", "publications", "personas", "n8n-provisioning"]},
+    "conversation-runtime": {"owns": ["decision", "ledger", "proof", "retry", "memory", "wa-validator", "conversation-template"]},
+    "transport": {"owns": ["webhooks", "inbound-buffer", "media", "outbox", "delivery-confirmation"]}
+  }
+}

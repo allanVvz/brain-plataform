@@ -1,0 +1,10 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "brain-shared"
+version = "1.0.0"
+description = "Small pure shared primitives for Brain services"
+requires-python = ">=3.12"
+dependencies = ["pydantic>=2.13,<3"]

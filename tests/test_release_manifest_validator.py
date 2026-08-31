@@ -29,7 +29,7 @@ def _manifest() -> dict:
         "contracts_version": "1.0.0",
         "schema_version": 131,
         "route_map_checksum": _sha256(ROOT / "ops/microservices/route-map.json"),
-        "n8n_checksum": _sha256(ROOT / "api/n8n-workflows/persona-conversation-template.json"),
+        "n8n_checksum": _sha256(ROOT / "apps/conversation-runtime/n8n/persona-conversation-template.json"),
         "services": {
             "gateway": {"repository": "allanVvz/brain-plataform", "sha": source_sha,
                         "digest": digest, "required_schema_version": 131},

@@ -34,8 +34,8 @@ jobs:
           changed() { grep -Eq "$1" <<<"$files" && echo true || echo false; }
           force_all="$(changed '^\.github/workflows/ci\.yml$')"
           scoped() { if [ "$force_all" = "true" ]; then echo true; else changed "$1"; fi; }
-          conversation_gate='^(tests/fixtures/(conversation_repetition_cases|sdr_flow_cases)\.json|api/services/(conversation_repetition|graph_agent_runtime_v3|graph_proof_checker_v3|wa_validator_service)\.py|api/n8n-workflows/persona-conversation-template\.json|api/scripts/fixtures/[^/]*graph[^/]*\.json|dashboard/scripts/(conversation-repetition|wa-validator-driver|wa-validator)\.mjs|dashboard/e2e/wa-validator/)'
-          echo "backend=$(scoped "^(api/|tests/|supabase/migrations/|scripts/check_.*\.py$|${conversation_gate#^})")" >> "$GITHUB_OUTPUT"
+          conversation_gate='^(tests/fixtures/(conversation_repetition_cases|sdr_flow_cases)\.json|apps/conversation-runtime/api/services/(conversation_repetition|graph_agent_runtime_v3|graph_proof_checker_v3|wa_validator_service)\.py|apps/conversation-runtime/n8n/persona-conversation-template\.json|apps/conversation-runtime/api/scripts/fixtures/[^/]*graph[^/]*\.json|dashboard/scripts/(conversation-repetition|wa-validator-driver|wa-validator)\.mjs|dashboard/e2e/wa-validator/)'
+          echo "backend=$(scoped "^(api/|apps/|packages/|tests/|supabase/migrations/|scripts/check_.*\.py$|${conversation_gate#^})")" >> "$GITHUB_OUTPUT"
           echo "frontend=$(scoped "^(dashboard/|${conversation_gate#^})")" >> "$GITHUB_OUTPUT"
           echo "compose=$(scoped '^(docker-compose\.yml|\.env\.compose\.example|infra/|ops/vps/|Caddyfile|kong\.yml)')" >> "$GITHUB_OUTPUT"
           echo "python_deps=$(scoped '^api/requirements(-[^/]+)?\.txt$')" >> "$GITHUB_OUTPUT"
@@ -64,8 +64,9 @@ jobs:
         if: steps.changes.outputs.backend == 'true'
         run: |
           python scripts/check_python_syntax.py
+          python scripts/check_monorepo_boundaries.py
           python scripts/check_persona_hardcodes.py
-          python -m json.tool api/n8n-workflows/persona-conversation-template.json >/dev/null
+          python -m json.tool apps/conversation-runtime/n8n/persona-conversation-template.json >/dev/null
 
       - name: Testar backend uma única vez
         if: steps.changes.outputs.backend == 'true'
@@ -77,7 +78,9 @@ jobs:
           SUPABASE_HTTP_TIMEOUT_SECONDS: "2"
           SUPABASE_OFFLINE: "true"
           KNOWLEDGE_TAXONOMY_OFFLINE: "true"
-        run: timeout --signal=TERM --kill-after=15s 600s python -m pytest -q
+        run: |
+          timeout --signal=TERM --kill-after=15s 600s python -m pytest -q
+          timeout --signal=TERM --kill-after=15s 600s python scripts/test_monorepo_apps.py
 
       - name: Configurar Node
         if: steps.changes.outputs.frontend == 'true'

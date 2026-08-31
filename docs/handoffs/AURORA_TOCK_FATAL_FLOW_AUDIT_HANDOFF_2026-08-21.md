@@ -55,7 +55,7 @@ deve ser considerado equivalente apenas pelo wiring.
 
 Conclusão: não criar fork de n8n nem backend por persona. Se o dry-run repetir o
 drift, ressincronizar somente a Tock a partir de
-`api/n8n-workflows/persona-conversation-template.json`.
+`apps/conversation-runtime/n8n/persona-conversation-template.json`.
 
 ## 4. Tock Fatal — estado atual e causa
 

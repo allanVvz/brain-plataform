@@ -320,7 +320,7 @@ def test_echo_guard_still_suppresses_long_distinctive_replies(monkeypatch):
 
 def test_n8n_agentic_template_and_local_mode_are_distinct_contracts():
     workflow = json.loads(
-        (ROOT / "api" / "n8n-workflows" / "persona-conversation-template.json").read_text(
+        (ROOT / "apps" / "conversation-runtime" / "n8n" / "persona-conversation-template.json").read_text(
             encoding="utf-8"
         )
     )
@@ -360,7 +360,7 @@ def test_technical_failure_captures_which_node_failed_and_why_without_handoff():
     """
     for filename in ("persona-conversation-template.json",):
         workflow = json.loads(
-            (ROOT / "api" / "n8n-workflows" / filename).read_text(encoding="utf-8")
+                (ROOT / "apps" / "conversation-runtime" / "n8n" / filename).read_text(encoding="utf-8")
         )
         assert workflow["settings"]["saveDataErrorExecution"] == "all"
         fail_safe = next(
@@ -437,7 +437,7 @@ def test_recoverable_technical_failure_retries_same_canonical_inbound(monkeypatc
 
 
 def test_canonical_agentic_workflow_uses_provider_managed_token_limits():
-    workflow = json.loads((ROOT / "api/n8n-workflows/persona-conversation-template.json").read_text(encoding="utf-8"))
+    workflow = json.loads((ROOT / "apps/conversation-runtime/n8n/persona-conversation-template.json").read_text(encoding="utf-8"))
     code = next(node for node in workflow["nodes"] if node["name"] == "Build graph grounded agent request")["parameters"]["jsCode"]
     assert "context_cards" in code and "approved_chunks" in code
     assert "rendered_content" not in code
@@ -451,7 +451,7 @@ def test_canonical_agentic_workflow_uses_provider_managed_token_limits():
 
 
 def test_canonical_agentic_workflow_forwards_semantic_observations():
-    workflow = json.loads((ROOT / "api/n8n-workflows/persona-conversation-template.json").read_text(encoding="utf-8"))
+    workflow = json.loads((ROOT / "apps/conversation-runtime/n8n/persona-conversation-template.json").read_text(encoding="utf-8"))
     request = next(node for node in workflow["nodes"] if node["name"] == "Build graph grounded agent request")["parameters"]["jsCode"]
     validate = next(node for node in workflow["nodes"] if node["name"] == "Validate agent response")["parameters"]["jsCode"]
     persist = next(node for node in workflow["nodes"] if node["name"] == "Persist once and enqueue send")["parameters"]["body"]
@@ -469,7 +469,7 @@ def test_canonical_agentic_workflow_forwards_semantic_observations():
 
 
 def test_canonical_agentic_workflow_has_one_repair_and_no_automatic_fallback():
-    workflow = json.loads((ROOT / "api/n8n-workflows/persona-conversation-template.json").read_text(encoding="utf-8"))
+    workflow = json.loads((ROOT / "apps/conversation-runtime/n8n/persona-conversation-template.json").read_text(encoding="utf-8"))
     all_code = "\n".join(
         node.get("parameters", {}).get("jsCode", "")
         for node in workflow["nodes"]
@@ -484,7 +484,7 @@ def test_canonical_agentic_workflow_has_one_repair_and_no_automatic_fallback():
 
 
 def test_canonical_agentic_workflow_does_not_duplicate_the_price_safety_check():
-    workflow = json.loads((ROOT / "api/n8n-workflows/persona-conversation-template.json").read_text(encoding="utf-8"))
+    workflow = json.loads((ROOT / "apps/conversation-runtime/n8n/persona-conversation-template.json").read_text(encoding="utf-8"))
     js_code = "\n".join(
         node.get("parameters", {}).get("jsCode", "")
         for node in workflow["nodes"]
@@ -519,7 +519,7 @@ def test_n8n_workflow_js_code_nodes_never_contain_a_dangerous_line_comment():
 
 
 def test_canonical_agentic_workflow_uses_graph_branch_identity_for_service():
-    workflow = json.loads((ROOT / "api/n8n-workflows/persona-conversation-template.json").read_text(encoding="utf-8"))
+    workflow = json.loads((ROOT / "apps/conversation-runtime/n8n/persona-conversation-template.json").read_text(encoding="utf-8"))
     request = next(node for node in workflow["nodes"] if node["name"] == "Build graph grounded agent request")["parameters"]["jsCode"]
     validate = next(node for node in workflow["nodes"] if node["name"] == "Validate agent response")["parameters"]["jsCode"]
     assert "branch_anchor_node_id" in request

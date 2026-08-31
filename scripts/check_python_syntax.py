@@ -9,6 +9,8 @@ ROOT = Path(__file__).resolve().parents[1]
 def main() -> int:
     checked = 0
     candidates = list((ROOT / "api").rglob("*.py"))
+    candidates.extend((ROOT / "apps").rglob("*.py"))
+    candidates.extend((ROOT / "packages").rglob("*.py"))
     candidates.extend((ROOT / "tests").glob("test_*.py"))
     for path in candidates:
         if "__pycache__" in path.parts or ".venv" in path.parts:

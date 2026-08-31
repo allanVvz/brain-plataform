@@ -162,7 +162,7 @@ api/n8n-workflows/*.json
 !api/n8n-workflows/whatsapp-outbound-sender.json
 !api/n8n-workflows/whatsapp-error-handler.json
 !api/n8n-workflows/baita-whatsapp-test-sender.json
-!api/n8n-workflows/persona-conversation-template.json
+!apps/conversation-runtime/n8n/persona-conversation-template.json
 !api/n8n-workflows/baita-vitoria.json
 DEPLOY_SERVICES_PLAN.md
 api/prompts/claude_knowledge_graph_validation.md

@@ -8,24 +8,24 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_gateway_strips_client_identity_and_blocks_new_internal_api():
-    source = (ROOT / "api/gateway_main.py").read_text(encoding="utf-8")
+    source = (ROOT / "apps/gateway/main.py").read_text(encoding="utf-8")
     assert 'IDENTITY_HEADERS = {"x-brain-principal", "x-brain-principal-signature"}' in source
     assert 'route.startswith("/internal/")' in source
 
 
 def test_gateway_has_own_readiness_and_minimal_image():
-    source = (ROOT / "api/gateway_main.py").read_text(encoding="utf-8")
-    dockerfile = (ROOT / "api/gateway.Dockerfile").read_text(encoding="utf-8")
-    requirements = (ROOT / "api/requirements-gateway.txt").read_text(encoding="utf-8")
+    source = (ROOT / "apps/gateway/main.py").read_text(encoding="utf-8")
+    dockerfile = (ROOT / "apps/gateway/Dockerfile").read_text(encoding="utf-8")
+    requirements = (ROOT / "apps/gateway/requirements.txt").read_text(encoding="utf-8")
     assert '@app.get("/health/ready")' in source
     assert "UPSTREAM_ENVIRONMENTS" in source
-    assert "api/gateway_main.py" in dockerfile
+    assert "apps/gateway/main.py" in dockerfile
     assert "api/requirements.txt" not in dockerfile
     assert "faster-whisper" not in requirements
 
 
 def test_gateway_routes_decisions_to_runtime_not_transport():
-    source = (ROOT / "api/gateway_main.py").read_text(encoding="utf-8")
+    source = (ROOT / "apps/gateway/main.py").read_text(encoding="utf-8")
     transport_rule, runtime_rule = source.split("def _upstream", 1)[1].split(
         "def _principal", 1
     )[0].split("return os.environ[\"BRAIN_TRANSPORT_URL\"]", 1)
@@ -34,7 +34,7 @@ def test_gateway_routes_decisions_to_runtime_not_transport():
 
 
 def test_canonical_n8n_template_has_no_microservice_fork():
-    templates = list((ROOT / "api/n8n-workflows").glob("persona-conversation-template.json"))
+    templates = list((ROOT / "apps/conversation-runtime/n8n").glob("persona-conversation-template.json"))
     assert len(templates) == 1
 
 
@@ -69,11 +69,12 @@ def test_blue_green_has_gateway_and_role_separated_env_files():
     assert groups == {"conversation", "transport", "media", "knowledge", "integrations", "validator"}
 
 
-def test_source_import_manifest_tracks_merged_service_heads():
+def test_source_import_manifest_freezes_extracted_service_heads():
     manifest = json.loads(
         (ROOT / "ops/microservices/source-import-manifest.json").read_text(encoding="utf-8")
     )
-    heads = manifest["current_main_commits"]
+    assert manifest["status"] == "frozen-reference-only"
+    heads = manifest["final_import_commits"]
     assert set(heads) == {
         "brain-contracts",
         "brain-control-plane",
@@ -270,7 +271,7 @@ def test_microservice_mutation_syncs_manifest_checksum_inputs():
     workflow = (ROOT / ".github/workflows/_deploy-microservice.yml").read_text(encoding="utf-8")
     mutate = workflow.split("  mutate:", 1)[1]
     assert "ops/microservices" in mutate
-    assert "api/n8n-workflows/persona-conversation-template.json" in mutate
+    assert "apps/conversation-runtime/n8n/persona-conversation-template.json" in mutate
 
 
 def test_service_env_bootstrap_never_distributes_universal_database_secrets():
@@ -300,4 +301,4 @@ def test_schema_apply_is_backup_restore_and_pause_gated():
 def test_schema_workflow_syncs_manifest_checksum_inputs():
     workflow = (ROOT / ".github/workflows/deploy-schema.yml").read_text(encoding="utf-8")
     assert "ops/microservices/route-map.json" in workflow
-    assert "api/n8n-workflows/persona-conversation-template.json" in workflow
+    assert "apps/conversation-runtime/n8n/persona-conversation-template.json" in workflow

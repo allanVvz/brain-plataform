@@ -66,7 +66,7 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
-          source: docker-compose.yml,infra/Caddyfile,infra/caddy-dynamic,infra/microservices,ops/microservices,ops/vps/deploy-microservice-blue-green.sh,api/n8n-workflows/persona-conversation-template.json,${{ inputs.manifest_path }}
+          source: docker-compose.yml,infra/Caddyfile,infra/caddy-dynamic,infra/microservices,ops/microservices,ops/vps/deploy-microservice-blue-green.sh,apps/conversation-runtime/n8n/persona-conversation-template.json,${{ inputs.manifest_path }}
           target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           overwrite: true
       - name: Deploy or rollback one service by immutable digest

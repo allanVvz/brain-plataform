@@ -1,0 +1,13 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "brain-contracts"
+version = "3.0.0"
+description = "Versioned private HTTP and event contracts for Brain AI"
+requires-python = ">=3.12"
+dependencies = ["pydantic>=2.13,<3"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

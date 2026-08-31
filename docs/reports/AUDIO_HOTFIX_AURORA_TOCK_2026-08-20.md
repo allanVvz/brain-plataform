@@ -6,7 +6,7 @@ Resultado: **safety stop, rollback aplicado, retomada bloqueada**
 ## Escopo
 
 O hotfix compacta o prompt do template canônico
-`api/n8n-workflows/persona-conversation-template.json` sem elevar o limite
+`apps/conversation-runtime/n8n/persona-conversation-template.json` sem elevar o limite
 duro de 24 mil tokens. Não houve migration, publicação de grafo, mudança de
 provedor, uso de WhatsApp real ou limpeza de dados.
 

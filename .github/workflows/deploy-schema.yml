@@ -38,7 +38,7 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
-          source: ops/microservices/validate-release-manifest.py,ops/microservices/route-map.json,api/n8n-workflows/persona-conversation-template.json,ops/vps/apply-runtime-vector-grant.sh,ops/vps/backup.sh,ops/vps/restore.sh,supabase/migrations/132_runtime_vector_distance_grant.sql,${{ inputs.manifest_path }}
+          source: ops/microservices/validate-release-manifest.py,ops/microservices/route-map.json,apps/conversation-runtime/n8n/persona-conversation-template.json,ops/vps/apply-runtime-vector-grant.sh,ops/vps/backup.sh,ops/vps/restore.sh,supabase/migrations/132_runtime_vector_distance_grant.sql,${{ inputs.manifest_path }}
           target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           overwrite: true
       - name: Apply migration 132 with backup and isolated restore

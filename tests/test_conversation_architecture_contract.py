@@ -10,7 +10,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SQL = (ROOT / "supabase/migrations/111_proof_gated_outbox_and_burst_claim.sql").read_text(encoding="utf-8")
-WORKFLOW = json.loads((ROOT / "api/n8n-workflows/persona-conversation-template.json").read_text(encoding="utf-8"))
+WORKFLOW = json.loads((ROOT / "apps/conversation-runtime/n8n/persona-conversation-template.json").read_text(encoding="utf-8"))
 
 
 def _node(name: str) -> dict:

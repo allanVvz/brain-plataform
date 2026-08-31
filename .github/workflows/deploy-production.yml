@@ -101,7 +101,7 @@ jobs:
         run: |
           python scripts/check_python_syntax.py
           python scripts/check_persona_hardcodes.py
-          python -m json.tool api/n8n-workflows/persona-conversation-template.json >/dev/null
+          python -m json.tool apps/conversation-runtime/n8n/persona-conversation-template.json >/dev/null
 
       - name: Validate production Compose
         shell: bash

@@ -16,6 +16,7 @@ EXPECTED_SERVICES = {
     "conversation-runtime": "allanVvz/brain-conversation-runtime",
     "transport": "allanVvz/brain-transport",
 }
+MONOREPO_REPOSITORY = "allanVvz/brain-plataform"
 SHA = re.compile(r"^[0-9a-f]{40}$")
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
@@ -42,8 +43,8 @@ def validate(path: Path, *, verify_checkout_artifacts: bool = True) -> dict:
     _require(required <= manifest.keys(), f"missing fields: {sorted(required - manifest.keys())}")
     _require(bool(SHA.fullmatch(str(manifest["source_sha"]))), "invalid source_sha")
     _require(
-        manifest["contracts_version"] in {"1.0.0", "1.1.0"},
-        "contracts_version must be 1.0.0 or 1.1.0 during the additive blue/green window",
+        manifest["contracts_version"] in {"1.0.0", "1.1.0", "3.0.0"},
+        "contracts_version must be 1.0.0, 1.1.0 or 3.0.0",
     )
     _require(isinstance(manifest["schema_version"], int) and manifest["schema_version"] >= 131,
              "schema_version must be at least 131")
@@ -54,10 +55,15 @@ def validate(path: Path, *, verify_checkout_artifacts: bool = True) -> dict:
     services = manifest["services"]
     _require(isinstance(services, dict), "services must be an object")
     _require(set(services) == set(EXPECTED_SERVICES), "service set does not match release boundary")
+    monorepo_release = manifest["contracts_version"] == "3.0.0"
+    if monorepo_release:
+        _require(bool(DIGEST.fullmatch(str(manifest.get("contracts_checksum", "")))),
+                 "monorepo manifest requires contracts_checksum")
     for name, repository in EXPECTED_SERVICES.items():
         item = services[name]
         _require(isinstance(item, dict), f"services.{name} must be an object")
-        _require(item.get("repository") == repository, f"unexpected repository for {name}")
+        expected_repository = MONOREPO_REPOSITORY if monorepo_release else repository
+        _require(item.get("repository") == expected_repository, f"unexpected repository for {name}")
         _require(bool(SHA.fullmatch(str(item.get("sha", "")))), f"invalid SHA for {name}")
         _require(bool(DIGEST.fullmatch(str(item.get("digest", "")))), f"invalid digest for {name}")
         required_schema = item.get("required_schema_version")
@@ -65,10 +71,15 @@ def validate(path: Path, *, verify_checkout_artifacts: bool = True) -> dict:
                  f"invalid required_schema_version for {name}")
     _require(services["gateway"]["sha"] == manifest["source_sha"],
              "gateway SHA must equal source_sha")
+    if monorepo_release:
+        _require(
+            all(item["sha"] == manifest["source_sha"] for item in services.values()),
+            "every monorepo service SHA must equal source_sha",
+        )
 
     if verify_checkout_artifacts:
         route_map = ROOT / "ops/microservices/route-map.json"
-        n8n = ROOT / "api/n8n-workflows/persona-conversation-template.json"
+        n8n = ROOT / "apps/conversation-runtime/n8n/persona-conversation-template.json"
         _require(_checksum(route_map) == manifest["route_map_checksum"], "route map checksum drift")
         _require(_checksum(n8n) == manifest["n8n_checksum"], "n8n checksum drift")
     return manifest

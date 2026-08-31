@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import uuid
 from pathlib import Path
 from typing import Any
@@ -10,10 +11,17 @@ from typing import Any
 from services import event_emitter, n8n_client
 
 
-_TEMPLATE = (
-    Path(__file__).resolve().parents[1]
-    / "n8n-workflows"
-    / "persona-conversation-template.json"
+_TEMPLATE = Path(
+    os.environ.get(
+        "BRAIN_CONVERSATION_TEMPLATE_PATH",
+        str(
+            Path(__file__).resolve().parents[2]
+            / "apps"
+            / "conversation-runtime"
+            / "n8n"
+            / "persona-conversation-template.json"
+        ),
+    )
 )
 _TEMPLATE_VERSION = "graph_agentic_v3"
 _REQUIRED_NODE_IDS = {

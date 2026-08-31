@@ -46,7 +46,7 @@ Crie `docs/evidence/AURORA_STUCK_<AAAA-MM-DD>/` e colete, sem mutar nada:
 | `ledger.json` | `facts_by_key`, `asked_question_node_ids`, `revision` |
 | `publication.json` | `graph_publications` ativa — `version`, `checksum`, `status`, `compiler_version` |
 | `migrations.txt` | prova de que 129 **e** 130 estão aplicadas |
-| `n8n.json` | workflow ativo — checksum vs `api/n8n-workflows/persona-conversation-template.json` |
+| `n8n.json` | workflow ativo — checksum vs `apps/conversation-runtime/n8n/persona-conversation-template.json` |
 | `logs.txt` | `system_events` + `/logs` da persona, janela de 24h |
 
 Reuse o que já existe em vez de escrever SQL novo: `.runtime/agent-resume-preflight.sql`,

@@ -1,0 +1,5 @@
+api/scripts/
+api/tests/
+tests/
+docs/
+**/__pycache__/

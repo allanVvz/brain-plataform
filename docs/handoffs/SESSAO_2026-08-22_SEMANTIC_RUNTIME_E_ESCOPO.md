@@ -169,7 +169,7 @@ o trabalho em curso descrito abaixo.
 |---|---|
 | `api/schemas/conversation.py` | `SemanticInterpretation` e modelos de apoio; `ConversationContext.pending_confirmation_ref`. |
 | `api/services/graph_agent_runtime_v3.py` | `_validated_interpretation`, `_pending_confirmation_ref`, `_with_semantic_branch_fallback`; confirmação, confirmação de fato pendente e escada de desambiguação passam a ler a interpretação; `available_services` publica os aliases do grafo. |
-| `api/n8n-workflows/persona-conversation-template.json` | Pede e parseia `SemanticInterpretation` nos 4 nós (request/validate, e os dois de repair). Persona-neutro, JSON válido. |
+| `apps/conversation-runtime/n8n/persona-conversation-template.json` | Pede e parseia `SemanticInterpretation` nos 4 nós (request/validate, e os dois de repair). Persona-neutro, JSON válido. |
 
 **Testes**
 | Arquivo | Mudança |

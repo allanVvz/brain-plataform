@@ -6,7 +6,7 @@ Estes arquivos são fixtures de auditoria histórica. **Nunca** foram — e nunc
 serão — fonte de runtime ou de provisionamento.
 
 A única fonte canônica de workflow de conversa é
-`api/n8n-workflows/persona-conversation-template.json`.
+`apps/conversation-runtime/n8n/persona-conversation-template.json`.
 
 Movidos para cá porque agentes de IA os liam como se fossem template ativo,
 gerando contexto contraditório. Nenhum código de produção os referencia

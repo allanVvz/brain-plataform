@@ -1,0 +1,6 @@
+api/scripts/*
+!api/scripts/resync_graph_agent_workflows.py
+api/tests/
+tests/
+docs/
+**/__pycache__/

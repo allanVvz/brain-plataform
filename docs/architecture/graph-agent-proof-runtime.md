@@ -151,7 +151,7 @@ casos, a transição pode alterar rota e metadados, nunca o texto do modelo.
   `media_batch` já em `main`, retrieval multimodal e prova de asset pendentes).
 
 O template canônico é
-`api/n8n-workflows/persona-conversation-template.json` (`graph_agentic_v3`) e
+`apps/conversation-runtime/n8n/persona-conversation-template.json` (`graph_agentic_v3`) e
 continua idêntico para todas as personas. Somente bindings técnicos são
 substituídos no provisionamento.
 
