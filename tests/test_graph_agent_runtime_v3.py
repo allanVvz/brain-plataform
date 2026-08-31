@@ -531,11 +531,13 @@ def test_invalid_model_fallback_cannot_leave_terminal_state_on_sdr():
         context, {"invalid": True}, ["proposal_schema_invalid"], repair_attempt=1,
     )
 
-    assert decision.intent == "awaiting_confirmation"
+    assert decision.intent == "model_format_retry_exhausted"
     assert decision.route.value == "SDR"
     assert response.handoff_required is False
-    assert response.cart_state["sdr_state"] == "awaiting_confirmation"
-    assert response.reply_text == "Known: name: Beatriz.\n\nIs this correct?"
+    assert response.cart_state == context.cart
+    assert response.reply_text is None
+    assert response.proof["durable_retry_required"] is True
+    assert response.proof["fallback_used"] is False
 
 
 def test_invalid_model_fallback_never_goes_silent_on_a_non_terminal_repeat():
@@ -585,10 +587,10 @@ def test_invalid_model_fallback_never_goes_silent_on_a_non_terminal_repeat():
         context, {"invalid": True}, ["proposal_schema_invalid"], repair_attempt=1,
     )
 
-    assert response.proof["repetition_action"] != "suppressed_duplicate_outbound"
-    assert response.reply_text == graph_agent_runtime_v3.CONTEXT_FAILURE_HANDOFF_REPLY
-    assert decision.route.value == "HUMAN"
-    assert response.proof["mode"] == "model_output_handoff"
+    assert response.reply_text is None
+    assert decision.route.value == "SDR"
+    assert response.proof["durable_retry_required"] is True
+    assert response.proof["fallback_used"] is False
 
 
 def test_invalid_proposal_fallback_confirms_every_active_branch_not_just_the_focused_one(monkeypatch):
@@ -655,8 +657,9 @@ def test_invalid_proposal_fallback_confirms_every_active_branch_not_just_the_foc
         context, {"invalid": True}, ["proposal_schema_invalid"], repair_attempt=1,
     )
 
-    assert "Polimento" in response.reply_text
-    assert "Vitrificação" in response.reply_text
+    assert response.reply_text is None
+    assert response.proof["durable_retry_required"] is True
+    assert response.proof["fallback_used"] is False
 
 
 def test_greeting_recognizer_covers_how_people_actually_type():
@@ -1181,7 +1184,7 @@ def test_recent_reply_similarity_is_detected_before_pending_question_exception()
     assert graph_agent_runtime_v3._repeats_recent_outbound(reply, messages) is True
 
 
-def test_third_pending_question_attempt_marks_field_unknown():
+def test_repeated_non_answer_never_marks_field_unknown_implicitly():
     contract = {
         "fields": [{
             "key": "name", "owner_node_id": "persona:one", "required": True,
@@ -1215,15 +1218,10 @@ def test_third_pending_question_attempt_marks_field_unknown():
         max_attempts=1,
     )
 
-    assert fact == {
-        "field_key": "name", "owner_node_id": "persona:one",
-        "status": "unknown", "value": None, "source_message_id": "",
-        "evidence_span": "", "confidence": 1.0,
-        "reason": "ignored_twice", "metadata": {"reason": "ignored_twice"},
-    }
+    assert fact is None
 
 
-def test_repeated_field_gets_one_model_repair_then_safe_handoff(monkeypatch):
+def test_repeated_field_is_quality_telemetry_and_preserves_model_reply(monkeypatch):
     document = compiled_fixture()
     pub = publication(document)
     monkeypatch.setattr(
@@ -1264,19 +1262,19 @@ def test_repeated_field_gets_one_model_repair_then_safe_handoff(monkeypatch):
     _first_decision, first_response = graph_agent_runtime_v3.decide(
         context, model_observation={"proposal": repeated, "repair_attempt": 0},
     )
-    assert first_response.reply_text is None
-    assert first_response.proof["repair_required"] is True
+    assert first_response.reply_text == f"Posso ajudar. {question_text}"
+    assert first_response.proof["repair_required"] is False
     assert "question_already_asked" in first_response.proof["repetition_audit"]["failures"]
     assert first_response.cart_state["asked_question_node_ids"] == [question_id]
 
     second_decision, second_response = graph_agent_runtime_v3.decide(
         context, model_observation={"proposal": repeated, "repair_attempt": 1},
     )
-    assert second_decision.route.value == "HUMAN"
-    assert second_response.handoff_required is True
-    assert question_text not in (second_response.reply_text or "")
+    assert second_decision.route.value == "SDR"
+    assert second_response.handoff_required is False
+    assert second_response.reply_text == f"Posso ajudar. {question_text}"
     assert second_response.cart_state["asked_question_node_ids"] == [question_id]
-    assert second_response.proof["repetition_action"] == "repetition_handoff"
+    assert second_response.proof["repetition_action"] == "observed_only"
 
     field_key = next(
         field["key"] for field in contract["fields"]
@@ -1294,9 +1292,9 @@ def test_repeated_field_gets_one_model_repair_then_safe_handoff(monkeypatch):
         context, model_observation={"proposal": segmented, "repair_attempt": 0},
     )
     assert segmented_decision.route.value == "SDR", segmented_response.model_dump()
-    assert segmented_response.reply_text == "Posso explicar isso sem problema."
+    assert segmented_response.reply_text == f"Posso explicar isso sem problema. {question_text}"
     assert segmented_response.handoff_required is False
-    assert segmented_response.proof["question_discarded"] is True
+    assert segmented_response.proof["question_discarded"] is False
     assert segmented_response.proof["repair_required"] is False
 
 
@@ -2571,6 +2569,9 @@ def test_resolving_name_candidate_asks_next_persisted_service_confirmation(monke
     _decision, response = graph_agent_runtime_v3.decide(
         context, model_observation={
             "interpretation": {
+                "envelope_version": "3",
+                "reply": "Você quer selecionar Vitrificação?",
+                "facts": [],
                 "intents": [{"kind": "confirmation", "evidence_span": "sim"}],
                 "state_relation": "continue",
                 "confirmation": {
@@ -2578,6 +2579,13 @@ def test_resolving_name_candidate_asks_next_persisted_service_confirmation(monke
                     "target_ref": "fact:nome:persona:generic",
                     "evidence_span": "sim",
                 },
+                "branch_selections": [],
+                "customer_questions": [],
+                "claims": [],
+                "cited_node_ids": [],
+                "cited_chunk_ids": [],
+                "asked_field_key": None,
+                "handoff_requested": False,
             },
         },
     )
@@ -2708,6 +2716,9 @@ def test_confirmed_switch_drops_previous_service_and_negative_preserves_it(monke
     _decision, accepted = graph_agent_runtime_v3.decide(
         context("sim"), model_observation={
             "interpretation": {
+                "envelope_version": "3",
+                "reply": "Certo, troquei para vitrificação.",
+                "facts": [],
                 "intents": [{"kind": "confirmation", "evidence_span": "sim"}],
                 "state_relation": "continue",
                 "confirmation": {
@@ -2719,6 +2730,9 @@ def test_confirmed_switch_drops_previous_service_and_negative_preserves_it(monke
                     "action": "switch", "branch_anchor_node_id": "branch:v",
                     "evidence_span": "sim",
                 }],
+                "customer_questions": [], "claims": [],
+                "cited_node_ids": [], "cited_chunk_ids": [],
+                "asked_field_key": None, "handoff_requested": False,
             },
         },
     )
@@ -2731,6 +2745,9 @@ def test_confirmed_switch_drops_previous_service_and_negative_preserves_it(monke
     _decision, rejected = graph_agent_runtime_v3.decide(
         context("n\u00e3o"), model_observation={
             "interpretation": {
+                "envelope_version": "3",
+                "reply": "Tudo bem, mantive o serviço anterior.",
+                "facts": [],
                 "intents": [{"kind": "rejection", "evidence_span": "n\u00e3o"}],
                 "state_relation": "continue",
                 "confirmation": {
@@ -2738,6 +2755,9 @@ def test_confirmed_switch_drops_previous_service_and_negative_preserves_it(monke
                     "target_ref": "fact:servico:branch:v",
                     "evidence_span": "n\u00e3o",
                 },
+                "branch_selections": [], "customer_questions": [], "claims": [],
+                "cited_node_ids": [], "cited_chunk_ids": [],
+                "asked_field_key": None, "handoff_requested": False,
             },
         },
     )
@@ -2784,6 +2804,9 @@ def test_rejected_confirmation_of_active_service_restores_previous_known_fact(mo
     _decision, response = graph_agent_runtime_v3.decide(
         context, model_observation={
             "interpretation": {
+                "envelope_version": "3",
+                "reply": "Tudo bem, mantive a vitrificação.",
+                "facts": [],
                 "intents": [{"kind": "rejection", "evidence_span": "não"}],
                 "state_relation": "continue",
                 "confirmation": {
@@ -2791,6 +2814,9 @@ def test_rejected_confirmation_of_active_service_restores_previous_known_fact(mo
                     "target_ref": "fact:servico:branch:v",
                     "evidence_span": "não",
                 },
+                "branch_selections": [], "customer_questions": [], "claims": [],
+                "cited_node_ids": [], "cited_chunk_ids": [],
+                "asked_field_key": None, "handoff_requested": False,
             },
         },
     )
@@ -4344,8 +4370,11 @@ def test_bare_service_like_answer_does_not_override_pending_objective(monkeypatc
     )
 
     assert response.proof["valid"], response.proof["errors"]
-    assert response.reply_text is None
-    assert response.proof["repair_required"] is True
+    assert response.reply_text == (
+        "Agora temos duas opcoes. Quer comparar os detalhes? "
+        "Qual delas chamou mais atencao?"
+    )
+    assert response.proof["repair_required"] is False
     # The natural wording is legitimately bound to q:objective.  It is
     # suppressed because that id was already emitted, not because it differs
     # lexically from the graph-authored question copy.
@@ -4354,16 +4383,12 @@ def test_bare_service_like_answer_does_not_override_pending_objective(monkeypatc
     assert response.proof["repetition_audit"]["question_node_id"] == "q:objective"
     assert response.proof["repetition_audit"]["passed"] is False
     assert "question_already_asked" in response.proof["repetition_audit"]["failures"]
-    assert any(
-        item.get("issue") == "conversation_repetition"
-        for item in response.proof["repair_requirements"]
-    )
+    assert response.proof["repair_requirements"] == []
     assert response.cart_state["facts"]["servico"] == existing_service
-    assert response.cart_state["facts"]["objective"]["status"] == "unknown"
-    assert response.cart_state["facts"]["objective"]["value"] is None
+    assert "objective" not in response.cart_state["facts"]
     assert response.cart_state["asked_question_node_ids"] == ["q:objective"]
     assert response.cart_state["active_branch_node_id"] == "aurora-product-polish-localized"
-    assert response.handoff_required is True
+    assert response.handoff_required is False
 
 
 
@@ -4964,9 +4989,11 @@ def test_semantic_interpretation_parse_error_uses_exactly_one_repair(monkeypatch
         context, model_observation={**observation, "repair_attempt": 1},
     )
 
-    assert second_decision.route.value == "HUMAN"
-    assert second_response.handoff_required is True
-    assert second_response.proof["mode"] == "model_output_handoff"
+    assert second_decision.route.value == "SDR"
+    assert second_response.handoff_required is False
+    assert second_response.reply_text is None
+    assert second_response.proof["durable_retry_required"] is True
+    assert second_response.proof["fallback_used"] is False
     assert second_response.proof["repair_required"] is False
 
 

@@ -87,6 +87,7 @@ class TechnicalFailureRequest(StrictModel):
     reason: str
     correlation_id: str
     diagnostic: dict[str, Any] = Field(default_factory=dict)
+    recoverable: bool = True
 
 
 @router.post("/context", response_model=ConversationContext)
@@ -206,27 +207,48 @@ def technical_failure(
     body: TechnicalFailureRequest,
     x_webhook_token: str | None = Header(None, alias="X-Webhook-Token"),
 ) -> dict:
-    """Quarantine a failed turn without inventing a commercial handoff."""
+    """Retry recoverable model/provider failures without inventing a reply."""
     _authorize(x_webhook_token)
     lead = conversation_runtime.supabase_client.get_lead_by_ref(body.lead_ref) or {}
     commit_failure = conversation_runtime.supabase_client.fail_conversation_commit(
-        body.buffer_id,
-        body.reason,
+        body.buffer_id, body.reason,
     )
-    conversation_runtime.supabase_client.complete_whatsapp_buffer(
-        body.buffer_id,
-        "dead_letter",
-        error=body.reason[:1000],
-    )
+    commit_state = str(commit_failure.get("status") or "")
+    attempt = int(commit_failure.get("attempt_count") or 1)
+    deduplicated = commit_state == "completed"
+    retry_scheduled = bool(body.recoverable and not deduplicated)
+    if retry_scheduled:
+        conversation_runtime.supabase_client.release_whatsapp_buffer(
+            body.buffer_id,
+            "retry",
+            delay_seconds=conversation_runtime.conversation_retry_delay(attempt),
+            error=body.reason[:1000],
+        )
+    elif not deduplicated:
+        conversation_runtime.supabase_client.complete_whatsapp_buffer(
+            body.buffer_id,
+            "dead_letter",
+            error=body.reason[:1000],
+        )
     conversation_runtime.supabase_client.insert_event(
         {
             "event_type": "conversation.technical_failure",
             "entity_type": "lead",
             "entity_id": str(body.lead_ref),
             "persona_id": lead.get("persona_id"),
-            "payload": {**body.model_dump(), "trace_id": body.buffer_id},
+            "payload": {
+                **body.model_dump(),
+                "trace_id": body.buffer_id,
+                "attempt": attempt,
+                "retry_scheduled": retry_scheduled,
+                "retry_delay_seconds": (
+                    conversation_runtime.conversation_retry_delay(attempt)
+                    if retry_scheduled else None
+                ),
+                "alert_threshold": attempt if attempt in {3, 10, 30} else None,
+            },
         },
-        level="error",
+        level="critical" if attempt in {3, 10, 30} else "error",
         source="routes.conversations",
     )
     conversation_runtime.emit_turn_event(
@@ -239,10 +261,22 @@ def technical_failure(
         metadata={"conversation_id": body.lead_ref, "step": "technical_failure"},
     )
     return {
-        "ok": False,
-        "technical_failure": True,
-        "workflow_outcome": "technical_failure",
-        "commit_state": commit_failure.get("status"),
+        "ok": deduplicated,
+        "technical_failure": not deduplicated,
+        "workflow_outcome": (
+            "deduplicated" if deduplicated
+            else "retry" if retry_scheduled
+            else "technical_failure"
+        ),
+        "commit_state": commit_state,
+        "retry_scheduled": retry_scheduled,
+        "retry_delay_seconds": (
+            conversation_runtime.conversation_retry_delay(attempt)
+            if retry_scheduled else None
+        ),
+        "attempt": attempt,
+        "alert_emitted": attempt in {3, 10, 30},
+        "deduplicated": deduplicated,
         "handoff": False,
         "ai_paused": bool(lead.get("ai_paused")),
     }

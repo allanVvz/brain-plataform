@@ -5015,14 +5015,92 @@ def commit_graph_turn_and_outbox_v4(
             value = value[0] if value else {}
         if isinstance(value, dict):
             return value
-    except Exception:
+    except Exception as exc:
         # A v3 fallback is safe only for a real journey.  Falling back for
         # journey_action=none would recreate the exact phantom-journey bug.
-        if str(turn.get("journey_action") or "continue") == "none":
+        missing_rpc = (
+            str(getattr(exc, "code", "") or "") in {"PGRST202", "42883"}
+            or "could not find the function" in str(exc).casefold()
+        )
+        if not missing_rpc or str(turn.get("journey_action") or "continue") == "none":
             raise
     return commit_graph_turn_and_outbox_v3(
         turn=turn, outbound_buffer=outbound_buffer,
         outbound_message=outbound_message, result_payload=result_payload,
+    )
+
+
+def get_conversation_asked_field_keys(
+    ledger_id: str,
+    *,
+    publication_id: str | None = None,
+    journey_sequence: int | None = None,
+) -> list[str]:
+    """Read semantic asked topics only from proofs with a real outbound.
+
+    This is the source of truth for the v3 prompt.  The legacy ledger array of
+    graph question ids remains available during blue/green but cannot prove
+    that a model-authored question was actually sent.
+    """
+    if not ledger_id:
+        return []
+    query = (
+        get_client().table("conversation_turn_proofs")
+        .select("proof_result,retrieval_trace,publication_id,outbound_id,created_at")
+        .eq("ledger_id", ledger_id)
+        .not_.is_("outbound_id", "null")
+        .order("created_at")
+    )
+    if publication_id:
+        query = query.eq("publication_id", publication_id)
+    rows = _q(query)
+    keys: list[str] = []
+    for row in rows:
+        trace = row.get("retrieval_trace") or {}
+        if journey_sequence is not None and int(
+            trace.get("journey_sequence") or journey_sequence
+        ) != int(journey_sequence):
+            continue
+        proof = row.get("proof_result") or {}
+        candidates = list(proof.get("asked_field_keys") or [])
+        if not candidates and proof.get("next_question_field_key"):
+            candidates = [proof.get("next_question_field_key")]
+        for value in candidates:
+            key = str(value or "").strip()
+            if key and key not in keys:
+                keys.append(key)
+    return keys
+
+
+def commit_graph_turn_and_outbox_v5(
+    *, turn: dict, outbound_buffer: dict | None,
+    outbound_message: dict | None, result_payload: dict,
+) -> dict:
+    """Replay-first commit; rolling fallback only when the RPC is absent."""
+    payload = {
+        "p_turn": turn,
+        "p_outbound_buffer": outbound_buffer,
+        "p_outbound_message": outbound_message,
+        "p_result": result_payload,
+    }
+    try:
+        result = get_client().rpc("commit_graph_turn_and_outbox_v5", payload).execute()
+        value = getattr(result, "data", None)
+        if isinstance(value, list):
+            value = value[0] if value else {}
+        return value if isinstance(value, dict) else {}
+    except Exception as exc:
+        missing_rpc = (
+            str(getattr(exc, "code", "") or "") in {"PGRST202", "42883"}
+            or "could not find the function" in str(exc).casefold()
+        )
+        if not missing_rpc:
+            raise
+    return commit_graph_turn_and_outbox_v4(
+        turn=turn,
+        outbound_buffer=outbound_buffer,
+        outbound_message=outbound_message,
+        result_payload=result_payload,
     )
 
 
@@ -5660,47 +5738,83 @@ def complete_whatsapp_buffer(buffer_id: str, status: str, error: str | None = No
 
 
 def fail_conversation_commit(inbound_buffer_id: str, reason: str) -> dict:
-    """Finalize an already-claimed inbound commit after a terminal failure.
+    """Release an already-claimed inbound commit for the same-id retry.
 
-    The update is conditional on the commit still being ``processing`` so a
-    late fail-safe can never overwrite a concurrent successful commit.  This
-    uses the existing lead_buffer payload ledger and requires no new storage.
+    The update is conditional on ``processing`` so a late failure can never
+    overwrite a concurrent successful commit. Removing only the transient
+    claim lets ``claim_conversation_commit`` reclaim the canonical inbound;
+    the attempt counter and technical failure remain on ``lead_buffer``.
     """
-    from datetime import datetime, timezone
+    try:
+        result = get_client().rpc(
+            "release_conversation_commit_for_retry_v1",
+            {
+                "p_canonical_inbound_id": inbound_buffer_id,
+                "p_reason": str(reason or "technical_failure")[:1000],
+            },
+        ).execute()
+        value = getattr(result, "data", None)
+        if isinstance(value, list):
+            value = value[0] if value else {}
+        if isinstance(value, dict):
+            return value
+    except Exception as exc:
+        missing_rpc = (
+            str(getattr(exc, "code", "") or "") in {"PGRST202", "42883"}
+            or "could not find the function" in str(exc).casefold()
+        )
+        if not missing_rpc:
+            raise
 
     row = _one(
         get_client().table("lead_buffer")
-        .select("payload")
+        .select("payload,attempt_count,max_attempts")
         .eq("id", inbound_buffer_id)
         .maybe_single()
     ) or {}
     payload = dict(row.get("payload") or {})
     commit = dict(payload.get("conversation_commit") or {})
-    if str(commit.get("status") or "") != "processing":
-        return {"updated": False, "status": commit.get("status")}
-    failed = {
-        **commit,
-        "status": "failed",
-        "failed_at": datetime.now(timezone.utc).isoformat(),
-        "failure_reason": str(reason or "technical_failure")[:1000],
+    if str(commit.get("status") or "") == "completed":
+        return {
+            "updated": False,
+            "status": "completed",
+            "attempt_count": int(row.get("attempt_count") or 1),
+            "max_attempts": int(row.get("max_attempts") or 5),
+        }
+    retry_payload = {
+        key: value for key, value in payload.items()
+        if key not in {
+            "conversation_commit",
+            "decision_attempt_started_at",
+            "decision_attempt_worker",
+        }
     }
-    _execute_with_retry(
+    retry_payload["last_conversation_failure"] = {
+        "reason": str(reason or "technical_failure")[:1000],
+        "retryable": True,
+    }
+    update = (
         get_client().table("lead_buffer")
-        .update({"payload": {**payload, "conversation_commit": failed}})
+        .update({"payload": retry_payload})
         .eq("id", inbound_buffer_id)
-        .eq("payload->conversation_commit->>status", "processing")
     )
+    if str(commit.get("status") or "") == "processing":
+        update = update.eq("payload->conversation_commit->>status", "processing")
+    _execute_with_retry(update)
     current = _one(
         get_client().table("lead_buffer")
         .select("payload")
         .eq("id", inbound_buffer_id)
         .maybe_single()
     ) or {}
-    current_status = str(
-        (((current.get("payload") or {}).get("conversation_commit") or {}).get("status"))
-        or "unknown"
-    )
-    return {"updated": current_status == "failed", "status": current_status}
+    current_commit = (current.get("payload") or {}).get("conversation_commit")
+    released = current_commit is None
+    return {
+        "updated": released,
+        "status": "retry" if released else str((current_commit or {}).get("status") or "unknown"),
+        "attempt_count": int(row.get("attempt_count") or 1),
+        "max_attempts": int(row.get("max_attempts") or 5),
+    }
 
 
 def release_whatsapp_buffer(buffer_id: str, status: str, *, delay_seconds: int, error: str | None, decrement_attempt: bool = False) -> None:

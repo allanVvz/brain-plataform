@@ -29,8 +29,8 @@ from workers.base_worker import BaseWorker
 
 
 def _retry_delay(attempt: int) -> int:
-    """Bounded exponential backoff in seconds (5, 10, ... up to 5 minutes)."""
-    return min(300, 5 * (2 ** max(0, attempt - 1)))
+    """Conversation/provider retry schedule: 15, 30, 60, 120, then 300s."""
+    return conversation_runtime.conversation_retry_delay(attempt)
 
 
 # Below this length an exact text match against a recent outbound message is

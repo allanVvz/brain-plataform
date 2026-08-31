@@ -72,6 +72,58 @@ Os dois caminhos escrevem em `graph_publications` e ativam por
 **A divergência é só de quem escreve, nunca de quem lê.** É isso que torna o
 paralelo seguro.
 
+### Checkpoint Aurora — 2026-08-31 (auditoria somente-leitura)
+
+Concluído: a baseline produtiva foi identificada e permanece isolada. A Aurora
+está na `graph_publications` **v75 ativa** (`d5c7afd7-24ea-44d6-90e9-8532fd3fc303`),
+checksum `sha256:3f727095819f75836453af2e3bbee42c1138b50a6dc99a59f502b5a1917811ec`,
+compilador `graph-compiler-v3.6.3`, com 140 nodes, 274 edges, 14 contratos de
+branch e 551 chunks publicados. O binding Meta Cloud está ativo e conectado.
+
+Concluído: foi verificada a origem da publicação. Ela não possui
+`source_table` nem `graph_bundle_draft_checksum`, e `origin/main` não contém
+`data/graph_bundles/aurora/`. Portanto, a v75 é uma publicação v3 imutável
+produzida pelo caminho autoral legado, não um GraphBundle declarativo. Nenhum
+staging, ativação, pausa ou envio foi executado nesta auditoria.
+
+O importador shadow-only foi preparado para aceitar exclusivamente um export
+cujo checksum e contagens reproduzam a v75 ativa; ele rejeita v66, fixtures e
+documentos incompletos. O próximo gate do item 6 é obter esse export
+autenticado, gerar o bundle declarativo, compilar em dry-run/shadow, revisar o
+diff e os dois checksums e só então solicitar autorização específica para
+staging, WA Validator interno e ativação isolada da persona.
+
+### Checkpoint mídia no SDR — 2026-08-31 (auditoria somente-leitura)
+
+Conflito de documento resolvido (governança regra 3): o item 4 dizia "baseline
+produtiva v11 … com mídia"; o item 8a dizia "falta assets/fotos/vídeos/links".
+O item 8a está correto. **Nenhuma execução de mídia está em produção nem em
+`main`.**
+
+O que existe de mídia:
+
+- **Conteúdo autorado** — os bundles `sdr-qualification-v11-product-media.json`
+  (só na worktree `recovery-question-hotfix`) e `-v12-model-owned.json`
+  (untracked) declaram 4 `asset` nodes, `gallery:tock-default`, a política
+  `content_delivery` e `rule/copy/faq:tock-product-media-delivery`. Os 4 jpeg +
+  `manifest.json` (sha256 por produto) estão em `docs/sdr/tock-fatal/product-media/`
+  da worktree; não confirmado que subiram para o bucket `assets-raw`.
+- **Rascunho de execução, nunca commitado** — a worktree `recovery-question-hotfix`
+  (HEAD `f2a896a`, base anterior a 131/132) tem `_media_delivery_request()` no
+  runtime, `131_graph_media_batch_outbox.sql` (colide com o 131 de `main` —
+  renumerar para 134+), mudanças em compiler/proof/`conversation_runtime`/
+  `whatsapp_dispatch_worker`/n8n template, e uma trava `raise RuntimeError("graph
+  media batch requires an Evolution binding")` — o rascunho só funcionava em
+  Evolution.
+- **Feito 2026-08-31 em `main`** — `MetaWhatsAppProvider.send_media()` (Graph API
+  upload-by-id, `api/services/whatsapp_providers/meta.py`) + `MEDIA` question
+  kind e `MediaItem`/`media_batch` em `api/schemas/conversation.py`.
+
+Decisões: Tock permanece no binding **Meta Cloud** (não reativar Evolution);
+reimplementar a execução limpa a partir do main atual, usando a worktree só como
+referência de leitura. Plano completo:
+`~/.claude/plans/lea-os-logs-de-atomic-candle.md`.
+
 ---
 
 ## Estado do roadmap
@@ -85,12 +137,12 @@ paralelo seguro.
 | 2 | Cards editáveis alteram o agente de verdade | **em progresso — 2a e 2b entregues no editor GraphBundle v3; 2c–2e permanecem bloqueadas pelos gates de revisão/publicação** | `card-editor` |
 | 2c.1 | Ordem visual e editável das perguntas de qualificação, integrada à Sofia | **a fazer — prioridade de autoria; sem tornar a conversa um roteiro rígido** | `card-editor`, `graph-publisher` |
 | 3 | Sofia produz dados declarativos, não código | a fazer | `faq-coverage`, `sdr-evaluator` |
-| 4 | Tock Fatal nasce no pipeline novo | **em progresso — v8 ativa (182 nós, catálogo estrutural sem preço); falta escopo de ramo real e os 220 nós comerciais — ver item 4a e a seção "Runtime semantic-first" (2026-08-22)** | `graph-publisher` |
-| 5 | n8n estável e desacoplado do conteúdo | a fazer | — |
-| 6 | Aurora migra para o bundle | a fazer | `bundle-migrator` |
+| 4 | Tock Fatal nasce no pipeline novo | **em progresso — baseline produtiva v11 (`sha256:e139c137…a9a5dc65`) com catálogo, 605 FAQs e isolamento varejo/atacado; candidato declarativo v12 preparado somente em código, com política conversacional model-owned e sem FAQ nova. Dry-run local passou, mas publicação e ativação continuam sem autorização. Os nós de mídia (asset/gallery/`content_delivery`) do v11/v12 são **conteúdo autorado**, não feature ativa — ver item 8a e o checkpoint de mídia (2026-08-31).** | `graph-publisher` |
+| 5 | n8n estável e desacoplado do conteúdo | **em progresso — template único v3 preparado para ambas as personas, envelope único e validador determinístico advisory; provisionamento, teste produtivo e deploy permanecem pendentes de gates próprios.** | — |
+| 6 | Aurora migra para o bundle | **em preparação — baseline v75, checksum, projeções e binding produtivos auditados em 2026-08-31; importador shadow-only estrito preparado, mas o export autenticado da publicação ativa ainda não está disponível no workspace. Restam gerar o bundle a partir desse export, dry-run/shadow, revisão dos dois checksums, WA Validator interno e autorização separada de staging/ativação.** | `bundle-migrator` |
 | 7 | Orquestradores por estágio e campanha por ciclo → arquitetura multi-agente | **redesenhado 2026-08-20; decisão nova 2026-08-22: escopo de conhecimento por agente via cards Embedded — ver seção própria abaixo** | `graph-publisher`, `card-editor` |
-| 8 | Runtime semantic-first (interpretação pelo modelo, prova pelo backend) | **em progresso 2026-08-22, branch `agent/sofia-vitoria-audit` — ver seção própria** | `graph-publisher` |
-| 8a | Navegação consultiva de catálogo e mídia no SDR | **FAQ por ProductGroup entregue no candidato 2026-08-24; falta assets/fotos/vídeos/links e avaliação offline de qualidade** | `faq-coverage`, `sdr-evaluator` |
+| 8 | Runtime semantic-first (interpretação pelo modelo, prova pelo backend) | **em progresso 2026-08-31 — resposta e próxima pergunta pertencem ao modelo no modo n8n; `missing_fields` mede completude e o proof preserva a fala, descartando apenas componentes inválidos. Runtime, migration funcional e rollout ainda aguardam revisão e autorizações separadas.** | `graph-publisher` |
+| 8a | Navegação consultiva de catálogo e mídia no SDR | **FAQ por ProductGroup entregue no candidato 2026-08-24. Envio de mídia: `MetaWhatsAppProvider.send_media` implementado 2026-08-31; falta retrieval multimodal (compiler não projeta asset), resolução de lote no runtime, prova de asset no proof, migration de lote, vídeos/links e avaliação offline. Rascunho de referência em `.worktrees/recovery-question-hotfix/` (não commitado). Plano: `~/.claude/plans/lea-os-logs-de-atomic-candle.md`.** | `faq-coverage`, `sdr-evaluator` |
 | 9 | Deploy incremental, leve e retomável | **em progresso 2026-08-24 — lifecycle durável, classificação, pausa/drain/resume, proof do primeiro claim, blue-green da API, imagens separadas, retenção autorizada e gates semânticos implementados no candidato; medição real e prova em QA/produção ainda pendentes** | `release-gate` |
 
 ### 9 — Deploy incremental, leve e retomável
@@ -554,8 +606,9 @@ governança 7 abaixo).
 
 Uma única fonte autoral declarativa por persona. Todo o resto é derivado.
 
-Tock Fatal e Aurora usam GraphBundle/runtime v3, cada uma isolada por
-publicacao, checksum, binding e memoria; o runtime comum nao mistura contratos.
+Tock Fatal usa GraphBundle e Aurora usa o caminho autoral legado, ambas no
+runtime v3 e isoladas por publicação, checksum, binding e memória; o runtime
+comum não mistura contratos. A migração autoral da Aurora permanece no item 6.
 
 ```
 GraphBundle (banco, versionado)

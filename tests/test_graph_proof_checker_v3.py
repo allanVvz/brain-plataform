@@ -60,7 +60,10 @@ def test_reply_cannot_hide_price_and_minimum_order_outside_claim_envelope():
 
     assert "claim_omitted_from_proposal:price" in proof["errors"]
     assert "claim_omitted_from_proposal:minimum_order" in proof["errors"]
-    assert proof["valid"] is False
+    assert proof["valid"] is True
+    assert proof["delivery_authorized"] is True
+    assert proof["evidence_status"] in {"missing", "partial"}
+    assert proof["quality_pass"] is False
 
 
 def test_safe_commercial_deferral_does_not_invent_a_claim():
@@ -598,8 +601,9 @@ def test_unproved_question_text_is_not_authorized_when_selection_is_invalid():
     assert "question_not_semantically_askable" in proof["component_errors"]
     assert proof["next_question_node_id"] is None
     assert proof["question_component_invalid"] is True
-    assert proof["repair_required"] is True
-    assert proof["repair_requirements"][0]["issue"] == "question_not_semantically_askable"
+    assert proof["repair_required"] is False
+    assert proof["repair_requirements"] == []
+    assert proof["model_reply_preserved"] is True
 
 
 def test_invalid_question_metadata_never_discards_valid_facts_or_memory():
@@ -635,7 +639,8 @@ def test_invalid_question_metadata_never_discards_valid_facts_or_memory():
     assert proof["ledger"]["facts"]["name"]["value"] == "Ana"
     assert proof["next_question_node_id"] is None
     assert proof["question_component_invalid"] is True
-    assert proof["repair_required"] is True
+    assert proof["repair_required"] is False
+    assert proof["model_reply_preserved"] is True
 
 
 def test_segmented_answer_survives_when_model_repeats_an_asked_topic():
@@ -673,11 +678,10 @@ def test_segmented_answer_survives_when_model_repeats_an_asked_topic():
 
     assert proof["valid"] is True
     assert proof["question_component_invalid"] is True
-    assert proof["question_discarded"] is True
-    assert proof["publishable_answer_text"] == (
-        "Os valores dependem do produto escolhido."
-    )
+    assert proof["question_discarded"] is False
+    assert proof["publishable_answer_text"] is None
     assert proof["repair_required"] is False
+    assert proof["model_reply_preserved"] is True
     assert proof["next_question_node_id"] is None
 
 
@@ -774,7 +778,8 @@ def test_canonical_repeated_question_requires_repair_without_losing_facts():
     assert proof["question_component_invalid"] is True
     assert proof["question_discarded"] is False
     assert proof["publishable_answer_text"] is None
-    assert proof["repair_required"] is True
+    assert proof["repair_required"] is False
+    assert proof["model_reply_preserved"] is True
     assert proof["next_question_node_id"] is None
 
 

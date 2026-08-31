@@ -339,6 +339,43 @@ def _invalid_proposal_fallback(
             ),
         )
 
+    # A second malformed response is a recoverable provider/model failure.
+    # Never manufacture graph copy, handoff text or a deterministic question;
+    # the same canonical inbound is returned to durable retry with no outbound.
+    return (
+        ConversationDecision(
+            classifier="graph_proof_checker_v3",
+            intent="model_format_retry_exhausted",
+            route=ConversationRoute.SDR,
+            confidence=0,
+            lead_stage=str(context.cart.get("_lead_stage") or "novo"),
+        ),
+        AgentResponse(
+            reply_text=None,
+            role=ConversationRoute.SDR,
+            cart_state=context.cart,
+            handoff_required=False,
+            proof={
+                "valid": False,
+                "delivery_authorized": False,
+                "errors": model_errors,
+                "gating_errors": ["model_output_invalid_after_retry"],
+                "repair_required": False,
+                "durable_retry_required": True,
+                "provider_failure_class": "invalid_json",
+                "fallback_used": False,
+                "model_reply_preserved": True,
+                "evidence_status": "unknown",
+                "quality_warnings": model_errors,
+                "technical_pass": False,
+                "quality_pass": False,
+                "accepted_facts": [],
+                "asked_field_keys": [],
+                "asked_question_node_ids": [],
+            },
+        ),
+    )
+
     contract = context.graph_contract or {}
     facts = context.cart.get("facts") or {}
     missing = graph_proof_checker_v3.pending_fields(contract, facts)
@@ -611,22 +648,20 @@ def _estimated_tokens(text: str) -> int:
     return max(1, len(text or "") // 4)
 
 
-# Confirmed live 2026-08-08 (WA Validator gap report): the v3 runtime's own
-# card/chunk assembly had no token-count budget at all, only a card-count
-# cap (_mmr(..., 16)) -- unlike the legacy context_cards.resolve_cards(),
-# which already enforces max_tokens=8000. Any future addition to what's
-# retrieved per turn (e.g. tone/flow-management skill content) could grow
-# per-turn input size unboundedly with nothing to stop it. This is a real,
-# enforced ceiling on the RAG chunk package specifically (context_cards are
-# capped separately downstream); it does not by itself guarantee the exact
-# total prompt size, but it makes "we didn't grow this" a checkable claim
-# instead of an assumption.
-RAG_CHUNK_TOKEN_BUDGET = 6000
-RAG_CHUNK_LIMIT = 12
+# RAG keeps a relevance/cardinality bound for retrieval quality, but there is
+# no runtime token ceiling. The provider owns its context and completion
+# limits; the runtime records estimates only as telemetry.
+RAG_CHUNK_TOKEN_BUDGET: int | None = None
+RAG_CHUNK_LIMIT = 10
 RAG_FAQ_CHUNK_RESERVE = 1
 
 
-def _mmr(candidates: list[dict[str, Any]], limit: int, *, max_tokens: int = RAG_CHUNK_TOKEN_BUDGET) -> list[dict[str, Any]]:
+def _mmr(
+    candidates: list[dict[str, Any]],
+    limit: int,
+    *,
+    max_tokens: int | None = RAG_CHUNK_TOKEN_BUDGET,
+) -> list[dict[str, Any]]:
     """Diversity reranking over the bounded result returned by Postgres."""
     selected: list[dict[str, Any]] = []
     remaining = list(candidates)
@@ -653,7 +688,7 @@ def _mmr(candidates: list[dict[str, Any]], limit: int, *, max_tokens: int = RAG_
         if best is None:
             break
         estimated = _estimated_tokens(str(best[2].get("chunk_text") or ""))
-        if selected and token_count + estimated > max_tokens:
+        if max_tokens is not None and selected and token_count + estimated > max_tokens:
             break
         token_count += estimated
         selected.append(best[2])
@@ -705,10 +740,9 @@ def _optional_retrieval_chunk_slots(
 ) -> int:
     """Return optional MMR capacity without charging FAQ against structure.
 
-    The branch contract can legitimately require all twelve structural slots.
-    A current-turn FAQ is separately selected, graph-authorized evidence and
-    therefore gets one explicit reserve.  The shared token budget still caps
-    the complete structural + FAQ package.
+    The branch contract can legitimately require all available structural
+    slots. A current-turn FAQ is separately selected, graph-authorized
+    evidence and therefore gets one explicit reserve.
     """
     if len(required_structural) > RAG_CHUNK_LIMIT:
         raise RuntimeError(
@@ -2284,6 +2318,8 @@ def _unanswered_fact_after_question_limit(
         _EXPLICIT_UNKNOWN.fullmatch(message)
         or _explicitly_defers_pending_field(message)
     )
+    if not explicit_unknown:
+        return None
     asked = [str(value) for value in context.cart.get("asked_question_node_ids") or []]
     question_text = str(
         ((contract.get("questions") or {}).get(question_id) or {}).get("text") or ""
@@ -2302,30 +2338,22 @@ def _unanswered_fact_after_question_limit(
         )
     )
     allowed_emissions = 1 + max(0, min(int(max_attempts), 1))
-    if (
-        not explicit_unknown
-        and max(asked.count(question_id), observed_attempts) < allowed_emissions
-    ):
-        return None
     # The budget counts question emissions, not customer stonewalling, and the
     # contract asks the agent to answer a doubt *and* resume the question. So a
     # customer who asks two legitimate questions about the catalog exhausts the
     # budget without ever having refused to answer, and the field is given up
     # on. A turn that carried an answered doubt is not a non-answer.
-    if not explicit_unknown and doubt_answered:
-        return None
+    del asked, observed_attempts, allowed_emissions, doubt_answered
     return {
         "field_key": key,
         "owner_node_id": owner,
         "status": "unknown",
         "value": None,
         "source_message_id": _source_message_id(context.messages),
-        "evidence_span": message if explicit_unknown else "",
+        "evidence_span": message,
         "confidence": 1.0,
-        "reason": "explicit_unknown" if explicit_unknown else "ignored_twice",
-        "metadata": {
-            "reason": "explicit_unknown" if explicit_unknown else "ignored_twice",
-        },
+        "reason": "explicit_unknown",
+        "metadata": {"reason": "explicit_unknown"},
     }
 
 
@@ -2362,8 +2390,16 @@ def _drop_premature_unknown_for_pending_question(
             str(row.get("content") or row.get("texto") or row.get("text") or ""),
         )
     )
-    allowed_emissions = 1 + max(0, min(int(max_attempts), 1))
-    if max(asked.count(question_id), observed_attempts) >= allowed_emissions:
+    del asked, observed_attempts, max_attempts
+    message = _message_without_consumed_services(
+        _latest_user_message(context),
+        context.retrieval_trace.get("service_resolution") or {},
+    ).strip()
+    explicit_unknown = bool(
+        _EXPLICIT_UNKNOWN.fullmatch(message)
+        or _explicitly_defers_pending_field(message)
+    )
+    if explicit_unknown:
         return proposal
     filtered = [
         fact
@@ -3289,7 +3325,7 @@ def build_context(
     context_batch_started = time.perf_counter()
     try:
         batch = supabase_client.get_graph_turn_context_batch_v4(
-            persona_id=str(persona["id"]), lead_ref=lead_ref, message_limit=8,
+            persona_id=str(persona["id"]), lead_ref=lead_ref, message_limit=6,
         )
     except Exception:
         # Rolling-deploy compatibility while migration 114 is being applied.
@@ -3299,7 +3335,7 @@ def build_context(
     if not publication:
         raise RuntimeError("active GraphRAG v3 publication not found")
     document = publication.get("document_json") or {}
-    messages = batch.get("messages") or supabase_client.get_messages(str(lead_ref), limit=8) or []
+    messages = batch.get("messages") or supabase_client.get_messages(str(lead_ref), limit=6) or []
     # The buffer can canonically coalesce several physical messages. Use that
     # ordered text for this decision/proof without rewriting persisted history
     # or changing the canonical inbound identity.
@@ -3377,6 +3413,20 @@ def build_context(
         active_branch, persisted_active_branches,
     )
     ledger_id = str(ledger.get("id") or "")
+    try:
+        asked_field_keys = (
+            supabase_client.get_conversation_asked_field_keys(
+                ledger_id,
+                publication_id=str(publication.get("id") or "") or None,
+                journey_sequence=int(journey.get("sequence") or 1),
+            )
+            if ledger_id else []
+        )
+    except Exception:
+        # Rolling compatibility while proof producers still emit only graph
+        # question ids. The v3 template consumes this empty semantic list and
+        # the legacy id list remains available separately for v2 consumers.
+        asked_field_keys = []
     completed_branch_node_ids: list[str] = []
     if ledger_id and operational_mode == "post_qualification_support":
         branch_states = supabase_client.get_ledger_branch_states(ledger_id)
@@ -3520,6 +3570,7 @@ def build_context(
                   "facts_by_key": ledger.get("facts_by_key") or {},
                   "active_branch_node_id": active_branch,
                   "asked_question_node_ids": ledger.get("asked_question_node_ids") or [],
+                  "asked_field_keys": asked_field_keys,
                   "_ledger_revision": ledger.get("revision") or 0},
             rag_nodes=[persona_node] if persona_node else [], rag_paths=[], rag_chunks=[],
             context_cards=[], system_prompt="", available_services=[{
@@ -3708,13 +3759,6 @@ def build_context(
     structural_ids = {
         str(row.get("chunk_id") or row.get("id")) for row in required_structural
     }
-    required_token_count = sum(
-        _estimated_tokens(str(row.get("chunk_text") or ""))
-        for row in [*required_structural, *reserved]
-    )
-    if required_token_count > RAG_CHUNK_TOKEN_BUDGET:
-        raise RuntimeError("required structural chunks exceed the prompt token budget")
-    remaining_token_budget = RAG_CHUNK_TOKEN_BUDGET - required_token_count
     selected = (
         _mmr(
             [
@@ -3722,9 +3766,8 @@ def build_context(
                 if key not in structural_ids and key not in reserved_ids
             ],
             optional_chunk_slots,
-            max_tokens=remaining_token_budget,
         )
-        if remaining_token_budget > 0 else []
+        if optional_chunk_slots > 0 else []
     )
     # Phase-A candidates are represented only by their compact snippets in the
     # retrieval trace. Full content enters the prompt solely from phase B.
@@ -3821,6 +3864,7 @@ def build_context(
                                       "facts_by_key": ledger.get("facts_by_key") or {},
                                       "active_branch_node_id": active_branch,
                                       "asked_question_node_ids": ledger.get("asked_question_node_ids") or [],
+                                      "asked_field_keys": asked_field_keys,
                                       "_ledger_revision": ledger.get("revision") or 0},
         rag_nodes=[document["node_by_id"][node_id] for node_id in by_source if node_id in document["node_by_id"]],
         rag_paths=[card.path for card in cards],
@@ -3963,7 +4007,9 @@ def _validated_interpretation(
     must therefore re-prove graph-scoped elements against it; passing a
     document here does the whole job in one pass.
     """
-    raw = (model_observation or {}).get("interpretation")
+    raw = semantic_conversation_policy.adapt_model_envelope(
+        (model_observation or {}).get("interpretation")
+    )
     if not isinstance(raw, dict):
         return None
     try:
@@ -4707,34 +4753,17 @@ def _deterministic_pending_fact_confirmation(
     )
     complete = bool(active and not missing and not remaining_pending)
     final_confirmation_pending = complete and accepted_confirmation
-    published_empty_reply_fallback = ""
     if remaining_pending:
-        published_empty_reply_fallback, next_confirmation = _confirmation_prompt_for_fact(
-            document, remaining_pending, active,
-            _assistant_replies(context.messages),
+        next_confirmation = dict(
+            ((remaining_pending.get("metadata") or {}).get("confirmation") or {})
         )
         next_question_id = None
-    elif final_confirmation_pending:
-        published_empty_reply_fallback = _terminal_reply(
-            document=document,
-            contract=(
-                (document.get("branch_contracts") or {}).get(focus)
-                or question_contract
-            ),
-            active_branch_ids=active,
-            facts_by_key=grouped,
-            missing_fields=[],
-            qualification_complete=True,
-        )
     # This path consumes confirmation metadata, not conversational authorship.
     # Preserve the model's grounded wording byte-for-byte; terminal state,
     # branch state and the next-question id remain independently auditable.
-    reply = (
-        semantic_conversation_policy.interpretation_reply(interpretation)
-        or published_empty_reply_fallback
-    )
+    reply = semantic_conversation_policy.interpretation_reply(interpretation)
     if not reply:
-        reply = CONTEXT_FAILURE_HANDOFF_REPLY
+        return None
     asked = list(context.cart.get("asked_question_node_ids") or [])
     if next_question_id:
         asked.append(next_question_id)
@@ -5160,11 +5189,21 @@ def decide(
         *_publication_document_and_contract(context, model_observation),
     )
     interpretation = validation.interpretation if validation else None
+    # n8n/model-owned turns never take a deterministic dialogue shortcut.
+    # These handlers remain available only to the manually selected
+    # deterministic engine, whose call carries no model observation.
+    # Confirmation reconciliation consumes model metadata but never authors
+    # public copy. It remains active for both engines; the graph-authored
+    # clarification utterance is a real deterministic shortcut and stays
+    # exclusive to the manually selected deterministic engine.
     deterministic = (
-        _deterministic_pending_service_clarification(context, interpretation)
-        or _deterministic_pending_fact_confirmation(context, interpretation)
+        _deterministic_pending_fact_confirmation(context, interpretation)
         or _deterministic_confirmation_decision(context, interpretation)
     )
+    if deterministic is None and model_observation is None:
+        deterministic = _deterministic_pending_service_clarification(
+            context, interpretation
+        )
     decision, response = deterministic or _decide(
         context, model_observation=model_observation,
     )
@@ -5543,7 +5582,15 @@ def _decide(
     context: ConversationContext, *, model_observation: dict[str, Any] | None
 ) -> tuple[ConversationDecision, AgentResponse]:
     observation = model_observation or {}
-    if context.retrieval_trace.get("deterministic_intent") == "greeting":
+    if observation.get("contract_probe") is True:
+        return (
+            ConversationDecision(classifier="graph_contract_probe_v3", intent="await_model_proposal",
+                                 route=ConversationRoute.SDR, confidence=1, lead_stage=str(context.cart.get("_lead_stage") or "novo")),
+            AgentResponse(reply_text=None, role=ConversationRoute.SDR, cart_state=context.cart,
+                          proof={"valid": True, "mode": "contract_probe", "runtime_version": RUNTIME_VERSION}),
+        )
+    manual_deterministic = model_observation is None
+    if manual_deterministic and context.retrieval_trace.get("deterministic_intent") == "greeting":
         question_id = context.retrieval_trace.get("next_question_node_id")
         greeting_node_id = context.retrieval_trace.get("greeting_response_node_id")
         evidence_node_ids = list(dict.fromkeys(
@@ -5593,14 +5640,7 @@ def _decide(
                              "completion_tokens": 0, "total_tokens": 0},
             ),
         )
-    if observation.get("contract_probe") is True:
-        return (
-            ConversationDecision(classifier="graph_contract_probe_v3", intent="await_model_proposal",
-                                 route=ConversationRoute.SDR, confidence=1, lead_stage=str(context.cart.get("_lead_stage") or "novo")),
-            AgentResponse(reply_text=None, role=ConversationRoute.SDR, cart_state=context.cart,
-                          proof={"valid": True, "mode": "contract_probe", "runtime_version": RUNTIME_VERSION}),
-        )
-    if (
+    if manual_deterministic and (
         (context.retrieval_trace.get("service_resolution") or {}).get("status")
         == "ambiguous"
     ):
@@ -6262,15 +6302,10 @@ def _decide(
         )
         confirmation_pending = bool(qualification_complete and not post_support)
         terminal_intent = "qualification_incomplete" if qualification_incomplete else None
-        # A structured response makes the question independently discardable.
-        # The backend publishes the model's answer byte-for-byte; it never
-        # trims a monolithic reply or appends graph-authored copy.
-        reply_seed = str(
-            proof.get("publishable_answer_text")
-            if proof.get("question_discarded")
-            else proposal.reply
-            or ""
-        )
+        # The backend publishes the model's single reply byte-for-byte. It
+        # never slices a question, appends graph copy or swaps in fallback
+        # prose because an advisory component failed validation.
+        reply_seed = str(proposal.reply or "")
         pending_confirmation_fact = next(
             (
                 fact for fact in accepted_facts
@@ -6283,6 +6318,7 @@ def _decide(
             ((pending_confirmation_fact or {}).get("metadata") or {}).get("confirmation")
             or {}
         )
+        reply = reply_seed
         if pending_confirmation_fact:
             next_question_id = None
             confirmation_pending = False
@@ -6290,10 +6326,8 @@ def _decide(
             qualification_incomplete = False
             collection_complete = False
             terminal_intent = None
-        else:
-            # The model owns every word of the reply. Question metadata is
-            # audited below, never converted into backend-authored copy.
-            reply = reply_seed
+        # The model owns every word of the reply. Question metadata is audited
+        # below, never converted into backend-authored copy.
         recent_replies = _assistant_replies(context.messages)
         question_text = str(
             ((question_contract.get("questions") or {}).get(audit_question_id or "") or {}).get("text")
@@ -6321,47 +6355,11 @@ def _decide(
         repetition_action = (
             "allowed" if repetition["passed"] else "observed_only"
         )
-        quality_repair_required = bool(
-            not repetition["passed"]
-            and int(observation.get("repair_attempt") or 0) == 0
-            and str(reply or "").strip()
-        )
-        repetition_repair_exhausted = bool(
-            not repetition["passed"]
-            and int(observation.get("repair_attempt") or 0) >= 1
-        )
-        if repetition_repair_exhausted:
-            persona_policy = (
-                ((_persona_node(document) or {}).get("data") or {})
-                .get("conversation_policy") or {}
-            )
-            reply = str(
-                persona_policy.get("context_failure_handoff_reply") or ""
-            ).strip() or CONTEXT_FAILURE_HANDOFF_REPLY
-            next_question_id = None
-            terminal_intent = "conversation_repetition_after_repair"
-            confirmation_pending = False
-            post_support = False
-            qualification_complete = False
-            qualification_incomplete = False
-            collection_complete = False
-            repetition_action = "repetition_handoff"
-        empty_reply_handoff = not str(reply or "").strip()
-        if empty_reply_handoff:
-            persona_policy = (
-                ((_persona_node(document) or {}).get("data") or {})
-                .get("conversation_policy") or {}
-            )
-            reply = str(
-                persona_policy.get("context_failure_handoff_reply") or ""
-            ).strip() or CONTEXT_FAILURE_HANDOFF_REPLY
-            terminal_intent = "empty_model_reply"
-            confirmation_pending = False
-            post_support = False
-            qualification_complete = False
-            qualification_incomplete = False
-            collection_complete = False
-            repetition_action = "empty_reply_handoff"
+        # Repetition and style belong to production telemetry/WA Validator.
+        # They never trigger a model rewrite or deterministic replacement.
+        quality_repair_required = False
+        repetition_repair_exhausted = False
+        empty_model_reply = not str(reply or "").strip()
 
         projection_contract = (
             (document.get("branch_contracts") or {}).get(committed_branch)
@@ -6451,22 +6449,19 @@ def _decide(
             ),
             "repetition_audit": repetition,
             "repetition_action": repetition_action,
-            "repair_required": bool(proof.get("repair_required"))
-            or quality_repair_required,
+            "repair_required": bool(proof.get("repair_required")) or (
+                empty_model_reply and int(observation.get("repair_attempt") or 0) == 0
+            ),
             "repair_requirements": [
                 *(proof.get("repair_requirements") or []),
                 *(
                     [{
-                        "kind": "quality",
-                        "issue": "conversation_repetition",
-                        "failures": repetition.get("failures") or [],
-                        "instruction": (
-                            "Rewrite the reply without asking a fact already known "
-                            "or repeating a previous question. Preserve supported "
-                            "knowledge and choose a genuinely unresolved topic."
-                        ),
+                        "kind": "provider",
+                        "issue": "empty_response",
+                        "instruction": "Return the compact v3 envelope with a non-empty reply.",
                     }]
-                    if quality_repair_required else []
+                    if empty_model_reply and int(observation.get("repair_attempt") or 0) == 0
+                    else []
                 ),
             ],
             "model_proposed_next_question_node_id": (
@@ -6477,13 +6472,28 @@ def _decide(
             "model_proposed_next_question_field_key": (
                 model_proposed_next_question_field_key
             ),
-            "fallback_used": bool(proof.get("fallback_used")) or empty_reply_handoff
-            or repetition_repair_exhausted,
-            "context_failure_handoff": empty_reply_handoff or repetition_repair_exhausted,
+            "fallback_used": False,
+            "context_failure_handoff": False,
+            "delivery_authorized": bool(
+                proof.get("delivery_authorized", proof.get("valid"))
+            ) and not empty_model_reply,
+            "durable_retry_required": bool(
+                empty_model_reply and int(observation.get("repair_attempt") or 0) >= 1
+            ),
+            "provider_failure_class": "empty_response" if empty_model_reply else None,
+            "model_reply_preserved": reply == proposal.reply,
+            "quality_warnings": list(dict.fromkeys([
+                *(proof.get("quality_warnings") or []),
+                *(repetition.get("failures") or []),
+            ])),
+            "technical_pass": bool(
+                proof.get("delivery_authorized", proof.get("valid"))
+            ) and not empty_model_reply,
+            "quality_pass": bool(proof.get("quality_pass", True))
+            and repetition["passed"],
             "model_proposal_errors": [
                 *(proof.get("model_proposal_errors") or []),
-                *(["empty_model_reply"] if empty_reply_handoff else []),
-                *(["conversation_repetition_after_repair"] if repetition_repair_exhausted else []),
+                *(["empty_model_reply"] if empty_model_reply else []),
             ],
             **(doubt or {}),
         }
@@ -6496,15 +6506,11 @@ def _decide(
                                  intent=resolved_intent,
                                  route=route, confidence=1, lead_stage="qualificado" if qualification_complete else "engajado",
                                  handoff_reason=(
-                                     "graph_conversation_repetition"
-                                     if repetition_repair_exhausted
-                                     else "graph_context_empty_reply"
-                                     if empty_reply_handoff
-                                     else "graph_terminal_qualification"
+                                     "graph_terminal_qualification"
                                      if terminal_intent else None
                                  ),
                                  evidence_node_ids=evidence_node_ids),
-            AgentResponse(reply_text=None if quality_repair_required else (reply or None),
+            AgentResponse(reply_text=reply if not empty_model_reply else None,
                           role=route, evidence_node_ids=evidence_node_ids,
                           cart_state=state,
                           handoff_required=bool(terminal_intent),
@@ -6512,6 +6518,48 @@ def _decide(
         )
     # A rejected model proposal may preserve accepted facts, but it never
     # authorizes the backend to choose or append a qualification question.
+    # It also never authorizes deterministic fallback copy. A first unsafe
+    # commercial confirmation gets one model repair; a persistent violation
+    # or publication-identity failure produces no outbound.
+    gating_errors = [str(value) for value in proof.get("gating_errors") or []]
+    safety_violation = any(
+        value == "premature_final_confirmation" for value in gating_errors
+    )
+    return (
+        ConversationDecision(
+            classifier="graph_proof_checker_v3",
+            intent="delivery_not_authorized",
+            route=ConversationRoute.SDR,
+            confidence=0,
+            lead_stage=str(context.cart.get("_lead_stage") or "novo"),
+            handoff_reason=(
+                "unsafe_commercial_confirmation" if safety_violation else None
+            ),
+            evidence_node_ids=[],
+        ),
+        AgentResponse(
+            reply_text=None,
+            role=ConversationRoute.SDR,
+            cart_state=context.cart,
+            handoff_required=False,
+            proposal=proposal,
+            proof={
+                **proof,
+                "valid": False,
+                "delivery_authorized": False,
+                "fallback_used": False,
+                "context_failure_handoff": False,
+                "model_reply_preserved": True,
+                "technical_pass": False,
+                "quality_pass": False,
+                "provider_failure_class": (
+                    "other" if safety_violation else None
+                ),
+                "durable_retry_required": False,
+            },
+        ),
+    )
+
     proof_facts = (proof.get("ledger") or {}).get("facts") or contract_facts
     fallback_askable = graph_proof_checker_v3.askable_pending_fields(
         contract, proof_facts,

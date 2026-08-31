@@ -45,6 +45,63 @@ _INTENT_TO_INTERACTION = {
 }
 
 
+def adapt_model_envelope(raw: Any) -> Any:
+    """Adapt the compact v3 model envelope to the internal v2 structure.
+
+    The public model contract has one customer-facing string.  The richer
+    ``SemanticInterpretation`` remains an internal compatibility shape while
+    the installed v2 and v3 workflows overlap during blue/green.
+    """
+    if not isinstance(raw, dict) or str(raw.get("envelope_version") or "") != "3":
+        return raw
+    branch_selections = list(raw.get("branch_selections") or [])
+    state_relation = (
+        "new_demand"
+        if any(
+            str(item.get("action") or "none") in {"select", "switch", "add"}
+            for item in branch_selections
+            if isinstance(item, dict)
+        )
+        else "continue"
+    )
+    asked_field_key = str(raw.get("asked_field_key") or "").strip() or None
+    reply = raw.get("reply") if isinstance(raw.get("reply"), str) else ""
+    return {
+        "intents": [],
+        "state_relation": state_relation,
+        "answers_field_key": None,
+        "confirmation": raw.get("confirmation") or {
+            "state": "none",
+            "target_ref": None,
+            "evidence_span": "",
+            "correction_field_key": None,
+            "correction_value": None,
+        },
+        "branch_selections": branch_selections,
+        "facts": list(raw.get("facts") or []),
+        "invalidated_facts": [],
+        "entities": [],
+        "questions": list(raw.get("customer_questions") or []),
+        "claims": list(raw.get("claims") or []),
+        "recommended_next_action": (
+            "handoff" if raw.get("handoff_requested") is True
+            else "ask_field" if asked_field_key
+            else "answer_question"
+        ),
+        "cited_node_ids": list(raw.get("cited_node_ids") or []),
+        "cited_chunk_ids": list(raw.get("cited_chunk_ids") or []),
+        "response": {
+            "answer": reply,
+            "question": None,
+            "question_field_key": asked_field_key,
+        },
+        "next_question_field_key": asked_field_key,
+        "next_question_node_id": None,
+        "reply": reply,
+        "handoff_requested": raw.get("handoff_requested") is True,
+    }
+
+
 def interpretation_segments(
     interpretation: SemanticInterpretation,
 ) -> tuple[str, str, str | None, str | None]:
@@ -56,19 +113,19 @@ def interpretation_segments(
     fallback for an older installed workflow whose answer is empty; it is
     never appended to an answer that may already contain the same question.
     """
-    answer = str(interpretation.response.answer or "").strip()
-    legacy_question = str(interpretation.response.question or "").strip()
+    answer = str(interpretation.response.answer or "")
+    legacy_question = str(interpretation.response.question or "")
     field_key = str(
         interpretation.response.question_field_key
         or interpretation.next_question_field_key
         or ""
     ).strip() or None
     node_id = str(interpretation.next_question_node_id or "").strip() or None
-    if not answer and legacy_question:
+    if not answer.strip() and legacy_question.strip():
         answer = legacy_question
         legacy_question = ""
-    if not answer:
-        answer = str(interpretation.reply or "").strip()
+    if not answer.strip():
+        answer = str(interpretation.reply or "")
     return answer, legacy_question, field_key, node_id
 
 

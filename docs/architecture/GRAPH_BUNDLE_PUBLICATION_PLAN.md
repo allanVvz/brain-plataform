@@ -196,6 +196,13 @@ bloqueia o plano.
 | 4 | Ativação explícita separada | concluído: dois checksums + RPC atômica |
 | 5 | Driver semântico `sales` no WA Validator | varejo/atacado com technical e quality pass |
 | 6 | Bundle Tock Fatal real | fontes comerciais aprovadas, sem fixture contaminada |
-| 7 | Regressão Aurora e preparação de release | P0 fechado e exactly-once/proof preservados |
+| 7 | Regressão Aurora e preparação de release | **em aberto:** P0, WA Validator interno, exactly-once e proof precisam de evidência formal antes do release |
+| 8 | Baseline da Aurora para migração autoral | **em preparação (auditoria read-only, 2026-08-31): publication v75 ativa e binding conectado identificados; importador shadow-only estrito preparado. A geração permanece bloqueada até existir um export autenticado que reproduza checksum, 140 nodes, 274 edges, 14 contratos e 551 chunks da v75.** |
+
+A fase 8 não publica conteúdo: ela fixa a baseline e prepara uma conversão que
+falha fechada para qualquer versão ou checksum diferente. A fase 7 continua
+aberta; o bundle da Aurora só pode seguir para dry-run/shadow depois de ser
+reconstruído da publicação ativa, nunca da fixture local, e depois do P0 e dos
+gates descritos neste documento.
 
 Nenhuma fase posterior está implicitamente autorizada por esta entrega.

@@ -4,7 +4,7 @@
   "required": ["source_sha", "contracts_version", "schema_version", "route_map_checksum", "n8n_checksum", "services"],
   "properties": {
     "source_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
-    "contracts_version": {"const": "1.0.0"},
+    "contracts_version": {"enum": ["1.0.0", "1.1.0"]},
     "schema_version": {"type": "integer", "minimum": 131},
     "route_map_checksum": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "n8n_checksum": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},

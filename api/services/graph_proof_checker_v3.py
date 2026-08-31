@@ -979,12 +979,13 @@ def check(
     if _FINAL_CONFIRMATION.search(str(proposal.get("reply") or "")) and missing:
         errors.append("premature_final_confirmation")
 
-    # Branch navigation, fact extraction, next-question metadata and a model's
-    # handoff flag are independently discardable components.  They may guide
-    # the next turn, but they must not erase a grounded reply.  Publication,
-    # citation, claim and premature-commercial-confirmation failures remain
-    # global proof errors because those are the actual knowledge/isolation
-    # boundary.
+    # Delivery authorization is deliberately narrower than quality/evidence
+    # evaluation. Branch navigation, facts, question metadata, citations and
+    # ordinary claims are independently discardable/advisory components: they
+    # may be absent or wrong without granting the backend permission to alter
+    # the model-authored public reply. Only publication identity and unsafe
+    # commercial confirmation remain hard gates here; persona/agent/binding
+    # identity and exactly-once are enforced again at commit time.
     component_prefixes = (
         "branch_", "none_with_branch_anchor", "keep_", "add_",
         "invalid_branch_action", "field_owner_", "undeclared_field:",
@@ -995,15 +996,20 @@ def check(
         error for error in errors
         if error.startswith(component_prefixes) or error == "handoff_not_authorized"
     ]
-    gating_errors = [error for error in errors if error not in component_errors]
+    technical_prefixes = (
+        "publication_not_active",
+        "publication_checksum_mismatch",
+        "premature_final_confirmation",
+    )
+    gating_errors = [
+        error for error in errors if error.startswith(technical_prefixes)
+    ]
+    advisory_errors = [error for error in errors if error not in gating_errors]
     if any(error.startswith(("next_question_", "question_")) for error in component_errors):
         question_id = None
     if question_count > 1:
         observations.append("multiple_questions_in_reply")
     repair = list({(item["kind"], item["id"]): item for item in repair if item.get("id")}.values())
-    repair_only = bool(gating_errors) and all(
-        "outside_package" in error for error in gating_errors
-    )
     question_component_invalid = bool(
         not question_id
         and question_count > 0
@@ -1012,33 +1018,64 @@ def check(
             for error in component_errors
         )
     )
-    discardable_question = bool(question_component_invalid and separable_question)
-    question_repair = [{
-        "kind": "quality",
-        "issue": "question_not_semantically_askable",
+    discardable_question = False
+    evidence_errors = [
+        error for error in advisory_errors
+        if error.startswith(("cited_", "claim_"))
+    ]
+    evidence_status = (
+        "complete" if not evidence_errors
+        else "missing" if all(
+            "without_evidence" in error or "omitted_from_proposal" in error
+            for error in evidence_errors
+        )
+        else "partial"
+    )
+    safety_repair = [{
+        "kind": "safety",
+        "issue": error,
         "instruction": (
-            "Preserve the grounded answer. Ask no question when every useful "
-            "pending topic was already asked; otherwise choose one unasked "
-            "field by semantic key. Never emit a graph node id."
+            "Rewrite the same answer without confirming a final price, date "
+            "or time. Preserve every safe, grounded part of the reply."
         ),
-    }] if question_component_invalid and not discardable_question else []
+    } for error in gating_errors if error == "premature_final_confirmation"]
+    asked_field_key = (
+        str((askable_by_question.get(str(question_id)) or {}).get("key") or "")
+        or None
+    )
     return {
-        "valid": not gating_errors, "errors": errors,
+        "valid": not gating_errors,
+        "delivery_authorized": not gating_errors,
+        "errors": errors,
         "gating_errors": gating_errors,
-        "repair_required": (
-            (repair_only and bool(repair))
-            or (question_component_invalid and not discardable_question)
-        ),
-        "repair_requirements": [*repair, *question_repair], "ledger": next_ledger,
+        "repair_required": bool(safety_repair),
+        "repair_requirements": safety_repair,
+        "ledger": next_ledger,
         "accepted_facts": accepted_facts, "missing_fields": missing_keys,
         "next_question_node_id": question_id,
-        "next_question_field_key": (
-            str((askable_by_question.get(str(question_id)) or {}).get("key") or "")
-            or None
-        ),
+        "next_question_field_key": asked_field_key,
+        "asked_field_keys": [asked_field_key] if asked_field_key else [],
+        "asked_question_node_ids": [question_id] if question_id else [],
         "question_component_invalid": question_component_invalid,
         "question_discarded": discardable_question,
-        "publishable_answer_text": answer_text if discardable_question else None,
+        "publishable_answer_text": None,
+        "discarded_components": sorted({
+            "branch" if error.startswith(("branch_", "keep_", "add_", "none_"))
+            else "fact" if error.startswith(("field_", "fact_", "undeclared_", "duplicate_", "non_known_"))
+            else "question" if error.startswith(("question_", "next_question_"))
+            else "handoff" if error == "handoff_not_authorized"
+            else "evidence" if error.startswith(("cited_", "claim_"))
+            else "other"
+            for error in advisory_errors
+        }),
+        "evidence_status": evidence_status,
+        "quality_warnings": [
+            *advisory_errors,
+            *(["multiple_questions_in_reply"] if question_count > 1 else []),
+        ],
+        "model_reply_preserved": True,
+        "technical_pass": not gating_errors,
+        "quality_pass": not advisory_errors and question_count <= 1,
         "qualification_complete": not missing,
         "handoff_required": handoff_required,
         "required_field_count": required_field_count(contract, facts),
