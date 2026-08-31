@@ -106,6 +106,38 @@ PY
     printf 'FAIL\t%s_digest\texpected=%s\n' "$service" "$expected"; failed=1
   fi
 }
+
+check_microservice_worker_digest() {
+  local owner="$1" slot="$2" worker="$3" expected cid image_id
+  expected="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["services"][sys.argv[2]]["digest"])' "$microservice_manifest" "$owner")"
+  cid="$(docker ps -q --filter "name=^/brain-ai-${worker}-${slot}-1$")"
+  if [[ -z "$cid" ]]; then
+    if python3 - <<'PY'
+import json
+from pathlib import Path
+
+path = Path(".deploy/control/claims-paused.json")
+try:
+    paused = json.loads(path.read_text(encoding="utf-8")).get("paused") is True
+except (OSError, json.JSONDecodeError, AttributeError):
+    paused = False
+raise SystemExit(0 if paused else 1)
+PY
+    then
+      printf 'PASS\t%s_digest\tcontainer intentionally stopped; claims paused; expected=%s\n' \
+        "$worker" "$expected"
+      return
+    fi
+    printf 'FAIL\t%s_digest\tcontainer missing\n' "$worker"; failed=1; return
+  fi
+  image_id="$(docker inspect -f '{{.Image}}' "$cid")"
+  if docker image inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' "$image_id" | grep -Fq "@$expected"; then
+    printf 'PASS\t%s_digest\t%s\n' "$worker" "$expected"
+  else
+    printf 'FAIL\t%s_digest\texpected=%s\n' "$worker" "$expected"; failed=1
+  fi
+}
+
 microservice_state=".deploy/microservices/slots.json"
 microservice_manifest="ops/microservices/release-manifest.json"
 gateway_slot=""
@@ -140,10 +172,22 @@ if [[ "$gateway_slot" =~ ^(blue|green)$ && -s "$microservice_manifest" ]]; then
   else
     printf 'PASS\tlegacy_api\tretired\n'
   fi
+  control_slot="$(python3 -c 'import json; print(json.load(open(".deploy/microservices/slots.json", encoding="utf-8"))["control-plane"]["active"])')"
+  runtime_slot="$(python3 -c 'import json; print(json.load(open(".deploy/microservices/slots.json", encoding="utf-8"))["conversation-runtime"]["active"])')"
+  transport_slot="$(python3 -c 'import json; print(json.load(open(".deploy/microservices/slots.json", encoding="utf-8"))["transport"]["active"])')"
+  for worker in control-plane-knowledge control-plane-integrations control-plane-validator; do
+    check_microservice_worker_digest control-plane "$control_slot" "$worker"
+  done
+  for worker in runtime-conversation runtime-validator; do
+    check_microservice_worker_digest conversation-runtime "$runtime_slot" "$worker"
+  done
+  for worker in transport-dispatch transport-media; do
+    check_microservice_worker_digest transport "$transport_slot" "$worker"
+  done
 else
   check_container_digest "$active_api_service" .deploy/release-api-digest
+  check_container_digest workers .deploy/release-worker-digest true
 fi
-check_container_digest workers .deploy/release-worker-digest true
 
 "${COMPOSE[@]}" ps
 "${COMPOSE[@]}" exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -P pager=off' <<'SQL'

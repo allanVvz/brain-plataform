@@ -233,11 +233,23 @@ def test_shared_runtime_release_has_audited_global_microservice_pause():
     assert "MICROSERVICE_WORKERS_PAUSED=passed" in workflow
 
 
-def test_release_audit_accepts_missing_legacy_worker_only_under_valid_pause():
+def test_release_audit_validates_domain_workers_and_accepts_missing_only_under_valid_pause():
     audit = (ROOT / "ops/vps/validate-production-release.sh").read_text(encoding="utf-8")
     assert 'allow_paused_missing="${3:-false}"' in audit
     assert 'Path(".deploy/control/claims-paused.json")' in audit
-    assert 'check_container_digest workers .deploy/release-worker-digest true' in audit
+    assert "check_microservice_worker_digest" in audit
+    for worker in (
+        "control-plane-knowledge",
+        "control-plane-integrations",
+        "control-plane-validator",
+        "runtime-conversation",
+        "runtime-validator",
+        "transport-dispatch",
+        "transport-media",
+    ):
+        assert worker in audit
+    legacy_branch = audit[audit.index("else\n  check_container_digest \"$active_api_service\"") :]
+    assert "check_container_digest workers .deploy/release-worker-digest true" in legacy_branch
 
 
 def test_microservice_resume_never_starts_legacy_worker_and_rolls_back_pause():
