@@ -65,7 +65,10 @@ jobs:
           echo "checksum=$checksum" >> "$GITHUB_OUTPUT"
       - uses: docker/login-action@v3
         if: github.event_name == 'push'
-        with: {registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}"}
+        with:
+          registry: ghcr.io
+          username: ${{ secrets.GHCR_USERNAME }}
+          password: ${{ secrets.GHCR_TOKEN }}
       - uses: docker/build-push-action@v6
         id: build
         with:
