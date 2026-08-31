@@ -30,10 +30,12 @@ jobs:
           base="$BEFORE_SHA"
           if [ "$EVENT_NAME" = "pull_request" ]; then base="$BASE_SHA"; fi
           files="$(git diff --name-only "$base" "$GITHUB_SHA")"
-          if grep -Eq '^packages/' <<<"$files"; then
+          if grep -Eq '^packages/|^\.github/workflows/build-monorepo-images\.yml$' <<<"$files"; then
             apps='["gateway","control-plane","conversation-runtime","transport"]'
           else
-            apps="$(printf '%s\n' gateway control-plane conversation-runtime transport | while read -r app; do grep -q "^apps/$app/" <<<"$files" && printf '%s\n' "$app"; done | jq -Rsc 'split("\n") | map(select(length > 0))')"
+            apps="$(for app in gateway control-plane conversation-runtime transport; do
+              if grep -q "^apps/$app/" <<<"$files"; then printf '%s\n' "$app"; fi
+            done | jq -Rsc 'split("\n") | map(select(length > 0))')"
           fi
           echo "apps=$apps" >> "$GITHUB_OUTPUT"
 
