@@ -19,8 +19,8 @@
     },
     "conversation-runtime": {
       "repository": "allanVvz/brain-conversation-runtime",
-      "sha": "4e23adf5cc42034866d154ad48e74188487d803a",
-      "digest": "sha256:198a20cfc227bace6768a8943eaf320972e157b83fe3bb0b271f14b4052706ac",
+      "sha": "363ce4454069c9d68dd7fd2ab55e2e734a30fe3e",
+      "digest": "sha256:163adc5a09bd82455255b0f0555f827084cc90cd7e0190087e6f623c20a3609e",
       "required_schema_version": 131
     },
     "transport": {
