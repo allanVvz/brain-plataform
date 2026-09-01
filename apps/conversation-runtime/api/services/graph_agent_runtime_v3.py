@@ -523,22 +523,20 @@ def _estimated_tokens(text: str) -> int:
     return max(1, len(text or "") // 4)
 
 
-# Confirmed live 2026-08-08 (WA Validator gap report): the v3 runtime's own
-# card/chunk assembly had no token-count budget at all, only a card-count
-# cap (_mmr(..., 16)) -- unlike the legacy context_cards.resolve_cards(),
-# which already enforces max_tokens=8000. Any future addition to what's
-# retrieved per turn (e.g. tone/flow-management skill content) could grow
-# per-turn input size unboundedly with nothing to stop it. This is a real,
-# enforced ceiling on the RAG chunk package specifically (context_cards are
-# capped separately downstream); it does not by itself guarantee the exact
-# total prompt size, but it makes "we didn't grow this" a checkable claim
-# instead of an assumption.
-RAG_CHUNK_TOKEN_BUDGET = 6000
-RAG_CHUNK_LIMIT = 12
+# Retrieval remains bounded by relevance and cardinality. The provider owns
+# its context/completion limits; a local fixed token ceiling can reject the
+# graph-owned structural and FAQ chunks before the model sees the turn.
+RAG_CHUNK_TOKEN_BUDGET: int | None = None
+RAG_CHUNK_LIMIT = 10
 RAG_FAQ_CHUNK_RESERVE = 1
 
 
-def _mmr(candidates: list[dict[str, Any]], limit: int, *, max_tokens: int = RAG_CHUNK_TOKEN_BUDGET) -> list[dict[str, Any]]:
+def _mmr(
+    candidates: list[dict[str, Any]],
+    limit: int,
+    *,
+    max_tokens: int | None = RAG_CHUNK_TOKEN_BUDGET,
+) -> list[dict[str, Any]]:
     """Diversity reranking over the bounded result returned by Postgres."""
     selected: list[dict[str, Any]] = []
     remaining = list(candidates)
@@ -565,7 +563,7 @@ def _mmr(candidates: list[dict[str, Any]], limit: int, *, max_tokens: int = RAG_
         if best is None:
             break
         estimated = _estimated_tokens(str(best[2].get("chunk_text") or ""))
-        if selected and token_count + estimated > max_tokens:
+        if max_tokens is not None and selected and token_count + estimated > max_tokens:
             break
         token_count += estimated
         selected.append(best[2])
@@ -988,6 +986,18 @@ def _reserve_message_for_pending_field(
         "resolution_method": "suppressed_for_pending_non_service_field",
         "rejection_reason": "evidence_reserved_for_pending_field",
     }
+
+
+def _routable_deterministic_candidates(
+    message: str,
+    candidates: list[dict[str, Any]],
+    *,
+    pending_field_answer: bool,
+) -> list[dict[str, Any]]:
+    """Do not let a literal service word steal an answer to the pending field."""
+    if pending_field_answer and not _has_explicit_service_intent(message):
+        return []
+    return candidates
 
 
 def _facts_by_key(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
@@ -3856,7 +3866,11 @@ def build_context(
     )
     # Greeting is a transversal current-turn intent. Historical replies,
     # handoffs and long pauses must never suppress it.
-    deterministic_candidates = _deterministic_branch_candidates(document, message)
+    deterministic_candidates = _routable_deterministic_candidates(
+        message,
+        _deterministic_branch_candidates(document, message),
+        pending_field_answer=pending_field_answer,
+    )
     greeting_eligible = _is_greeting(message)
     greeting_prefix = _greeting_policy(
         document, contract=active_contract, facts=ledger.get("facts") or {},
@@ -4101,13 +4115,6 @@ def build_context(
     structural_ids = {
         str(row.get("chunk_id") or row.get("id")) for row in required_structural
     }
-    required_token_count = sum(
-        _estimated_tokens(str(row.get("chunk_text") or ""))
-        for row in [*required_structural, *reserved]
-    )
-    if required_token_count > RAG_CHUNK_TOKEN_BUDGET:
-        raise RuntimeError("required structural and FAQ chunks exceed the prompt token budget")
-    remaining_token_budget = RAG_CHUNK_TOKEN_BUDGET - required_token_count
     selected = (
         _mmr(
             [
@@ -4115,9 +4122,8 @@ def build_context(
                 if key not in structural_ids and key not in reserved_ids
             ],
             optional_chunk_slots,
-            max_tokens=remaining_token_budget,
         )
-        if remaining_token_budget > 0 else []
+        if optional_chunk_slots > 0 else []
     )
     # Phase-A candidates are represented only by their compact snippets in the
     # retrieval trace. Full content enters the prompt solely from phase B.

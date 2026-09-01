@@ -1062,6 +1062,18 @@ def _reserve_message_for_pending_field(
     }
 
 
+def _routable_deterministic_candidates(
+    message: str,
+    candidates: list[dict[str, Any]],
+    *,
+    pending_field_answer: bool,
+) -> list[dict[str, Any]]:
+    """Do not let a literal service word steal an answer to the pending field."""
+    if pending_field_answer and not _has_explicit_service_intent(message):
+        return []
+    return candidates
+
+
 def _facts_by_key(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     grouped: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
@@ -3507,7 +3519,11 @@ def build_context(
     )
     # Greeting is a transversal current-turn intent. Historical replies,
     # handoffs and long pauses must never suppress it.
-    deterministic_candidates = _deterministic_branch_candidates(document, message)
+    deterministic_candidates = _routable_deterministic_candidates(
+        message,
+        _deterministic_branch_candidates(document, message),
+        pending_field_answer=pending_field_answer,
+    )
     greeting_eligible = _is_greeting(message)
     greeting_prefix = _greeting_policy(
         document, contract=active_contract, facts=ledger.get("facts") or {},

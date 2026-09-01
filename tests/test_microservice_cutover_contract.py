@@ -167,7 +167,70 @@ def test_control_plane_and_transport_receive_internal_n8n_endpoint_in_both_slots
     compose = (ROOT / "infra" / "microservices" / "docker-compose.blue-green.yml").read_text()
     # Both API services need the explicit endpoint in each blue/green slot:
     # control plane manages n8n bindings and transport dispatch validates them.
-    assert compose.count("N8N_BASE_URL: ${N8N_BASE_URL:-http://n8n:5678}") == 4
+    # The green dispatch worker replaces the inherited environment mapping, so
+    # it must restate the endpoint explicitly as well.
+    assert compose.count("N8N_BASE_URL: ${N8N_BASE_URL:-http://n8n:5678}") == 5
+    green_dispatch = compose.split("  transport-dispatch-green:", 1)[1].split(
+        "  transport-media-blue:", 1
+    )[0]
+    assert "N8N_BASE_URL: ${N8N_BASE_URL:-http://n8n:5678}" in green_dispatch
+
+
+def test_runtime_uses_a_writable_local_embedding_cache_in_every_green_process():
+    compose = (ROOT / "infra" / "microservices" / "docker-compose.blue-green.yml").read_text()
+    cache_setting = "FASTEMBED_CACHE_PATH: ${FASTEMBED_CACHE_PATH:-/tmp/brain-fastembed-cache}"
+    assert compose.count(cache_setting) == 4
+    for service, next_service in (
+        ("runtime-green", "transport-blue"),
+        ("runtime-conversation-green", "runtime-validator-blue"),
+        ("runtime-validator-green", "transport-dispatch-blue"),
+    ):
+        block = compose.split(f"  {service}:", 1)[1].split(f"  {next_service}:", 1)[0]
+        assert cache_setting in block
+
+
+def test_split_runtime_does_not_reject_graph_owned_chunks_with_a_fixed_token_ceiling():
+    source = (
+        ROOT
+        / "apps"
+        / "conversation-runtime"
+        / "api"
+        / "services"
+        / "graph_agent_runtime_v3.py"
+    ).read_text(encoding="utf-8")
+
+    assert "RAG_CHUNK_TOKEN_BUDGET: int | None = None" in source
+    assert "required structural and FAQ chunks exceed the prompt token budget" not in source
+
+
+def test_wa_validator_release_gate_reads_terminal_pass_fields_from_output():
+    script = (ROOT / "ops" / "vps" / "run-microservice-wa-validator.sh").read_text()
+
+    assert 'o=s.get("output") or {}' in script
+    assert 'o.get("technical_pass",s.get("technical_pass"))' in script
+    assert 'o.get("quality_pass",s.get("quality_pass"))' in script
+    assert 'o.get("quality_scope",s.get("quality_scope"))' in script
+
+
+def test_split_validator_allows_one_bounded_model_repair():
+    source = (
+        ROOT
+        / "apps"
+        / "conversation-runtime"
+        / "api"
+        / "services"
+        / "wa_validator_service.py"
+    ).read_text(encoding="utf-8")
+
+    assert 'int(audit.get("model_calls") or 0) > 2' in source
+    assert 'audit.get("deterministic_branch_match") and int(audit.get("model_calls") or 0) > 1' not in source
+
+
+def test_n8n_template_change_rebuilds_runtime_and_control_plane_images():
+    workflow = (ROOT / ".github" / "workflows" / "build-monorepo-images.yml").read_text()
+
+    assert "^apps/conversation-runtime/n8n/" in workflow
+    assert 'apps=\'["control-plane","conversation-runtime"]\'' in workflow
 
 
 def test_control_plane_n8n_credential_sync_is_redacted_and_authorized():

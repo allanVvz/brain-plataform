@@ -76,6 +76,7 @@ services:
       BUILD_DIGEST: ${RUNTIME_DIGEST:?runtime digest required}
       BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
       REQUIRED_SCHEMA_VERSION: "131"
+      FASTEMBED_CACHE_PATH: ${FASTEMBED_CACHE_PATH:-/tmp/brain-fastembed-cache}
     labels: {brain.service: conversation-runtime, brain.slot: blue}
   runtime-green:
     <<: *runtime
@@ -87,6 +88,7 @@ services:
       BUILD_DIGEST: ${RUNTIME_DIGEST:?runtime digest required}
       BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
       REQUIRED_SCHEMA_VERSION: "131"
+      FASTEMBED_CACHE_PATH: ${FASTEMBED_CACHE_PATH:-/tmp/brain-fastembed-cache}
     labels: {brain.service: conversation-runtime, brain.slot: green}
 
   transport-blue: &transport
@@ -181,6 +183,7 @@ services:
       BUILD_DIGEST: ${RUNTIME_DIGEST:?runtime digest required}
       BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
       REQUIRED_SCHEMA_VERSION: "131"
+      FASTEMBED_CACHE_PATH: ${FASTEMBED_CACHE_PATH:-/tmp/brain-fastembed-cache}
     labels: {brain.service: conversation-runtime, brain.slot: green, brain.worker-group: conversation}
 
   runtime-validator-blue: &runtime-validator
@@ -198,6 +201,7 @@ services:
       BUILD_DIGEST: ${RUNTIME_DIGEST:?runtime digest required}
       BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
       REQUIRED_SCHEMA_VERSION: "131"
+      FASTEMBED_CACHE_PATH: ${FASTEMBED_CACHE_PATH:-/tmp/brain-fastembed-cache}
     labels: {brain.service: conversation-runtime, brain.slot: green, brain.worker-group: validator}
 
   transport-dispatch-blue: &transport-dispatch
@@ -215,6 +219,7 @@ services:
       BUILD_DIGEST: ${TRANSPORT_DIGEST:?transport digest required}
       BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
       REQUIRED_SCHEMA_VERSION: "131"
+      N8N_BASE_URL: ${N8N_BASE_URL:-http://n8n:5678}
     labels: {brain.service: transport, brain.slot: green, brain.worker-group: transport}
 
   transport-media-blue: &transport-media
