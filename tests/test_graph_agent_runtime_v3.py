@@ -1635,6 +1635,21 @@ def test_pending_condition_answer_does_not_change_branch_from_service_word():
     ) is True
 
 
+def test_pending_field_answer_suppresses_literal_branch_retrieval_candidate():
+    candidates = [{"branch_anchor_node_id": "branch:paint", "score": 1.0}]
+
+    assert graph_agent_runtime_v3._routable_deterministic_candidates(
+        "Nao, nunca foi feito outro procedimento nessa pintura",
+        candidates,
+        pending_field_answer=True,
+    ) == []
+    assert graph_agent_runtime_v3._routable_deterministic_candidates(
+        "Na verdade quero trocar para pintura",
+        candidates,
+        pending_field_answer=True,
+    ) == candidates
+
+
 def test_explicit_service_change_is_not_hidden_by_pending_field_guard():
     contract = {
         "fields": [

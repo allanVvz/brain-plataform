@@ -1293,7 +1293,7 @@ def _local_embeddings(
             model_name=resolved_model_name,
             cache_dir=(
                 os.environ.get("FASTEMBED_CACHE_PATH")
-                or "/opt/venv/fastembed-cache"
+                or "/tmp/brain-fastembed-cache"
             ),
         )
         _local_embedding_model_name = resolved_model_name

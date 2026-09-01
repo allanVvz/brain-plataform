@@ -2916,7 +2916,11 @@ async def run_session_direct(
                         model_calls = max(1, int(audit.get("model_calls") or 0))
                         if prompt_tokens > 24_000 * model_calls:
                             invariant_errors.append(f"prompt_tokens={prompt_tokens}")
-                        if audit.get("deterministic_branch_match") and int(audit.get("model_calls") or 0) > 1:
+                        # One proposal plus one bounded repair is allowed by
+                        # the canonical policy feedback contract. More than
+                        # two calls still fails closed regardless of how the
+                        # branch was resolved.
+                        if int(audit.get("model_calls") or 0) > 2:
                             invariant_errors.append(f"model_calls={audit.get('model_calls')}")
                         turn["turn_audit"] = audit
                         if invariant_errors:

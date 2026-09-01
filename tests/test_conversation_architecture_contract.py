@@ -58,6 +58,7 @@ const nodes = {
   'Build graph repair request': {llm_call_started_at: Date.now(), prompt_estimated_tokens: 1, repair_context_node_ids: [], repair_context_chunk_ids: [], repair_context_chunk_sources: {}},
   'Validate agent response': {model_observation: {token_usage: null, interpretation: fixture.firstInterpretation || {}}},
   'Validate conversation binding': {model: 'fixture-model'},
+  'Load published graph context': {graph_contract: {fields: []}, retrieval_trace: {}},
   'Reconcile fields with graph policy': {response: {proof: {accepted_facts: fixture.acceptedFacts || []}}},
 };
 const select = (name) => ({item: {json: nodes[name]}});
@@ -217,6 +218,8 @@ def test_model_prompt_is_compact_and_provider_managed():
     assert "Repair only the specified format or safety defect" in repair
     assert "temperature: 0" in repair
     assert "Preserve the original reply byte for byte" in repair
+    assert "proof.model_proposal_errors" in repair
+    assert "proof.policy_feedback" in repair
     assert "approved_faq" not in repair
 
 
@@ -233,6 +236,7 @@ def test_aurora_sized_audio_prompt_preserves_full_relevant_evidence():
         "customer_name", "service",
     ]
     assert all("already_asked" in field for field in prompt["graph_contract"]["fields"])
+    assert all("validation" in field for field in prompt["graph_contract"]["fields"])
     assert "questions" not in prompt["graph_contract"]
     assert "claims" not in prompt["graph_contract"]
     assert "closure_node_ids" not in prompt["graph_contract"]
@@ -271,6 +275,7 @@ def test_prompt_exposes_spent_questions_as_semantic_topics_without_question_ids(
     prompt = json.loads(result["request_body"]["messages"][1]["content"])
 
     assert prompt["asked_field_keys"] == ["service"]
+    assert prompt["expected_answer_field_key"] == "service"
     service = next(
         field for field in prompt["graph_contract"]["fields"]
         if field["key"] == "service"
@@ -320,7 +325,8 @@ def test_model_prompt_receives_complete_multi_service_memory_contract():
     assert "['none','keep','select','switch','add','drop']" in initial
     assert "required: ['action','branch_anchor_node_id','evidence_span']" in initial
     assert "active_branch_node_ids: context.active_branch_node_ids" in initial
-    assert "facts_by_key: context.cart && context.cart.facts_by_key" in initial
+    assert "const factsByKey = context.cart && context.cart.facts_by_key" in initial
+    assert "facts_by_key: factsByKey" in initial
     assert "known_facts: context.known_facts" not in initial
     assert "recent_messages: memory.recent_messages" in initial
     assert "asked_field_keys: askedFieldKeys" in initial
@@ -350,7 +356,7 @@ def test_model_contract_uses_semantic_question_metadata_and_separates_audience_f
     assert "questions: Object.fromEntries" not in initial
     for validator in validators:
         assert "asked_field_key: parsed.asked_field_key" in validator
-        assert "next_question_node_id" not in validator
+        assert "next_question_node_id: parsed" not in validator
 
     # Audience/channel nodes are context; product/group interest is a
     # separate unresolved field. Keep this distinction portable instead of

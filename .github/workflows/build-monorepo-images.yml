@@ -32,6 +32,11 @@ jobs:
           files="$(git diff --name-only "$base" "$GITHUB_SHA")"
           if grep -Eq '^packages/|^\.github/workflows/build-monorepo-images\.yml$' <<<"$files"; then
             apps='["gateway","control-plane","conversation-runtime","transport"]'
+          elif grep -Eq '^apps/conversation-runtime/n8n/' <<<"$files"; then
+            # The canonical conversation template is copied into both images.
+            # Rebuilding only the runtime would leave the control plane unable
+            # to resync n8n from the same immutable release SHA.
+            apps='["control-plane","conversation-runtime"]'
           else
             apps="$(for app in gateway control-plane conversation-runtime transport; do
               if grep -q "^apps/$app/" <<<"$files"; then printf '%s\n' "$app"; fi

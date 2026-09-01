@@ -86,7 +86,7 @@ else:
 PY
 
 if [[ "$MODE" == "--inspect" ]]; then
-  docker exec "$runtime_name" python -c 'import json,sys; from services import wa_validator_service as w; s=w.get_session(sys.argv[1]); turns=[]; keep=("role","text","intent","route","handoff","message_id","pipeline_contract","graph_version","graph_checksum","journey_state","turn_audit","semantic_audit","failure_diagnostic"); [turns.append({k:t.get(k) for k in keep if k in t}) for t in (((s.get("output") or {}).get("conversation") or []))]; result={"id":s.get("id"),"persona_slug":s.get("persona_slug"),"publication_id":s.get("publication_id"),"status":s.get("status"),"error":s.get("error"),"technical_pass":s.get("technical_pass"),"quality_pass":s.get("quality_pass"),"quality_scope":s.get("quality_scope"),"turns":turns}; print("WA_VALIDATOR_INSPECTION="+json.dumps(result, ensure_ascii=True, sort_keys=True))' "$SESSION_ID"
+  docker exec "$runtime_name" python -c 'import json,sys; from services import wa_validator_service as w; s=w.get_session(sys.argv[1]); o=s.get("output") or {}; turns=[]; keep=("role","text","intent","route","handoff","message_id","pipeline_contract","graph_version","graph_checksum","journey_state","turn_audit","semantic_audit","failure_diagnostic"); [turns.append({k:t.get(k) for k in keep if k in t}) for t in (o.get("conversation") or [])]; result={"id":s.get("id"),"persona_slug":s.get("persona_slug"),"publication_id":s.get("publication_id"),"status":s.get("status"),"error":s.get("error"),"technical_pass":o.get("technical_pass",s.get("technical_pass")),"quality_pass":o.get("quality_pass",s.get("quality_pass")),"quality_scope":o.get("quality_scope",s.get("quality_scope")),"turns":turns}; print("WA_VALIDATOR_INSPECTION="+json.dumps(result, ensure_ascii=True, sort_keys=True))' "$SESSION_ID"
   echo "WA_VALIDATOR_INSPECT_RESULT=passed"
   exit 0
 fi
@@ -140,7 +140,7 @@ session_id="$(printf '%s\n' "$session_output" | sed -n 's/^WA_VALIDATOR_SESSION_
 
 deadline=$((SECONDS + 900))
 while (( SECONDS < deadline )); do
-  summary="$(docker exec "$runtime_name" python -c 'import json,sys; from services import wa_validator_service as w; s=w.get_session(sys.argv[1]); print(json.dumps({"status":s.get("status"),"technical_pass":s.get("technical_pass"),"quality_pass":s.get("quality_pass"),"quality_scope":s.get("quality_scope"),"turn_count":len(((s.get("output") or {}).get("conversation") or [])),"error":s.get("error")}, ensure_ascii=True, sort_keys=True))' "$session_id")"
+  summary="$(docker exec "$runtime_name" python -c 'import json,sys; from services import wa_validator_service as w; s=w.get_session(sys.argv[1]); o=s.get("output") or {}; print(json.dumps({"status":s.get("status"),"technical_pass":o.get("technical_pass",s.get("technical_pass")),"quality_pass":o.get("quality_pass",s.get("quality_pass")),"quality_scope":o.get("quality_scope",s.get("quality_scope")),"turn_count":len(o.get("conversation") or []),"error":s.get("error")}, ensure_ascii=True, sort_keys=True))' "$session_id")"
   printf 'WA_VALIDATOR_STATUS=%s\n' "$summary"
   status="$(printf '%s' "$summary" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status") or "")')"
   if [[ "$status" == "done" ]]; then

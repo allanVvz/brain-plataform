@@ -374,6 +374,7 @@ def test_technical_failure_captures_which_node_failed_and_why_without_handoff():
         assert "$json.error" in body
         assert "http_code" in body
         assert "workflow_template" in body
+        assert "recoverable" not in body
         assert "JSON.stringify($json).slice" not in body
         assert "reason: 'workflow_step_failed'," not in body
 
@@ -481,6 +482,14 @@ def test_canonical_agentic_workflow_has_one_repair_and_no_automatic_fallback():
     assert "published_fallback" not in all_code
     assert "questionOnlyRepair" not in all_code
     assert "response_format" in all_code and "json_schema" in all_code and "json_object" in all_code
+    assert all_code.count("proposal: legacyProposal") == 2
+    assert all_code.count("proposal_parse_errors: normalized.reply ? [] : errors") == 2
+    repair_gate = next(node for node in workflow["nodes"] if node["name"] == "Graph proof needs repair")
+    repair_expression = repair_gate["parameters"]["conditions"]["conditions"][0]["leftValue"]
+    assert "interpretation_parse_errors" in repair_expression
+    assert all_code.count("Never omit a key and never return only reply") == 2
+    assert all_code.count("fact.field_key || fact.key") == 3
+    assert "acceptedFactKeys.has(fieldKey + ':' + ownerNodeId)" in all_code
 
 
 def test_canonical_agentic_workflow_does_not_duplicate_the_price_safety_check():
