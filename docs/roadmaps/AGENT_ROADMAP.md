@@ -310,6 +310,14 @@ o grafo (`api/services/semantic_interpretation_validator.py`).
 
 ### Fronteira central de runtime
 
+**Risco arquitetural resolvido no candidato de 2026-09-01:** o cutover havia
+deixado composicao deterministica e fallback publico dentro do caminho agentic,
+alem de duas fontes concorrentes de runtime. `apps/conversation-runtime` agora
+e a unica fonte produtiva; execute/decide possuem entradas exclusivas,
+`decision_owner` falha fechado no commit e o canario prova que uma reply
+sentinela do modelo nao e anexada nem substituida. Deploy e prova produtiva
+continuam pendentes de autorizacoes operacionais separadas.
+
 O GraphBundle publicado fornece conhecimento, fatos comerciais e limites. O
 modelo possui explicacao, recomendacao, linguagem, fluxo conversacional e a
 proxima pergunta natural; nao pode inventar fatos. `missing_fields` indica

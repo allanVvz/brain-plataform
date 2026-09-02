@@ -21,7 +21,11 @@ def test_execute_delegates_canonical_inbound_and_returns_small_envelope(monkeypa
             "knowledge_context": {"must_not_cross": True},
         }
 
-    monkeypatch.setattr(conversations.conversation_runtime, "execute_pipeline", fake_execute)
+    monkeypatch.setattr(
+        conversations.conversation_runtime,
+        "execute_deterministic_pipeline",
+        fake_execute,
+    )
     body = conversations.ExecuteRequest(
         persona_slug="persona",
         lead_ref=7,

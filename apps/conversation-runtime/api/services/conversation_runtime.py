@@ -22,6 +22,7 @@ from schemas.conversation import (
 )
 from services import (
     context_cards as context_cards_service,
+    deterministic_composer,
     graph_agent_runtime_v3,
     graph_conversation_contract,
     graph_json_v2_store,
@@ -515,58 +516,15 @@ def _resolve_identified_service(
 
 
 def _next_field_question(cart_state: dict[str, Any], context: ConversationContext) -> str | None:
-    """The question for whatever field is next in missing_fields.
-
-    Read from this persona's own graph data (appointment_policy.field_
-    questions), same source _commercial_note_fields uses — no hardcoded
-    field names or questions here, any persona with an appointment_policy.
-    """
-    if cart_state.get("business_model") != "appointment":
-        return None
-    missing = cart_state.get("missing_fields") or []
-    if not missing:
-        return None
-    persona_node = next(
-        (item for item in context.rag_nodes if item.get("node_type") == "persona"),
-        None,
-    )
-    field_questions = (
-        (persona_node or {}).get("data", {}).get("appointment_policy", {}).get("field_questions")
-        or {}
-    )
-    question = field_questions.get(missing[0])
-    if not isinstance(question, str) or not question.strip():
-        raise ValueError(
-            "published graph appointment_policy.field_questions is missing "
-            f"required field {missing[0]}"
-        )
-    return question.strip()
+    """Compatibility wrapper for deterministic-only composition."""
+    return deterministic_composer.next_field_question(cart_state, context)
 
 
 def _ensure_trailing_question(reply_text: str | None, cart_state: dict[str, Any], context: ConversationContext) -> str | None:
-    """Never leave the customer without a next step while info is missing.
-
-    Confirmed live 2026-08-01: the model's candidate correctly asked the
-    graph-defined next question, but got discarded by the unsafe-price
-    filter and fell back to the deterministic engine's plain price-fact
-    reply — which never asks anything, silently dropping the qualification
-    flow. Whatever reply text ends up used (agentic or deterministic
-    fallback), if it doesn't already end in a question and fields are
-    still missing, this appends the graph's own next question for it —
-    a structural guarantee, not just a prompt instruction the model (or a
-    safety fallback) can skip.
-    """
-    if reply_text is None:
-        return None
-    text = reply_text.strip()
-    if text.endswith("?"):
-        return reply_text
-    question = _next_field_question(cart_state, context)
-    if not question:
-        return reply_text
-    if not text:
-        return question
-    return f"{text} {question}"
+    """Compatibility wrapper for deterministic-only composition."""
+    return deterministic_composer.ensure_trailing_question(
+        reply_text, cart_state, context
+    )
 
 
 def _approved_faq_match(graph: Any, message: str) -> Any | None:
@@ -649,6 +607,7 @@ def build_context(
     message_id: str | None = None,
     trace_id: str | None = None,
     publication_id: str | None = None,
+    force_deterministic: bool = False,
 ) -> ConversationContext:
     _turn_started_at = time.monotonic()
     lead_binding_probe = supabase_client.get_lead_by_ref(lead_ref) or {}
@@ -656,7 +615,7 @@ def build_context(
         lead_binding_probe.get("channel_binding_id")
     )
     binding_probe_metadata = (binding_probe or {}).get("metadata") or {}
-    if (
+    if not force_deterministic and (
         not graph_agent_runtime_v3.binding_uses_v3(binding_probe)
         and binding_probe_metadata.get("shadow_runtime_version")
         == graph_agent_runtime_v3.RUNTIME_VERSION
@@ -697,7 +656,9 @@ def build_context(
                 level="warning",
                 source="conversation_runtime.shadow",
             )
-    if graph_agent_runtime_v3.binding_uses_v3(binding_probe) or publication_id:
+    if not force_deterministic and (
+        graph_agent_runtime_v3.binding_uses_v3(binding_probe) or publication_id
+    ):
         try:
             v3_context = graph_agent_runtime_v3.build_context(
                 persona_slug=persona_slug,
@@ -1508,15 +1469,23 @@ def _ground_decision_in_context_cards(
     )
 
 
-def decide(
+def decide_agentic(
     context: ConversationContext,
     *,
-    model_observation: dict[str, Any] | None = None,
+    model_observation: dict[str, Any],
     trace_id: str | None = None,
     lead_ref: int | None = None,
 ) -> tuple[ConversationDecision, AgentResponse]:
     _started_at = time.monotonic()
-    decision, response = _decide_dispatch(context, model_observation=model_observation)
+    if not isinstance(model_observation, dict):
+        raise ValueError("model_observation is required for the agentic engine")
+    if context.runtime_version != graph_agent_runtime_v3.RUNTIME_VERSION:
+        raise RuntimeError(
+            "agentic decision requires a graph_agent_runtime_v3 context"
+        )
+    decision, response = graph_agent_runtime_v3.decide(
+        context, model_observation=model_observation
+    )
     observation = model_observation or {}
     is_repair = int(observation.get("repair_attempt") or 0) > 0
     token_usage = observation.get("token_usage") or (response.token_usage or {})
@@ -1545,12 +1514,38 @@ def decide(
     return decision, response
 
 
+def decide(
+    context: ConversationContext,
+    *,
+    model_observation: dict[str, Any],
+    trace_id: str | None = None,
+    lead_ref: int | None = None,
+) -> tuple[ConversationDecision, AgentResponse]:
+    """Compatibility alias for the agentic path; observation stays required."""
+    return decide_agentic(
+        context,
+        model_observation=model_observation,
+        trace_id=trace_id,
+        lead_ref=lead_ref,
+    )
+
+
+def decide_deterministic(
+    context: ConversationContext,
+) -> tuple[ConversationDecision, AgentResponse]:
+    """Run the deterministic engine without entering graph_agent_runtime_v3."""
+    return _decide_dispatch(
+        context, model_observation=None, allow_agentic=False
+    )
+
+
 def _decide_dispatch(
     context: ConversationContext,
     *,
     model_observation: dict[str, Any] | None = None,
+    allow_agentic: bool = True,
 ) -> tuple[ConversationDecision, AgentResponse]:
-    if context.runtime_version == graph_agent_runtime_v3.RUNTIME_VERSION:
+    if allow_agentic and context.runtime_version == graph_agent_runtime_v3.RUNTIME_VERSION:
         return graph_agent_runtime_v3.decide(
             context, model_observation=model_observation
         )
@@ -2145,10 +2140,10 @@ def commit(
             }
         )
 
-    if context.runtime_version != graph_agent_runtime_v3.RUNTIME_VERSION:
+    if expected_decision_owner == "deterministic":
         response = response.model_copy(
             update={
-                "reply_text": _ensure_trailing_question(
+                "reply_text": deterministic_composer.ensure_trailing_question(
                     response.reply_text, response.cart_state, context
                 )
             }
@@ -2892,7 +2887,7 @@ def dispatch_result_envelope(
     return envelope
 
 
-def execute_pipeline(
+def execute_deterministic_pipeline(
     *,
     persona_slug: str,
     lead_ref: int,
@@ -2911,8 +2906,9 @@ def execute_pipeline(
         message=message,
         message_id=message_id,
         publication_id=publication_id,
+        force_deterministic=True,
     )
-    decision, response = decide(context)
+    decision, response = decide_deterministic(context)
     result = commit(
         lead_ref=lead_ref,
         context=context,
@@ -2933,3 +2929,8 @@ def execute_pipeline(
             "graph_checksum": context.graph_checksum,
         },
     }
+
+
+# Compatibility for internal imports. This alias is deterministic and cannot
+# cross the engine boundary.
+execute_pipeline = execute_deterministic_pipeline
