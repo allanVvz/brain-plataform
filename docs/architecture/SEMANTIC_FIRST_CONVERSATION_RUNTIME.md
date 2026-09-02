@@ -5,6 +5,12 @@ camada semântica. Documento de arquitetura da branch `agent/sofia-vitoria-audit
 
 ## Limite central
 
+O dashboard/binding escolhe o motor por
+`workflow_bindings.metadata.decision_owner`. `deterministic` usa somente o
+entrypoint `/execute`; `n8n_agents` usa somente `/context`, `/decide` e
+`/commit`. Proof nao escolhe motor, FAQ, pergunta ou redacao publica, e o commit
+falha fechado quando o owner persistido diverge do entrypoint.
+
 O GraphBundle publicado fornece conhecimento, fatos comerciais e limites
 autorizados. Produto, Offer, Copy e FAQ sao compilados/publicados e recuperados
 por escopo; nunca sao reconstruidos por turno. O modelo possui explicacao,

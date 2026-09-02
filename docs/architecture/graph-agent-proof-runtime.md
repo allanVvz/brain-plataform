@@ -103,6 +103,12 @@ declaração correspondente usa `accepts_unknown=true`.
 
 ## Proof checker e reparo
 
+O dashboard/binding e a unica autoridade para escolher `deterministic` ou
+`n8n_agents`. Proof nao faz essa selecao e nao pode atravessar a fronteira para
+buscar compositores do outro motor. A unica fonte produtiva e
+`apps/conversation-runtime`; `api/services` permanece congelado para
+compatibilidade e referencia historica.
+
 O modelo retorna `ConversationProposal`. O checker comprova checksum, escopo
 persona/agente dos nodes citados e evidência publicada para fatos e limites
 comerciais. Ele preserva CAS e o limite de um inbound canônico -> uma decisão ->

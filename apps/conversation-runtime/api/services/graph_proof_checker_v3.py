@@ -1,7 +1,6 @@
 """Generic proof checker for structured GraphRAG model proposals."""
 from __future__ import annotations
 
-import difflib
 import re
 import unicodedata
 from copy import deepcopy
@@ -710,20 +709,21 @@ def check(
     question_id = proposal.get("next_question_node_id")
     questions = contract.get("questions") or {}
     askable = askable_pending_fields(contract, facts)
-    if askable:
-        expected_question_id = askable[0].get("question_node_id")
+    if question_id:
         question = questions.get(str(question_id or ""))
-        if question_id != expected_question_id:
-            errors.append("next_question_not_first_missing_field")
-        elif not question or question.get("field_key") != askable[0].get("key"):
-            errors.append("next_question_not_for_pending_field")
-        else:
-            if any(dependency in missing_keys for dependency in question.get("depends_on") or []):
-                errors.append("next_question_dependencies_unsatisfied")
-    elif missing and question_id:
-        errors.append("question_after_all_pending_fields_deferred")
-    elif question_id:
-        errors.append("question_after_completion")
+        askable_by_question = {
+            str(field.get("question_node_id") or ""): field
+            for field in askable
+            if field.get("question_node_id")
+        }
+        field = askable_by_question.get(str(question_id))
+        if not question or not field or question.get("field_key") != field.get("key"):
+            errors.append("next_question_not_askable")
+        elif any(
+            dependency in missing_keys
+            for dependency in question.get("depends_on") or []
+        ):
+            errors.append("next_question_dependencies_unsatisfied")
     # qualification_complete is 100% derivable from `missing` -- the same
     # reasoning as re-deriving "servico" from active_branch_node_id
     # server-side (graph_agent_runtime_v3.decide()) rather than trusting a
@@ -804,9 +804,33 @@ def check(
         errors.append("premature_final_confirmation")
 
     repair = list({(item["kind"], item["id"]): item for item in repair if item.get("id")}.values())
-    repair_only = bool(errors) and all("outside_package" in error for error in errors)
+    metadata_errors = [
+        error for error in errors
+        if error.startswith("next_question_")
+        or error == "question_after_completion"
+    ]
+    hard_prefixes = (
+        "publication_", "branch_", "keep_", "add_", "switch_", "drop_",
+        "cited_node_", "cited_chunk_", "claim_",
+    )
+    gating_errors = [
+        error for error in errors
+        if error.startswith(hard_prefixes)
+        or error in {"premature_final_confirmation", "handoff_not_authorized"}
+    ]
+    repair_only = bool(gating_errors) and all(
+        "outside_package" in error for error in gating_errors
+    )
     return {
-        "valid": not errors, "errors": errors,
+        "valid": not gating_errors and not metadata_errors,
+        "delivery_authorized": not gating_errors and not metadata_errors,
+        "errors": errors,
+        "gating_errors": gating_errors,
+        "metadata_errors": metadata_errors,
+        "quality_warnings": [
+            error for error in errors
+            if error not in gating_errors and error not in metadata_errors
+        ],
         "repair_required": repair_only and bool(repair),
         "repair_requirements": repair, "ledger": next_ledger,
         "accepted_facts": accepted_facts, "missing_fields": missing_keys,
@@ -815,6 +839,7 @@ def check(
         "handoff_required": handoff_required,
         "required_field_count": required_field_count(contract, facts),
         "field_validation": field_validation,
+        "model_reply_preserved": True,
     }
 
 
@@ -824,101 +849,5 @@ def _fold(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
 
 
-def _question_already_asked(question: str, text: str) -> bool:
-    """True when `text` already asks `question`, even personalized/reworded.
 
-    Confirmed live 2026-08-08: a literal substring match breaks the moment
-    the model personalizes the canonical question -- swapping "o carro" for
-    the customer's actual model ("o Onix", "o Civic") -- so the same
-    question got silently appended a second time in the same message.
-    Content-word overlap alone (first attempt at this fix, same day) still
-    missed a short question whose *only* real content word is exactly the
-    one that gets personalized away (e.g. "Qual é a cor do veículo?" ->
-    "...a cor do seu Onix?" -- "veículo" is the one content word, and it's
-    gone). Matching contiguous character runs between the two folded
-    strings catches that: the shared prefix/suffix around the swapped word
-    still accounts for most of the question's length, even when word-level
-    overlap alone would not. Checking both signals (word overlap OR
-    character-run coverage) covers substitutions in either a single word or
-    the sentence's structure, without weakening detection of a genuinely
-    different question -- unrelated questions share only a few short/
-    common words either way.
-    """
-    if question.casefold() in text.casefold():
-        return True
-    q_folded = _fold(question)
-    if not q_folded:
-        return False
-    # Compare each interrogative sentence, never the whole reply. Summing
-    # every matching character run across an acknowledgement plus an
-    # unrelated question made ordinary Portuguese glue words look like a
-    # match (for example, the graph expected the objective while the model
-    # repeated "como voce se chama?"). SequenceMatcher.ratio keeps order
-    # and penalizes those scattered coincidences, while still recognizing a
-    # personalized noun substitution such as "cor do veiculo" ->
-    # "cor do seu Onix".
-    candidates = [
-        sentence.strip()
-        for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", str(text or ""))
-        if "?" in sentence
-    ]
-    content_tokens = {token for token in q_folded.split() if len(token) >= 4}
-    for candidate in candidates:
-        candidate_folded = _fold(candidate)
-        candidate_tokens = set(candidate_folded.split())
-        if (
-            len(content_tokens) >= 2
-            and len(content_tokens & candidate_tokens) / len(content_tokens) >= 0.7
-        ):
-            return True
-        if difflib.SequenceMatcher(
-            None, q_folded, candidate_folded, autojunk=False,
-        ).ratio() >= 0.68:
-            return True
-    return False
-
-
-def compose_published_question(
-    *, reply: str, next_question_node_id: str | None, contract: dict[str, Any]
-) -> str:
-    """Preserve acknowledgement/answer prose and emit exactly one graph question."""
-    text = str(reply or "").strip()
-    if not next_question_node_id:
-        return text
-    question = str(((contract.get("questions") or {}).get(next_question_node_id) or {}).get("text") or "").strip()
-    if not question:
-        return text
-    if _question_already_asked(question, text) and text.count("?") <= 1:
-        return text
-    # The model may have drafted a natural acknowledgement followed by a
-    # question for a different field. Routing/field order belongs to the
-    # graph, so retain declarative sentences but discard every interrogative
-    # sentence before appending the single authorized question.
-    sentences = re.split(r"(?<=[.!?])\s+|[\r\n]+", text)
-    declarative = " ".join(
-        sentence.strip() for sentence in sentences
-        if sentence.strip() and "?" not in sentence
-    ).strip()
-    return f"{declarative}\n\n{question}".strip()
-
-
-def validate_natural_summary(reply: str, *, informed_values: list[str]) -> bool:
-    """Accept a model-written qualification summary only if it stays grounded.
-
-    Every collected value must appear in the reply (accent/case-insensitive
-    substring match -- the model can still phrase the surrounding sentence
-    freely), the reply must carry exactly one confirmation question, and it
-    may not use vocabulary implying the order is already final (that word
-    choice is reserved for the turn after the customer actually confirms).
-    """
-    text = str(reply or "").strip()
-    if not text or text.count("?") != 1:
-        return False
-    if _FINAL_CONFIRMATION.search(text):
-        return False
-    folded = _fold(text)
-    for value in informed_values:
-        candidate = _fold(str(value or ""))
-        if candidate and candidate not in folded:
-            return False
-    return True
+# Agentic proof intentionally contains no public-text composer.
