@@ -122,18 +122,35 @@ def summarize(execution):
     data = execution.get("data") or {}
     result = data.get("resultData") or {}
     errors = []
+    signals = []
     for node_name, runs in (result.get("runData") or {}).items():
         for run in runs or []:
             error = run.get("error") or {}
-            if not error:
-                continue
-            errors.append({
-                "node": node_name,
-                "message": str(
-                    error.get("message") or error.get("description") or "unknown"
-                )[:1000],
-                "http_code": error.get("httpCode") or error.get("statusCode"),
-            })
+            for branch in ((run.get("data") or {}).get("main") or []):
+                for item in branch or []:
+                    value = item.get("json") or {}
+                    nested = value.get("error") or {}
+                    message = nested.get("message") or value.get("message")
+                    http_code = (
+                        nested.get("httpCode")
+                        or nested.get("statusCode")
+                        or value.get("httpCode")
+                        or value.get("statusCode")
+                    )
+                    if message or http_code:
+                        signals.append({
+                            "node": node_name,
+                            "message": str(message or "")[:1000],
+                            "http_code": http_code,
+                        })
+            if error:
+                errors.append({
+                    "node": node_name,
+                    "message": str(
+                        error.get("message") or error.get("description") or "unknown"
+                    )[:1000],
+                    "http_code": error.get("httpCode") or error.get("statusCode"),
+                })
     top_error = result.get("error") or {}
     return {
         "id": execution.get("id"),
@@ -146,6 +163,8 @@ def summarize(execution):
             top_error.get("message") or top_error.get("description") or ""
         )[:1000],
         "node_errors": errors,
+        "error_signals": signals,
+        "executed_nodes": list((result.get("runData") or {}).keys()),
     }
 
 payload = {
