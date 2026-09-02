@@ -63,6 +63,7 @@ def is_semantic_repetition(left: Any, right: Any) -> bool:
 
 
 def _contextual_bridge(reply: Any, question_text: Any) -> str:
+    raw_reply = str(reply or "").strip()
     folded_reply = normalize_text(reply)
     folded_question = normalize_text(question_text)
     if not folded_reply or not folded_question:
@@ -70,6 +71,26 @@ def _contextual_bridge(reply: Any, question_text: Any) -> str:
     offset = folded_reply.rfind(folded_question)
     if offset >= 0:
         return folded_reply[:offset].strip()
+
+    # In agentic mode the model owns the wording of the next useful question.
+    # When it asks the same pending field with materially different language,
+    # similarity to the graph-authored question can be low even though the
+    # reply first contains a substantive acknowledgement/answer. Preserve
+    # that valid conversational freedom by recognizing a final interrogative
+    # sentence and auditing everything before it as the contextual bridge.
+    # A bare re-ask still yields an empty bridge and remains blocked below.
+    question_mark = raw_reply.rfind("?")
+    if question_mark >= 0:
+        before_question = raw_reply[:question_mark]
+        boundary = max(
+            before_question.rfind("."),
+            before_question.rfind("!"),
+            before_question.rfind("?"),
+        )
+        if boundary >= 0:
+            sentence_bridge = normalize_text(before_question[: boundary + 1])
+            if sentence_bridge:
+                return sentence_bridge
 
     # A contextual resumption remains valid when the model lightly
     # paraphrases the graph-owned question. Compare token suffixes so the
