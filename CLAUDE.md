@@ -27,6 +27,17 @@ em vez de escolher em silêncio.
 - O CTA público de WhatsApp usa `whatsapp_phone` e `whatsapp_message_template`.
   Não usar nem expor o `whatsapp_phone_number_id` do Meta/n8n para esse link.
 
+## Runtime de conversa
+
+- Runtime de conversa: `apps/conversation-runtime` e a unica fonte produtiva.
+  Nao copiar implementacoes congeladas de `api/services` ou repositorios
+  legados de volta para o microsservico.
+- O dashboard/binding escolhe explicitamente `deterministic` ou `n8n_agents`.
+  Alteracoes agentic nao podem compor FAQ, pergunta, resumo ou fallback
+  deterministico; proof valida evidencia, isolamento, seguranca e exactly-once.
+- Toda mudanca conversacional deve executar o teste-canario que prova a
+  fronteira entre os dois motores e a preservacao byte a byte da reply agentic.
+
 ## Leitura obrigatória antes de mudanças maiores
 
 - `docs/roadmaps/AGENT_ROADMAP.md`

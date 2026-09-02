@@ -644,9 +644,14 @@ Se nao aparece no grafo, esta incompleto.
   `data.appointment_policy.field_questions`.
 - Cada campo obrigatorio comum ou presente em `product.data.booking.required_fields`
   deve ter uma pergunta nao vazia no mapa da Persona.
-- A proxima pergunta e sempre resolvida por
-  `field_questions[missing_fields[0]]`; o backend nao pode conter fallback de
-  copy comercial, nome de campo ou pergunta de fixture.
+- `field_questions` garante cobertura de autoria e identidade auditavel; nao e
+  roteiro no modo `n8n_agents`. Nesse modo o modelo pode escolher qualquer
+  campo ainda perguntavel cujas dependencias estejam satisfeitas, e
+  `missing_fields` mede somente completude.
+- Somente o motor `deterministic`, quando escolhido explicitamente pelo
+  binding, pode resolver a proxima pergunta por
+  `field_questions[missing_fields[0]]`. O motor agentic e o proof nao podem
+  anexar essa copy, selecionar uma FAQ unica ou substituir a fala do modelo.
 - Grafo de agendamento incompleto deve falhar na validacao antes da publicacao.
 - Sofia deve auxiliar o operador a preencher a matriz campo/pergunta, preservar
   fonte/status e nao copiar perguntas de outra persona ou exemplo.
@@ -655,6 +660,13 @@ Se nao aparece no grafo, esta incompleto.
 
 - `brain-plataform` conserva dashboard, gateway `/api-brain`, migrations,
   route map e manifests de release.
+- `apps/conversation-runtime` e a unica fonte produtiva do runtime de conversa.
+  Implementacoes em `api/services` e repositorios congelados sao apenas
+  referencia/compatibilidade e nunca podem ser copiadas de volta para o
+  microsservico.
+- Mudancas no motor `n8n_agents` nao podem introduzir composicao deterministica
+  de FAQ, pergunta, resumo terminal ou fallback publico. Toda alteracao de
+  runtime exige o teste-canario da fronteira entre engines.
 - Control plane, conversation runtime e transport usam imagens, health,
   rollback e roles de banco independentes; nenhum importa codigo de outro.
 - Contratos entre servicos vem somente de `brain-contracts` em versao exata.

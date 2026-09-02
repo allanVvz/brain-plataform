@@ -4,6 +4,32 @@ Contract-ID: `graph-agent-runtime-v3`
 
 Compiler: `graph-compiler-v3.6.2`
 
+## Fronteira normativa entre engines
+
+`apps/conversation-runtime` e a unica fonte produtiva. O dashboard grava a
+escolha em `workflow_bindings.metadata.decision_owner`: `deterministic` entra
+somente por `/internal/v1/conversations/execute`; `n8n_agents` entra somente por
+`/context`, `/decide` e `/commit`, e `/decide` exige `model_observation`.
+`/commit` confere o owner persistido e falha fechado se o outro motor tentar
+publicar.
+
+No modo `n8n_agents`, a reply fundamentada do modelo e preservada byte a byte.
+FAQs aprovadas e escopadas sao candidatos do prompt; o backend nao escolhe uma
+resposta unica. A metadata de proxima pergunta pode apontar para qualquer campo
+ainda perguntavel com dependencias satisfeitas. `missing_fields` mede apenas
+completude. Componentes estruturados invalidos sao descartados sem compor ou
+substituir a reply.
+
+Os hard gates agentic ficam restritos a checksum/publicacao, isolamento de
+persona/agente, evidencia de claims comerciais, confirmacao insegura de
+preco/data/horario e exactly-once. Repeticao ou metadata inconsistente permite
+uma unica reparacao do modelo; reincidencia gera handoff observavel sem pergunta
+automatica. O teste-canario de fronteira e obrigatorio em toda mudanca.
+
+Descricoes historicas abaixo sobre FAQ unica, primeira pergunta, resumo
+terminal, escada publicada ou fallback textual aplicam-se somente ao motor
+`deterministic` e nao sao normativas para `n8n_agents`.
+
 Este Markdown faz parte da proveniência de cada publicação. O compilador grava
 seu caminho e checksum no Graph JSON; qualquer alteração deliberada neste
 contrato produz um novo checksum de publicação.

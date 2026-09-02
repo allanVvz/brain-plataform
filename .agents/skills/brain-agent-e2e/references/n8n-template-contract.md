@@ -4,6 +4,12 @@
 
 Treat `apps/conversation-runtime/n8n/persona-conversation-template.json` as the only provisionable conversation workflow template.
 
+The dashboard persists the engine choice in
+`workflow_bindings.metadata.decision_owner`. `deterministic` enters only the
+private execute path; `n8n_agents` enters only context/decide/commit. Proof
+never chooses the engine and never chooses a FAQ, authored question or public
+wording.
+
 Persona-specific exports such as `baita-vitoria.json` are audit fixtures only. Do not import, provision, clone or evolve them as runtime sources.
 
 The provisioner may substitute only technical bindings such as:

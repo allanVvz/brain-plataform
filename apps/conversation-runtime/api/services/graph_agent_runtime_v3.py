@@ -16,6 +16,7 @@ from pydantic import ValidationError
 from schemas.conversation import (
     AgentResponse,
     BranchAction,
+    CommercialClaim,
     ContextCard,
     ConversationContext,
     ConversationDecision,
@@ -27,6 +28,7 @@ from schemas.conversation import (
     JourneyAction,
     ServiceOperation,
     ServiceOperationAction,
+    ServiceObservation,
 )
 from services import (
     conversation_repetition,
@@ -126,86 +128,8 @@ def _normalize_servico_owner(
     return proposal.model_copy(update={"extracted_facts": normalized_facts})
 
 
-def _normalize_premature_servico_requestion(
-    proposal: ConversationProposal, contract: dict[str, Any], ledger_facts: dict[str, Any],
-) -> ConversationProposal:
-    """Repoint a next_question_node_id that re-asks an already-known "servico".
-
-    Confirmed live 2026-08-08, re-validating the report's other fixes in
-    production: right after a branch gets selected (turn N), the model's
-    very next turn (N+1) often proposes next_question_node_id pointing back
-    at the "servico" question, even though servico was already resolved by
-    the branch selection itself. check_proposal() correctly rejects that
-    (servico isn't a pending field anymore) with
-    next_question_not_for_pending_field, but the rejection discards the
-    *entire* otherwise-correct proposal -- including whatever fact the
-    model did extract that same turn (a customer's name, in the confirmed
-    case), reintroducing the exact repeated-question symptom this session's
-    other fixes closed. Since "servico" is always auto-derived and never
-    actually pending once a branch is active, repoint the question to
-    whatever field genuinely is still pending, before validation -- the
-    same normalize-before-validating principle as the owner_node_id fix
-    above. Only runs when the branch's own contract declares a "servico"
-    field and it is already known, matching that same fix's convention.
-    """
-    servico_field = next((f for f in contract.get("fields") or [] if f.get("key") == "servico"), None)
-    if not servico_field or not servico_field.get("question_node_id"):
-        return proposal
-    if proposal.next_question_node_id != servico_field["question_node_id"]:
-        return proposal
-    if (ledger_facts.get("servico") or {}).get("status") != "known":
-        return proposal
-    pending = graph_proof_checker_v3.askable_pending_fields(contract, ledger_facts)
-    substitute = next((field.get("question_node_id") for field in pending if field.get("question_node_id")), None)
-    if not substitute or substitute == proposal.next_question_node_id:
-        return proposal
-    return proposal.model_copy(update={"next_question_node_id": substitute})
 
 
-def _normalize_stale_next_question_after_branch_change(
-    proposal: ConversationProposal, contract: dict[str, Any], ledger_facts: dict[str, Any],
-) -> ConversationProposal:
-    """Repoint a next_question_node_id that doesn't fit the branch just selected.
-
-    Confirmed live 2026-08-09: right when the model proposes
-    branch_action "select"/"switch", it can still propose a
-    next_question_node_id that isn't one of the *new* branch's genuinely
-    pending fields (it can misjudge field order, or hang onto a question
-    from the branch it's leaving). check_proposal() correctly rejects that
-    as next_question_not_for_pending_field, but the rejection discards the
-    *entire* otherwise-correct proposal -- the branch change itself and
-    every fact extracted alongside it -- so the customer's request to
-    change service goes silently unfulfilled, the same failure mode
-    _drop_stale_branch_citations already fixed for citations and
-    _normalize_premature_servico_requestion already fixed for the
-    servico-specific case. This generalizes that fix to any field: repoint
-    to whatever field is genuinely still pending for the branch about to be
-    selected, using the same servico auto-derivation the runtime performs
-    after validity so the substitute reflects the branch change about to be
-    committed, not the branch being left.
-    """
-    if proposal.branch_action.value not in {"select", "switch"}:
-        return proposal
-    effective_facts = dict(ledger_facts)
-    servico_field = next((f for f in contract.get("fields") or [] if f.get("key") == "servico"), None)
-    if servico_field:
-        effective_facts["servico"] = {
-            "status": "known", "value": proposal.branch_anchor_node_id,
-            "owner_node_id": proposal.branch_anchor_node_id,
-        }
-    for fact in proposal.extracted_facts:
-        effective_facts[fact.field_key] = {
-            "status": fact.status.value if hasattr(fact.status, "value") else fact.status,
-            "value": fact.value, "owner_node_id": fact.owner_node_id,
-        }
-    pending = graph_proof_checker_v3.askable_pending_fields(contract, effective_facts)
-    pending_question_ids = {field.get("question_node_id") for field in pending if field.get("question_node_id")}
-    if proposal.next_question_node_id in pending_question_ids:
-        return proposal
-    substitute = pending[0].get("question_node_id") if pending else None
-    if substitute == proposal.next_question_node_id:
-        return proposal
-    return proposal.model_copy(update={"next_question_node_id": substitute})
 
 
 def _drop_stale_branch_citations(
@@ -246,156 +170,77 @@ def _drop_stale_branch_citations(
 
 
 def _invalid_proposal_fallback(
-    context: ConversationContext, raw: Any, errors: list[str]
+    context: ConversationContext,
+    raw: Any,
+    errors: list[str],
+    *,
+    repair_attempt: int = 0,
 ) -> tuple[ConversationDecision, AgentResponse]:
-    contract = context.graph_contract or {}
-    facts = context.cart.get("facts") or {}
-    missing = graph_proof_checker_v3.pending_fields(contract, facts)
-    pending = graph_proof_checker_v3.askable_pending_fields(contract, facts)
-    question_id = next(
-        (field.get("question_node_id") for field in pending if field.get("question_node_id")),
-        None,
-    )
-    facts_by_key = context.cart.get("facts_by_key") or {
-        key: [value] for key, value in facts.items()
-    }
-    unconfirmed = _dedupe_fields([
-        *missing,
-        *_unknown_fields(contract.get("fields") or [], facts_by_key),
-    ])
-    terminal_intent = None
-    confirmation_pending = False
-    if context.active_branch_node_id and contract.get("fields") and not pending:
-        confirmation_pending = not unconfirmed
-        terminal_intent = "qualification_incomplete" if unconfirmed else None
-    if terminal_intent or confirmation_pending:
-        # A malformed/unparseable model proposal must not collapse a
-        # multi-service pedido back down to whichever single branch
-        # happens to be focused this turn -- every other active branch's
-        # already-confirmed facts would silently drop out of the summary.
-        # Same active-branch union every other _terminal_reply call site
-        # in this module already uses (e.g. the check_proposal-rejection
-        # fallback below).
-        active_branch_ids = list(dict.fromkeys([
-            *([context.active_branch_node_id] if context.active_branch_node_id else []),
-            *context.active_branch_node_ids,
-        ]))
-        if len(active_branch_ids) > 1:
-            persona = supabase_client.get_persona(context.persona_slug) or {}
-            publication = supabase_client.get_active_graph_publication(
-                str(persona.get("id") or "")
-            ) or {}
-            document = publication.get("document_json") or {}
-            document = {
-                **document,
-                "branch_contracts": {
-                    **(document.get("branch_contracts") or {}),
-                    context.active_branch_node_id: contract,
+    model_errors = list(dict.fromkeys(errors))
+    if repair_attempt < 1:
+        return (
+            ConversationDecision(
+                classifier="graph_proof_checker_v3",
+                intent="repair_retrieval",
+                route=ConversationRoute.SDR,
+                confidence=0,
+                lead_stage=str(context.cart.get("_lead_stage") or "novo"),
+            ),
+            AgentResponse(
+                reply_text=None,
+                role=ConversationRoute.SDR,
+                cart_state=context.cart,
+                handoff_required=False,
+                proof={
+                    "valid": False,
+                    "delivery_authorized": False,
+                    "errors": model_errors,
+                    "gating_errors": ["model_output_invalid"],
+                    "repair_required": True,
+                    "repair_requirements": [{
+                        "kind": "schema",
+                        "issue": "model_output_invalid",
+                        "instruction": (
+                            "Return one complete grounded model observation; "
+                            "do not add deterministic copy."
+                        ),
+                    }],
+                    "fallback_used": False,
+                    "mode": "model_output_repair",
+                    "accepted_facts": [],
+                    "model_reply_preserved": True,
                 },
-            }
-        else:
-            document = {
-                "branch_contracts": {context.active_branch_node_id: contract},
-                "node_by_id": {},
-            }
-        reply = _terminal_reply(
-            document=document,
-            contract=contract,
-            active_branch_ids=active_branch_ids or [context.active_branch_node_id],
-            facts_by_key=facts_by_key,
-            missing_fields=unconfirmed,
-            qualification_complete=not unconfirmed,
+            ),
         )
-    else:
-        reply = graph_proof_checker_v3.compose_published_question(
-            reply="", next_question_node_id=question_id, contract=contract
-        )
-    recent_replies = _assistant_replies(context.messages)
-    repetition = conversation_repetition.assess_repetition(
-        current_reply=reply,
-        recent_replies=recent_replies,
-        question_node_id=question_id,
-        question_text=str(
-            ((contract.get("questions") or {}).get(question_id or "") or {}).get("text") or ""
-        ),
-        asked_question_node_ids=context.cart.get("asked_question_node_ids") or [],
-        max_attempts=_question_repetition_max_attempts(contract),
-        field_pending=bool(question_id),
-        terminal_intent=terminal_intent,
-        previous_terminal_intent=str(
-            ((context.cart.get("terminal_handoff") or {}).get("intent") or "")
-        ) or None,
-    )
-    repetition_action = "allowed"
-    if not repetition["passed"]:
-        # This fallback already means the model's own proposal was unusable,
-        # so the reply here is the published question itself -- exactly the
-        # sentence the customer just read. Climb the ladder for another
-        # published wording, then for the field's own "I did not catch that",
-        # before considering saying nothing.
-        laddered, repetition_action = _repetition_ladder(
-            reply=reply, recent_replies=recent_replies, contract=contract,
-            question_node_id=question_id,
-        )
-        # Confirmed live 2026-08-17: blanking `reply` on a plain duplicate
-        # (not even a terminal handoff repeat) left two separate customers
-        # with no reply at all on the exact turn they needed one. Silence is
-        # still the last resort, never the first -- so an exhausted ladder
-        # keeps the original text rather than dropping the turn.
-        if laddered:
-            reply = laddered
-        else:
-            repetition_action = "allowed_never_silent"
-    proof = {
-        "valid": False,
-        "errors": list(dict.fromkeys(errors)),
-        "repair_required": False,
-        "fallback_used": True,
-        "model_proposal": raw if isinstance(raw, dict) else {"raw_type": type(raw).__name__},
-        "missing_fields": [field["key"] for field in unconfirmed],
-        "qualification_complete": not unconfirmed,
-        "qualification_incomplete": bool(unconfirmed and not pending),
-        "repetition_audit": repetition,
-        "repetition_action": repetition_action,
-        "explicit_confirmation": False,
-        "confirmation_state": (
-            "awaiting_confirmation" if confirmation_pending
-            else "handed_off" if terminal_intent else "collecting"
-        ),
-    }
-    route = ConversationRoute.HUMAN if terminal_intent else ConversationRoute.SDR
-    state = {
-        **context.cart,
-        "sdr_state": (
-            "awaiting_confirmation" if confirmation_pending
-            else "handed_off" if terminal_intent else "collecting"
-        ),
-        "asked_question_node_ids": [
-            *(context.cart.get("asked_question_node_ids") or []),
-            *([question_id] if question_id else []),
-        ],
-        **({
-            "terminal_handoff": {"intent": terminal_intent, "emitted": True}
-        } if terminal_intent else {}),
-    }
     return (
         ConversationDecision(
             classifier="graph_proof_checker_v3",
-            intent=terminal_intent or (
-                "awaiting_confirmation" if confirmation_pending else "published_fallback"
-            ),
-            route=route, confidence=0,
+            intent="model_repair_exhausted",
+            route=ConversationRoute.HUMAN,
+            confidence=0,
             lead_stage=str(context.cart.get("_lead_stage") or "novo"),
-            handoff_reason="graph_terminal_qualification" if terminal_intent else None,
-            evidence_node_ids=[question_id] if question_id else [],
+            handoff_reason="model_metadata_inconsistent_after_repair",
         ),
         AgentResponse(
-            reply_text=reply or None, role=route,
-            evidence_node_ids=[question_id] if question_id else [],
-            cart_state=state, handoff_required=bool(terminal_intent), proof=proof,
+            reply_text=None,
+            role=ConversationRoute.HUMAN,
+            cart_state=context.cart,
+            handoff_required=True,
+            proof={
+                "valid": False,
+                "delivery_authorized": False,
+                "errors": model_errors,
+                "gating_errors": ["model_output_invalid_after_repair"],
+                "repair_required": False,
+                "fallback_used": False,
+                "model_reply_preserved": True,
+                "technical_pass": False,
+                "quality_pass": False,
+                "handoff_observable": True,
+                "accepted_facts": [],
+            },
         ),
     )
-
 
 def binding_uses_v3(binding: dict[str, Any] | None) -> bool:
     metadata = (binding or {}).get("metadata") or {}
@@ -527,8 +372,8 @@ def _estimated_tokens(text: str) -> int:
 # its context/completion limits; a local fixed token ceiling can reject the
 # graph-owned structural and FAQ chunks before the model sees the turn.
 RAG_CHUNK_TOKEN_BUDGET: int | None = None
-RAG_CHUNK_LIMIT = 10
-RAG_FAQ_CHUNK_RESERVE = 1
+RAG_CHUNK_LIMIT = 12
+RAG_FAQ_CHUNK_RESERVE = 4
 
 
 def _mmr(
@@ -606,8 +451,8 @@ def _optional_retrieval_chunk_slots(
             f"required structural chunks exceed the {RAG_CHUNK_LIMIT}-chunk prompt limit"
         )
     if len(reserved_faq) > RAG_FAQ_CHUNK_RESERVE:
-        raise RuntimeError("selected FAQ evidence exceeds its reserved chunk limit")
-    return RAG_CHUNK_LIMIT - len(required_structural)
+        raise RuntimeError("ranked FAQ evidence exceeds its reserved chunk limit")
+    return max(0, RAG_CHUNK_LIMIT - len(required_structural) - len(reserved_faq))
 
 
 def _required_retrieval_node_ids(
@@ -619,27 +464,17 @@ def _required_retrieval_node_ids(
     """Return the executable structural package for one turn.
 
     The published branch contract already carries every question and handoff
-    rule verbatim.  The chunk package therefore needs the full active path,
-    the *next* graph-owned question (missing_fields[0]), and the handoff rule
-    nodes.  Loading a chunk for every later question duplicated the contract
-    and made every real appointment branch exceed the 12-chunk hard limit.
+    rule verbatim. The chunk package therefore needs the full active path and
+    handoff rule nodes. Question order is model-owned in agentic mode; the
+    contract exposes every still-askable authored question without reserving
+    one question chunk as the backend-selected next step.
     """
     path = (
         ((document.get("coordinates") or {}).get(branch_node_id) or {})
         .get("path_node_ids") or []
     )
-    next_field = missing_fields[0] if missing_fields else None
-    next_question = next(
-        (
-            field.get("question_node_id")
-            for field in contract.get("fields") or []
-            if field.get("key") == next_field
-        ),
-        None,
-    )
     return list(dict.fromkeys([
         *path,
-        *([next_question] if next_question else []),
         *(contract.get("handoff_rule_node_ids") or []),
     ]))
 
@@ -721,18 +556,6 @@ def _normalized_phrase(value: Any) -> str:
     return " ".join(re.findall(r"[a-z0-9]+", ascii_text))
 
 
-def _statements_only(text: Any) -> str:
-    """Drop the interrogative sentences, keep what the turn actually says.
-
-    Used when a reply may not carry its question -- either the field was just
-    given up on, or the question would be an unsafe duplicate. The statements
-    are still owned by the graph; only the ask is withheld.
-    """
-    return " ".join(
-        sentence.strip()
-        for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", str(text or ""))
-        if sentence.strip() and "?" not in sentence
-    ).strip()
 
 
 def _interrogative_clause(message: str) -> str:
@@ -765,13 +588,55 @@ def _interrogative_clause(message: str) -> str:
     return raw if _looks_like_customer_question(raw) else ""
 
 
-def _select_faq_candidate(
-    interrogative_clause: str, rows: list[dict[str, Any]]
-) -> tuple[dict[str, Any] | None, str, list[dict[str, Any]]]:
-    """Select an exact FAQ or a safely separated semantic winner."""
+_FAQ_LEXICAL_STOPWORDS = {
+    "a", "ao", "as", "da", "das", "de", "do", "dos", "e", "em", "esse",
+    "essa", "este", "esta", "eu", "me", "meu", "minha", "no", "na", "nos",
+    "nas", "o", "os", "para", "por", "qual", "quais", "que", "um", "uma",
+}
+_FAQ_INTENT_CANONICAL = {
+    "custa": "preco", "custam": "preco", "custo": "preco", "preco": "preco",
+    "valor": "preco", "valores": "preco",
+    "material": "tecido", "materiais": "tecido", "tecidos": "tecido",
+}
+_FAQ_INTENT_TERMS = frozenset(_FAQ_INTENT_CANONICAL.values())
+
+
+def _faq_lexical_terms(value: Any) -> set[str]:
+    return {
+        _FAQ_INTENT_CANONICAL.get(token, token)
+        for token in _normalized_phrase(value).split()
+        if token not in _FAQ_LEXICAL_STOPWORDS
+    }
+
+
+def _faq_context_hint(messages: list[dict[str, Any]]) -> str:
+    """Return only the latest agent turn preceding the current customer turn.
+
+    Short follow-up questions commonly refer to a product named in the previous
+    response. Older conversation text is deliberately ignored so stale catalog
+    mentions cannot silently disambiguate a current commercial claim.
+    """
+    for row in reversed(messages[:-1]):
+        if (
+            str(row.get("role") or "") == "assistant"
+            or str(row.get("sender_type") or "") in {"agent", "assistant", "ai"}
+        ):
+            return str(
+                row.get("content") or row.get("texto") or row.get("text") or ""
+            ).strip()
+    return ""
+
+
+def _rank_faq_candidates(
+    interrogative_clause: str, rows: list[dict[str, Any]], *, context_hint: str = ""
+) -> list[dict[str, Any]]:
+    """Rank scoped FAQs for the model without choosing a public answer."""
     normalized_query = _normalized_phrase(interrogative_clause)
     candidates: list[dict[str, Any]] = []
-    exact_by_node: dict[str, dict[str, Any]] = {}
+    query_terms = _faq_lexical_terms(interrogative_clause)
+    query_intent = query_terms & _FAQ_INTENT_TERMS
+    query_subject = query_terms - _FAQ_INTENT_TERMS
+    context_terms = _faq_lexical_terms(context_hint)
     for row in rows:
         aliases = row.get("aliases") or []
         if isinstance(aliases, str):
@@ -780,6 +645,16 @@ def _select_faq_candidate(
             except (TypeError, ValueError):
                 aliases = []
         phrases = [row.get("question"), *(aliases if isinstance(aliases, list) else [])]
+        phrase_terms = set().union(*(
+            _faq_lexical_terms(value) for value in phrases if value
+        )) if any(phrases) else set()
+        intent_overlap = len(query_intent & phrase_terms)
+        subject_overlap = len(query_subject & phrase_terms)
+        # Two shared content terms are enough to establish a contextual
+        # mention. Do not reward a longer product name when two different
+        # published products were both named in the previous response.
+        context_overlap = min(2, len(context_terms & phrase_terms))
+        lexical_rank = (intent_overlap, subject_overlap, context_overlap)
         exact = bool(normalized_query) and normalized_query in {
             _normalized_phrase(value) for value in phrases if value
         }
@@ -789,32 +664,20 @@ def _select_faq_candidate(
             "question": str(row.get("question") or ""),
             "semantic_score": round(float(row.get("semantic_score") or 0), 6),
             "lexical_score": round(float(row.get("lexical_score") or 0), 6),
+            "contextual_lexical_rank": list(lexical_rank),
             "exact": exact,
         }
         candidates.append(candidate)
-        if exact and candidate["faq_node_id"]:
-            exact_by_node[candidate["faq_node_id"]] = row
-    if len(exact_by_node) == 1:
-        return next(iter(exact_by_node.values())), "exact_normalized", candidates
-    if len(exact_by_node) > 1:
-        return None, "ambiguous_exact", candidates
-
-    ranked = sorted(
-        rows,
-        key=lambda row: (
-            -float(row.get("semantic_score") or 0),
-            str(row.get("faq_node_id") or row.get("source_node_id") or ""),
+    return sorted(
+        candidates,
+        key=lambda candidate: (
+            not bool(candidate["exact"]),
+            *(-value for value in candidate["contextual_lexical_rank"]),
+            -float(candidate["semantic_score"]),
+            -float(candidate["lexical_score"]),
+            candidate["faq_node_id"],
         ),
     )
-    if not ranked:
-        return None, "no_candidates", candidates
-    top = float(ranked[0].get("semantic_score") or 0)
-    second = float(ranked[1].get("semantic_score") or 0) if len(ranked) > 1 else 0.0
-    if top < FAQ_SEMANTIC_MIN_SCORE:
-        return None, "semantic_below_threshold", candidates
-    if top - second < FAQ_SEMANTIC_MIN_MARGIN:
-        return None, "semantic_ambiguous_margin", candidates
-    return ranked[0], "semantic_margin", candidates
 
 
 _ADDITIVE_SERVICE_MARKER = re.compile(
@@ -939,23 +802,18 @@ def _is_direct_answer_to_pending_non_service_field(
         or _message_explicitly_changes_service(message)
     ):
         return False
-    first_missing = str(missing_fields[0] or "")
-    if not first_missing or first_missing == "servico":
-        return False
+    last_question_id = str(asked_question_node_ids[-1] or "")
     field = next(
         (
             row for row in contract.get("fields") or []
-            if str(row.get("key") or "") == first_missing
+            if str(row.get("question_node_id") or "") == last_question_id
+            and str(row.get("key") or "") in set(missing_fields)
         ),
         None,
     )
-    if not field:
+    if not field or str(field.get("key") or "") == "servico":
         return False
-    expected_question = str(field.get("question_node_id") or "")
-    return bool(
-        expected_question
-        and str(asked_question_node_ids[-1] or "") == expected_question
-    )
+    return True
 
 
 def _has_explicit_service_intent(message: str) -> bool:
@@ -1086,7 +944,7 @@ def _preselection_contract(
         # dos 17 contratos de galho da Aurora e nunca no comum. O cliente que
         # perguntava "como funciona o ppf?" antes de escolher recebia
         # `claim_not_authorized`/`claim_evidence_not_authorized`, a proposta
-        # inteira era descartada e o turno caia em `published_fallback` -- ou
+        # inteira era descartada e o turno caia no fallback legado -- ou
         # em silencio, quando o fallback repetia a pergunta anterior. Ou seja:
         # para perguntar sobre um servico o cliente precisava ja te-lo
         # escolhido, o inverso de como uma venda consultiva funciona.
@@ -1829,89 +1687,6 @@ def _service_facts_for_operations(
     return facts
 
 
-def _service_disambiguation_response(
-    context: ConversationContext,
-) -> tuple[ConversationDecision, AgentResponse]:
-    contract = (
-        context.retrieval_trace.get("common_contract")
-        or context.graph_contract or {}
-    )
-    service_field = next(
-        (field for field in contract.get("fields") or [] if field.get("key") == "servico"),
-        None,
-    )
-    question_id = str((service_field or {}).get("question_node_id") or "") or None
-    resolution = context.retrieval_trace.get("service_resolution") or {}
-    candidate_options = (
-        (resolution.get("confirmation") or {}).get("options") or []
-    )
-    option_ids = list(dict.fromkeys(
-        str(anchor)
-        for ambiguity in [*(resolution.get("ambiguities") or []), *candidate_options]
-        for anchor in (
-            ambiguity.get("candidate_branch_node_ids")
-            or [ambiguity.get("branch_anchor_node_id")]
-        )
-        if anchor
-    ))
-    labels = {
-        str(item.get("branch_anchor_node_id") or item.get("slug") or ""):
-        str(item.get("label") or "")
-        for item in context.available_services
-    }
-    options = ", ".join(labels.get(anchor, anchor) for anchor in option_ids)
-    disambiguation_template = str(
-        (context.retrieval_trace.get("confirmation_templates") or {})
-        .get("service_disambiguation") or ""
-    ).strip()
-    if not disambiguation_template:
-        raise RuntimeError("published graph missing service_disambiguation template")
-    validation = (service_field or {}).get("validation") or {}
-    invalid_text = str(
-        validation.get("invalid_response")
-        or "Não consegui identificar exatamente qual serviço você quis dizer."
-    ).strip()
-    reply = disambiguation_template.replace("{options}", options)
-    asked = list(context.cart.get("asked_question_node_ids") or [])
-    if question_id:
-        asked.append(question_id)
-    proof = {
-        "valid": True,
-        "errors": [],
-        "mode": "service_disambiguation",
-        "service_resolution": resolution,
-        "service_operations": [],
-        "consumed_service_spans": resolution.get("consumed_spans") or [],
-        "collection_complete": False,
-        "qualification_complete": False,
-        "accepted_facts": [],
-        "field_validation": [],
-        "next_question_node_id": question_id,
-    }
-    state = {
-        **context.cart,
-        "active_branch_node_id": context.active_branch_node_id,
-        "active_branch_node_ids": list(context.active_branch_node_ids),
-        "asked_question_node_ids": asked,
-    }
-    return (
-        ConversationDecision(
-            classifier="graph_service_resolver_v3",
-            intent="service_disambiguation",
-            route=ConversationRoute.SDR,
-            confidence=1,
-            lead_stage=str(context.cart.get("_lead_stage") or "novo"),
-            evidence_node_ids=[question_id] if question_id else [],
-        ),
-        AgentResponse(
-            reply_text=reply or None,
-            role=ConversationRoute.SDR,
-            evidence_node_ids=[question_id] if question_id else [],
-            cart_state=state,
-            handoff_required=False,
-            proof=proof,
-        ),
-    )
 
 
 def active_offering_titles(
@@ -2031,80 +1806,10 @@ _EXPLICIT_UNKNOWN = re.compile(
 )
 
 
-def _explicitly_defers_pending_field(message: str) -> bool:
-    """Recognize a deictic request to continue without the pending answer.
-
-    This is deliberately field- and persona-neutral.  A phrase such as
-    ``podemos seguir sem essa informação?`` refers to the question the
-    runtime just published; it is not an informational FAQ merely because it
-    ends in a question mark.
-    """
-    normalized = _normalized_phrase(message)
-    return bool(re.fullmatch(
-        r"(?:podemos|pode|posso|vamos|quero|prefiro)\s+"
-        r"(?:seguir|continuar|prosseguir)\s+sem\s+"
-        r"(?:essa|esta|a)\s+(?:informacao|resposta|dado)(?:\s+agora)?",
-        normalized,
-    ))
 
 
-def _normalize_next_question_to_first_missing(
-    proposal: ConversationProposal,
-    contract: dict[str, Any],
-    ledger_facts: dict[str, Any],
-) -> ConversationProposal:
-    """Resolve the next question from the first graph-owned missing field."""
-    effective_facts = dict(ledger_facts)
-    for fact in proposal.extracted_facts:
-        effective_facts[fact.field_key] = {
-            "status": fact.status.value if hasattr(fact.status, "value") else fact.status,
-            "value": fact.value,
-            "owner_node_id": fact.owner_node_id,
-        }
-    pending = graph_proof_checker_v3.askable_pending_fields(contract, effective_facts)
-    expected = pending[0].get("question_node_id") if pending else None
-    if proposal.next_question_node_id == expected:
-        return proposal
-    return proposal.model_copy(update={"next_question_node_id": expected})
 
 
-def _coerce_direct_field_value(message: str, field: dict[str, Any]) -> Any:
-    """Conservatively coerce a literal reply for one graph-declared field."""
-    literal = str(message or "").strip()
-    if not literal:
-        return None
-    schema = field.get("value_schema") or {}
-    candidates = schema.get("anyOf") or [schema]
-    for candidate in candidates:
-        expected = candidate.get("type")
-        value: Any = None
-        if expected == "string" or not expected:
-            value = literal
-            enum = candidate.get("enum") or []
-            if enum:
-                folded = _normalized_phrase(literal)
-                value = next(
-                    (item for item in enum if _normalized_phrase(item) == folded),
-                    None,
-                )
-        elif expected in {"integer", "number"} and re.fullmatch(
-            r"[-+]?\d+(?:[.,]\d+)?", literal,
-        ):
-            parsed = float(literal.replace(",", "."))
-            value = int(parsed) if expected == "integer" and parsed.is_integer() else parsed
-        elif expected == "boolean":
-            folded = _normalized_phrase(literal)
-            if folded in {"sim", "yes", "verdadeiro"}:
-                value = True
-            elif folded in {"nao", "no", "falso"}:
-                value = False
-        if value is not None and graph_proof_checker_v3._schema_error(candidate, value) is None:
-            canonical, error = graph_proof_checker_v3._canonical_field_value(
-                field, value, literal,
-            )
-            if error is None:
-                return canonical
-    return None
 
 
 def _looks_like_customer_question(message: str) -> bool:
@@ -2120,329 +1825,16 @@ def _looks_like_customer_question(message: str) -> bool:
     return normalized.startswith(question_prefixes)
 
 
-def _factual_answer_only(value: Any) -> str:
-    """Remove qualification questions embedded in legacy FAQ answers."""
-    return " ".join(
-        sentence.strip()
-        for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", str(value or ""))
-        if sentence.strip() and "?" not in sentence
-    ).strip()
 
 
-def _doubt_resolution(
-    *, context: ConversationContext, document: dict[str, Any],
-    proposal: ConversationProposal, contract: dict[str, Any],
-    chunk_sources: dict[str, str], package_node_ids: set[str],
-) -> dict[str, Any] | None:
-    message = _latest_user_message(context)
-    if _explicitly_defers_pending_field(message):
-        return None
-    closure = set(contract.get("closure_node_ids") or [])
-    selected_faq_node_id = str(
-        context.retrieval_trace.get("selected_faq_node_id") or ""
-    )
-    selected_faq_chunk_id = str(
-        context.retrieval_trace.get("selected_faq_chunk_id") or ""
-    )
-    deterministic_faq_trace = "faq_selection_method" in context.retrieval_trace
-    cited = [selected_faq_node_id] if selected_faq_node_id else []
-    if not deterministic_faq_trace:
-        cited.extend(proposal.cited_node_ids)
-        cited.extend(
-            chunk_sources.get(chunk_id, "") for chunk_id in proposal.cited_chunk_ids
-        )
-    factual_faqs: list[dict[str, Any]] = []
-    for node_id in dict.fromkeys(value for value in cited if value):
-        node = (document.get("node_by_id") or {}).get(node_id) or {}
-        data = node.get("data") or {}
-        metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
-        claims = data.get("claims")
-        if (
-            node.get("node_type") == "faq"
-            and node_id in closure
-            and node_id in package_node_ids
-            and (metadata.get("role") or data.get("role")) != "qualification_question"
-            and str(data.get("answer") or "").strip()
-            and isinstance(claims, list)
-            and any(
-                isinstance(claim, dict)
-                and claim.get("policy")
-                and [str(value) for value in claim.get("evidence_node_ids") or []] == [node_id]
-                for claim in claims
-            )
-        ):
-            factual_faqs.append(node)
-    detected = bool(
-        context.retrieval_trace.get("interrogative_clause")
-        or _looks_like_customer_question(message)
-        or proposal.claims
-        or factual_faqs
-    )
-    if not detected:
-        return None
-    conversation_policy, _field_labels = _published_conversation_policies(
-        document, contract,
-    )
-    doubt_policy = conversation_policy.get("doubt_handling")
-    if not isinstance(doubt_policy, dict):
-        raise RuntimeError("published appointment graph missing conversation_policy.doubt_handling")
-    if factual_faqs:
-        faq = factual_faqs[0]
-        answer = _factual_answer_only((faq.get("data") or {}).get("answer"))
-        if answer:
-            used_chunks = (
-                [selected_faq_chunk_id] if selected_faq_chunk_id
-                else [
-                    chunk_id for chunk_id, source_id in chunk_sources.items()
-                    if source_id == faq.get("id")
-                ]
-            )
-            if not used_chunks or any(
-                chunk_sources.get(chunk_id) != faq.get("id") for chunk_id in used_chunks
-            ):
-                raise RuntimeError("selected FAQ evidence is outside the proof package")
-            return {
-                "customer_doubt_detected": True,
-                "doubt_resolution": "answered",
-                "text": answer,
-                "faq_node_id": faq.get("id"),
-                "doubt_node_ids": [faq.get("id")],
-                "doubt_chunk_ids": used_chunks,
-                "interrogative_clause": context.retrieval_trace.get("interrogative_clause"),
-                "faq_candidates": context.retrieval_trace.get("faq_candidates") or [],
-                "faq_selection_method": context.retrieval_trace.get("faq_selection_method"),
-            }
-    deferred = str(doubt_policy.get("deferred_response") or "").strip()
-    if not deferred:
-        raise RuntimeError("published appointment graph missing doubt deferral text")
-    return {
-        "customer_doubt_detected": True,
-        "doubt_resolution": "deferred",
-        "text": deferred,
-        "faq_node_id": None,
-        "doubt_node_ids": [],
-        "doubt_chunk_ids": [],
-        "interrogative_clause": context.retrieval_trace.get("interrogative_clause"),
-        "faq_candidates": context.retrieval_trace.get("faq_candidates") or [],
-        "faq_selection_method": context.retrieval_trace.get("faq_selection_method"),
-        "faq_deferral_reason": context.retrieval_trace.get("faq_deferral_reason") or "no_safe_match",
-    }
 
 
-def _doubt_policy_feedback(
-    *, doubt: dict[str, Any], errors: list[str], contract: dict[str, Any], facts: dict[str, Any]
-) -> dict[str, Any]:
-    """Give one bounded correction turn enough deterministic context.
-
-    This is advisory input to the model, never an authorization for a claim.
-    The proof checker remains the sole authority on facts and the next field.
-    """
-    pending = graph_proof_checker_v3.askable_pending_fields(contract, facts)
-    return {
-        "kind": "claim_not_authorized",
-        "validation_errors": errors,
-        "customer_doubt_detected": True,
-        "instruction": (
-            "Responda primeiro a duvida usando somente a FAQ aprovada indicada; "
-            "depois faca apenas a pergunta do primeiro campo pendente. "
-            "Nao repita nem invente claims."
-        ),
-        "approved_faq": {
-            "node_id": doubt.get("faq_node_id"),
-            "chunk_ids": doubt.get("doubt_chunk_ids") or [],
-            "answer": doubt.get("text"),
-        },
-        "faq_candidates": doubt.get("faq_candidates") or [],
-        "pending_field": (pending[0].get("key") if pending else None),
-        "pending_question_node_id": (
-            pending[0].get("question_node_id") if pending else None
-        ),
-    }
 
 
-def _reconcile_direct_answer_to_pending_field(
-    proposal: ConversationProposal,
-    context: ConversationContext,
-    contract: dict[str, Any],
-    ledger_facts: dict[str, Any],
-) -> ConversationProposal:
-    """Persist a valid literal answer to the last published graph question.
-
-    The model remains useful for extraction, but omission cannot make the
-    runtime loop when the database proves exactly which field was asked.
-    """
-    if proposal.branch_action.value != "keep" or proposal.claims:
-        return proposal
-    message = _message_without_consumed_services(
-        _latest_user_message(context),
-        context.retrieval_trace.get("service_resolution") or {},
-    ).strip()
-    if not message or _looks_like_customer_question(message):
-        return proposal
-    pending = graph_proof_checker_v3.askable_pending_fields(contract, ledger_facts)
-    if not pending:
-        return proposal
-    field = pending[0]
-    question_id = str(field.get("question_node_id") or "")
-    asked = [str(value) for value in context.cart.get("asked_question_node_ids") or []]
-    if not question_id or not asked or asked[-1] != question_id:
-        return proposal
-    key = str(field.get("key") or "")
-    if not key or any(fact.field_key == key for fact in proposal.extracted_facts):
-        return proposal
-    value = _coerce_direct_field_value(message, field)
-    if value is None:
-        return proposal
-    fact = ExtractedFact(
-        field_key=key,
-        value=value,
-        status="known",
-        source_message_id=_source_message_id(context.messages),
-        owner_node_id=str(field.get("owner_node_id") or ""),
-        evidence_span=message,
-        confidence=1.0,
-    )
-    return proposal.model_copy(update={
-        "extracted_facts": [*proposal.extracted_facts, fact],
-    })
 
 
-def _unanswered_fact_after_question_limit(
-    *,
-    context: ConversationContext,
-    contract: dict[str, Any],
-    ledger_facts: dict[str, Any],
-    proposal: ConversationProposal,
-    max_attempts: int = 1,
-    doubt_answered: bool = False,
-) -> dict[str, Any] | None:
-    """Mark an unanswered field unknown after initial ask plus allowed retries."""
-    pending = graph_proof_checker_v3.askable_pending_fields(contract, ledger_facts)
-    if not pending:
-        return None
-    field = pending[0]
-    key = str(field.get("key") or "")
-    owner = str(field.get("owner_node_id") or "")
-    question_id = str(field.get("question_node_id") or "")
-    if not key or not owner or not question_id:
-        return None
-    accepted_statuses = set(field.get("accepted_statuses") or ["known"])
-    proposed = next(
-        (
-            fact
-            for fact in proposal.extracted_facts
-            if fact.field_key == key and fact.owner_node_id == owner
-        ),
-        None,
-    )
-    proposed_status = str(
-        proposed.status.value if proposed and hasattr(proposed.status, "value")
-        else proposed.status if proposed else ""
-    )
-    if proposed and proposed_status in accepted_statuses and proposed_status != "unknown":
-        return None
-    message = _message_without_consumed_services(
-        _latest_user_message(context),
-        context.retrieval_trace.get("service_resolution") or {},
-    ).strip()
-    explicit_unknown = bool(
-        _EXPLICIT_UNKNOWN.fullmatch(message)
-        or _explicitly_defers_pending_field(message)
-    )
-    asked = [str(value) for value in context.cart.get("asked_question_node_ids") or []]
-    question_text = str(
-        ((contract.get("questions") or {}).get(question_id) or {}).get("text") or ""
-    ).strip()
-    observed_attempts = sum(
-        1
-        for row in context.messages
-        if (
-            str(row.get("role") or "") == "assistant"
-            or str(row.get("sender_type") or "") in {"agent", "assistant", "ai"}
-        )
-        and question_text
-        and graph_proof_checker_v3._question_already_asked(
-            question_text,
-            str(row.get("content") or row.get("texto") or row.get("text") or ""),
-        )
-    )
-    allowed_emissions = 1 + max(0, min(int(max_attempts), 1))
-    if (
-        not explicit_unknown
-        and max(asked.count(question_id), observed_attempts) < allowed_emissions
-    ):
-        return None
-    # The budget counts question emissions, not customer stonewalling, and the
-    # contract asks the agent to answer a doubt *and* resume the question. So a
-    # customer who asks two legitimate questions about the catalog exhausts the
-    # budget without ever having refused to answer, and the field is given up
-    # on. A turn that carried an answered doubt is not a non-answer.
-    if not explicit_unknown and doubt_answered:
-        return None
-    return {
-        "field_key": key,
-        "owner_node_id": owner,
-        "status": "unknown",
-        "value": None,
-        "source_message_id": _source_message_id(context.messages),
-        "evidence_span": message if explicit_unknown else "",
-        "confidence": 1.0,
-        "reason": "explicit_unknown" if explicit_unknown else "ignored_twice",
-        "metadata": {
-            "reason": "explicit_unknown" if explicit_unknown else "ignored_twice",
-        },
-    }
 
 
-def _drop_premature_unknown_for_pending_question(
-    proposal: ConversationProposal,
-    context: ConversationContext,
-    contract: dict[str, Any],
-    ledger_facts: dict[str, Any],
-    *,
-    max_attempts: int,
-) -> ConversationProposal:
-    """Do not let a model turn the first ignored answer into a terminal fact."""
-    pending = graph_proof_checker_v3.askable_pending_fields(contract, ledger_facts)
-    if not pending:
-        return proposal
-    field = pending[0]
-    key = str(field.get("key") or "")
-    owner = str(field.get("owner_node_id") or "")
-    question_id = str(field.get("question_node_id") or "")
-    question_text = str(
-        ((contract.get("questions") or {}).get(question_id) or {}).get("text") or ""
-    ).strip()
-    asked = [str(value) for value in context.cart.get("asked_question_node_ids") or []]
-    observed_attempts = sum(
-        1
-        for row in context.messages
-        if (
-            str(row.get("role") or "") == "assistant"
-            or str(row.get("sender_type") or "") in {"agent", "assistant", "ai"}
-        )
-        and question_text
-        and graph_proof_checker_v3._question_already_asked(
-            question_text,
-            str(row.get("content") or row.get("texto") or row.get("text") or ""),
-        )
-    )
-    allowed_emissions = 1 + max(0, min(int(max_attempts), 1))
-    if max(asked.count(question_id), observed_attempts) >= allowed_emissions:
-        return proposal
-    filtered = [
-        fact
-        for fact in proposal.extracted_facts
-        if not (
-            fact.field_key == key
-            and fact.owner_node_id == owner
-            and str(fact.status.value if hasattr(fact.status, "value") else fact.status)
-            == "unknown"
-        )
-    ]
-    if len(filtered) == len(proposal.extracted_facts):
-        return proposal
-    return proposal.model_copy(update={"extracted_facts": filtered})
 
 
 def _normalize_fact_source_message_ids(
@@ -2480,14 +1872,6 @@ def _project_recent_messages(messages: list[dict[str, Any]], limit: int = 6) -> 
     return projected
 
 
-def _repeats_recent_outbound(reply: str, messages: list[dict[str, Any]]) -> bool:
-    recent = [
-        str(row.get("content") or row.get("texto") or "")
-        for row in messages
-        if str(row.get("role") or "") == "assistant"
-        or str(row.get("sender_type") or "") in {"agent", "assistant", "ai"}
-    ][-3:]
-    return any(conversation_repetition.is_semantic_repetition(previous, reply) for previous in recent)
 
 
 def _question_repetition_max_attempts(contract: dict[str, Any]) -> int:
@@ -2507,134 +1891,14 @@ def _assistant_replies(messages: Sequence[dict[str, Any]], limit: int = 4) -> li
     ][-limit:]
 
 
-def _pending_field_for_question(
-    contract: dict[str, Any], question_node_id: str | None
-) -> dict[str, Any]:
-    if not question_node_id:
-        return {}
-    return next(
-        (
-            field for field in contract.get("fields") or []
-            if str(field.get("question_node_id") or "") == str(question_node_id)
-        ),
-        {},
-    )
 
 
-def _confirmation_is_last_resort(
-    contract: dict[str, Any], confirmation: dict[str, Any],
-) -> bool:
-    """Whether the graph asks for this field to be confirmed only as a last resort."""
-    key = str(confirmation.get("field_key") or "")
-    if not key:
-        return False
-    return any(
-        str((field.get("validation") or {}).get("confirmation_policy") or "")
-        == "last_resort"
-        for field in contract.get("fields") or []
-        if str(field.get("key") or "") == key
-    )
 
 
-def _repetition_ladder(
-    *,
-    reply: str,
-    recent_replies: Sequence[str],
-    contract: dict[str, Any],
-    question_node_id: str | None,
-    prefix: str = "",
-) -> tuple[str, str]:
-    """Resolve a turn whose reply would repeat something already said.
-
-    Returns ``(reply, repetition_action)``. Until 2026-08-19 this decision was
-    binary -- emit the duplicate verbatim (``allowed_never_silent``) or say
-    nothing -- because blanking the reply on 2026-08-17 left two customers
-    with no answer at all. Repeating verbatim is what a customer experiences
-    as a broken agent, so the choice is now a ladder of published material:
-
-    1. adapt: another wording this conversation has not heard yet;
-    2. admit: the field's own published ``invalid_response``;
-    3. stop: emit nothing here and let the caller close the turn.
-
-    Every rung is authored in the graph. The runtime never writes copy, so a
-    persona with no alternatives published simply falls to the next rung.
-    """
-    question = (contract.get("questions") or {}).get(str(question_node_id or "")) or {}
-    adapted = _unrepeated_variant(question.get("paraphrases") or [], recent_replies)
-    if adapted:
-        return " ".join(part for part in (prefix, adapted) if part).strip(), "adapted_variant"
-
-    field = _pending_field_for_question(contract, question_node_id)
-    admission = str((field.get("validation") or {}).get("invalid_response") or "").strip()
-    if admission and not any(
-        conversation_repetition.is_semantic_repetition(previous, admission)
-        for previous in recent_replies
-    ):
-        return (
-            " ".join(part for part in (prefix, admission) if part).strip(),
-            "admitted_not_understood",
-        )
-
-    return prefix.strip(), "stopped_last_resort"
 
 
-def _unrepeated_variant(
-    variants: Sequence[str], recent_replies: Sequence[str] = ()
-) -> str:
-    """First published phrasing this conversation has not already heard.
-
-    Step one of the repetition ladder. The graph is the sole author of every
-    candidate, so adapting never invents copy -- it only declines to reuse a
-    phrasing the customer just read. Rotating by lead_ref (the previous
-    behaviour) kept a lead on one stable phrase forever, which is precisely
-    what repeats inside a single conversation. Returns "" when every variant
-    was already used, handing the turn to the next step of the ladder.
-    """
-    approved = [text for value in variants if (text := str(value or "").strip())]
-    for candidate in approved:
-        if not any(
-            conversation_repetition.is_semantic_repetition(previous, candidate)
-            for previous in recent_replies
-        ):
-            return candidate
-    return ""
 
 
-def _repeated_pending_question_is_allowed(
-    *,
-    next_question_node_id: str | None,
-    aggregate_missing: list[dict[str, Any]],
-    asked_question_node_ids: list[str],
-    reply: str = "",
-    question_text: str = "",
-    recent_replies: list[str] | None = None,
-    max_attempts: int = 1,
-) -> bool:
-    """Allow one graph-budgeted, contextual and semantically distinct retry."""
-    if not next_question_node_id:
-        return False
-    pending = any(
-        field.get("question_node_id") == next_question_node_id
-        for field in aggregate_missing
-    )
-    if asked_question_node_ids.count(next_question_node_id) <= 0:
-        return False
-    if not reply and not question_text:
-        return bool(
-            pending
-            and asked_question_node_ids.count(next_question_node_id)
-            < 1 + max(0, min(int(max_attempts), 1))
-        )
-    result = conversation_repetition.assess_repetition(
-        current_reply=reply,
-        recent_replies=recent_replies or [],
-        question_node_id=next_question_node_id,
-        question_text=question_text,
-        asked_question_node_ids=asked_question_node_ids,
-        max_attempts=max_attempts,
-        field_pending=pending,
-    )
-    return result["passed"]
 
 
 def _active_contract_fields(
@@ -2690,26 +1954,6 @@ def _dedupe_fields(fields: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return result
 
 
-def _published_conversation_policies(
-    document: dict[str, Any], contract: dict[str, Any],
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    conversation_policy = contract.get("conversation_policy") or {}
-    field_labels = contract.get("field_labels") or {}
-    if conversation_policy and field_labels:
-        return conversation_policy, field_labels
-    persona = next(
-        (
-            node for node in (document.get("node_by_id") or {}).values()
-            if str(node.get("node_type") or "") == "persona"
-        ),
-        {},
-    )
-    data = persona.get("data") or {}
-    appointment_policy = data.get("appointment_policy") or {}
-    return (
-        conversation_policy or data.get("conversation_policy") or {},
-        field_labels or appointment_policy.get("field_labels") or {},
-    )
 
 
 def _render_fact_value(value: Any) -> str:
@@ -2755,7 +1999,7 @@ def _render_field_value(field: dict[str, Any], value: Any) -> str:
     An enum field's stored value is the internal slug used for matching
     (e.g. "continuar_cuidar_proteger"), never meant to be shown verbatim --
     the grounding guard for the natural summary
-    (graph_proof_checker_v3.validate_natural_summary) would otherwise force
+    A former deterministic summary guard would otherwise force
     the model to literally write that slug to pass validation. Prefer the
     published alias; if an enum value somehow has none, humanize the slug
     like any other field key rather than leak the underscore.
@@ -2768,130 +2012,8 @@ def _render_field_value(field: dict[str, Any], value: Any) -> str:
     return _render_fact_value(value)
 
 
-def _collected_field_facts(
-    document: dict[str, Any],
-    active_branch_ids: list[str],
-    contract: dict[str, Any],
-    facts_by_key: dict[str, list[dict[str, Any]]],
-    *,
-    merge_selector: bool = False,
-) -> list[tuple[str, str]]:
-    """(label, rendered value) for every required field already known.
-
-    Shared by the deterministic terminal summary and the natural-summary
-    grounding guard so both agree on exactly what counts as "collected".
-
-    ``merge_selector`` is opt-in and only used by the deterministic terminal
-    summary. The branch-selection field (e.g. "servico") is declared once per
-    active branch by construction -- with 2+ active branches this loop would
-    otherwise emit one ("Serviço", value) tuple per branch, which is what
-    produced two disjoint "serviço:" clauses in the same confirmation
-    sentence instead of one that treats every active offering as equally
-    fundamental. The natural-summary grounding guard (validate_natural_summary)
-    must keep seeing each title as its own independent substring, so it calls
-    this with the default False.
-    """
-    _, labels = _published_conversation_policies(document, contract)
-    fields = _active_contract_fields(document, active_branch_ids, contract)
-    selection_key = branch_selection_field_key(document) if merge_selector else ""
-    collected: list[tuple[str, str]] = []
-    selector_emitted = False
-    for field in fields:
-        key = str(field.get("key") or "")
-        owner = str(field.get("owner_node_id") or "")
-        if merge_selector and key == selection_key and owner in active_branch_ids:
-            if selector_emitted:
-                continue
-            titles = active_offering_titles(document, active_branch_ids, facts_by_key)
-            if len(titles) >= 2:
-                selector_emitted = True
-                label = str(labels.get(key) or "") or _humanize_field_key(key)
-                collected.append((label, ", ".join(titles)))
-                continue
-        # Match the same "already answered" bar _unanswered_fact_after_-
-        # question_limit uses (accepted_statuses, not a hardcoded "known")
-        # so a field the contract explicitly lets settle at
-        # "needs_confirmation" (the branch selector) still surfaces in the
-        # summary instead of vanishing from it while qualification is
-        # already considered complete.
-        accepted_statuses = set(field.get("accepted_statuses") or ["known"])
-        fact = next(
-            (
-                row for row in facts_by_key.get(key) or []
-                if str(row.get("owner_node_id") or "") == owner
-                and row.get("status") in accepted_statuses
-                and row.get("status") != "unknown"
-                and row.get("value") not in (None, "")
-            ),
-            None,
-        )
-        if fact:
-            label = str(labels.get(key) or "") or _humanize_field_key(key)
-            collected.append((label, _render_field_value(field, fact.get("value"))))
-    return collected
 
 
-def _terminal_reply(
-    *,
-    document: dict[str, Any],
-    contract: dict[str, Any],
-    active_branch_ids: list[str],
-    facts_by_key: dict[str, list[dict[str, Any]]],
-    missing_fields: list[dict[str, Any]],
-    qualification_complete: bool,
-) -> str:
-    """Render terminal copy exclusively from the published graph contract."""
-    conversation_policy, labels = _published_conversation_policies(document, contract)
-    qualification = conversation_policy.get("qualification") or {}
-    collected = _collected_field_facts(
-        document, active_branch_ids, contract, facts_by_key, merge_selector=True,
-    )
-    informed = [f"{label}: {value}" for label, value in collected]
-    missing_labels = list(dict.fromkeys(
-        str(labels.get(str(field.get("key") or "")) or "")
-        or _humanize_field_key(str(field.get("key") or ""))
-        for field in missing_fields
-        if str(field.get("key") or "")
-    ))
-    replacements = {
-        "{informed_fields}": "; ".join(informed),
-        "{missing_fields}": ", ".join(missing_labels),
-    }
-
-    def render(template: Any) -> str:
-        result = str(template or "").strip()
-        for marker, value in replacements.items():
-            result = result.replace(marker, value)
-        return result.strip()
-
-    if qualification_complete:
-        parts = [
-            render(qualification.get("summary_template")),
-            render(qualification.get("confirmation_question")),
-        ]
-        reply = "\n\n".join(part for part in parts if part)
-    else:
-        reply = render(qualification.get("incomplete_handoff_template"))
-    if reply:
-        return reply
-
-    facts = {
-        key: rows[-1] for key, rows in facts_by_key.items() if rows
-    }
-    for branch_id in active_branch_ids:
-        candidate = (document.get("branch_contracts") or {}).get(branch_id) or {}
-        rule = next(
-            (
-                row for row in candidate.get("handoff_rules") or []
-                if row.get("text") and graph_proof_checker_v3.handoff_rule_matches(
-                    row, facts=facts, qualification_complete=qualification_complete,
-                )
-            ),
-            None,
-        )
-        if rule:
-            return str(rule["text"]).strip()
-    raise RuntimeError("published graph missing terminal qualification copy")
 
 
 def _compact_prompt_chunk(row: dict[str, Any]) -> dict[str, Any]:
@@ -3122,36 +2244,12 @@ def _explicit_change_requested(message: str) -> bool:
     )
 
 
-def _qualification_copy(contract: dict[str, Any]) -> dict[str, Any]:
-    return ((contract.get("conversation_policy") or {}).get("qualification") or {})
 
 
-def _render_qualification_template(
-    template: Any,
-    *,
-    informed_fields: str = "",
-    missing_fields: str = "",
-) -> str:
-    rendered = str(template or "").strip()
-    return (
-        rendered.replace("{informed_fields}", informed_fields)
-        .replace("{missing_fields}", missing_fields)
-        .strip()
-    )
 
 
-def _completion_reply(contract: dict[str, Any]) -> str:
-    reply = str(_qualification_copy(contract).get("completion_message") or "").strip()
-    if not reply:
-        raise RuntimeError("published graph missing qualification completion_message")
-    return reply
 
 
-def _correction_prompt(contract: dict[str, Any]) -> str:
-    reply = str(_qualification_copy(contract).get("correction_prompt") or "").strip()
-    if not reply:
-        raise RuntimeError("published graph missing qualification correction_prompt")
-    return reply
 
 
 def _is_agent_message(row: dict[str, Any]) -> bool:
@@ -3168,136 +2266,8 @@ def _persona_node(document: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def _qualification_question_node_id(document: dict[str, Any], field_key: str) -> str | None:
-    """Find the published question node for a field outside any branch contract.
-
-    On a first-contact greeting there is no active branch yet, so
-    contract["questions"] is empty and the greeting turn used to carry
-    question_node_id=None -- which meant _decide never recorded the question
-    in asked_question_node_ids, leaving the graph-budgeted repetition guard
-    with nothing but a fuzzy text match to
-    work from. The nodes exist regardless of contract: they are the FAQs
-    materialized by graph_conversation_contract.materialize_qualification_questions,
-    carrying the same data.metadata.role/field_key contract read here.
-    """
-    if not field_key:
-        return None
-    for node in document.get("nodes") or []:
-        if node.get("node_type") != "faq":
-            continue
-        data = node.get("data") or {}
-        metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
-        role = metadata.get("role") or data.get("role")
-        key = str(metadata.get("field_key") or data.get("field_key") or "").strip()
-        if role == "qualification_question" and key == field_key:
-            return str(node.get("id") or "") or None
-    return None
 
 
-def _greeting_policy(
-    document: dict[str, Any], *, contract: dict[str, Any], facts: dict[str, Any],
-    lead_ref: int = 0, recent_replies: Sequence[str] = (), message: str = "",
-) -> dict[str, Any] | None:
-    persona = _persona_node(document)
-    persona_data = persona.get("data") or {}
-    policy = persona_data.get("conversation_policy") or {}
-    greeting = ((policy.get("intents") or {}).get("greeting") or {})
-    # A customer the agent already knows must not be introduced from scratch
-    # again. The graph publishes the two sets separately; when it only
-    # publishes the first-contact set, that one keeps serving both cases.
-    returning = bool(facts) and bool(
-        greeting.get("response_node_ids_returning")
-        or greeting.get("responses_returning")
-    )
-    node_ids = (
-        greeting.get("response_node_ids_returning")
-        if returning else greeting.get("response_node_ids")
-    ) or []
-    node_by_id = document.get("node_by_id") or {
-        str(node.get("id") or ""): node for node in document.get("nodes") or []
-    }
-    node_responses: list[tuple[str, str, list[str]]] = []
-    for value in node_ids:
-        node_id = str(value or "").strip()
-        node = node_by_id.get(node_id) or {}
-        node_data = node.get("data") or {}
-        role = str(
-            node_data.get("role")
-            or ((node_data.get("metadata") or {}).get("role") or "")
-        )
-        answer = str(node_data.get("answer") or "").strip()
-        if node.get("node_type") == "faq" and role == "greeting_response" and answer:
-            triggers = [
-                str(trigger).strip()
-                for trigger in node_data.get("triggers") or []
-                if str(trigger).strip()
-            ]
-            node_responses.append((node_id, answer, triggers))
-    normalized_message = _normalized_phrase(message)
-    matching_node_responses = [
-        item for item in node_responses
-        if normalized_message and any(
-            re.search(
-                rf"(?<!\w){re.escape(_normalized_phrase(trigger))}(?!\w)",
-                normalized_message,
-            )
-            for trigger in item[2]
-        )
-    ]
-    selectable_node_responses = matching_node_responses or node_responses
-    direct_responses = [
-        text
-        for value in (
-            greeting.get("responses_returning") if returning else greeting.get("responses")
-        ) or []
-        if isinstance(value, str) and (text := value.strip())
-    ]
-    response = _unrepeated_variant(
-        [text for _node_id, text, _triggers in selectable_node_responses]
-        or direct_responses,
-        recent_replies,
-    ) or str(greeting.get("response") or "").strip()
-    response_node_id = next(
-        (
-            node_id for node_id, text, _triggers in selectable_node_responses
-            if text == response
-        ),
-        None,
-    )
-    if not response:
-        return None
-    pending = graph_proof_checker_v3.pending_fields(contract, facts) if contract else []
-    askable = graph_proof_checker_v3.askable_pending_fields(contract, facts) if contract else []
-    # The published contract is the sole owner of qualification order. The
-    # graph validator guarantees that a declared identity_field is the first
-    # required field, so the greeting must never bypass missing_fields[0].
-    chosen = askable[0] if askable else None
-    question_id = chosen.get("question_node_id") if chosen else None
-    question = str(
-        (((contract.get("questions") or {}).get(str(question_id or "")) or {}).get("text"))
-        or ""
-    ).strip()
-    field_key = chosen.get("key") if chosen else None
-    if not contract:
-        appointment = persona_data.get("appointment_policy") or {}
-        required = [str(value) for value in appointment.get("required_fields") or [] if value]
-        questions = appointment.get("field_questions") or {}
-        unresolved = [
-            key for key in required
-            if not graph_proof_checker_v3.field_resolved({}, facts.get(key))
-        ]
-        field_key = next(iter(unresolved), None)
-        question = str(questions.get(field_key) or "").strip() if field_key else ""
-        question_id = _qualification_question_node_id(document, str(field_key or ""))
-    return {
-        "response": response,
-        "response_node_id": response_node_id,
-        "question": question,
-        "question_node_id": question_id,
-        "asked_field_key": field_key,
-        "missing_fields": [field.get("key") for field in pending]
-        if pending else ([field_key] if field_key else []),
-    }
 
 
 SYSTEM_PROMPT = (
@@ -3520,10 +2490,6 @@ def _carry_over_field_keys(document: dict) -> set[str]:
     return keys
 
 
-def _no_journey_fallback_reply(document: dict[str, Any]) -> str:
-    persona = _persona_node(document) or {}
-    policy = ((persona.get("data") or {}).get("conversation_policy") or {})
-    return str(policy.get("no_journey_fallback_reply") or "").strip()
 
 
 def _agent_identity_prompt(document: dict[str, Any]) -> str:
@@ -3557,18 +2523,6 @@ def _agent_identity_prompt(document: dict[str, Any]) -> str:
     )
 
 
-def _field_feedback(document: dict[str, Any], key: str) -> str:
-    """Published copy for what the agent says when a value does not fit.
-
-    Persona-owned, because it is commercial copy: `AGENTS.md` §26 forbids
-    production code from carrying a sentence a customer will read. A persona
-    that publishes nothing here says nothing extra -- the runtime never
-    invents the wording.
-    """
-    persona = _persona_node(document) or {}
-    policy = ((persona.get("data") or {}).get("conversation_policy") or {})
-    feedback = policy.get("field_feedback") or {}
-    return str(feedback.get(key) or "").strip()
 
 
 def _post_sale_route(document: dict[str, Any]) -> str:
@@ -3871,160 +2825,6 @@ def build_context(
         _deterministic_branch_candidates(document, message),
         pending_field_answer=pending_field_answer,
     )
-    greeting_eligible = _is_greeting(message)
-    greeting_prefix = _greeting_policy(
-        document, contract=active_contract, facts=ledger.get("facts") or {},
-        lead_ref=lead_ref, recent_replies=_assistant_replies(messages), message=message,
-    ) if greeting_eligible else None
-    if greeting_prefix and operational_mode == "post_qualification_support":
-        greeting_prefix = {
-            **greeting_prefix,
-            "question": "",
-            "question_node_id": None,
-            "asked_field_key": None,
-            "missing_fields": [],
-        }
-    # Only a greeting that asks nothing and names no service skips the model.
-    # Anything else -- a doubt, a service, both -- has to be answered, with
-    # the greeting riding along as a prefix instead.
-    greeting = greeting_prefix if (
-        greeting_eligible
-        and _is_bare_greeting(message)
-        and not deterministic_candidates
-    ) else None
-    if greeting:
-        persona_node = _persona_node(document)
-        reply = "\n\n".join(
-            part for part in (greeting["response"], greeting["question"]) if part
-        )
-        trace = {
-            "runtime_version": RUNTIME_VERSION,
-            "publication_id": publication["id"],
-            "publication_version": publication["version"],
-            "graph_checksum": publication["checksum"],
-            "ledger_revision": int(ledger.get("revision") or 0),
-            "publication_changed": publication_changed,
-            "invalidated_fact_keys": invalidated_fact_keys,
-            "focus_derived_in_memory": focus_derived_in_memory,
-            "common_contract": common_contract,
-            "pending_field": pending_field or None,
-            "confirmation_templates": document.get("confirmation_templates") or {},
-            "service_resolution_policy": document.get("service_resolution_policy") or {},
-            "no_journey_fallback_reply": _no_journey_fallback_reply(document),
-            "post_sale_operation_route": _post_sale_route(document),
-            "deterministic_intent": "greeting",
-            "deterministic_reply": reply,
-            "greeting_response_node_id": greeting.get("response_node_id"),
-            "asked_field_key": greeting.get("asked_field_key"),
-            "next_question_node_id": greeting.get("question_node_id"),
-            "missing_fields": greeting.get("missing_fields") or [],
-            "journey_state": journey_state,
-            "journey_sequence": int(journey.get("sequence") or 1),
-            "operational_mode": operational_mode,
-            "context_batch_ms": context_batch_ms,
-            "embedding_ms": 0, "branch_rank_ms": 0, "branch_package_ms": 0,
-            "latency_ms": round((time.perf_counter() - started) * 1000, 3),
-        }
-        return ConversationContext(
-            persona_slug=persona_slug,
-            agent_slug=str((persona.get("config") or {}).get("agent_slug") or "agent"),
-            graph_version=int(publication["version"]), graph_checksum=publication["checksum"],
-            messages=_project_recent_messages(messages),
-            cart={**((lead.get("metadata") or {}).get("conversation_state") or {}),
-                  "facts": ledger.get("facts") or {},
-                  "facts_by_key": ledger.get("facts_by_key") or {},
-                  "active_branch_node_id": active_branch,
-                  "asked_question_node_ids": ledger.get("asked_question_node_ids") or [],
-                  "_ledger_revision": ledger.get("revision") or 0},
-            rag_nodes=[persona_node] if persona_node else [], rag_paths=[], rag_chunks=[],
-            context_cards=[], system_prompt="", available_services=[{
-                "branch_anchor_node_id": anchor,
-                "slug": document["node_by_id"][anchor]["slug"],
-                "label": document["node_by_id"][anchor]["title"],
-            } for anchor in document.get("branch_anchors") or []],
-            active_branch_node_id=active_branch, active_branch_node_ids=active_branches,
-            completed_branch_node_ids=completed_branch_node_ids, ledger_id=ledger_id or None,
-            active_path_checksum=((document.get("coordinates") or {}).get(active_branch) or {}).get("path_checksum"),
-            branch_node_ids=active_contract.get("closure_node_ids") or [],
-            graph_contract=active_contract, publication_id=publication["id"],
-            runtime_version=RUNTIME_VERSION, retrieval_trace=trace,
-            known_facts=_known_facts_payload(
-                ledger.get("facts_by_key") or ledger.get("facts") or {}, message_id,
-            ),
-            time_since_last_client_message=_time_since_last_client_message(messages, message_id),
-            pending_reconfirmation=bool((lead.get("metadata") or {}).get("pending_reconfirmation")),
-            journey_id=str(journey.get("id") or "") or None,
-            journey_sequence=int(journey.get("sequence") or 1),
-            journey_state=journey_state,
-            pending_field_key=str(pending_field.get("key") or "") or None,
-            pending_question_node_id=str(pending_field.get("question_node_id") or "") or None,
-            last_handoff={
-                "at": journey.get("handed_off_at"),
-                "reason": (journey.get("metadata") or {}).get("handoff_reason")
-                or (lead.get("metadata") or {}).get("handoff_reason"),
-            },
-            operational_mode=operational_mode,
-            shared_memory=shared_memory,
-            post_completion_state={
-                "has_terminal_journey": str(
-                    completion_journey.get("state") or journey_state
-                ) in {
-                    "qualified_confirmed", "handed_off", "converted", "closed"
-                },
-                "has_confirmed_conversion": has_confirmed_conversion,
-                "latest_journey_sequence": int(journey.get("sequence") or 1),
-                "latest_journey_state": str(
-                    completion_journey.get("state") or journey_state
-                ),
-            },
-        )
-    embedding_started = time.perf_counter()
-    embedding = None if deterministic_candidates else graph_compiler_v3.query_embeddings([message])[0]
-    embedding_ms = round((time.perf_counter() - embedding_started) * 1000, 3)
-    if (
-        service_resolution.get("resolution_method") == "none"
-        and embedding is not None
-        and not pending_field_answer
-        and not _is_social_or_non_service_value(message)
-    ):
-        semantic_rows = supabase_client.rank_graph_services_v3(
-            persona_id=str(persona["id"]),
-            publication_id=str(publication["id"]),
-            query_embedding=embedding,
-            limit=8,
-        )
-        semantic_ranking = [
-            {
-                "branch_anchor_node_id": str(row.get("branch_anchor_node_id") or ""),
-                "chunk_id": str(row.get("chunk_id") or ""),
-                "score": round(float(row.get("score") or 0), 6),
-                "snippet": str(row.get("snippet") or "")[:240],
-            }
-            for row in semantic_rows
-            if row.get("branch_anchor_node_id")
-        ]
-        service_resolution = {
-            **service_resolution,
-            "semantic_ranking": semantic_ranking,
-            "semantic_threshold": SERVICE_SEMANTIC_MIN_SCORE,
-            "semantic_margin_threshold": SERVICE_SEMANTIC_MIN_MARGIN,
-        }
-        if (
-            len(semantic_ranking) >= 2
-            and semantic_ranking[0]["score"] >= SERVICE_SEMANTIC_MIN_SCORE
-            and semantic_ranking[1]["score"] >= SERVICE_SEMANTIC_MIN_SCORE
-            and semantic_ranking[0]["score"] - semantic_ranking[1]["score"]
-            < SERVICE_SEMANTIC_MIN_MARGIN
-        ):
-            service_resolution = {
-                **service_resolution,
-                "status": "ambiguous",
-                "resolution_method": "semantic_anchor_ranking",
-                "confirmation": {
-                    "kind": "service_disambiguation",
-                    "options": semantic_ranking[:2],
-                },
-            }
     short_expected_answer = bool(
         active_branch
         and missing
@@ -4052,7 +2852,6 @@ def build_context(
     missing = [field["key"] for field in graph_proof_checker_v3.pending_fields(contract, ledger.get("facts") or {})]
     interrogative_clause = _interrogative_clause(message)
     faq_rows: list[dict[str, Any]] = []
-    selected_faq_row: dict[str, Any] | None = None
     faq_selection_method = "no_interrogative_clause"
     faq_candidates: list[dict[str, Any]] = []
     eligible_faq_node_ids = [
@@ -4066,9 +2865,12 @@ def build_context(
             query_embedding=faq_embedding,
             eligible_faq_node_ids=eligible_faq_node_ids, limit=64,
         )
-        selected_faq_row, faq_selection_method, faq_candidates = _select_faq_candidate(
-            interrogative_clause, faq_rows,
+        faq_candidates = _rank_faq_candidates(
+            interrogative_clause,
+            faq_rows,
+            context_hint=_faq_context_hint(messages),
         )
+        faq_selection_method = "ranked_candidates_for_model"
     branch_package_started = time.perf_counter()
     rows = supabase_client.search_graph_rag_v3(
         persona_id=str(persona["id"]), publication_id=publication["id"],
@@ -4087,25 +2889,30 @@ def build_context(
     )
     structural = branch_package.get("chunks") or []
     branch_package_ms = round((time.perf_counter() - branch_package_started) * 1000, 3)
-    selected_faq_chunk: dict[str, Any] | None = None
-    if selected_faq_row:
-        selected_faq_chunk = {
-            **selected_faq_row,
+    faq_rows_by_chunk = {
+        str(row.get("chunk_id") or row.get("id") or ""): row for row in faq_rows
+    }
+    ranked_faq_chunks = []
+    for candidate in faq_candidates[:RAG_FAQ_CHUNK_RESERVE]:
+        row = faq_rows_by_chunk.get(str(candidate.get("chunk_id") or ""))
+        if not row:
+            continue
+        chunk = {
+            **row,
             "source_node_id": str(
-                selected_faq_row.get("faq_node_id")
-                or selected_faq_row.get("source_node_id") or ""
+                row.get("faq_node_id") or row.get("source_node_id") or ""
             ),
             "chunk_kind": "faq",
-            "hybrid_score": float(selected_faq_row.get("faq_score") or 1),
+            "hybrid_score": float(row.get("faq_score") or 1),
         }
-        if not selected_faq_chunk.get("chunk_id") or not selected_faq_chunk.get("source_node_id"):
-            raise RuntimeError("selected FAQ evidence is missing its chunk or node identity")
+        if chunk.get("chunk_id") and chunk.get("source_node_id"):
+            ranked_faq_chunks.append(chunk)
     merged = {
         str(row.get("chunk_id") or row.get("id")): row
-        for row in [*rows, *structural, *([selected_faq_chunk] if selected_faq_chunk else [])]
+        for row in [*rows, *structural, *ranked_faq_chunks]
     }
     required_structural = _required_structural_chunks(structural)
-    reserved = [selected_faq_chunk] if selected_faq_chunk else []
+    reserved = ranked_faq_chunks
     reserved_ids = {
         str(row.get("chunk_id") or row.get("id")) for row in reserved
     }
@@ -4153,10 +2960,11 @@ def build_context(
         "invalidated_fact_keys": invalidated_fact_keys,
         "focus_derived_in_memory": focus_derived_in_memory,
         "common_contract": common_contract,
-        "pending_field": pending_field or None,
+        "pending_field": None,
+        "askable_fields": pending_fields,
+        "missing_fields": missing,
         "confirmation_templates": document.get("confirmation_templates") or {},
         "service_resolution_policy": document.get("service_resolution_policy") or {},
-        "no_journey_fallback_reply": _no_journey_fallback_reply(document),
         "post_sale_operation_route": _post_sale_route(document),
         "short_expected_answer": short_expected_answer,
         "pending_field_branch_resolution_suppressed": pending_field_answer,
@@ -4173,24 +2981,13 @@ def build_context(
                 None,
             )
         ),
-        # Reached only when the deterministic greeting turn did not return
-        # above, so any eligible greeting here is one that must be prefixed
-        # onto a model reply -- whether it named a service or asked a doubt.
-        "greeting_response": (
-            greeting_prefix.get("response") if greeting_prefix else None
-        ),
         "retrieval_branch_node_id": retrieval_branch,
         "interrogative_clause": interrogative_clause or None,
         "faq_candidates": faq_candidates,
-        "selected_faq_node_id": (
-            str(selected_faq_chunk.get("source_node_id")) if selected_faq_chunk else None
-        ),
-        "selected_faq_chunk_id": (
-            str(selected_faq_chunk.get("chunk_id") or selected_faq_chunk.get("id"))
-            if selected_faq_chunk else None
-        ),
+        "selected_faq_node_id": None,
+        "selected_faq_chunk_id": None,
         "faq_selection_method": faq_selection_method,
-        "faq_deferral_reason": faq_selection_method if interrogative_clause and not selected_faq_chunk else None,
+        "faq_deferral_reason": None,
         "branch_candidates": _evidenced_branch_candidates(candidates),
         "possible_switches": possible_switches,
         "journey_state": journey_state,
@@ -4252,8 +3049,8 @@ def build_context(
         journey_id=str(journey.get("id") or "") or None,
         journey_sequence=int(journey.get("sequence") or 1),
         journey_state=journey_state,
-        pending_field_key=str(pending_field.get("key") or "") or None,
-        pending_question_node_id=str(pending_field.get("question_node_id") or "") or None,
+        pending_field_key=None,
+        pending_question_node_id=None,
         last_handoff={
             "at": journey.get("handed_off_at"),
             "reason": (journey.get("metadata") or {}).get("handoff_reason")
@@ -4276,164 +3073,18 @@ def build_context(
     )
 
 
-def _deterministic_confirmation_decision(
-    context: ConversationContext,
-) -> tuple[ConversationDecision, AgentResponse] | None:
-    if str(context.operational_mode) != "confirmation":
-        return None
-    message = _latest_user_message(context)
-    if _is_explicit_confirmation(message):
-        reply = _completion_reply(context.graph_contract)
-        state = {
-            **context.cart,
-            "sdr_state": "handed_off",
-            "terminal_handoff": {
-                "intent": "qualification_confirmed",
-                "emitted": True,
-            },
-        }
-        proof = {
-            "valid": True,
-            "errors": [],
-            "mode": "deterministic_confirmation",
-            "explicit_confirmation": True,
-            "missing_fields": [],
-            "qualification_complete": True,
-            "qualification_incomplete": False,
-            "accepted_facts": [],
-            "confirmation_state": "qualified_confirmed",
-            "model_calls": 0,
-            # Every offering (service or product) active on this ledger just
-            # had its confirmation cycle accepted -- stamped 'completed' by
-            # commit_graph_turn_and_outbox_v3 (migration 128) so a later
-            # support turn about the same item never re-opens confirmation,
-            # while a genuinely new offering added afterward still can.
-            "confirmed_branch_node_ids": list(dict.fromkeys([
-                *([context.active_branch_node_id] if context.active_branch_node_id else []),
-                *context.active_branch_node_ids,
-            ])),
-        }
-        return (
-            ConversationDecision(
-                classifier="graph_confirmation_v1",
-                intent="qualification_confirmed",
-                route=ConversationRoute.HUMAN,
-                confidence=1,
-                lead_stage="qualificado",
-                handoff_reason="graph_qualification_confirmed",
-            ),
-            AgentResponse(
-                reply_text=reply,
-                role=ConversationRoute.HUMAN,
-                cart_state=state,
-                handoff_required=True,
-                proof=proof,
-                token_usage={
-                    "model_calls": 0, "repair_calls": 0, "prompt_tokens": 0,
-                    "completion_tokens": 0, "total_tokens": 0,
-                },
-            ),
-        )
-    if _is_explicit_rejection(message):
-        state = {**context.cart, "sdr_state": "collecting"}
-        return (
-            ConversationDecision(
-                classifier="graph_confirmation_v1",
-                intent="qualification_correction_requested",
-                route=ConversationRoute.SDR,
-                confidence=1,
-                lead_stage=str(context.cart.get("_lead_stage") or "engajado"),
-            ),
-            AgentResponse(
-                reply_text=_correction_prompt(context.graph_contract),
-                role=ConversationRoute.SDR,
-                cart_state=state,
-                handoff_required=False,
-                proof={
-                    "valid": True,
-                    "errors": [],
-                    "mode": "deterministic_confirmation_rejection",
-                    "explicit_confirmation": False,
-                    "missing_fields": [],
-                    "accepted_facts": [],
-                    "confirmation_state": "correction_requested",
-                    "model_calls": 0,
-                },
-                token_usage={
-                    "model_calls": 0, "repair_calls": 0, "prompt_tokens": 0,
-                    "completion_tokens": 0, "total_tokens": 0,
-                },
-            ),
-        )
-    return None
 
 
-def _restates_pending_candidate(message: str, fact: dict[str, Any]) -> bool:
-    """The customer repeating the value is confirming it.
-
-    Asking "Allan Rodrigues is your full name?" and getting "allan
-    rodrigues" back is agreement in any human reading of the exchange. The
-    runtime used to accept only a short list of literal confirmation
-    phrases, so a customer restating the exact value read as a non-answer
-    and the same question came back turn after turn.
-    """
-    confirmation = (fact.get("metadata") or {}).get("confirmation") or {}
-    candidate = _normalized_phrase(
-        confirmation.get("candidate_title") or confirmation.get("candidate")
-    )
-    if not candidate:
-        return False
-    normalized = _normalized_phrase(message)
-    return normalized == candidate or any(
-        normalized == f"{token} {candidate}" for token in _EXPLICIT_CONFIRMATIONS
-    )
 
 
-def _pending_confirmation_fact(context: ConversationContext) -> dict[str, Any] | None:
-    for rows in (context.cart.get("facts_by_key") or {}).values():
-        for fact in rows if isinstance(rows, list) else []:
-            confirmation = (fact.get("metadata") or {}).get("confirmation")
-            if fact.get("status") == "needs_confirmation" and isinstance(confirmation, dict):
-                return fact
-    return None
 
 
-def _service_clarification_policy(document: dict[str, Any]) -> dict[str, Any]:
-    persona = _persona_node(document) or {}
-    conversation_policy = ((persona.get("data") or {}).get("conversation_policy") or {})
-    return dict(conversation_policy.get("service_clarification") or {})
 
 
-def _render_service_clarification(
-    document: dict[str, Any], key: str, *, candidate: str = "",
-    service_titles: Sequence[str] = (),
-) -> str:
-    template = str(_service_clarification_policy(document).get(key) or "").strip()
-    if not template:
-        raise RuntimeError(f"published graph missing service clarification text: {key}")
-    return (
-        template.replace("{candidate}", candidate)
-        .replace("{services}", ", ".join(service_titles))
-    ).strip()
 
 
-def _service_titles(document: dict[str, Any], branch_ids: Sequence[str]) -> list[str]:
-    nodes = document.get("node_by_id") or {}
-    return [
-        str((nodes.get(branch_id) or {}).get("title") or branch_id)
-        for branch_id in dict.fromkeys(str(value) for value in branch_ids if value)
-    ]
 
 
-def _service_request_summary(
-    document: dict[str, Any], branch_ids: Sequence[str],
-) -> str:
-    titles = _service_titles(document, branch_ids)
-    if not titles:
-        return ""
-    policy = _service_clarification_policy(document)
-    template = str(policy.get("summary_template") or "").strip()
-    return template.replace("{services}", ", ".join(titles)).strip() if template else ""
 
 
 def _turn_publication(context: ConversationContext) -> dict[str, Any]:
@@ -4462,165 +3113,8 @@ def _turn_publication(context: ConversationContext) -> dict[str, Any]:
     return publication
 
 
-def _deterministic_pending_service_clarification(
-    context: ConversationContext,
-) -> tuple[ConversationDecision, AgentResponse] | None:
-    """Advance the graph-owned add/switch ambiguity ladder without a model.
-
-    The pending fact is the ledger: candidate, proposed operation and attempt
-    count all live in its metadata, so retries and resume remain idempotent and
-    no schema change is needed.
-    """
-    pending = _pending_confirmation_fact(context)
-    if not pending:
-        return None
-    confirmation = dict((pending.get("metadata") or {}).get("confirmation") or {})
-    if (
-        _confirmation_capability(confirmation) not in {"service", "branch_selector"}
-        or not confirmation.get("operation_ambiguous")
-    ):
-        return None
-    message = _latest_user_message(context)
-    current_candidate = str(confirmation.get("branch_anchor_node_id") or "")
-    current_resolution = context.retrieval_trace.get("service_resolution") or {}
-    new_candidate = str(
-        ((current_resolution.get("candidate") or {}).get("branch_anchor_node_id")) or ""
-    )
-    if new_candidate and new_candidate != current_candidate:
-        return None
-    if (
-        _is_explicit_confirmation(message)
-        or _is_explicit_rejection(message)
-        or _restates_pending_candidate(message, pending)
-        or _ADDITIVE_SERVICE_MARKER.search(message or "")
-        or _SERVICE_CHANGE_MARKER.search(message or "")
-        or _SERVICE_DROP_MARKER.search(message or "")
-    ):
-        return None
-
-    publication = _turn_publication(context)
-    if (
-        str(publication.get("id") or "") != str(context.publication_id or "")
-        or str(publication.get("checksum") or "") != str(context.graph_checksum)
-    ):
-        raise RuntimeError("GraphRAG publication changed during service clarification")
-    document = publication.get("document_json") or {}
-    attempts = int(confirmation.get("attempts") or 1)
-    candidate_title = str(
-        confirmation.get("candidate_title") or confirmation.get("candidate") or ""
-    )
-    possible = _service_titles(
-        document,
-        [*context.active_branch_node_ids, current_candidate],
-    )
-    if attempts >= 2:
-        reply = _render_service_clarification(
-            document, "handoff_message", candidate=candidate_title,
-            service_titles=possible,
-        )
-        proof = {
-            "valid": True, "errors": [],
-            "mode": "deterministic_service_clarification_handoff",
-            "accepted_facts": [], "missing_fields": [],
-            "pending_confirmation": confirmation,
-            "clarification_attempts": attempts,
-            "possible_service_node_ids": list(dict.fromkeys([
-                *context.active_branch_node_ids, current_candidate,
-            ])),
-            "confirmation_state": "clarification_handoff",
-            "model_calls": 0,
-        }
-        return (
-            ConversationDecision(
-                classifier="graph_service_clarification_v1",
-                intent="service_clarification_exhausted",
-                route=ConversationRoute.HUMAN, confidence=1,
-                lead_stage="engajado", handoff_reason="service_clarification_exhausted",
-            ),
-            AgentResponse(
-                reply_text=reply, role=ConversationRoute.HUMAN,
-                cart_state={**context.cart, "sdr_state": "handed_off"},
-                handoff_required=True, proof=proof,
-                token_usage={"model_calls": 0, "repair_calls": 0},
-            ),
-        )
-
-    next_confirmation = {**confirmation, "attempts": attempts + 1}
-    next_fact = {
-        **pending,
-        "source_message_id": _source_message_id(context.messages),
-        "evidence_span": message.strip(),
-        "metadata": {
-            **dict(pending.get("metadata") or {}),
-            "confirmation": next_confirmation,
-        },
-    }
-    grouped = {
-        str(key): list(values)
-        for key, values in (context.cart.get("facts_by_key") or {}).items()
-    }
-    key = str(next_fact.get("field_key") or "")
-    owner = str(next_fact.get("owner_node_id") or "")
-    grouped[key] = [
-        fact for fact in grouped.get(key, [])
-        if str(fact.get("owner_node_id") or "") != owner
-    ] + [next_fact]
-    reply = _render_service_clarification(
-        document, "retry_question", candidate=candidate_title,
-        service_titles=possible,
-    )
-    proof = {
-        "valid": True, "errors": [],
-        "mode": "deterministic_service_clarification_retry",
-        "accepted_facts": [next_fact], "missing_fields": [key],
-        "pending_confirmation": next_confirmation,
-        "clarification_attempts": attempts + 1,
-        "confirmation_state": "field_confirmation",
-        "model_calls": 0,
-    }
-    return (
-        ConversationDecision(
-            classifier="graph_service_clarification_v1",
-            intent="service_clarification_retry",
-            route=ConversationRoute.SDR, confidence=1, lead_stage="engajado",
-        ),
-        AgentResponse(
-            reply_text=reply, role=ConversationRoute.SDR,
-            cart_state={**context.cart, "facts_by_key": grouped},
-            handoff_required=False, proof=proof,
-            token_usage={"model_calls": 0, "repair_calls": 0},
-        ),
-    )
 
 
-def _confirmation_prompt_for_fact(
-    document: dict[str, Any], fact: dict[str, Any],
-    active_branch_node_ids: list[str],
-    recent_replies: Sequence[str] = (),
-) -> tuple[str, dict[str, Any]]:
-    """Render only graph-published copy for one persisted candidate."""
-    confirmation = dict((fact.get("metadata") or {}).get("confirmation") or {})
-    capability = _confirmation_capability(confirmation)
-    if capability in {"name", "common_fact"}:
-        return _confirmation_template(
-            document, str(
-                confirmation.get("template_key")
-                or ("name" if capability == "name" else "fact")
-            ),
-            candidate=str(confirmation.get("candidate") or ""),
-            recent_replies=recent_replies,
-        ), confirmation
-    if capability in {"service", "branch_selector"}:
-        return _confirmation_template(
-            document,
-            _service_candidate_template_key(confirmation, active_branch_node_ids),
-            candidate=str(
-                confirmation.get("candidate_title")
-                or confirmation.get("candidate") or ""
-            ),
-            recent_replies=recent_replies,
-        ), confirmation
-    raise RuntimeError("unsupported persisted confirmation candidate")
 
 
 def _confirmation_capability(confirmation: dict[str, Any]) -> str:
@@ -4629,378 +3123,8 @@ def _confirmation_capability(confirmation: dict[str, Any]) -> str:
     )
 
 
-def _aggregate_confirmation_state(
-    document: dict[str, Any], active: list[str], grouped: dict[str, list[dict[str, Any]]],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int, dict[str, Any]]:
-    if active:
-        missing = graph_proof_checker_v3.aggregate_missing_fields(
-            document.get("branch_contracts") or {}, active, grouped,
-        )
-        askable = graph_proof_checker_v3.aggregate_askable_fields(
-            document.get("branch_contracts") or {}, active, grouped,
-        )
-        required = graph_proof_checker_v3.aggregate_required_field_count(
-            document.get("branch_contracts") or {}, active, grouped,
-        )
-        question_contract = next(
-            (
-                contract for contract in (document.get("branch_contracts") or {}).values()
-                if any(
-                    field.get("question_node_id") == (askable[0].get("question_node_id") if askable else None)
-                    for field in contract.get("fields") or []
-                )
-            ),
-            (document.get("branch_contracts") or {}).get(active[-1]) or {},
-        )
-        return missing, askable, required, question_contract
-    contract = document.get("common_contract") or {}
-    scoped = _facts_for_contract(contract, grouped)
-    return (
-        graph_proof_checker_v3.pending_fields(contract, scoped),
-        graph_proof_checker_v3.askable_pending_fields(contract, scoped),
-        graph_proof_checker_v3.required_field_count(contract, scoped),
-        contract,
-    )
 
 
-def _deterministic_pending_fact_confirmation(
-    context: ConversationContext,
-) -> tuple[ConversationDecision, AgentResponse] | None:
-    pending = _pending_confirmation_fact(context)
-    message = _latest_user_message(context)
-    pending_confirmation = (
-        ((pending or {}).get("metadata") or {}).get("confirmation") or {}
-    )
-    pending_anchor = str(pending_confirmation.get("branch_anchor_node_id") or "")
-    rejected_confirmation = bool(
-        _is_explicit_rejection(message)
-        or (
-            pending
-            and pending_confirmation.get("operation_ambiguous")
-            and _SERVICE_DROP_MARKER.search(message or "")
-            and pending_anchor not in set(context.active_branch_node_ids)
-        )
-    )
-    accepted_confirmation = bool(
-        not rejected_confirmation
-        and (
-            _is_explicit_confirmation(message)
-            or (pending and _restates_pending_candidate(message, pending))
-            or bool(
-                pending
-                and _confirmation_capability(
-                    ((pending.get("metadata") or {}).get("confirmation") or {})
-                ) in {"service", "branch_selector"}
-                and (
-                    _ADDITIVE_SERVICE_MARKER.search(message or "")
-                    or _SERVICE_CHANGE_MARKER.search(message or "")
-                    or _SERVICE_DROP_MARKER.search(message or "")
-                )
-            )
-        )
-    )
-    if not pending or not (accepted_confirmation or rejected_confirmation):
-        return None
-
-    publication = _turn_publication(context)
-    if (
-        str(publication.get("id") or "") != str(context.publication_id or "")
-        or str(publication.get("checksum") or "") != str(context.graph_checksum)
-    ):
-        raise RuntimeError("GraphRAG publication changed during pending confirmation")
-    document = publication.get("document_json") or {}
-    confirmation = dict((pending.get("metadata") or {}).get("confirmation") or {})
-    capability = _confirmation_capability(confirmation)
-    selection_key = branch_selection_field_key(document)
-    source_message_id = _source_message_id(context.messages)
-    grouped = {
-        str(key): list(values)
-        for key, values in (context.cart.get("facts_by_key") or {}).items()
-    }
-    previous_active = list(dict.fromkeys([
-        *([context.active_branch_node_id] if context.active_branch_node_id else []),
-        *context.active_branch_node_ids,
-    ]))
-    active = list(previous_active)
-    focus = context.active_branch_node_id
-    accepted_facts: list[dict[str, Any]] = []
-    operations: list[dict[str, Any]] = []
-    consumed_spans: list[dict[str, Any]] = []
-
-    def replace_fact(fact: dict[str, Any]) -> None:
-        key = str(fact.get("field_key") or "")
-        owner = str(fact.get("owner_node_id") or "")
-        grouped[key] = [
-            current for current in grouped.get(key, [])
-            if str(current.get("owner_node_id") or "") != owner
-        ] + [fact]
-        accepted_facts.append(fact)
-
-    if capability in {"name", "common_fact"}:
-        fact = {
-            "field_key": str(confirmation.get("field_key") or pending.get("field_key") or ""),
-            "owner_node_id": str(confirmation.get("owner_node_id") or pending.get("owner_node_id") or ""),
-            "status": "known" if accepted_confirmation else "invalid",
-            "value": str(confirmation.get("candidate") or "") if accepted_confirmation else None,
-            "source_message_id": source_message_id,
-            "evidence_span": message.strip(),
-            "confidence": 1.0,
-            "metadata": {
-                "confirmation": {
-                    **confirmation,
-                    "transition": "confirmed" if accepted_confirmation else "rejected",
-                    "confirmed_by_message_id": source_message_id,
-                },
-            },
-        }
-        replace_fact(fact)
-    elif capability in {"service", "branch_selector"}:
-        anchor = str(confirmation.get("branch_anchor_node_id") or pending.get("owner_node_id") or "")
-        action = str(confirmation.get("action") or "add")
-        if accepted_confirmation:
-            if _SERVICE_DROP_MARKER.search(message or ""):
-                action = "drop"
-            elif _SERVICE_CHANGE_MARKER.search(message or ""):
-                action = "switch"
-            elif _ADDITIVE_SERVICE_MARKER.search(message or ""):
-                action = "add"
-            if action == "add" and anchor in active:
-                action = "keep"
-            replace_anchor = str(
-                confirmation.get("replace_branch_node_id")
-                or (focus if action == "switch" else "") or ""
-            )
-
-            def confirmed_operation(operation_action: str, operation_anchor: str) -> dict[str, Any]:
-                return {
-                    "action": operation_action,
-                    "branch_anchor_node_id": operation_anchor,
-                    "branch_path_checksum": str(
-                        ((document.get("coordinates") or {}).get(operation_anchor) or {})
-                        .get("path_checksum") or ""
-                    ),
-                    "evidence_span": message.strip(),
-                    "evidence_type": "confirmed_candidate",
-                    "resolution_method": str(
-                        confirmation.get("method") or "confirmed_candidate"
-                    ),
-                    "score": confirmation.get("score"),
-                    "margin": confirmation.get("margin"),
-                }
-
-            if action == "switch":
-                if not replace_anchor or replace_anchor not in active:
-                    raise RuntimeError("confirmed service switch has stale previous focus")
-                operations = [
-                    confirmed_operation("drop", replace_anchor),
-                    confirmed_operation("add", anchor),
-                ]
-            else:
-                operations = [confirmed_operation(action, anchor)]
-            consumed_spans = [
-                {
-                    "text": message.strip(), "start": 0, "end": len(message.strip()),
-                    "branch_anchor_node_id": operation["branch_anchor_node_id"],
-                    "evidence_type": "confirmed_candidate",
-                }
-                for operation in operations
-            ]
-            service_proof = graph_proof_checker_v3.check_service_operations(
-                document=document,
-                message=message,
-                operations=operations,
-                active_branch_node_ids=active,
-                consumed_service_spans=consumed_spans,
-            )
-            if not service_proof["valid"]:
-                raise RuntimeError("confirmed service candidate failed backend proof")
-            active = list(service_proof["next_active_branch_node_ids"])
-            focus = anchor if action in {"add", "keep", "switch"} else (
-                active[-1] if active else None
-            )
-            if action in {"add", "keep", "switch"}:
-                if action == "switch":
-                    replace_fact({
-                        "field_key": selection_key, "owner_node_id": replace_anchor,
-                        "status": "invalid", "value": None,
-                        "source_message_id": source_message_id,
-                        "evidence_span": message.strip(), "confidence": 1.0,
-                        "metadata": {"confirmation": {
-                            **confirmation, "transition": "confirmed_switch_drop",
-                        }},
-                    })
-                node = (document.get("node_by_id") or {}).get(anchor) or {}
-                replace_fact({
-                    "field_key": selection_key, "owner_node_id": anchor,
-                    "status": "known",
-                    "value": str(node.get("slug") or node.get("title") or anchor),
-                    "source_message_id": source_message_id,
-                    "evidence_span": message.strip(), "confidence": 1.0,
-                    "metadata": {
-                        "source": "service_confirmation",
-                        "confirmation": {**confirmation, "transition": "confirmed"},
-                    },
-                })
-            else:
-                replace_fact({
-                    "field_key": selection_key, "owner_node_id": anchor,
-                    "status": "invalid", "value": None,
-                    "source_message_id": source_message_id,
-                    "evidence_span": message.strip(), "confidence": 1.0,
-                    "metadata": {"confirmation": {**confirmation, "transition": "confirmed_removal"}},
-                })
-        else:
-            previous_fact = confirmation.get("previous_fact")
-            if isinstance(previous_fact, dict) and previous_fact.get("status") == "known":
-                replace_fact({
-                    **previous_fact,
-                    "field_key": selection_key, "owner_node_id": anchor,
-                    "source_message_id": source_message_id,
-                    "evidence_span": message.strip(), "confidence": 1.0,
-                    "metadata": {
-                        **(previous_fact.get("metadata") or {}),
-                        "confirmation": {**confirmation, "transition": "rejected"},
-                    },
-                })
-            else:
-                replace_fact({
-                    "field_key": selection_key, "owner_node_id": anchor,
-                    "status": "invalid", "value": None,
-                    "source_message_id": source_message_id,
-                    "evidence_span": message.strip(), "confidence": 1.0,
-                    "metadata": {"confirmation": {**confirmation, "transition": "rejected"}},
-                })
-    else:
-        return None
-
-    remaining_pending = next(
-        (
-            fact
-            for rows in grouped.values()
-            for fact in rows
-            if fact.get("status") == "needs_confirmation"
-            and isinstance((fact.get("metadata") or {}).get("confirmation"), dict)
-        ),
-        None,
-    )
-    next_confirmation: dict[str, Any] = {}
-
-    missing, askable, required_count, question_contract = _aggregate_confirmation_state(
-        document, active, grouped,
-    )
-    next_question_id = str((askable[0] if askable else {}).get("question_node_id") or "") or None
-    if rejected_confirmation:
-        if capability in {"name", "common_fact"}:
-            next_question_id = str(
-                next(
-                    (
-                        field.get("question_node_id")
-                        for field in (document.get("common_contract") or {}).get("fields") or []
-                        if str(field.get("key") or "") == str(pending.get("field_key") or "")
-                    ),
-                    "",
-                ) or ""
-            ) or None
-            question_contract = document.get("common_contract") or question_contract
-        else:
-            selection_field = _service_selection_field(document.get("common_contract") or {})
-            next_question_id = str((selection_field or {}).get("question_node_id") or "") or None
-            question_contract = document.get("common_contract") or question_contract
-    complete = bool(active and not missing and not remaining_pending)
-    final_confirmation_pending = complete and accepted_confirmation
-    if remaining_pending:
-        reply, next_confirmation = _confirmation_prompt_for_fact(
-            document, remaining_pending, active,
-            _assistant_replies(context.messages),
-        )
-        next_question_id = None
-    elif final_confirmation_pending:
-        reply = _terminal_reply(
-            document=document,
-            contract=(document.get("branch_contracts") or {}).get(focus) or question_contract,
-            active_branch_ids=active,
-            facts_by_key=grouped,
-            missing_fields=[],
-            qualification_complete=True,
-        )
-    else:
-        reply = graph_proof_checker_v3.compose_published_question(
-            reply="", next_question_node_id=next_question_id, contract=question_contract,
-        )
-    if operations:
-        summary = _service_request_summary(document, active)
-        if summary and _normalized_phrase(summary) not in _normalized_phrase(reply):
-            reply = "\n\n".join(part for part in (summary, reply) if part)
-    asked = list(context.cart.get("asked_question_node_ids") or [])
-    if next_question_id:
-        asked.append(next_question_id)
-    projection = (
-        (document.get("branch_contracts") or {}).get(focus)
-        or document.get("common_contract") or {}
-    )
-    state = {
-        **context.cart,
-        "facts": _facts_for_contract(projection, grouped),
-        "facts_by_key": grouped,
-        "active_branch_node_id": focus,
-        "active_branch_node_ids": active,
-        "asked_question_node_ids": asked,
-        "sdr_state": "awaiting_confirmation" if final_confirmation_pending else "collecting",
-    }
-    proof = {
-        "valid": True, "errors": [], "mode": "deterministic_field_confirmation",
-        "explicit_confirmation": False,
-        "field_confirmation_transition": "confirmed" if accepted_confirmation else "rejected",
-        "resolved_confirmation": confirmation,
-        "pending_confirmation": next_confirmation or None,
-        "accepted_facts": accepted_facts,
-        "missing_fields": [str(field.get("key") or "") for field in missing],
-        "required_field_count": required_count,
-        "next_question_node_id": next_question_id,
-        "qualification_complete": complete,
-        "collection_complete": complete,
-        "confirmation_state": (
-            "field_confirmation" if remaining_pending
-            else "awaiting_confirmation" if final_confirmation_pending
-            else "collecting"
-        ),
-        "service_operations": operations,
-        "applied_service_operations": operations,
-        "service_operation_proof": (
-            graph_proof_checker_v3.check_service_operations(
-                document=document, message=message, operations=operations,
-                active_branch_node_ids=previous_active,
-                consumed_service_spans=consumed_spans,
-            ) if operations else {"valid": True, "errors": [], "operations": []}
-        ),
-        "consumed_service_spans": consumed_spans,
-        "previous_active_branch_node_ids": previous_active,
-        "next_active_branch_node_ids": active,
-        "previous_active_branch_node_id": context.active_branch_node_id,
-        "next_active_branch_node_id": focus,
-        "branch_focus_invariant": (not active and focus is None) or focus in set(active),
-        "model_calls": 0,
-    }
-    return (
-        ConversationDecision(
-            classifier="graph_field_confirmation_v1",
-            intent="field_confirmation_resolved",
-            route=ConversationRoute.SDR,
-            confidence=1,
-            lead_stage="engajado",
-        ),
-        AgentResponse(
-            reply_text=reply or None,
-            role=ConversationRoute.SDR,
-            cart_state=state,
-            handoff_required=False,
-            proof=proof,
-            token_usage={
-                "model_calls": 0, "repair_calls": 0, "prompt_tokens": 0,
-                "completion_tokens": 0, "total_tokens": 0,
-            },
-        ),
-    )
 
 
 def _with_structural_proof_audit(
@@ -5141,24 +3265,6 @@ def _resolve_journey_action(
     return JourneyAction.CONTINUE
 
 
-def _no_journey_reply(context: ConversationContext, response: AgentResponse) -> str:
-    proved_doubt = (
-        response.proof.get("text")
-        if response.proof.get("doubt_resolution") == "answered" else None
-    )
-    candidates = [proved_doubt]
-    if response.proof.get("valid"):
-        candidates.extend([
-            _statements_only(response.proposal.reply) if response.proposal else None,
-            _statements_only(str(response.reply_text or "")),
-        ])
-    candidates.append(context.retrieval_trace.get("no_journey_fallback_reply"))
-    reply = next((str(value).strip() for value in candidates if str(value or "").strip()), "")
-    if not reply:
-        raise RuntimeError("published graph missing no-journey fallback reply")
-    return reply
-
-
 def _without_journey_mutation(
     context: ConversationContext,
     decision: ConversationDecision,
@@ -5182,15 +3288,14 @@ def _without_journey_mutation(
         "handoff_requested": False,
     }) if response.proposal else None
     response = response.model_copy(update={
-        "reply_text": _no_journey_reply(context, response),
         "cart_state": dict(context.cart),
         "handoff_required": False,
         "proposal": proposal,
         "proof": {
             **response.proof,
             "model_proposal_errors": response.proof.get("errors") or [],
-            "valid": True, "errors": [], "fallback_used": True,
-            "fallback_applied": "no_journey_policy_v4",
+            "valid": True, "errors": [], "fallback_used": False,
+            "reply_policy": "model_owned_no_journey",
             "accepted_facts": [], "missing_fields": [],
             "next_question_node_id": None, "qualification_complete": False,
             "confirmation_state": "no_journey",
@@ -5245,12 +3350,6 @@ def _apply_journey_policy(
         or response.proof.get("mode") == "contract_probe"
     ):
         return decision, response
-    deterministic_intent = str(
-        context.retrieval_trace.get("deterministic_intent") or ""
-    ).strip()
-    deterministic_classifier = decision.classifier
-    deterministic_cart_state = response.cart_state
-    deterministic_confirmation_state = response.proof.get("confirmation_state")
     kind, evidence_span, confidence = _interaction_observation(
         context, model_observation,
     )
@@ -5265,38 +3364,12 @@ def _apply_journey_policy(
         )
         rejected_components.extend(rejected)
         accepted_components.append({"component": "reply", "policy": "no_journey"})
-    # A graph-owned deterministic decision is already stronger evidence than
-    # the model interaction observation. In particular, a greeting after a
-    # terminal journey legitimately uses journey_action=none, but the generic
-    # no-journey policy used to overwrite only final_decision.intent with
-    # ``unclear``. The proof still said deterministic_greeting/greeting, so
-    # the durable envelope contradicted itself. Preserve the authoritative
-    # decision while still applying the no-journey mutation guard.
-    if deterministic_intent:
-        decision = decision.model_copy(update={
-            "classifier": deterministic_classifier,
-            "intent": deterministic_intent,
-        })
-        response = response.model_copy(update={
-            "cart_state": deterministic_cart_state,
-            "proof": {
-                **response.proof,
-                "confirmation_state": deterministic_confirmation_state,
-            },
-        })
-        interaction_observation = {
-            "kind": deterministic_intent,
-            "evidence_span": _latest_user_message(context),
-            "confidence": 1,
-            "authority": "deterministic_graph_policy",
-        }
-    else:
-        interaction_observation = {
-            "kind": kind.value,
-            "evidence_span": evidence_span,
-            "confidence": confidence,
-            "authority": "model_observation_backend_reconciled",
-        }
+    interaction_observation = {
+        "kind": kind.value,
+        "evidence_span": evidence_span,
+        "confidence": confidence,
+        "authority": "model_observation_backend_reconciled",
+    }
     proof = {
         **response.proof,
         "journey_action": action.value,
@@ -5341,14 +3414,11 @@ def _seed_profile_facts_for_open_journey(
 
 
 def decide(
-    context: ConversationContext, *, model_observation: dict[str, Any] | None
+    context: ConversationContext, *, model_observation: dict[str, Any]
 ) -> tuple[ConversationDecision, AgentResponse]:
-    deterministic = (
-        _deterministic_pending_service_clarification(context)
-        or _deterministic_pending_fact_confirmation(context)
-        or _deterministic_confirmation_decision(context)
-    )
-    decision, response = deterministic or _decide(
+    if not isinstance(model_observation, dict):
+        raise ValueError("model_observation is required for graph_agent_runtime_v3")
+    decision, response = _decide(
         context, model_observation=model_observation,
     )
     token_usage = (model_observation or {}).get("token_usage")
@@ -5395,9 +3465,33 @@ def decide(
                 },
             })
     audited = _with_structural_proof_audit(context, decision, response)
-    return _apply_journey_policy(
+    if (
+        response.reply_text is None
+        or response.proof.get("delivery_authorized") is False
+        or response.proof.get("repair_required") is True
+    ):
+        return decision, audited.model_copy(update={
+            "reply_text": None,
+            "proof": {
+                **audited.proof,
+                "model_reply_preserved": True,
+            },
+        })
+    final_decision, final_response = _apply_journey_policy(
         context, decision, audited, model_observation=model_observation,
     )
+    # Journey policy may adjust routing/state, but it does not own public
+    # language in agentic mode. Safety failures already return reply_text=None
+    # before this point; every non-empty grounded model reply stays byte exact.
+    if response.reply_text is not None:
+        final_response = final_response.model_copy(update={
+            "reply_text": response.reply_text,
+            "proof": {
+                **final_response.proof,
+                "model_reply_preserved": True,
+            },
+        })
+    return final_decision, final_response
 
 
 def _sanitize_untrusted_service_operations(raw: Any) -> Any:
@@ -5418,6 +3512,43 @@ def _sanitize_untrusted_service_operations(raw: Any) -> Any:
         or str(operation.get("evidence_span") or "").strip()
     ]
     return {**raw, "service_operations": operations}
+
+
+def _discard_invalid_structured_components(
+    raw: Any,
+) -> tuple[Any, list[str]]:
+    """Drop malformed ancillary components without touching ``reply``.
+
+    A malformed fact/claim/service observation is not permission to replace a
+    valid public answer. Each component is independently parsed; proof later
+    decides which surviving commercial claims are safe to publish.
+    """
+    if not isinstance(raw, dict):
+        return raw, []
+    result = dict(raw)
+    discarded: list[str] = []
+    component_models = {
+        "service_observations": ServiceObservation,
+        "service_operations": ServiceOperation,
+        "extracted_facts": ExtractedFact,
+        "claims": CommercialClaim,
+    }
+    for key, model in component_models.items():
+        value = result.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, list):
+            discarded.append(f"discarded_invalid_component:{key}")
+            result[key] = []
+            continue
+        accepted = []
+        for index, item in enumerate(value):
+            try:
+                accepted.append(model.model_validate(item).model_dump(mode="json"))
+            except ValidationError:
+                discarded.append(f"discarded_invalid_component:{key}:{index}")
+        result[key] = accepted
+    return result, discarded
 
 
 def _folded_with_origin(text: Any) -> tuple[str, list[int]]:
@@ -5669,103 +3800,14 @@ def _semantic_service_candidate(
     }, None
 
 
-def _confirmation_template(
-    document: dict[str, Any], key: str, *, candidate: str = "", options: str = "",
-    recent_replies: Sequence[str] = (),
-) -> str:
-    """Published confirmation copy, in a wording this conversation has not heard.
-
-    A persona may publish one string or a list of equivalent phrasings. The
-    list matters because a confirmation that comes back word for word is
-    exactly what a customer reads as a stuck agent -- and the repetition
-    guard, seeing a duplicate, would otherwise strip the question and leave
-    only the acknowledgement.
-    """
-    published = (document.get("confirmation_templates") or {}).get(key)
-    if published is None:
-        published = _service_clarification_policy(document).get(key)
-    variants = published if isinstance(published, list) else [published]
-    rendered = [
-        text.replace("{candidate}", candidate).replace("{options}", options)
-        for value in variants
-        if (text := str(value or "").strip())
-    ]
-    if not rendered:
-        raise RuntimeError(f"published graph missing confirmation template: {key}")
-    return _unrepeated_variant(rendered, recent_replies) or rendered[0]
 
 
-def _service_candidate_template_key(
-    candidate: dict[str, Any], active_branch_node_ids: list[str],
-) -> str:
-    if candidate.get("operation_ambiguous") and active_branch_node_ids:
-        return "add_or_switch_question"
-    action = str(candidate.get("action") or "add")
-    if action == "drop":
-        return "service_removal"
-    if action == "switch":
-        return "service_switch"
-    if action == "keep":
-        return "service_selection"
-    if active_branch_node_ids:
-        return "service_addition"
-    return "service_selection"
 
 
 def _decide(
-    context: ConversationContext, *, model_observation: dict[str, Any] | None
+    context: ConversationContext, *, model_observation: dict[str, Any]
 ) -> tuple[ConversationDecision, AgentResponse]:
-    observation = model_observation or {}
-    if context.retrieval_trace.get("deterministic_intent") == "greeting":
-        question_id = context.retrieval_trace.get("next_question_node_id")
-        greeting_node_id = context.retrieval_trace.get("greeting_response_node_id")
-        evidence_node_ids = list(dict.fromkeys(
-            node_id for node_id in (greeting_node_id, question_id) if node_id
-        ))
-        asked = list(context.cart.get("asked_question_node_ids") or [])
-        if question_id and question_id not in asked:
-            asked.append(question_id)
-        state = {
-            **context.cart,
-            "asked_question_node_ids": asked,
-            "active_branch_node_id": context.active_branch_node_id,
-            "active_branch_node_ids": list(context.active_branch_node_ids),
-            "sdr_state": (
-                "handed_off"
-                if str(context.operational_mode) == "post_qualification_support"
-                else str(context.journey_state)
-            ),
-        }
-        proof = {
-            "valid": True,
-            "errors": [],
-            "mode": "deterministic_greeting",
-            "accepted_facts": [],
-            "missing_fields": context.retrieval_trace.get("missing_fields") or [],
-            "asked_field_key": context.retrieval_trace.get("asked_field_key"),
-            "model_calls": 0,
-            "confirmation_state": (
-                "post_qualification_support"
-                if str(context.operational_mode) == "post_qualification_support"
-                else str(context.journey_state)
-            ),
-        }
-        return (
-            ConversationDecision(
-                classifier="graph_intent_v3", intent="greeting",
-                route=ConversationRoute.SDR, confidence=1,
-                lead_stage=str(context.cart.get("_lead_stage") or "novo"),
-                evidence_node_ids=evidence_node_ids,
-            ),
-            AgentResponse(
-                reply_text=str(context.retrieval_trace.get("deterministic_reply") or "") or None,
-                role=ConversationRoute.SDR,
-                evidence_node_ids=evidence_node_ids,
-                cart_state=state, handoff_required=False, proof=proof,
-                token_usage={"model_calls": 0, "repair_calls": 0, "prompt_tokens": 0,
-                             "completion_tokens": 0, "total_tokens": 0},
-            ),
-        )
+    observation = model_observation
     if observation.get("contract_probe") is True:
         return (
             ConversationDecision(classifier="graph_contract_probe_v3", intent="await_model_proposal",
@@ -5773,22 +3815,26 @@ def _decide(
             AgentResponse(reply_text=None, role=ConversationRoute.SDR, cart_state=context.cart,
                           proof={"valid": True, "mode": "contract_probe", "runtime_version": RUNTIME_VERSION}),
         )
-    if (
-        (context.retrieval_trace.get("service_resolution") or {}).get("status")
-        == "ambiguous"
-    ):
-        return _service_disambiguation_response(context)
     raw = observation.get("proposal") if isinstance(observation.get("proposal"), dict) else observation
     raw = _sanitize_untrusted_service_operations(raw)
+    raw, discarded_components = _discard_invalid_structured_components(raw)
     parse_errors = [str(value) for value in observation.get("proposal_parse_errors") or []]
     try:
         proposal = ConversationProposal.model_validate(raw)
     except ValidationError as exc:
         return _invalid_proposal_fallback(
-            context, raw, [*parse_errors, f"proposal_schema_invalid:{exc.errors(include_url=False)}"]
+            context,
+            raw,
+            [*parse_errors, f"proposal_schema_invalid:{exc.errors(include_url=False)}"],
+            repair_attempt=int(observation.get("repair_attempt") or 0),
         )
     if parse_errors:
-        return _invalid_proposal_fallback(context, raw, parse_errors)
+        return _invalid_proposal_fallback(
+            context,
+            raw,
+            parse_errors,
+            repair_attempt=int(observation.get("repair_attempt") or 0),
+        )
     publication = _turn_publication(context)
     if str(publication.get("id")) != str(context.publication_id) or publication.get("checksum") != context.graph_checksum:
         raise RuntimeError("GraphRAG publication changed during turn")
@@ -5834,6 +3880,23 @@ def _decide(
         _facts_for_contract(contract, grouped_facts)
         if grouped_facts else context.cart.get("facts") or {}
     )
+    asked_field_key = str(
+        ((observation.get("interpretation") or {}).get("asked_field_key") or "")
+        if isinstance(observation.get("interpretation"), dict)
+        else ""
+    )
+    if asked_field_key and not proposal.next_question_node_id:
+        authored_field = next(
+            (
+                field for field in contract.get("fields") or []
+                if str(field.get("key") or "") == asked_field_key
+            ),
+            None,
+        )
+        if authored_field and authored_field.get("question_node_id"):
+            proposal = proposal.model_copy(update={
+                "next_question_node_id": authored_field["question_node_id"],
+            })
     proposal = _normalize_referential_service_fact(proposal, context, document)
     proposal = _normalize_servico_owner(proposal, contract)
     proposal = _normalize_fact_source_message_ids(proposal, context)
@@ -5851,21 +3914,6 @@ def _decide(
         *consumed_field_validation,
         *invalid_field_validation,
     ]
-    proposal = _drop_premature_unknown_for_pending_question(
-        proposal,
-        context,
-        contract,
-        contract_facts,
-        max_attempts=_question_repetition_max_attempts(contract),
-    )
-    proposal = _reconcile_direct_answer_to_pending_field(
-        proposal, context, contract, contract_facts,
-    )
-    proposal = _normalize_premature_servico_requestion(proposal, contract, contract_facts)
-    proposal = _normalize_stale_next_question_after_branch_change(proposal, contract, contract_facts)
-    proposal = _normalize_next_question_to_first_missing(
-        proposal, contract, contract_facts,
-    )
     chunk_sources = {
         str(row.get("chunk_id") or row.get("id")): str(
             row.get("source_node_id") or row.get("source_graph_node_id") or ""
@@ -5875,28 +3923,6 @@ def _decide(
         str(chunk_id): str(source_id)
         for chunk_id, source_id in (observation.get("repair_context_chunk_sources") or {}).items()
     }
-    selected_faq_node_id = str(
-        context.retrieval_trace.get("selected_faq_node_id") or ""
-    )
-    selected_faq_chunk_id = str(
-        context.retrieval_trace.get("selected_faq_chunk_id") or ""
-    )
-    if selected_faq_node_id and selected_faq_chunk_id:
-        node_by_id = document.get("node_by_id") or {}
-        cited_nodes = [
-            node_id for node_id in proposal.cited_node_ids
-            if (node_by_id.get(node_id) or {}).get("node_type") != "faq"
-            or node_id == selected_faq_node_id
-        ]
-        cited_chunks = [
-            chunk_id for chunk_id in proposal.cited_chunk_ids
-            if (node_by_id.get(chunk_sources.get(chunk_id, "")) or {}).get("node_type") != "faq"
-            or chunk_id == selected_faq_chunk_id
-        ]
-        proposal = proposal.model_copy(update={
-            "cited_node_ids": list(dict.fromkeys([*cited_nodes, selected_faq_node_id])),
-            "cited_chunk_ids": list(dict.fromkeys([*cited_chunks, selected_faq_chunk_id])),
-        })
     if (
         proposal.branch_action.value == "switch"
         and context.active_branch_node_id
@@ -6003,62 +4029,12 @@ def _decide(
             *(proof.get("field_validation") or []),
             *rejected_field_validation,
         ],
+        "discarded_structured_components": discarded_components,
+        "quality_warnings": list(dict.fromkeys([
+            *(proof.get("quality_warnings") or []),
+            *discarded_components,
+        ])),
     })
-    package_node_ids = {card.id for card in context.context_cards} | {
-        str(value) for value in observation.get("repair_context_node_ids") or [] if value
-    } | persona_root_ids
-    doubt = _doubt_resolution(
-        context=context,
-        document=document,
-        proposal=proposal,
-        contract=contract,
-        chunk_sources=chunk_sources,
-        package_node_ids=package_node_ids,
-    )
-    if doubt:
-        original_errors = [str(error) for error in proof.get("errors") or []]
-        non_claim_errors = [
-            error for error in original_errors
-            if not error.startswith((
-                "claim_not_authorized:",
-                "claim_without_evidence:",
-                "claim_node_evidence_outside_package:",
-                "claim_chunk_evidence_outside_package:",
-                "claim_evidence_not_authorized:",
-            ))
-            and error != "keep_without_active_branch"
-        ]
-        if any(error.startswith("claim_") for error in original_errors) and not non_claim_errors:
-            # A factual FAQ may be perfectly grounded even when the model put
-            # an unauthorized claim type beside it. repair_requirements is
-            # always empty in this branch -- there's never anything to fetch,
-            # since the graph's own doubt resolution already computed the
-            # approved answer with zero model calls (doubt["text"]). This
-            # used to wait for a second model call (repair_attempt>=1,
-            # orchestrated outside Python by n8n) before resolving, returning
-            # reply_text=None in the meantime -- confirmed live 2026-08-18
-            # that round trip can simply not complete, leaving the customer
-            # with total silence despite the correct answer already being in
-            # hand. Resolve immediately with the graph-approved text instead;
-            # this is the exact same terminal state the code already forced
-            # on a hypothetical second attempt, just without the avoidable,
-            # silently-failure-prone round trip in between.
-            feedback = _doubt_policy_feedback(
-                doubt=doubt, errors=original_errors, contract=contract,
-                facts=contract_facts,
-            )
-            proof.update({
-                "valid": True,
-                "errors": [],
-                "repair_required": False,
-                "repair_requirements": [],
-                "policy_feedback": feedback,
-                "model_proposal_errors": original_errors,
-                "fallback_used": True,
-                "fallback_applied": "published_faq_immediate",
-                "model_attempts": 1,
-                **doubt,
-            })
     # An explicit switch/add is only a Phase-A decision on the first pass.
     # Force one directed Phase-B retrieval for the selected branch before
     # any reply or fact can be committed, even if an anchor snippet
@@ -6144,8 +4120,70 @@ def _decide(
         and str(entry.get("owner_node_id") or "") in non_focused_active
         for error in entry.get("errors") or []
     }
-    gating_errors = [error for error in proof.get("errors") or [] if error not in deferrable_errors]
-    proof_gates_turn = bool(gating_errors)
+    gating_errors = [
+        error for error in proof.get("gating_errors") or []
+        if error not in deferrable_errors
+    ]
+    metadata_errors = list(proof.get("metadata_errors") or [])
+    repairable_errors = list(dict.fromkeys([*gating_errors, *metadata_errors]))
+    if repairable_errors:
+        repair_attempt = int(observation.get("repair_attempt") or 0)
+        if repair_attempt < 1:
+            return (
+                ConversationDecision(
+                    classifier="graph_proof_checker_v3",
+                    intent="repair_retrieval",
+                    route=ConversationRoute.SDR,
+                    confidence=0,
+                    lead_stage=str(context.cart.get("_lead_stage") or "novo"),
+                ),
+                AgentResponse(
+                    reply_text=None,
+                    role=ConversationRoute.SDR,
+                    cart_state=context.cart,
+                    handoff_required=False,
+                    proposal=proposal,
+                    proof={
+                        **proof,
+                        "valid": False,
+                        "delivery_authorized": False,
+                        "repair_required": True,
+                        "repair_requirements": [{
+                            "kind": "model_metadata",
+                            "issue": error,
+                        } for error in repairable_errors],
+                        "fallback_used": False,
+                        "model_reply_preserved": True,
+                    },
+                ),
+            )
+        return (
+            ConversationDecision(
+                classifier="graph_proof_checker_v3",
+                intent="safety_handoff",
+                route=ConversationRoute.HUMAN,
+                confidence=0,
+                lead_stage=str(context.cart.get("_lead_stage") or "novo"),
+                handoff_reason="agentic_proof_failed_after_repair",
+            ),
+            AgentResponse(
+                reply_text=None,
+                role=ConversationRoute.HUMAN,
+                cart_state=context.cart,
+                handoff_required=True,
+                proposal=proposal,
+                proof={
+                    **proof,
+                    "valid": False,
+                    "delivery_authorized": False,
+                    "repair_required": False,
+                    "fallback_used": False,
+                    "model_reply_preserved": True,
+                    "handoff_observable": True,
+                },
+            ),
+        )
+    proof_gates_turn = False
     if not proof_gates_turn or discovery_only:
         if discovery_only:
             proof = {
@@ -6248,60 +4286,6 @@ def _decide(
             (str(fact.get("field_key") or ""), str(fact.get("owner_node_id") or "")): fact
             for fact in accepted_facts
         }.values())
-        pending_before = graph_proof_checker_v3.askable_pending_fields(
-            contract, contract_facts,
-        )
-        pending_before_field = pending_before[0] if pending_before else None
-        pending_before_key = str((pending_before_field or {}).get("key") or "")
-        pending_before_owner = str((pending_before_field or {}).get("owner_node_id") or "")
-        pending_answered = any(
-            str(fact.get("field_key") or "") == pending_before_key
-            and str(fact.get("owner_node_id") or "") == pending_before_owner
-            for fact in accepted_facts
-        )
-        residual_message = _message_without_consumed_services(
-            _latest_user_message(context),
-            context.retrieval_trace.get("service_resolution") or {},
-        )
-        rejected_pending = any(
-            str(item.get("field_key") or "") == pending_before_key
-            and str(item.get("owner_node_id") or "") == pending_before_owner
-            for item in rejected_field_validation
-        )
-        incompatible_pending = bool(
-            pending_before_field
-            and not pending_answered
-            and not doubt
-            and (
-                rejected_pending
-                or bool(service_operations and not residual_message)
-                or bool(residual_message and not _looks_like_customer_question(residual_message))
-            )
-        )
-        unanswered_fact = _unanswered_fact_after_question_limit(
-            context=context,
-            contract=contract,
-            ledger_facts=contract_facts,
-            proposal=proposal,
-            max_attempts=_question_repetition_max_attempts(contract),
-            # Only a doubt the graph actually answered. A deferred doubt gave
-            # the customer nothing, so it stays a spent attempt and the
-            # conversation still escalates to a human.
-            doubt_answered=bool(
-                doubt and str(doubt.get("doubt_resolution") or "") == "answered"
-            ),
-        )
-        if unanswered_fact:
-            accepted_facts = [
-                fact
-                for fact in accepted_facts
-                if not (
-                    str(fact.get("field_key") or "") == unanswered_fact["field_key"]
-                    and str(fact.get("owner_node_id") or "")
-                    == unanswered_fact["owner_node_id"]
-                )
-            ]
-            accepted_facts.append(unanswered_fact)
         next_grouped = {
             str(key): list(values) for key, values in grouped_facts.items()
         }
@@ -6362,9 +4346,15 @@ def _decide(
             *aggregate_missing,
             *_unknown_fields(active_fields, next_grouped),
         ])
-        next_question_id = next(
-            (field.get("question_node_id") for field in aggregate_askable if field.get("question_node_id")),
-            None,
+        askable_question_ids = {
+            str(field.get("question_node_id") or "")
+            for field in aggregate_askable
+            if field.get("question_node_id")
+        }
+        next_question_id = (
+            proposal.next_question_node_id
+            if str(proposal.next_question_node_id or "") in askable_question_ids
+            else None
         )
         question_contract = next(
             (
@@ -6396,36 +4386,11 @@ def _decide(
         )
         confirmation_pending = bool(qualification_complete and not post_support)
         terminal_intent = "qualification_incomplete" if qualification_incomplete else None
-        reply_seed = str((doubt or {}).get("text") or proposal.reply)
-        if model_proposed_service_operations != service_operations and not doubt:
-            # A rejected branch mutation invalidates the mutation, not the
-            # turn. Keep what the model actually said -- an answer, an
-            # acknowledgement, a useful observation -- and drop only the
-            # interrogative part, whose routing belongs to the graph.
-            reply_seed = _statements_only(reply_seed)
-        if incompatible_pending:
-            invalid_response = str(
-                (((pending_before_field or {}).get("validation") or {}).get("invalid_response"))
-                or _field_feedback(document, "invalid_fallback")
-            ).strip()
-            if unanswered_fact:
-                invalid_response = " ".join(
-                    part for part in (
-                        invalid_response,
-                        _field_feedback(document, "recorded_unknown"),
-                    ) if part
-                )
-            reply_seed = " ".join(
-                part for part in (reply_seed, invalid_response) if part
-            )
-        if (
-            not accepted_facts
-            and next_question_id
-            and not doubt
-            and not context.retrieval_trace.get("deterministic_branch_resolution")
-            and len(_latest_user_message(context).split()) <= 3
-        ):
-            reply_seed = ""
+        # Public language is model-owned in n8n_agents mode. Structured state
+        # may be accepted, discarded or repaired independently, but a valid
+        # grounded reply is never appended, summarized, normalized or swapped
+        # for graph-authored copy.
+        reply = proposal.reply
         pending_confirmation_fact = next(
             (
                 fact for fact in accepted_facts
@@ -6438,94 +4403,6 @@ def _decide(
             ((pending_confirmation_fact or {}).get("metadata") or {}).get("confirmation")
             or {}
         )
-        if pending_confirmation_fact:
-            confirmation_kind = str(field_confirmation.get("kind") or "")
-            already_said = _assistant_replies(context.messages)
-            if confirmation_kind == "name":
-                confirmation_text = _confirmation_template(
-                    document, "name",
-                    candidate=str(field_confirmation.get("candidate") or ""),
-                    recent_replies=already_said,
-                )
-            else:
-                confirmation_text = _confirmation_template(
-                    document,
-                    _service_candidate_template_key(service_candidate or {}, before_services),
-                    candidate=str(
-                        field_confirmation.get("candidate_title")
-                        or field_confirmation.get("candidate") or ""
-                    ),
-                    recent_replies=already_said,
-                )
-            # A confirmation candidate is the only authoritative outcome for
-            # this turn. Do not leak a model acknowledgement or a validation
-            # error for a different pending field into the confirmation copy.
-            #
-            # The published doubt answer is the exception: a customer who asks
-            # "como funciona o PPF?" names a service and raises a question in
-            # the same breath. Replacing the answer with the confirmation
-            # question leaves that customer with a question instead of an
-            # answer -- and when the same template was already sent, the
-            # duplicate suppression turns it into silence.
-            doubt_text = str((doubt or {}).get("text") or "").strip()
-            lead = [doubt_text]
-            if _confirmation_is_last_resort(contract, field_confirmation):
-                # `last_resort` lets the model's own statements lead too, so a
-                # turn that genuinely answered something never reaches the
-                # customer as a bare confirmation question.
-                lead.append(_statements_only(proposal.reply))
-            reply = " ".join(
-                part for part in (*lead, confirmation_text) if part
-            )
-            next_question_id = None
-            confirmation_pending = False
-            qualification_complete = False
-            qualification_incomplete = False
-            collection_complete = False
-            terminal_intent = None
-        elif terminal_intent or confirmation_pending:
-            natural_summary = ""
-            if confirmation_pending:
-                # Let the model write the qualification summary in its own
-                # words -- the published template is a fallback, not the
-                # only voice. Grounding guard: every collected value must
-                # actually appear in the model's text, or we fall back to
-                # the deterministic template unchanged.
-                collected = _collected_field_facts(
-                    document, active_branch_ids, contract, next_grouped,
-                )
-                candidate = str(proposal.reply or "").strip()
-                if candidate and graph_proof_checker_v3.validate_natural_summary(
-                    candidate, informed_values=[value for _, value in collected],
-                ):
-                    natural_summary = candidate
-            reply = natural_summary or _terminal_reply(
-                document=document,
-                contract=contract,
-                active_branch_ids=active_branch_ids,
-                facts_by_key=next_grouped,
-                missing_fields=terminal_unconfirmed,
-                qualification_complete=qualification_complete,
-            )
-        elif post_support:
-            reply = reply_seed
-        else:
-            reply = graph_proof_checker_v3.compose_published_question(
-                reply=reply_seed,
-                next_question_node_id=next_question_id,
-                contract=question_contract,
-            )
-        if service_operations and not pending_confirmation_fact:
-            summary = _service_request_summary(document, active_branch_ids)
-            if summary and _normalized_phrase(summary) not in _normalized_phrase(reply):
-                reply = "\n\n".join(part for part in (summary, reply) if part)
-        greeting_response = str(context.retrieval_trace.get("greeting_response") or "").strip()
-        if greeting_response and not _normalized_phrase(reply).startswith(
-            _normalized_phrase(greeting_response)
-        ):
-            reply = "\n\n".join(part for part in (greeting_response, reply) if part)
-        if unanswered_fact and not next_question_id and not terminal_intent:
-            reply = _statements_only(reply_seed)
         recent_replies = _assistant_replies(context.messages)
         question_text = str(
             ((question_contract.get("questions") or {}).get(next_question_id or "") or {}).get("text")
@@ -6547,82 +4424,69 @@ def _decide(
                 ((context.cart.get("terminal_handoff") or {}).get("intent") or "")
             ) or None,
         )
-        repetition_action = "allowed"
         if not repetition["passed"]:
-            # Quality gates still observe the semantic failure through proof,
-            # but production commits accepted facts and suppresses only the
-            # unsafe duplicate outbound.
-            terminal_duplicate = "terminal_repetition" in repetition["failures"]
-            # A repeated question is not a reason to say nothing at all. When
-            # the turn carried its own content -- a doubt answered, a service
-            # acknowledged -- withhold the duplicated ask and still deliver
-            # that content. Silence is reserved for a turn with nothing new,
-            # and a repeated terminal handoff genuinely has nothing new.
-            remainder = "" if terminal_duplicate else _statements_only(reply)
-            if remainder and any(
-                conversation_repetition.is_semantic_repetition(previous, remainder)
-                for previous in recent_replies
-            ):
-                remainder = ""
-            if terminal_duplicate:
-                reply = remainder
-                repetition_action = "suppressed_duplicate_terminal"
-            elif (laddered := _repetition_ladder(
-                reply=reply, recent_replies=recent_replies,
-                contract=question_contract, question_node_id=next_question_id,
-                prefix=remainder,
-            ))[0]:
-                # Dropping the duplicated ask used to drop the question with
-                # it, so a field the customer never answered was silently
-                # abandoned whenever the turn happened to carry other
-                # content. The ladder keeps that content as the prefix and
-                # re-asks in a wording this conversation has not heard.
-                reply, repetition_action = laddered
-            elif remainder:
-                reply = remainder
-                repetition_action = "suppressed_duplicate_question"
-            else:
-                # A repeated non-terminal question is still not a reason to
-                # say nothing: keep the original (un-suppressed) reply
-                # rather than go silent. Full silence stays reserved for a
-                # genuinely repeated terminal handoff, which has nothing
-                # new to say by definition.
-                repetition_action = "allowed_never_silent"
-
-        # And a collection turn never ends as a bare acknowledgement. The
-        # ladder's last rung emits only its prefix, which is how a suppressed
-        # confirmation reached the customer as "Entendi." and nothing else
-        # (live 2026-08-19): indistinguishable from a broken agent, with
-        # nothing to answer. While a field is still askable, the published
-        # question comes back instead.
-        # A doubt answered by the graph is content: that turn gave the customer
-        # something, and re-appending the ask it just suppressed would spend an
-        # emission the budget deliberately withheld.
-        if (
-            not terminal_intent
-            and not post_support
-            and not doubt
-            and aggregate_askable
-            and "?" not in reply
-        ):
-            recovery_question_id = next_question_id or next(
-                (
-                    field.get("question_node_id")
-                    for field in aggregate_askable
-                    if field.get("question_node_id")
+            repair_attempt = int(observation.get("repair_attempt") or 0)
+            if repair_attempt < 1:
+                return (
+                    ConversationDecision(
+                        classifier="graph_proof_checker_v3",
+                        intent="repair_retrieval",
+                        route=ConversationRoute.SDR,
+                        confidence=0,
+                        lead_stage=str(context.cart.get("_lead_stage") or "novo"),
+                    ),
+                    AgentResponse(
+                        reply_text=None,
+                        role=ConversationRoute.SDR,
+                        cart_state=context.cart,
+                        handoff_required=False,
+                        proposal=proposal,
+                        proof={
+                            **proof,
+                            "valid": False,
+                            "delivery_authorized": False,
+                            "repair_required": True,
+                            "repair_requirements": [{
+                                "kind": "model_reply",
+                                "issue": "semantic_repetition",
+                                "instruction": (
+                                    "Rewrite once without repeating a recent reply; "
+                                    "preserve every grounded fact."
+                                ),
+                            }],
+                            "repetition_audit": repetition,
+                            "fallback_used": False,
+                            "model_reply_preserved": True,
+                        },
+                    ),
+                )
+            return (
+                ConversationDecision(
+                    classifier="graph_proof_checker_v3",
+                    intent="repetition_handoff",
+                    route=ConversationRoute.HUMAN,
+                    confidence=0,
+                    lead_stage=str(context.cart.get("_lead_stage") or "novo"),
+                    handoff_reason="model_repetition_after_repair",
                 ),
-                None,
+                AgentResponse(
+                    reply_text=None,
+                    role=ConversationRoute.HUMAN,
+                    cart_state=context.cart,
+                    handoff_required=True,
+                    proposal=proposal,
+                    proof={
+                        **proof,
+                        "valid": False,
+                        "delivery_authorized": False,
+                        "repair_required": False,
+                        "repetition_audit": repetition,
+                        "fallback_used": False,
+                        "model_reply_preserved": True,
+                        "handoff_observable": True,
+                    },
+                ),
             )
-            recovered = graph_proof_checker_v3.compose_published_question(
-                reply=reply,
-                next_question_node_id=recovery_question_id,
-                contract=question_contract,
-            ).strip()
-            if recovered and recovered != reply.strip():
-                reply = recovered
-                next_question_id = recovery_question_id
-                repetition_action = "repaired_never_acknowledge_only"
-
         projection_contract = (
             (document.get("branch_contracts") or {}).get(committed_branch)
             or document.get("common_contract")
@@ -6709,12 +4573,14 @@ def _decide(
             ),
             "repetition_audit": repetition,
             "repetition_action": repetition_action,
-            "fallback_used": bool(proof.get("fallback_used")),
-            **(doubt or {}),
+            "fallback_used": False,
+            "delivery_authorized": True,
+            "model_reply_preserved": reply == proposal.reply,
+            "technical_pass": True,
+            "quality_pass": repetition["passed"],
         }
         evidence_node_ids = list(dict.fromkeys([
             *proposal.cited_node_ids,
-            *((doubt or {}).get("doubt_node_ids") or []),
         ]))
         return (
             ConversationDecision(classifier="graph_proof_checker_v3",
@@ -6727,210 +4593,12 @@ def _decide(
                           handoff_required=bool(terminal_intent),
                           proposal=proposal, proof=proof),
         )
-    # A rejected model proposal may only emit a graph-owned question or a
-    # graph-owned terminal summary. Routing remains deterministic.
-    proof_facts = (proof.get("ledger") or {}).get("facts") or contract_facts
-    fallback_askable = graph_proof_checker_v3.askable_pending_fields(
-        contract, proof_facts,
-    )
-    fallback_id = next(
-        (field.get("question_node_id") for field in fallback_askable if field.get("question_node_id")),
-        None,
-    )
-    fallback_missing = graph_proof_checker_v3.pending_fields(contract, proof_facts)
-
-    fallback_grouped = {
-        str(key): list(values)
-        for key, values in (context.cart.get("facts_by_key") or {}).items()
-    }
-    if not fallback_grouped:
-        for field in contract.get("fields") or []:
-            key = str(field.get("key") or "")
-            fact = proof_facts.get(key)
-            if key and fact:
-                fallback_grouped.setdefault(key, []).append(fact)
-    for fact in proof.get("accepted_facts") or []:
-        key = str(fact.get("field_key") or "")
-        owner = str(fact.get("owner_node_id") or "")
-        fallback_grouped[key] = [
-            current for current in fallback_grouped.get(key, [])
-            if str(current.get("owner_node_id") or "") != owner
-        ] + [fact]
-
-    fallback_unconfirmed = _dedupe_fields([
-        *fallback_missing,
-        *_unknown_fields(contract.get("fields") or [], fallback_grouped),
-    ])
-    fallback_complete = not fallback_unconfirmed
-    fallback_incomplete = bool(fallback_unconfirmed and not fallback_askable)
-
-    # Mirror the pending_branch_confirmation guard the accepted-proposal path
-    # uses above (search this file for that name): a rejected proposal must
-    # reopen confirmation for any active branch this ledger hasn't marked
-    # completed too, not just blank out to "" whenever the journey is
-    # already post_qualification_support for whatever was confirmed first.
-    # Confirmed live 2026-08-17/18: a customer's correction to a multi-
-    # service confirmation landed here (model proposal rejected, journey
-    # already post_qualification_support) and got zero outbound reply.
-    fallback_pending_branch_confirmation = bool(
-        set(context.active_branch_node_ids) - set(context.completed_branch_node_ids)
-    )
-    fallback_post_support = bool(
-        str(context.operational_mode) == "post_qualification_support"
-        and not _explicit_change_requested(_latest_user_message(context))
-        and not fallback_pending_branch_confirmation
-    )
-    fallback_confirmation_pending = fallback_complete and not fallback_post_support
-    fallback_terminal_intent = (
-        "qualification_incomplete" if fallback_incomplete else None
-    )
-    if fallback_terminal_intent or fallback_confirmation_pending:
-        fallback = _terminal_reply(
-            document=document,
-            contract=contract,
-            active_branch_ids=context.active_branch_node_ids
-            or [proposal.branch_anchor_node_id],
-            facts_by_key=fallback_grouped,
-            missing_fields=fallback_unconfirmed,
-            qualification_complete=fallback_complete,
-        )
-    elif fallback_post_support:
-        fallback = ""
-    else:
-        fallback = graph_proof_checker_v3.compose_published_question(
-            reply="", next_question_node_id=fallback_id, contract=contract
-        )
-    # A rejected proposal must not erase the deterministic answer to the
-    # customer's interruption.  Only the qualification question is subject
-    # to duplicate suppression below.
-    doubt_text = str((doubt or {}).get("text") or "").strip()
-    if doubt_text:
-        fallback = "\n\n".join(part for part in (doubt_text, fallback) if part)
-    deterministic_fallback_valid = bool(fallback)
-    fallback_proof = {
-        **proof,
-        "valid": deterministic_fallback_valid,
-        "errors": [] if deterministic_fallback_valid else proof.get("errors") or [],
-        "model_proposal_errors": proof.get("errors") or [],
-        "mode": "published_fallback",
-        "repair_required": False,
-        "fallback_used": True,
-        "missing_fields": [field.get("key") for field in fallback_unconfirmed],
-        "aggregate_missing_fields": fallback_unconfirmed,
-        "qualification_complete": fallback_complete,
-        "qualification_incomplete": fallback_incomplete,
-        "explicit_confirmation": False,
-        "confirmation_state": (
-            "awaiting_confirmation" if fallback_confirmation_pending
-            else "handed_off" if fallback_terminal_intent
-            else "post_qualification_support" if fallback_post_support
-            else "collecting"
-        ),
-    }
-    fallback_facts = dict(context.cart.get("facts") or {})
-    for fact in proof.get("accepted_facts") or []:
-        fallback_facts[str(fact.get("field_key") or "")] = fact
-    proposal_errors = [str(error) for error in proof.get("errors") or []]
-    branch_safe = not any(
-        error.startswith((
-            "branch_", "keep_", "add_", "publication_", "fact_", "field_owner_",
-        ))
-        or error in {"branch_not_published", "branch_path_checksum_mismatch"}
-        for error in proposal_errors
-    )
-    fallback_branch = context.active_branch_node_id
-    if branch_safe and proposal.branch_action.value in {"select", "switch", "keep", "add"}:
-        fallback_branch = proposal.branch_anchor_node_id
-    fallback_active_branches = list(context.active_branch_node_ids)
-    if proposal.branch_action.value == "add" and branch_safe and proposal.branch_anchor_node_id not in fallback_active_branches:
-        fallback_active_branches.append(proposal.branch_anchor_node_id)
-    fallback_state = {
-        **context.cart,
-        "facts": fallback_facts,
-        "facts_by_key": fallback_grouped,
-        "active_branch_node_id": fallback_branch,
-        "active_branch_node_ids": fallback_active_branches,
-        "sdr_state": (
-            "awaiting_confirmation" if fallback_confirmation_pending
-            else "handed_off" if fallback_terminal_intent or fallback_post_support
-            else "collecting"
-        ),
-        "asked_question_node_ids": [
-            *(context.cart.get("asked_question_node_ids") or []),
-            *([fallback_id] if fallback_id else []),
-        ],
-        **({
-            "terminal_handoff": {
-                "intent": fallback_terminal_intent,
-                "emitted": True,
-            }
-        } if fallback_terminal_intent else {}),
-    }
-    fallback_question_text = str(
-        ((contract.get("questions") or {}).get(fallback_id or "") or {}).get("text") or ""
-    )
-    fallback_repetition = conversation_repetition.assess_repetition(
-        current_reply=fallback,
-        recent_replies=[
-            str(row.get("content") or row.get("texto") or "")
-            for row in context.messages
-            if str(row.get("role") or "") == "assistant"
-            or str(row.get("sender_type") or "") in {"agent", "assistant", "ai"}
-        ][-4:],
-        question_node_id=fallback_id,
-        question_text=fallback_question_text,
-        asked_question_node_ids=context.cart.get("asked_question_node_ids") or [],
-        max_attempts=_question_repetition_max_attempts(contract),
-        field_pending=bool(fallback_id),
-        terminal_intent=fallback_terminal_intent,
-        previous_terminal_intent=str(
-            ((context.cart.get("terminal_handoff") or {}).get("intent") or "")
-        ) or None,
-    )
-    fallback_proof["repetition_audit"] = fallback_repetition
-    if not fallback_repetition["passed"]:
-        fallback_terminal_duplicate = "terminal_repetition" in fallback_repetition["failures"]
-        remainder = "" if fallback_terminal_duplicate else _statements_only(fallback)
-        if remainder and any(
-            conversation_repetition.is_semantic_repetition(previous, remainder)
-            for previous in [
-                str(row.get("content") or row.get("texto") or "")
-                for row in context.messages
-                if str(row.get("role") or "") == "assistant"
-                or str(row.get("sender_type") or "") in {"agent", "assistant", "ai"}
-            ][-4:]
-        ):
-            remainder = ""
-        if fallback_terminal_duplicate:
-            fallback = remainder
-            fallback_proof["repetition_action"] = "suppressed_duplicate_terminal"
-        elif remainder:
-            fallback = remainder
-            fallback_proof["repetition_action"] = "suppressed_duplicate_question"
-        else:
-            # Same never-go-silent floor as the other repetition gates in
-            # this module: a repeated non-terminal question is not a
-            # reason to withhold the reply entirely.
-            fallback_proof["repetition_action"] = "allowed_never_silent"
-    else:
-        fallback_proof["repetition_action"] = "allowed"
-    fallback_route = (
-        ConversationRoute.HUMAN if fallback_terminal_intent else ConversationRoute.SDR
-    )
-    return (
-        ConversationDecision(classifier="graph_proof_checker_v3",
-                             intent=fallback_terminal_intent or (
-                                 "awaiting_confirmation"
-                                 if fallback_confirmation_pending
-                                 else "post_qualification_support"
-                                 if fallback_post_support
-                                 else "published_fallback"
-                             ),
-                             route=fallback_route, confidence=0,
-                             lead_stage=str(context.cart.get("_lead_stage") or "novo"),
-                             handoff_reason="graph_terminal_qualification" if fallback_terminal_intent else None,
-                             evidence_node_ids=[fallback_id] if fallback_id else []),
-        AgentResponse(reply_text=fallback or None, role=fallback_route,
-                      evidence_node_ids=[fallback_id] if fallback_id else [], cart_state=fallback_state,
-                      handoff_required=bool(fallback_terminal_intent), proposal=proposal, proof=fallback_proof),
+    # A rejected proposal never crosses into graph-authored public copy.
+    # One model repair is allowed; a second inconsistency becomes an
+    # observable handoff with no outbound text.
+    return _invalid_proposal_fallback(
+        context,
+        raw,
+        [str(error) for error in proof.get("errors") or []],
+        repair_attempt=int(observation.get("repair_attempt") or 0),
     )

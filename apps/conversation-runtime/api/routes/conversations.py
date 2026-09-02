@@ -40,7 +40,7 @@ class ContextRequest(StrictModel):
 
 class DecisionRequest(StrictModel):
     context: ConversationContext
-    model_observation: dict | None = None
+    model_observation: dict
     trace_id: str | None = None
     # ConversationContext carries no lead identity of its own (by design --
     # /decide reasons only from context + model_observation) -- forwarded
@@ -103,7 +103,7 @@ def execute(
     """Execute a deterministic inbound behind the private service boundary."""
     internal_auth.authorize_webhook_token(x_webhook_token)
     try:
-        result = conversation_runtime.execute_pipeline(**body.model_dump())
+        result = conversation_runtime.execute_deterministic_pipeline(**body.model_dump())
         envelope = conversation_runtime.dispatch_result_envelope(
             result, correlation_id=body.correlation_id
         )
@@ -140,12 +140,15 @@ def decide(
     x_webhook_token: str | None = Header(None, alias="X-Webhook-Token"),
 ) -> dict:
     internal_auth.authorize_webhook_token(x_webhook_token)
-    decision, response = conversation_runtime.decide(
-        body.context,
-        model_observation=body.model_observation,
-        trace_id=body.trace_id,
-        lead_ref=body.lead_ref,
-    )
+    try:
+        decision, response = conversation_runtime.decide_agentic(
+            body.context,
+            model_observation=body.model_observation,
+            trace_id=body.trace_id,
+            lead_ref=body.lead_ref,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
     return {
         "decision": decision.model_dump(mode="json"),
         "response": response.model_dump(mode="json"),
