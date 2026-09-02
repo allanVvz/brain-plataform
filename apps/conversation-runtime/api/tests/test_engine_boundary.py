@@ -312,3 +312,58 @@ def test_agentic_modules_have_no_reachable_deterministic_composition():
     }
     assert productive.keys() == {"decide", "_decide"}
     assert not (set().union(*productive.values()) & guarded)
+
+
+def _function_def(source: str, name: str) -> ast.FunctionDef:
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            return node
+    raise AssertionError(f"{name} not found")
+
+
+def test_decide_binds_every_name_it_reads():
+    """`_decide` grew a committed-state branch that read `repetition_action`
+    while nothing bound it -- a latent NameError that only surfaced once an
+    agentic turn could progress past the service-operation proof gate. Guard
+    the whole function against reintroducing an unbound local."""
+    services = Path(__file__).resolve().parents[1] / "services"
+    source = (services / "graph_agent_runtime_v3.py").read_text(encoding="utf-8")
+    module = ast.parse(source)
+    module_names: set[str] = set()
+    for node in module.body:  # module scope only -- never descend into defs
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            module_names.add(node.name)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                module_names.add(alias.asname or alias.name.split(".")[0])
+        elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                for sub in ast.walk(target):
+                    if isinstance(sub, ast.Name):
+                        module_names.add(sub.id)
+
+    import builtins
+
+    func = _function_def(source, "_decide")
+    bound = set(module_names) | set(dir(builtins))
+    bound |= {arg.arg for arg in func.args.args + func.args.kwonlyargs}
+    if func.args.vararg:
+        bound.add(func.args.vararg.arg)
+    if func.args.kwarg:
+        bound.add(func.args.kwarg.arg)
+    for node in ast.walk(func):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            bound.add(node.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            for arg in getattr(node.args, "args", []):
+                bound.add(arg.arg)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            bound.add(node.name)
+
+    read = {
+        node.id
+        for node in ast.walk(func)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+    }
+    assert read <= bound, f"unbound names read in _decide: {sorted(read - bound)}"
