@@ -1687,6 +1687,45 @@ def _service_facts_for_operations(
     return facts
 
 
+def _prospective_contract_facts_for_service_operations(
+    *,
+    contract: dict[str, Any],
+    contract_facts: dict[str, dict[str, Any]],
+    operations: list[dict[str, Any]],
+    document: dict[str, Any],
+    grouped_facts: dict[str, list[dict[str, Any]]],
+    source_message_id: str,
+    service_proof: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Project already-proved branch selection into metadata validation.
+
+    The selected branch can satisfy the graph's own branch-selector field in
+    the same turn.  This projection is deliberately limited to valid service
+    operations and authored field identities; the durable fact is still
+    appended later to the normal accepted-facts commit.
+    """
+    projected = dict(contract_facts)
+    if not operations or service_proof.get("valid") is not True:
+        return projected
+    authored = {
+        (str(field.get("key") or ""), str(field.get("owner_node_id") or ""))
+        for field in contract.get("fields") or []
+    }
+    for fact in _service_facts_for_operations(
+        operations=operations,
+        document=document,
+        grouped_facts=grouped_facts,
+        source_message_id=source_message_id,
+    ):
+        identity = (
+            str(fact.get("field_key") or ""),
+            str(fact.get("owner_node_id") or ""),
+        )
+        if identity in authored:
+            projected[identity[0]] = fact
+    return projected
+
+
 
 
 def active_offering_titles(
@@ -3941,11 +3980,38 @@ def _decide(
             previous_branch_closure=set(previous_contract.get("closure_node_ids") or []),
             chunk_sources=chunk_sources,
         )
+    service_operations = [
+        item.model_dump(mode="json")
+        for item in proposal.service_operations
+    ]
+    before_services = list(dict.fromkeys([
+        *([context.active_branch_node_id] if context.active_branch_node_id else []),
+        *context.active_branch_node_ids,
+    ]))
+    service_proof = graph_proof_checker_v3.check_service_operations(
+        document=document,
+        message=_latest_user_message(context),
+        operations=service_operations,
+        active_branch_node_ids=before_services,
+        consumed_service_spans=(
+            (context.retrieval_trace.get("service_resolution") or {})
+            .get("consumed_spans") or []
+        ),
+    )
+    prospective_contract_facts = _prospective_contract_facts_for_service_operations(
+        contract=contract,
+        contract_facts=contract_facts,
+        operations=service_operations,
+        document=document,
+        grouped_facts=grouped_facts,
+        source_message_id=_source_message_id(context.messages),
+        service_proof=service_proof,
+    )
     ledger = {
         "active_branch_node_id": context.active_branch_node_id,
         "publication_id": context.publication_id, "graph_checksum": context.graph_checksum,
         "revision": context.retrieval_trace.get("ledger_revision", 0),
-        "facts": contract_facts,
+        "facts": prospective_contract_facts,
         "asked_question_node_ids": context.cart.get("asked_question_node_ids") or [],
     }
     # The persona root is unconditionally in every branch's closure/path (it
@@ -3992,24 +4058,6 @@ def _decide(
         package_chunk_sources=chunk_sources,
         active_branch_node_ids=active_ids_for_fields,
         additional_fields=additional_fields,
-    )
-    service_operations = [
-        item.model_dump(mode="json")
-        for item in proposal.service_operations
-    ]
-    before_services = list(dict.fromkeys([
-        *([context.active_branch_node_id] if context.active_branch_node_id else []),
-        *context.active_branch_node_ids,
-    ]))
-    service_proof = graph_proof_checker_v3.check_service_operations(
-        document=document,
-        message=_latest_user_message(context),
-        operations=service_operations,
-        active_branch_node_ids=before_services,
-        consumed_service_spans=(
-            (context.retrieval_trace.get("service_resolution") or {})
-            .get("consumed_spans") or []
-        ),
     )
     if service_operations and not service_proof["valid"]:
         proof["errors"] = [*proof.get("errors", []), *service_proof["errors"]]

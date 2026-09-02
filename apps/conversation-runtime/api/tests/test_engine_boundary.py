@@ -13,7 +13,11 @@ from schemas.conversation import (
     ConversationDecision,
     ConversationRoute,
 )
-from services import conversation_runtime, graph_agent_runtime_v3
+from services import (
+    conversation_runtime,
+    graph_agent_runtime_v3,
+    graph_proof_checker_v3,
+)
 
 
 def _context(*, runtime_version: str = graph_agent_runtime_v3.RUNTIME_VERSION) -> ConversationContext:
@@ -116,6 +120,62 @@ def test_agentic_repair_never_runs_a_public_copy_fallback(monkeypatch):
     assert result.reply_text is None
     assert result.proof["repair_required"] is True
     assert result.proof["model_reply_preserved"] is True
+
+
+def test_proved_branch_selection_satisfies_selector_dependencies_same_turn():
+    contract = {
+        "fields": [
+            {
+                "key": "purchase_profile",
+                "owner_node_id": "audience:retail",
+                "required": True,
+                "branch_selection_field": True,
+                "accepted_statuses": ["known"],
+            },
+            {
+                "key": "retail_need",
+                "owner_node_id": "audience:retail",
+                "required": True,
+                "depends_on": ["purchase_profile"],
+                "question_node_id": "faq:retail-need",
+                "accepted_statuses": ["known"],
+            },
+        ],
+    }
+    operations = [{
+        "action": "add",
+        "branch_anchor_node_id": "audience:retail",
+        "branch_path_checksum": "checksum:retail",
+        "evidence_span": "uso proprio",
+        "evidence_type": "exact_catalog",
+        "resolution_method": "exact_catalog",
+    }]
+    projected = (
+        graph_agent_runtime_v3._prospective_contract_facts_for_service_operations(
+            contract=contract,
+            contract_facts={},
+            operations=operations,
+            document={
+                "common_contract": {"fields": [{
+                    "key": "purchase_profile",
+                    "branch_selection_field": True,
+                }]},
+                "node_by_id": {
+                    "audience:retail": {
+                        "slug": "uso-proprio-varejo",
+                        "title": "Uso proprio / varejo",
+                    },
+                },
+            },
+            grouped_facts={},
+            source_message_id="inbound:1",
+            service_proof={"valid": True},
+        )
+    )
+
+    assert projected["purchase_profile"]["value"] == "uso-proprio-varejo"
+    askable = graph_proof_checker_v3.askable_pending_fields(contract, projected)
+    assert [field["key"] for field in askable] == ["retail_need"]
 
 
 def test_decision_request_requires_model_observation():
