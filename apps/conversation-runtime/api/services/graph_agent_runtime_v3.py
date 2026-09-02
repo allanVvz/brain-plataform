@@ -2825,6 +2825,13 @@ def build_context(
         _deterministic_branch_candidates(document, message),
         pending_field_answer=pending_field_answer,
     )
+    # Exact graph routing can skip semantic *branch* ranking, but retrieval
+    # still needs the message embedding.  Keeping this unconditional also
+    # prevents the agentic /context entrypoint from reaching RAG with an
+    # uninitialised embedding when no exact branch candidate exists.
+    embedding_started = time.perf_counter()
+    embedding = graph_compiler_v3.query_embeddings([message])[0]
+    embedding_ms = round((time.perf_counter() - embedding_started) * 1000, 3)
     short_expected_answer = bool(
         active_branch
         and missing
