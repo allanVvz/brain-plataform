@@ -31,7 +31,6 @@ from services import (
     graph_agent_runtime_v3,
     graph_compiler_v3,
     graph_json_v2_store,
-    graph_proof_checker_v3,
     n8n_client,
     supabase_client,
     transport_client,
@@ -1782,6 +1781,41 @@ def _semantic_similarity(left: object, right: object) -> float:
     ).ratio()
 
 
+def _question_already_asked(question: str, text: str) -> bool:
+    """True when `text` already asks `question`, even personalized/reworded.
+
+    The agentic proof module dropped its public-text composer in the
+    engine-isolation split (309b912) and this helper went with it, but the
+    validator's own quality scoring still needs it: it is read-only
+    introspection over the model's reply, never composition. A literal
+    substring match breaks once the model personalizes the canonical
+    question (swapping "o veiculo" for "o seu Onix"), so also accept a
+    high content-word overlap or sequence-similarity on any interrogative
+    sentence of the reply.
+    """
+    if str(question or "").casefold() in str(text or "").casefold():
+        return True
+    q_folded = _semantic_fold(question)
+    if not q_folded:
+        return False
+    candidates = [
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", str(text or ""))
+        if "?" in sentence
+    ]
+    content_tokens = {token for token in q_folded.split() if len(token) >= 4}
+    for candidate in candidates:
+        candidate_tokens = set(_semantic_fold(candidate).split())
+        if (
+            len(content_tokens) >= 2
+            and len(content_tokens & candidate_tokens) / len(content_tokens) >= 0.7
+        ):
+            return True
+        if _semantic_similarity(q_folded, candidate) >= 0.68:
+            return True
+    return False
+
+
 def _fact_matches_expected(fact: dict | None, expected: object) -> bool:
     if not fact or fact.get("status") != "known":
         return False
@@ -2197,7 +2231,7 @@ def _semantic_turn_audit(
                 question_id == expected_question_id
                 and bool(published_question_variants)
                 and any(
-                    graph_proof_checker_v3._question_already_asked(variant, reply)
+                    _question_already_asked(variant, reply)
                     for variant in published_question_variants
                 )
             )

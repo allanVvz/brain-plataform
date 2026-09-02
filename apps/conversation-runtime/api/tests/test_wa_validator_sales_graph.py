@@ -204,3 +204,18 @@ def test_validator_gaps_become_review_only_sofia_proposals():
         "branch_resolution_review", "knowledge_gap"
     ]
     assert all(item["publication_allowed"] is False for item in review["proposals"])
+
+
+def test_question_already_asked_detects_personalized_repeat():
+    # The engine-isolation split (309b912) removed this predicate from the
+    # agentic proof module but left a call to it in the validator's quality
+    # scoring, so every second turn crashed with AttributeError. Keep the
+    # validator's own copy wired and matching personalized rewordings.
+    canonical = "Qual e a cor do veiculo?"
+    assert wa_validator_service._question_already_asked(
+        canonical, "Perfeito! Qual e a cor do seu Onix?"
+    )
+    assert wa_validator_service._question_already_asked(canonical, canonical)
+    assert not wa_validator_service._question_already_asked(
+        canonical, "Show! Como voce se chama?"
+    )
