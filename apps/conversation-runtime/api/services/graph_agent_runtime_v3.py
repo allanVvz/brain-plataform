@@ -4084,7 +4084,10 @@ def _decide(
             *(proof.get("field_validation") or []),
             *rejected_field_validation,
         ],
-        "discarded_structured_components": discarded_components,
+        "discarded_structured_components": list(dict.fromkeys([
+            *(proof.get("discarded_structured_components") or []),
+            *discarded_components,
+        ])),
         "quality_warnings": list(dict.fromkeys([
             *(proof.get("quality_warnings") or []),
             *discarded_components,
@@ -4179,7 +4182,7 @@ def _decide(
         error for error in proof.get("gating_errors") or []
         if error not in deferrable_errors
     ]
-    metadata_errors = list(proof.get("metadata_errors") or [])
+    metadata_errors = list(proof.get("blocking_metadata_errors") or [])
     repairable_errors = list(dict.fromkeys([*gating_errors, *metadata_errors]))
     if repairable_errors:
         repair_attempt = int(observation.get("repair_attempt") or 0)
