@@ -1,6 +1,7 @@
 name: Build monorepo service images
 
 on:
+  workflow_dispatch:
   pull_request:
     paths: ["apps/**", "packages/**", ".github/workflows/build-monorepo-images.yml"]
   push:
@@ -27,6 +28,10 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -Eeuo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo 'apps=["gateway","control-plane","conversation-runtime","transport"]' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           base="$BEFORE_SHA"
           if [ "$EVENT_NAME" = "pull_request" ]; then base="$BASE_SHA"; fi
           files="$(git diff --name-only "$base" "$GITHUB_SHA")"
@@ -69,7 +74,7 @@ jobs:
           checksum="$(python -c "import hashlib; from pathlib import Path; digest = hashlib.sha256(); [digest.update(path.read_bytes().replace(b'\\r\\n', b'\\n')) for path in sorted(Path('packages/brain-contracts/brain_contracts').glob('*.py'))]; print('sha256:' + digest.hexdigest())")"
           echo "checksum=$checksum" >> "$GITHUB_OUTPUT"
       - uses: docker/login-action@v3
-        if: github.event_name == 'push'
+        if: github.event_name != 'pull_request'
         with:
           registry: ghcr.io
           username: ${{ secrets.GHCR_USERNAME }}
@@ -79,7 +84,7 @@ jobs:
         with:
           context: .
           file: apps/${{ matrix.app }}/Dockerfile
-          push: ${{ github.event_name == 'push' }}
+          push: ${{ github.event_name != 'pull_request' }}
           build-args: |
             SOURCE_SHA=${{ github.sha }}
             BRAIN_CONTRACTS_SHA=${{ steps.contracts.outputs.checksum }}
@@ -88,19 +93,19 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             io.brain.contracts-checksum=${{ steps.contracts.outputs.checksum }}
       - name: Record immutable image digest
-        if: github.event_name == 'push'
+        if: github.event_name != 'pull_request'
         shell: bash
         run: |
           mkdir -p image-digest
           printf '%s\n' '${{ steps.build.outputs.digest }}' > "image-digest/${{ matrix.app }}.txt"
       - uses: actions/upload-artifact@v4
-        if: github.event_name == 'push'
+        if: github.event_name != 'pull_request'
         with:
           name: image-digest-${{ matrix.app }}
           path: image-digest/${{ matrix.app }}.txt
           if-no-files-found: error
       - name: Smoke-test deployable application import
-        if: github.event_name == 'push'
+        if: github.event_name != 'pull_request'
         shell: bash
         run: |
           docker run --rm --entrypoint python \
