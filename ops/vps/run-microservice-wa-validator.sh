@@ -92,8 +92,8 @@ if [[ "$MODE" == "--inspect" ]]; then
   if [[ -n "$session_started" ]]; then
     session_until="$(date -d "$session_started + 3 minutes" --iso-8601=seconds)"
     docker logs --since "$session_started" --until "$session_until" "$runtime_name" 2>&1 \
-      | grep -E -A 35 'Traceback|ERROR|Exception|Internal Server Error' \
-      | tail -n 160 || true
+      | grep -E -A 120 'Traceback|ERROR|Exception|Internal Server Error' \
+      | tail -n 320 || true
   fi
   echo "WA_VALIDATOR_RUNTIME_LOGS_END"
   control_slot="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["control-plane"]["active"])' "$STATE_FILE")"
