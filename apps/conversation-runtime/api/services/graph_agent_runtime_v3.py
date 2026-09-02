@@ -4479,6 +4479,13 @@ def _decide(
                 ((context.cart.get("terminal_handoff") or {}).get("intent") or "")
             ) or None,
         )
+        # Mirrors _with_structural_proof_audit: the committed-state branch and
+        # the terminal proof below both read repetition_action, but nothing in
+        # _decide bound it -- a latent NameError that only became reachable once
+        # an agentic turn could progress past the service-operation proof gate.
+        repetition_action = proof.get("repetition_action") or (
+            "allowed" if repetition["passed"] else "quality_failure_recorded"
+        )
         if not repetition["passed"]:
             repair_attempt = int(observation.get("repair_attempt") or 0)
             if repair_attempt < 1:
