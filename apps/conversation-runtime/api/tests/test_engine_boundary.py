@@ -178,6 +178,76 @@ def test_proved_branch_selection_satisfies_selector_dependencies_same_turn():
     assert [field["key"] for field in askable] == ["retail_need"]
 
 
+def test_agentic_proof_discards_invalid_question_metadata_without_blocking_reply():
+    contract = {
+        "branch_path_checksum": "checksum:retail",
+        "closure_node_ids": ["audience:retail", "q:need", "q:style"],
+        "fields": [
+            {
+                "key": "retail_need",
+                "owner_node_id": "audience:retail",
+                "required": True,
+                "question_node_id": "q:need",
+                "accepted_statuses": ["known"],
+            },
+            {
+                "key": "retail_style",
+                "owner_node_id": "audience:retail",
+                "required": True,
+                "depends_on": ["retail_need"],
+                "question_node_id": "q:style",
+                "accepted_statuses": ["known", "unknown"],
+            },
+        ],
+        "questions": {
+            "q:need": {"field_key": "retail_need", "text": "O que procura?"},
+            "q:style": {
+                "field_key": "retail_style",
+                "text": "Qual estilo prefere?",
+                "depends_on": ["retail_need"],
+            },
+        },
+    }
+    proof = graph_proof_checker_v3.check(
+        publication={
+            "status": "active",
+            "checksum": "graph-checksum",
+            "document_json": {"branch_anchors": ["audience:retail"]},
+        },
+        contract=contract,
+        ledger={"graph_checksum": "graph-checksum", "facts": {}},
+        proposal={
+            "reply": "Entendi, algo para o dia a dia. Qual estilo você prefere?",
+            "branch_action": "keep",
+            "branch_anchor_node_id": "audience:retail",
+            "branch_path_checksum": "checksum:retail",
+            "extracted_facts": [],
+            "next_question_node_id": "q:style",
+            "claims": [],
+        },
+        message="Estou procurando algo para usar no dia a dia",
+        source_message_id="inbound:1",
+        package_node_ids=set(),
+        package_chunk_ids=set(),
+        active_branch_node_id="audience:retail",
+        active_branch_node_ids=["audience:retail"],
+        branch_selection_allowed=False,
+        branch_switch_allowed=False,
+    )
+
+    assert proof["valid"] is True
+    assert proof["delivery_authorized"] is True
+    assert proof["model_reply_preserved"] is True
+    assert proof["next_question_node_id"] is None
+    assert proof["missing_fields"] == ["retail_need", "retail_style"]
+    assert proof["required_field_count"] == 2
+    assert proof["metadata_errors"] == ["next_question_dependencies_unsatisfied"]
+    assert proof["blocking_metadata_errors"] == []
+    assert proof["discarded_structured_components"] == [
+        "next_question_node_id:next_question_dependencies_unsatisfied"
+    ]
+
+
 def test_decision_request_requires_model_observation():
     with pytest.raises(ValidationError):
         conversations.DecisionRequest.model_validate({"context": _context().model_dump()})

@@ -809,6 +809,14 @@ def check(
         if error.startswith("next_question_")
         or error == "question_after_completion"
     ]
+    # Question metadata is advisory in the agentic engine.  A model can
+    # produce a useful, grounded public reply while omitting a fact or
+    # advancing to a field whose dependency is not yet represented in the
+    # ledger.  Keep the required field pending and discard only the invalid
+    # pointer; never suppress or replace the model's public text for this.
+    discarded_metadata = [
+        f"next_question_node_id:{error}" for error in metadata_errors
+    ]
     hard_prefixes = (
         "publication_", "branch_", "keep_", "add_", "switch_", "drop_",
         "cited_node_", "cited_chunk_", "claim_",
@@ -822,19 +830,21 @@ def check(
         "outside_package" in error for error in gating_errors
     )
     return {
-        "valid": not gating_errors and not metadata_errors,
-        "delivery_authorized": not gating_errors and not metadata_errors,
+        "valid": not gating_errors,
+        "delivery_authorized": not gating_errors,
         "errors": errors,
         "gating_errors": gating_errors,
         "metadata_errors": metadata_errors,
+        "blocking_metadata_errors": [],
         "quality_warnings": [
             error for error in errors
-            if error not in gating_errors and error not in metadata_errors
+            if error not in gating_errors
         ],
         "repair_required": repair_only and bool(repair),
         "repair_requirements": repair, "ledger": next_ledger,
         "accepted_facts": accepted_facts, "missing_fields": missing_keys,
-        "next_question_node_id": question_id,
+        "next_question_node_id": None if metadata_errors else question_id,
+        "discarded_structured_components": discarded_metadata,
         "qualification_complete": not missing,
         "handoff_required": handoff_required,
         "required_field_count": required_field_count(contract, facts),
