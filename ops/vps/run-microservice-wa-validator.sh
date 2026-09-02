@@ -92,6 +92,69 @@ if [[ "$MODE" == "--inspect" ]]; then
     | grep -F "$SESSION_ID" \
     | tail -n 100 || true
   echo "WA_VALIDATOR_RUNTIME_LOGS_END"
+  control_slot="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["control-plane"]["active"])' "$STATE_FILE")"
+  control_name="brain-ai-control-plane-${control_slot}-1"
+  docker exec -i "$control_name" python - "$PERSONA_SLUG" "$SESSION_ID" <<'PY'
+import json
+import sys
+
+from scripts import resync_graph_agent_workflows as resync
+from services import n8n_client, supabase_client
+
+slug, session_id = sys.argv[1:]
+persona = supabase_client.get_persona(slug)
+binding = resync._binding(persona, require_active=True)
+connection = supabase_client.get_persona_integration_connection(
+    str(persona["id"]), "deepseek"
+) or {}
+config = resync._resolved_config(persona, connection, binding)
+workflow_id = str(config["n8n_workflow_id"])
+executions = n8n_client.get_executions(
+    limit=20, workflow_id=workflow_id, include_data=True
+)
+matches = [
+    value
+    for value in executions
+    if session_id in json.dumps(value, ensure_ascii=True, default=str)
+]
+
+def summarize(execution):
+    data = execution.get("data") or {}
+    result = data.get("resultData") or {}
+    errors = []
+    for node_name, runs in (result.get("runData") or {}).items():
+        for run in runs or []:
+            error = run.get("error") or {}
+            if not error:
+                continue
+            errors.append({
+                "node": node_name,
+                "message": str(
+                    error.get("message") or error.get("description") or "unknown"
+                )[:1000],
+                "http_code": error.get("httpCode") or error.get("statusCode"),
+            })
+    top_error = result.get("error") or {}
+    return {
+        "id": execution.get("id"),
+        "workflow_id": execution.get("workflowId"),
+        "status": execution.get("status"),
+        "started_at": execution.get("startedAt"),
+        "stopped_at": execution.get("stoppedAt"),
+        "last_node": result.get("lastNodeExecuted"),
+        "error": str(
+            top_error.get("message") or top_error.get("description") or ""
+        )[:1000],
+        "node_errors": errors,
+    }
+
+payload = {
+    "workflow_id": workflow_id,
+    "matched_count": len(matches),
+    "executions": [summarize(value) for value in matches[:5]],
+}
+print("WA_VALIDATOR_N8N_EXECUTIONS=" + json.dumps(payload, sort_keys=True))
+PY
   echo "WA_VALIDATOR_INSPECT_RESULT=passed"
   exit 0
 fi
