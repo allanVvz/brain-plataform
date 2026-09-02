@@ -31,6 +31,7 @@ from services import (
     graph_agent_runtime_v3,
     graph_compiler_v3,
     graph_json_v2_store,
+    graph_proof_checker_v3,
     n8n_client,
     supabase_client,
     transport_client,
@@ -1917,6 +1918,7 @@ def _semantic_turn_audit(
     recent_replies: list[str],
     previous_question_node_id: str | None,
     expected_handoff: bool = False,
+    conversation_mode: str = "deterministic",
 ) -> dict:
     proof = proof_record.get("proof_result") or {}
     decision = proof_record.get("final_decision") or {}
@@ -1952,6 +1954,18 @@ def _semantic_turn_audit(
     missing = [str(value) for value in proof.get("missing_fields") or []]
     question_id = str(proof.get("next_question_node_id") or "") or None
     first_missing = missing[0] if missing else None
+    askable_fields = [
+        field
+        for field in graph_proof_checker_v3.askable_pending_fields(
+            contract, facts_after,
+        )
+        if str(field.get("key") or "") in set(missing)
+    ]
+    askable_question_ids = {
+        str(field.get("question_node_id") or "")
+        for field in askable_fields
+        if str(field.get("question_node_id") or "")
+    }
     first_field = next(
         (
             field for field in contract.get("fields") or []
@@ -1990,7 +2004,19 @@ def _semantic_turn_audit(
     actual_evidence = set(turn.get("evidence_node_ids") or []) | set(
         decision.get("evidence_node_ids") or []
     )
-    asked_owner = str(question.get("owner_node_id") or (first_field or {}).get("owner_node_id") or "")
+    asked_field_contract = next(
+        (
+            field for field in askable_fields
+            if str(field.get("question_node_id") or "") == str(question_id or "")
+        ),
+        {},
+    )
+    asked_owner = str(
+        question.get("owner_node_id")
+        or asked_field_contract.get("owner_node_id")
+        or (first_field or {}).get("owner_node_id")
+        or ""
+    )
     asked_fact_already_known = any(
         fact.get("status") == "known"
         and (not asked_owner or str(fact.get("owner_node_id") or "") == asked_owner)
@@ -2186,7 +2212,11 @@ def _semantic_turn_audit(
         question_text=question_text,
         asked_question_node_ids=ledger_before.get("asked_question_node_ids") or [],
         max_attempts=repetition_policy.get("max_attempts", 0),
-        field_pending=bool(first_askable and question_id == expected_question_id),
+        field_pending=(
+            bool(question_id and question_id in askable_question_ids)
+            if conversation_mode == "n8n_agents"
+            else bool(first_askable and question_id == expected_question_id)
+        ),
         terminal_intent=terminal_intent,
         previous_terminal_intent=str(
             ((ledger_before.get("terminal_handoff") or {}).get("intent") or "")
@@ -2215,7 +2245,7 @@ def _semantic_turn_audit(
             and proof.get("explicit_confirmation") is True
         ),
         "received_content_acknowledged": not intended or bool(declarative_parts),
-        "first_missing_field_only": (
+        "question_semantically_askable": (
             (not missing and question_id is None)
             or (
                 proof.get("confirmation_state") == "field_confirmation"
@@ -2228,7 +2258,14 @@ def _semantic_turn_audit(
                 and first_askable is None
             )
             or (
-                question_id == expected_question_id
+                conversation_mode == "n8n_agents"
+                and question_id in askable_question_ids
+                and bool(question_text)
+                and "?" in reply
+            )
+            or (
+                conversation_mode != "n8n_agents"
+                and question_id == expected_question_id
                 and bool(published_question_variants)
                 and any(
                     _question_already_asked(variant, reply)
@@ -3090,6 +3127,7 @@ async def run_session_direct(
                             recent_replies=recent_replies,
                             previous_question_node_id=previous_question_node_id,
                             expected_handoff=bool(driver.get("expected_handoff")),
+                            conversation_mode=conversation_mode,
                         )
                     turn["semantic_audit"] = audit
                     _session_update(
