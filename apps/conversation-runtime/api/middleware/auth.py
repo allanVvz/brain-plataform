@@ -24,6 +24,9 @@ PUBLIC_EXACT_PATHS = {
     "/internal/v1/conversations/commit",
     "/internal/v1/conversations/fail-safe-handoff",
     "/internal/v1/conversations/technical-failure",
+    # Transport-authenticated lead decoration. The route performs its own
+    # constant-time X-Webhook-Token validation before reading lead metadata.
+    "/internal/v1/runtime/leads/decorate",
     # Integration-authenticated equivalent of the operator conversion route.
     # The handler performs constant-time X-Webhook-Token validation.
     "/internal/v1/agents/leads/{lead_ref}/purchase-completed",
