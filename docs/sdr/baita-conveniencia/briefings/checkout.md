@@ -2,8 +2,8 @@
 {
   "type": "briefing",
   "persona": "baita-conveniencia",
-  "slug": "checkout-vitoria",
-  "title": "Checkout da Vitoria",
+  "slug": "checkout",
+  "title": "Checkout",
   "source": "sources/operator-policy.md",
   "status": "validated",
   "active": true,

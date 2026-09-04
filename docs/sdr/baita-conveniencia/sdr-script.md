@@ -2,14 +2,13 @@
 {
   "type": "briefing",
   "persona": "baita-conveniencia",
-  "slug": "roteiro-comercial-vitoria",
-  "title": "Roteiro comercial da Vitoria",
+  "slug": "roteiro-comercial",
+  "title": "Roteiro comercial",
   "source": "sources/operator-policy.md",
   "status": "validated",
   "active": true,
-  "tags": ["baita", "vitoria", "briefing"],
+  "tags": ["baita", "briefing"],
   "metadata": {
-    "agent_slug": "vitoria",
     "allowed_roles": ["SDR", "CLOSER"]
   },
   "relations": [
