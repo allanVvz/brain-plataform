@@ -589,7 +589,12 @@ def test_wa_validator_generates_from_graph_without_model_or_allowlist(monkeypatc
 
     script = result["script"]
     assert script["target"] == "Vitoria"
-    assert script["target_phone"] == "+555131916538"
+    # Baita has no named agent, and an agent briefing is not where a phone
+    # number lives: the public contact number belongs to
+    # personas.config.public_site.whatsapp_phone and the routing identifier to
+    # workflow_bindings. Keeping one in docs/sdr is what let the same number be
+    # read as two different personas' -- see the 2026-09-04 ownership fix.
+    assert script["target_phone"] is None
     assert script["meta"]["model"] == "none"
     assert script["meta"]["classifier"] == "deterministic_v1"
     assert script["meta"]["conversation_mode"] == "deterministic"
