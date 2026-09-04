@@ -203,7 +203,13 @@ def test_model_prompt_is_compact_and_provider_managed():
     assert "const rawMemory" in initial
     assert "approved_nodes: approvedNodes" in initial
     assert "approved_chunks: approvedChunks" in initial
-    assert "rules: contract.conversation_policy" in initial
+    # The complete compiled policy still reaches the model unmodified; the
+    # instructions now address parts of it by path
+    # (policy.rules.branch_selection.origin_binding) instead of leaving the
+    # model to find the relevant rule inside the blob on its own.
+    assert "const conversationPolicy = contract.conversation_policy" in initial
+    assert "rules: conversationPolicy" in initial
+    assert "policy.rules.branch_selection.origin_binding" in initial
     assert "graph_contract: { branch_anchor_node_id:" in initial
     assert "graph_contract: context.graph_contract" not in initial
     assert "commonContractPrompt" not in initial
