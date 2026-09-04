@@ -57,6 +57,13 @@ de código, republicação de grafo, envio de mensagem ou retomada de IA/transpo
 - Os dois bindings continuam ativos como cadastro e apontam para
   `n8n_agents`, mas estão em `safety_paused=true`; o worker está parado. Isso
   impede novos atendimentos enquanto se corrige o comportamento.
+  > **Superado em 2026-09-04 (operador):** a tock-fatal atende no binding
+  > **Meta**, telefone público `51992623375`, correto e respondendo; o binding
+  > Evolution dela está fora. A pausa acima é o retrato de 2026-08-24 e não
+  > descreve mais o estado. Binding é estado de banco e não é versionado —
+  > confira em `workflow_bindings` antes de usar qualquer número, e nunca
+  > confunda `whatsapp_phone` (CTA público) com `whatsapp_phone_number_id`
+  > (roteamento Meta) ou `channel_binding_id`.
 - Leads auditados (IDs internos, sem telefone): Allan/Tock Fatal = `33`;
   Allan Rodrigues/Aurora = `34`; Luiza Camargo/Aurora = `32`.
 - Não usar WhatsApp real na correção. Primeiro reproduzir no WA Validator
