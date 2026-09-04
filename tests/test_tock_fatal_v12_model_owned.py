@@ -79,6 +79,10 @@ def test_v12_declares_model_owned_natural_conversation_policy() -> None:
     assert policy["question_policy"]["force_question"] is False
     assert policy["catalog_discovery"]["allow_before_purchase_profile"] is True
     assert policy["explicit_unknown_only"] is True
+    assert policy["doubt_handling"]["deferred_response"] == (
+        "Vou registrar seu interesse. Um atendente confirmará os valores "
+        "ao final do atendimento."
+    )
 
 
 def test_v12_retail_and_reseller_contracts_remain_isolated() -> None:
@@ -105,3 +109,39 @@ def test_v12_retail_and_reseller_contracts_remain_isolated() -> None:
     assert not {node for node in reseller_members if node.startswith("offer:") and node.endswith("-varejo")}
     assert any(node.startswith("product_group:") for node in retail_members)
     assert any(node.startswith("product_group:") for node in reseller_members)
+
+
+def test_v12_projects_faq_aliases_and_authors_cotele_followups() -> None:
+    bundle = _bundle()
+    audit = bundle["metadata"]["faq_coverage_audit"]
+
+    assert audit["runtime_aliases_projected"] == 4
+    assert audit["targeted_query_aliases_added"] == 20
+    for channel in ("varejo", "atacado"):
+        price = _node(
+            bundle,
+            f"faq:tock-conjuntos-conjunto-em-cotele-{channel}-preco-canal-quantidade",
+        )
+        description = _node(
+            bundle,
+            f"faq:tock-conjuntos-conjunto-em-cotele-{channel}-descricao-indicacao",
+        )
+        assert "qual o valor do cotele" in price["data"]["aliases"]
+        assert "qual o valor do cotelÃª" in price["data"]["aliases"]
+        assert "qual o tecido do cotele" in description["data"]["aliases"]
+
+
+def test_every_faq_published_to_embed_is_approved() -> None:
+    bundle = _bundle()
+    nodes = {node["id"]: node for node in bundle["nodes"]}
+    published_faqs = {
+        edge["source"]
+        for edge in bundle["edges"]
+        if edge["relation_type"] == "publishes_to"
+        and nodes[edge["source"]]["node_type"] == "faq"
+    }
+
+    assert published_faqs
+    for faq_id in published_faqs:
+        assert nodes[faq_id]["status"] == "approved"
+        assert nodes[faq_id]["data"]["status"] == "approved"

@@ -53,6 +53,13 @@ def _preflight_source_scope(
         str(row.get("id")): graph_compiler_v3._stable_node_id(row)
         for row in node_rows
     }
+    ignored_legacy_persona_projection_ids = {
+        str(row.get("id"))
+        for row in node_rows
+        if has_authored_persona
+        and str(row.get("node_type") or "").lower() == "persona"
+        and str(row.get("slug") or "").lower() == "self"
+    }
     desired_edges = {
         (edge["source"], edge["target"], edge["relation_type"])
         for edge in normalized["edges"]
@@ -63,7 +70,10 @@ def _preflight_source_scope(
             stable_by_projection.get(str(row.get("target_node_id")), ""),
             str(row.get("relation_type") or ""),
         )
-        for row in edge_rows if _active_edge(row)
+        for row in edge_rows
+        if _active_edge(row)
+        and str(row.get("source_node_id")) not in ignored_legacy_persona_projection_ids
+        and str(row.get("target_node_id")) not in ignored_legacy_persona_projection_ids
     }
     unexpected_edges = sorted(existing_edges - desired_edges)
     if unexpected_edges:
@@ -152,20 +162,27 @@ def stage_bundle(
         projection_by_stable[node["id"]] = str(row["id"])
 
     for edge in normalized["edges"]:
-        row = supabase_client.upsert_knowledge_edge(
-            projection_by_stable[edge["source"]],
-            projection_by_stable[edge["target"]],
-            edge["relation_type"],
-            persona_id=persona_id,
-            weight=edge["weight"],
-            metadata={
-                "active": True,
-                "primary_tree": edge["relation_type"] == "contains",
-                "graph_json_edge_id": edge["id"],
-                "graph_bundle_draft_checksum": approved_draft_checksum,
-                **edge["metadata"],
-            },
-        )
+        try:
+            row = supabase_client.upsert_knowledge_edge(
+                projection_by_stable[edge["source"]],
+                projection_by_stable[edge["target"]],
+                edge["relation_type"],
+                persona_id=persona_id,
+                weight=edge["weight"],
+                metadata={
+                    "active": True,
+                    "primary_tree": edge["relation_type"] == "contains",
+                    "graph_json_edge_id": edge["id"],
+                    "graph_bundle_draft_checksum": approved_draft_checksum,
+                    **edge["metadata"],
+                },
+            )
+        except Exception as exc:
+            raise GraphBundlePublishError(
+                "edge_materialization_error:"
+                f"{edge['id']}:{edge['source']}:{edge['target']}:"
+                f"{edge['relation_type']}:{exc}"
+            ) from exc
         if not row:
             raise GraphBundlePublishError(f"edge_materialization_failed:{edge['id']}")
         row = supabase_client.update_knowledge_edge(

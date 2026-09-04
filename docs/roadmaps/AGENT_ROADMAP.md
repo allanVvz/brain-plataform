@@ -134,9 +134,11 @@ referência de leitura. Plano completo:
 | P0 | Destravar a Aurora SDR (ciclo com memória travado) | **em aberto — evidência coletada 2026-08-19 (branch `chore/aurora-unblock-p0-evidence-2026-08-19`, commit `62d8c62`, não mesclada): nenhuma das 5 hipóteses reproduziu contra tráfego real; falta sessão de prova formal via WA Validator e teste da hipótese 3 (orçamento de prompt) antes de marcar concluído** | `aurora-unblock` |
 | 0 | Higiene do repositório e precedência de documentos | **concluído 2026-08-19** | `deprecation-sweeper` |
 | 1 | Publisher genérico, PublicationPlan, embeddings incrementais | **em progresso — GraphBundle + PublicationPlan + staging/ativação em duas fases já existem e publicaram a Tock Fatal real; falta embeddings incrementais por chunk e o publisher completo de edição/remoção** | `bundle-migrator`, `graph-publisher`, `release-gate` |
-| 2 | Cards editáveis alteram o agente de verdade | **em progresso — 2a e 2b entregues no editor GraphBundle v3; 2c–2e permanecem bloqueadas pelos gates de revisão/publicação** | `card-editor` |
+| 2 | Cards editáveis alteram o agente de verdade | **em progresso — 2a e 2b entregues no editor GraphBundle v3; 2c–2e permanecem bloqueadas pelos gates de revisão/publicação; 2f tem catálogo local recuperável, mas UI e projeções ainda estão pendentes** | `card-editor` |
 | 2c.1 | Ordem visual e editável das perguntas de qualificação, integrada à Sofia | **a fazer — prioridade de autoria; sem tornar a conversa um roteiro rígido** | `card-editor`, `graph-publisher` |
+| 2f | Skills como blocos renderizáveis | **fase 1 entregue localmente — Humanizer instalada e manifestada; catálogo/projeções/UI permanecem a fazer, sem publicação produtiva** | `card-editor`, `graph-publisher` |
 | 3 | Sofia produz dados declarativos, não código | **a fazer — inclui: Sofia lê o grafo, atualiza FAQ e cria os blocos dos sites. Os `requires` do template ativo viram a checklist concreta que hoje é a instrução vaga "SAIDA PUBLICA DE SITE" em `agents/sofia_criar.md`.** | `faq-coverage`, `sdr-evaluator` |
+| 3a | Sofia Skill Connector | **a fazer — contrato definido; nenhuma skill entra no prompt ou runtime nesta fase** | `card-editor`, `graph-publisher` |
 | 4 | Tock Fatal nasce no pipeline novo | **em progresso — baseline produtiva v11 (`sha256:e139c137…a9a5dc65`) com catálogo, 605 FAQs e isolamento varejo/atacado; candidato declarativo v12 preparado somente em código, com política conversacional model-owned e sem FAQ nova. Dry-run local passou, mas publicação e ativação continuam sem autorização. Os nós de mídia (asset/gallery/`content_delivery`) do v11/v12 são **conteúdo autorado**, não feature ativa — ver item 8a e o checkpoint de mídia (2026-08-31). LP pública de varejo gerada do bundle em 2026-09-04 pelo item 10, sem publicar nem alterar checksum.** | `graph-publisher` |
 | 5 | n8n estável e desacoplado do conteúdo | **em progresso — template único v3 preparado para ambas as personas, envelope único e validador determinístico advisory; provisionamento, teste produtivo e deploy permanecem pendentes de gates próprios.** | — |
 | 6 | Aurora migra para o bundle | **em preparação — baseline v75, checksum, projeções e binding produtivos auditados em 2026-08-31; importador shadow-only estrito preparado, mas o export autenticado da publicação ativa ainda não está disponível no workspace. Restam gerar o bundle a partir desse export, dry-run/shadow, revisão dos dois checksums, WA Validator interno e autorização separada de staging/ativação.** | `bundle-migrator` |
@@ -660,64 +662,49 @@ Alterar (card)  ->  Aprovar (plano)  ->  Publicar
   com proteção de Persona, Embedded e Gallery.
 - **2e — Paridade e retirada controlada do v2:** somente depois de provar
   autoria, aprovação, publicação, rollback e equivalência visual no v3.
+- **2f — Skills como blocos renderizáveis:** catálogo global recuperável,
+  projeções persona-scoped e cards Skill sem copiar instruções para o RAG.
 
-Contrato obrigatório da edição GraphBundle futura:
+### 2f — Skills como blocos renderizáveis
+
+Skills são capabilities versionadas e independentes do modelo. O contrato
+`BrainSkillManifestV1` registra nome, versão, resumo, gatilhos, limitações,
+origem, commit, licença, caminho e checksum do artefato. A fase recuperável usa
+o fluxo existente, sem tabela ou `node_type` novo:
 
 ```text
-Editar node
-  -> salvar nova revisão do draft com CAS
-  -> validar GraphBundle
-  -> compilar PublicationPlan
-  -> exibir diff semântico e novos checksums
-  -> aprovação humana
-  -> staging
-  -> ativação explicitamente autorizada
+data/skills/*.json
+  -> knowledge_items(content_type=prompt, persona_id=null)
+  -> knowledge_nodes(node_type=rule, metadata.capability_kind=skill)
 ```
 
-Regras do editor:
+O node global nasce validado e desconectado. Ele não entra no Embedded/RAG,
+não é incorporado automaticamente a prompts e não concede ferramentas, rede
+ou execução de código. O sincronizador é idempotente, usa dry-run por padrão,
+valida confinamento de caminho e checksum e nunca cria edges. Apply no banco
+produtivo exige autorização específica, separada da instalação no repositório.
 
-- Nunca editar diretamente uma `graph_publications` ativa.
-- Cada save exige `expected_draft_checksum` e chave idempotente; conflito de
-  versão retorna 409 sem sobrescrever outro operador.
-- `id` e `projection_node_id` são imutáveis; rename de slug é operação
-  estrutural própria.
-- Conteúdo sem fonte ou validação permanece `pending_source` ou
-  `pending_validation` e bloqueia publicação.
-- Exclusão comum arquiva; remoção física não faz parte do editor.
-- Somente admin ou acesso `can_edit` altera; viewer permanece somente leitura.
-- Layout não participa do checksum semântico.
-- Cada alteração cria revisão recuperável; desfazer cria outra revisão, sem
-  reescrever histórico.
-- Nenhum save publica automaticamente.
+Na fase renderizável, nodes `rule` com `capability_kind=skill` aparecem como
+cards "Skill" com nome, versão, resumo, origem, integridade e um dos estados:
+`available`, `projected`, `connected` ou `drift`. A paleta "Skills disponíveis"
+lista manifests globais e projeções autorizadas da persona. Adicionar uma skill
+a uma persona cria uma `SkillProjection`, que referencia o manifesto global em
+vez de copiar suas instruções. Nunca se cria edge entre o catálogo global e a
+persona.
 
-```json
-{
-  "draft_checksum": "...",
-  "runtime_checksum": "...",
-  "next_version": 65,
-  "nodes_added": 1,
-  "nodes_changed": 2,
-  "branches_affected": ["polimento-tecnico"],
-  "chunks_reused": 143,
-  "chunks_to_embed": 3,
-  "estimated_embedding_cost": "...",
-  "breaking_contract_changes": [],
-  "validation_errors": []
-}
-```
+A UI deve oferecer preview somente leitura do Markdown e mostrar se a projeção
+está conectada a algum agente. A API interna deve exigir sessão, filtrar
+projeções pelo acesso à persona e responder 403 sem revelar nomes de outras
+personas. Sofia pode transformar "adicione Humanizer ao agente de copy" em um
+patch/diff declarativo, mas nesta fase não altera prompts nem executa a skill.
 
-Adicionar o alias "polimento" deve virar: 1 node alterado, 0 embeddings novos,
-1 teste de resolução, publicação em segundos. Hoje atravessa fixture, código
-Python, publicação fonte, projeção, recompilação GraphRAG, embeddings, n8n e
-Validator.
+Gate de aceite do item 2f:
 
-### O que se perde (e está tudo bem)
-
-- Não é mais possível colocar exceção arbitrária em Python para uma persona.
-- Não existem múltiplos caminhos independentes de publicação.
-- Hotfix direto no banco é bloqueado ou detectado como drift.
-
----
+1. renderizar os quatro estados e o preview recuperável;
+2. detectar manifesto ausente, artefato alterado e checksum em drift;
+3. provar que a projeção referencia o manifesto e não copia instruções ao RAG;
+4. provar 403 por persona e rejeitar toda referência cross-persona;
+5. exibir o diff da Sofia antes de criar projeção ou edge.
 
 ## 10 — Saída pública por template de blocos
 
@@ -838,6 +825,96 @@ O que isso implica, em ordem de dependência:
 Ordem sugerida: 1 e 2 destravam o produto sem infra nova; 3 é conteúdo; 4 é
 disciplina de chave e custa quase nada se feita antes; 5 e 6 são o CRM de fato e
 exigem migração e superfície nova.
+
+### 3a — Sofia Skill Connector
+
+A conexão é exclusivamente por agente. Uma projeção na mesma persona recebe
+uma edge `visible_to_agent` para o role-node alvo. O catálogo global permanece
+sem edges. Sofia resolve `pedido -> skill candidata -> agente alvo -> patch` e
+mostra versão, checksum e efeito antes de pedir aprovação.
+
+O conector produz `ResolvedSkillContext` somente quando todos os gates passam:
+
+- a projeção e o agente pertencem ao mesmo `persona_id`;
+- existe edge `visible_to_agent` ativa para o agente exato;
+- manifesto, artefato e checksum são válidos;
+- a solicitação atual corresponde a um gatilho declarado;
+- o operador tem autorização para a persona e para a alteração.
+
+A precedência é: segurança e isolamento, fatos do GraphBundle, contrato da
+skill e solicitação atual. Humanizer pode ajustar redação, mas não pode inventar
+ou alterar fatos, preços, datas, regras ou estados. Falta de conexão, artefato,
+autorização ou checksum válido falha fechada, sem injeção. A auditoria registra
+persona, agente, skill, versão, checksum, gatilho e motivo da resolução, sem
+conteúdo secreto.
+
+Gate de aceite do item 3a:
+
+1. provar que uma skill desconectada nunca aparece no prompt;
+2. provar que conexão na Aurora não habilita Tock Fatal nem outro agente da
+   Aurora;
+3. ativar Humanizer somente para o agente conectado e pedidos compatíveis;
+4. falhar fechado em drift, manifesto ausente ou checksum inválido;
+5. avaliar textos com fatos comerciais e provar mudança de estilo sem mudança
+   de significado.
+
+Contrato obrigatório da edição GraphBundle futura:
+
+```text
+Editar node
+  -> salvar nova revisão do draft com CAS
+  -> validar GraphBundle
+  -> compilar PublicationPlan
+  -> exibir diff semântico e novos checksums
+  -> aprovação humana
+  -> staging
+  -> ativação explicitamente autorizada
+```
+
+Regras do editor:
+
+- Nunca editar diretamente uma `graph_publications` ativa.
+- Cada save exige `expected_draft_checksum` e chave idempotente; conflito de
+  versão retorna 409 sem sobrescrever outro operador.
+- `id` e `projection_node_id` são imutáveis; rename de slug é operação
+  estrutural própria.
+- Conteúdo sem fonte ou validação permanece `pending_source` ou
+  `pending_validation` e bloqueia publicação.
+- Exclusão comum arquiva; remoção física não faz parte do editor.
+- Somente admin ou acesso `can_edit` altera; viewer permanece somente leitura.
+- Layout não participa do checksum semântico.
+- Cada alteração cria revisão recuperável; desfazer cria outra revisão, sem
+  reescrever histórico.
+- Nenhum save publica automaticamente.
+
+```json
+{
+  "draft_checksum": "...",
+  "runtime_checksum": "...",
+  "next_version": 65,
+  "nodes_added": 1,
+  "nodes_changed": 2,
+  "branches_affected": ["polimento-tecnico"],
+  "chunks_reused": 143,
+  "chunks_to_embed": 3,
+  "estimated_embedding_cost": "...",
+  "breaking_contract_changes": [],
+  "validation_errors": []
+}
+```
+
+Adicionar o alias "polimento" deve virar: 1 node alterado, 0 embeddings novos,
+1 teste de resolução, publicação em segundos. Hoje atravessa fixture, código
+Python, publicação fonte, projeção, recompilação GraphRAG, embeddings, n8n e
+Validator.
+
+### O que se perde (e está tudo bem)
+
+- Não é mais possível colocar exceção arbitrária em Python para uma persona.
+- Não existem múltiplos caminhos independentes de publicação.
+- Hotfix direto no banco é bloqueado ou detectado como drift.
+
+---
 
 ## Catálogo de agentes
 

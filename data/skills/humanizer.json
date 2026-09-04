@@ -1,0 +1,31 @@
+{
+  "schema_version": "BrainSkillManifestV1",
+  "name": "humanizer",
+  "display_name": "Humanizer",
+  "version": "2.11.2",
+  "summary": "Reescreve textos com padrões artificiais para uma redação natural sem alterar afirmações, fatos ou intenção.",
+  "triggers": [
+    "humanizar texto",
+    "remover padrões de escrita de IA",
+    "revisar prosa artificial ou repetitiva",
+    "ajustar tom e fluidez sem mudar o significado"
+  ],
+  "limitations": [
+    "Transforma somente a redação; não cria conhecimento comercial.",
+    "Não pode inventar nem alterar fatos, preços, datas, regras ou estados.",
+    "Não concede ferramentas, rede, execução de código ou permissões.",
+    "Não entra no RAG nem em prompts sem uma conexão persona-agente aprovada e íntegra."
+  ],
+  "source": {
+    "repository": "https://github.com/blader/humanizer",
+    "commit": "e2e92e7b4b8229253ed5c8e81dc65463fdeddda5"
+  },
+  "license": {
+    "spdx": "MIT",
+    "path": ".agents/skills/humanizer/LICENSE"
+  },
+  "artifact": {
+    "skill_path": ".agents/skills/humanizer/SKILL.md",
+    "sha256": "sha256:14fc8a965b6e0a8dc100ba4dffeab55cb94bbac112abbde7e014d5c15a35c202"
+  }
+}

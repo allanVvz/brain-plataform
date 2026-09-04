@@ -116,6 +116,8 @@ def test_validator_uses_only_active_runtime_validator_and_stops_it_after_run():
     assert "WA_VALIDATOR_INSPECT_RESULT=passed" in script
     assert "run-microservice-wa-validator.sh" in workflow
     assert "release_lifecycle.py show" not in workflow
+    assert "options: [tock-fatal, aurora, vz-lupas]" in workflow
+    assert "^(aurora|tock-fatal|vz-lupas)$" in script
 
 
 def test_production_backup_workflow_is_bounded_and_restore_verified():
@@ -158,8 +160,23 @@ def test_n8n_workflow_management_runs_in_active_control_plane_slot():
     assert 'control_service="control-plane-$control_slot"' in workflow
     assert 'infra/microservices/docker-compose.blue-green.yml' in workflow
     assert 'queue_drained|candidate_healthy' in workflow
-    assert 'before="$(audit_template)"' in workflow
-    assert 'required=("persona_slug","workflow_id","active","live_checksum","candidate_checksum","would_change")' in workflow
+    assert "options: [tock-fatal, aurora, vz-lupas, aurora-vz-lupas]" in workflow
+    assert "options: [audit, dry-run, resync]" in workflow
+    assert 'aurora-vz-lupas) personas=(aurora vz-lupas)' in workflow
+    assert 'resync_args=("${personas[@]}")' in workflow
+    assert 'python scripts/resync_graph_agent_workflows.py "${resync_args[@]}"' in workflow
+    assert 'before_records+=("$record")' in workflow
+    assert 'after_records+=("$record")' in workflow
+    assert 'validate_group "$OPERATION-before" "${before_records[@]}"' in workflow
+    assert 'validate_group after "${after_records[@]}"' in workflow
+    assert '"binding_id", "active_binding_count"' in workflow
+    assert 'record["active_binding_count"] == 1' in workflow
+    assert 'record["active_publication_id"]' in workflow
+    assert 'record["foreign_persona_hits"] == []' in workflow
+    assert 'record["live_checksum"] == record["candidate_checksum"]' in workflow
+    assert 'record["binding_pipeline_contract"] == "conversation_v3"' in workflow
+    assert 'len({record[key] for record in records}) == len(records)' in workflow
+    assert 'N8N_RESYNC_DRY_RUN=passed' in workflow
     assert 'active_api_service' not in workflow
 
 

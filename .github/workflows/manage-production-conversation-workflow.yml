@@ -6,12 +6,12 @@ on:
       operation:
         description: Read-only template audit or explicit n8n resync
         type: choice
-        options: [audit, resync]
+        options: [audit, dry-run, resync]
         default: audit
       persona_slug:
-        description: Active persona whose canonical workflow is audited
+        description: Active persona or approved joint scope whose canonical workflow is audited
         type: choice
-        options: [tock-fatal, aurora]
+        options: [tock-fatal, aurora, vz-lupas, aurora-vz-lupas]
         required: true
 
 permissions:
@@ -31,25 +31,26 @@ jobs:
         env:
           VPS_APP_DIR: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           OPERATION: ${{ inputs.operation }}
-          PERSONA_SLUG: ${{ inputs.persona_slug }}
+          PERSONA_SCOPE: ${{ inputs.persona_slug }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
-          envs: VPS_APP_DIR,OPERATION,PERSONA_SLUG
+          envs: VPS_APP_DIR,OPERATION,PERSONA_SCOPE
           command_timeout: 10m
           script: |
             set -Eeuo pipefail
             cd "$VPS_APP_DIR"
-            [[ "$OPERATION" == "audit" || "$OPERATION" == "resync" ]] || {
+            [[ "$OPERATION" == "audit" || "$OPERATION" == "dry-run" || "$OPERATION" == "resync" ]] || {
               echo "invalid operation" >&2
               exit 2
             }
-            [[ "$PERSONA_SLUG" =~ ^[a-z0-9-]{2,80}$ ]] || {
-              echo "invalid persona slug" >&2
-              exit 2
-            }
+            case "$PERSONA_SCOPE" in
+              tock-fatal|aurora|vz-lupas) personas=("$PERSONA_SCOPE") ;;
+              aurora-vz-lupas) personas=(aurora vz-lupas) ;;
+              *) echo "invalid persona scope" >&2; exit 2 ;;
+            esac
 
             lifecycle_stage="$(python3 ops/vps/release_lifecycle.py show --field stage)"
             case "$lifecycle_stage" in
@@ -80,19 +81,77 @@ jobs:
             compose=(docker compose --env-file .env.compose -f docker-compose.yml -f infra/microservices/docker-compose.blue-green.yml)
 
             audit_template() {
-              "${compose[@]}" exec -T "$control_service" python -c 'import json,sys; from scripts import resync_graph_agent_workflows as r; from services import deepseek_n8n_service as d, n8n_client, supabase_client; slug=sys.argv[1]; persona=supabase_client.get_persona(slug); binding=r._binding(persona, require_active=True); connection=supabase_client.get_persona_integration_connection(str(persona["id"]), "deepseek") or {}; config=r._resolved_config(persona, connection, binding); expected=d._workflow_for_persona(persona, credential_id=str(config["n8n_credential_id"]), credential_name="Brain DeepSeek \u2014 " + slug, model_binding={"model": config.get("model"), "endpoint": config.get("endpoint"), "reply_source": config.get("reply_source")}); live=n8n_client.get_workflow(str(config["n8n_workflow_id"])) or {}; expected_checksum=d._workflow_checksum(expected); live_checksum=d._workflow_checksum(live) if live else None; print(json.dumps({"persona_slug": slug, "workflow_id": config.get("n8n_workflow_id"), "active": live.get("active"), "stored_checksum": config.get("workflow_checksum"), "live_checksum": live_checksum, "candidate_checksum": expected_checksum, "would_change": live_checksum != expected_checksum}, ensure_ascii=True, sort_keys=True))' "$PERSONA_SLUG"
+              local slug="$1"
+              "${compose[@]}" exec -T "$control_service" python -c 'import hashlib,json,sys; from scripts import resync_graph_agent_workflows as r; from services import deepseek_n8n_service as d, n8n_client, supabase_client; slug=sys.argv[1]; peers=sys.argv[2:]; persona=supabase_client.get_persona(slug); bindings=supabase_client.get_workflow_bindings(str(persona["id"])); active_bindings=[row for row in bindings if row.get("active")]; binding=r._binding(persona,require_active=False); publication=supabase_client.get_active_graph_publication(str(persona["id"])); connection=supabase_client.get_persona_integration_connection(str(persona["id"]), "deepseek") or {}; config=r._resolved_config(persona, connection, binding); expected=d._workflow_for_persona(persona, credential_id=str(config["n8n_credential_id"]), credential_name="Brain DeepSeek \u2014 " + slug, model_binding={"model": config.get("model"), "endpoint": config.get("endpoint"), "reply_source": config.get("reply_source")}); live=n8n_client.get_workflow(str(config["n8n_workflow_id"])) or {}; expected_checksum=d._workflow_checksum(expected); live_checksum=d._workflow_checksum(live) if live else None; structure={"nodes":[(n.get("id"),n.get("type")) for n in expected.get("nodes") or []],"connections":expected.get("connections") or {}}; structure_checksum="sha256:"+hashlib.sha256(json.dumps(structure,sort_keys=True,separators=(",",":")).encode()).hexdigest(); expected_binding=(expected.get("meta") or {}).get("binding") or {}; live_binding=(live.get("meta") or {}).get("binding") or {}; inbound=next((n for n in live.get("nodes") or [] if n.get("id")=="inbound"),{}); live_webhook_path=str((inbound.get("parameters") or {}).get("path") or "").strip("/"); binding_metadata=binding.get("metadata") or {}; rendered=json.dumps(expected,ensure_ascii=False).lower(); foreign_hits=sorted(peer for peer in peers if peer!=slug and peer.lower() in rendered); print(json.dumps({"persona_slug":slug,"workflow_id":config.get("n8n_workflow_id"),"binding_id":binding.get("id"),"active_binding_count":len(active_bindings),"active_publication_id":(publication or {}).get("id"),"active":live.get("active"),"stored_checksum":config.get("workflow_checksum"),"live_checksum":live_checksum,"candidate_checksum":expected_checksum,"would_change":live_checksum!=expected_checksum,"template":(expected.get("meta") or {}).get("template"),"structure_checksum":structure_checksum,"foreign_persona_hits":foreign_hits,"candidate_pipeline_contract":expected_binding.get("pipeline_contract"),"live_pipeline_contract":live_binding.get("pipeline_contract"),"binding_pipeline_contract":binding_metadata.get("pipeline_contract"),"candidate_webhook_path":slug+"/conversation","live_webhook_path":live_webhook_path},ensure_ascii=True,sort_keys=True))' "$slug" "${personas[@]}"
             }
 
-            before="$(audit_template)"
-            printf '%s' "$before" | python3 -c 'import json,sys; value=json.load(sys.stdin); required=("persona_slug","workflow_id","active","live_checksum","candidate_checksum","would_change"); assert all(key in value for key in required), value'
-            echo "N8N_TEMPLATE_AUDIT_BEFORE=$before"
-            if [[ "$OPERATION" == "audit" ]]; then
+            validate_group() {
+              local phase="$1"
+              shift
+              python3 - "$phase" "$@" <<'PY'
+            import json
+            import sys
+
+            phase = sys.argv[1]
+            records = [json.loads(raw) for raw in sys.argv[2:]]
+            required = {
+                "persona_slug", "workflow_id", "binding_id", "active_binding_count",
+                "active_publication_id", "active",
+                "live_checksum", "candidate_checksum", "would_change", "template",
+                "structure_checksum", "foreign_persona_hits", "candidate_pipeline_contract",
+                "live_pipeline_contract", "binding_pipeline_contract",
+                "candidate_webhook_path", "live_webhook_path",
+            }
+            assert records and all(required <= set(record) for record in records), records
+            assert len({record["persona_slug"] for record in records}) == len(records), records
+            assert len({record["structure_checksum"] for record in records}) == 1, records
+            assert all(record["foreign_persona_hits"] == [] for record in records), records
+            assert all(record["template"] == "graph_agentic_v3" for record in records), records
+            assert all(record["candidate_pipeline_contract"] == "conversation_v3" for record in records), records
+            if len(records) > 1:
+                for key in ("workflow_id", "candidate_webhook_path", "live_webhook_path"):
+                    assert all(record[key] for record in records), (key, records)
+                    assert len({record[key] for record in records}) == len(records), (key, records)
+                present_binding_ids = [record["binding_id"] for record in records if record["binding_id"]]
+                assert len(set(present_binding_ids)) == len(present_binding_ids), records
+            if phase != "audit-before":
+                assert all(record["binding_id"] for record in records), records
+                assert all(record["active_binding_count"] == 1 for record in records), records
+                assert all(record["active_publication_id"] for record in records), records
+            if phase == "after":
+                assert all(record["active"] is True for record in records), records
+                assert all(record["would_change"] is False for record in records), records
+                assert all(record["live_checksum"] == record["candidate_checksum"] for record in records), records
+                assert all(record["live_webhook_path"] == record["candidate_webhook_path"] for record in records), records
+                assert all(record["live_pipeline_contract"] == "conversation_v3" for record in records), records
+                assert all(record["binding_pipeline_contract"] == "conversation_v3" for record in records), records
+            PY
+            }
+
+            before_records=()
+            for slug in "${personas[@]}"; do
+              record="$(audit_template "$slug")"
+              before_records+=("$record")
+              echo "N8N_TEMPLATE_AUDIT_BEFORE=$record"
+            done
+            validate_group "$OPERATION-before" "${before_records[@]}"
+            if [[ "$OPERATION" == "audit" || "$OPERATION" == "dry-run" ]]; then
+              [[ "$OPERATION" == "dry-run" ]] && echo "N8N_RESYNC_DRY_RUN=passed scope=$PERSONA_SCOPE personas=${personas[*]}"
               exit 0
             fi
 
+            resync_args=("${personas[@]}")
+            for slug in "${personas[@]}"; do
+              resync_args+=(--active-persona "$slug")
+            done
             "${compose[@]}" exec -T "$control_service" \
-              python scripts/resync_graph_agent_workflows.py \
-              "$PERSONA_SLUG" --active-persona "$PERSONA_SLUG"
-            after="$(audit_template)"
-            echo "N8N_TEMPLATE_AUDIT_AFTER=$after"
-            printf '%s' "$after" | python3 -c 'import json,sys; value=json.load(sys.stdin); ok=value.get("active") is True and value.get("would_change") is False and value.get("live_checksum")==value.get("candidate_checksum"); raise SystemExit(0 if ok else 1)'
+              python scripts/resync_graph_agent_workflows.py "${resync_args[@]}"
+
+            after_records=()
+            for slug in "${personas[@]}"; do
+              record="$(audit_template "$slug")"
+              after_records+=("$record")
+              echo "N8N_TEMPLATE_AUDIT_AFTER=$record"
+            done
+            validate_group after "${after_records[@]}"
+            echo "N8N_TEMPLATE_RESYNC_RESULT=passed scope=$PERSONA_SCOPE personas=${personas[*]}"
