@@ -136,14 +136,16 @@ referência de leitura. Plano completo:
 | 1 | Publisher genérico, PublicationPlan, embeddings incrementais | **em progresso — GraphBundle + PublicationPlan + staging/ativação em duas fases já existem e publicaram a Tock Fatal real; falta embeddings incrementais por chunk e o publisher completo de edição/remoção** | `bundle-migrator`, `graph-publisher`, `release-gate` |
 | 2 | Cards editáveis alteram o agente de verdade | **em progresso — 2a e 2b entregues no editor GraphBundle v3; 2c–2e permanecem bloqueadas pelos gates de revisão/publicação** | `card-editor` |
 | 2c.1 | Ordem visual e editável das perguntas de qualificação, integrada à Sofia | **a fazer — prioridade de autoria; sem tornar a conversa um roteiro rígido** | `card-editor`, `graph-publisher` |
-| 3 | Sofia produz dados declarativos, não código | a fazer | `faq-coverage`, `sdr-evaluator` |
-| 4 | Tock Fatal nasce no pipeline novo | **em progresso — baseline produtiva v11 (`sha256:e139c137…a9a5dc65`) com catálogo, 605 FAQs e isolamento varejo/atacado; candidato declarativo v12 preparado somente em código, com política conversacional model-owned e sem FAQ nova. Dry-run local passou, mas publicação e ativação continuam sem autorização. Os nós de mídia (asset/gallery/`content_delivery`) do v11/v12 são **conteúdo autorado**, não feature ativa — ver item 8a e o checkpoint de mídia (2026-08-31).** | `graph-publisher` |
+| 3 | Sofia produz dados declarativos, não código | **a fazer — inclui: Sofia lê o grafo, atualiza FAQ e cria os blocos dos sites. Os `requires` do template ativo viram a checklist concreta que hoje é a instrução vaga "SAIDA PUBLICA DE SITE" em `agents/sofia_criar.md`.** | `faq-coverage`, `sdr-evaluator` |
+| 4 | Tock Fatal nasce no pipeline novo | **em progresso — baseline produtiva v11 (`sha256:e139c137…a9a5dc65`) com catálogo, 605 FAQs e isolamento varejo/atacado; candidato declarativo v12 preparado somente em código, com política conversacional model-owned e sem FAQ nova. Dry-run local passou, mas publicação e ativação continuam sem autorização. Os nós de mídia (asset/gallery/`content_delivery`) do v11/v12 são **conteúdo autorado**, não feature ativa — ver item 8a e o checkpoint de mídia (2026-08-31). LP pública de varejo gerada do bundle em 2026-09-04 pelo item 10, sem publicar nem alterar checksum.** | `graph-publisher` |
 | 5 | n8n estável e desacoplado do conteúdo | **em progresso — template único v3 preparado para ambas as personas, envelope único e validador determinístico advisory; provisionamento, teste produtivo e deploy permanecem pendentes de gates próprios.** | — |
 | 6 | Aurora migra para o bundle | **em preparação — baseline v75, checksum, projeções e binding produtivos auditados em 2026-08-31; importador shadow-only estrito preparado, mas o export autenticado da publicação ativa ainda não está disponível no workspace. Restam gerar o bundle a partir desse export, dry-run/shadow, revisão dos dois checksums, WA Validator interno e autorização separada de staging/ativação.** | `bundle-migrator` |
 | 7 | Orquestradores por estágio e campanha por ciclo → arquitetura multi-agente | **redesenhado 2026-08-20; decisão nova 2026-08-22: escopo de conhecimento por agente via cards Embedded — ver seção própria abaixo** | `graph-publisher`, `card-editor` |
 | 8 | Runtime semantic-first (interpretação pelo modelo, prova pelo backend) | **em progresso 2026-08-31 — resposta e próxima pergunta pertencem ao modelo no modo n8n; `missing_fields` mede completude e o proof preserva a fala, descartando apenas componentes inválidos. Runtime, migration funcional e rollout ainda aguardam revisão e autorizações separadas.** | `graph-publisher` |
 | 8a | Navegação consultiva de catálogo e mídia no SDR | **FAQ por ProductGroup entregue no candidato 2026-08-24. Envio de mídia: `MetaWhatsAppProvider.send_media` implementado 2026-08-31; falta retrieval multimodal (compiler não projeta asset), resolução de lote no runtime, prova de asset no proof, migration de lote, vídeos/links e avaliação offline. Rascunho de referência em `.worktrees/recovery-question-hotfix/` (não commitado). Plano: `~/.claude/plans/lea-os-logs-de-atomic-candle.md`.** | `faq-coverage`, `sdr-evaluator` |
 | 9 | Deploy incremental, leve e retomável | **em progresso 2026-08-24 — lifecycle durável, classificação, pausa/drain/resume, proof do primeiro claim, blue-green da API, imagens separadas, retenção autorizada e gates semânticos implementados no candidato; medição real e prova em QA/produção ainda pendentes** | `release-gate` |
+| 10 | Saída pública por template de blocos | **em progresso 2026-09-04 — `api/services/site_blocks.py` resolve blocos declarativos com `scope` de galho; LP de varejo da Tock Fatal gerada e renderizada em `/lp/:personaSlug`. Falta expor os blocos por `/api/menu`, mover `structure` para o banco e ligar a Sofia.** | `graph-publisher`, `card-editor` |
+| 11 | Plataforma Brain: cliente, CRM e páginas públicas integrados | **a fazer — no login o cliente acessa suas páginas públicas (LP e cardápio/catálogo), configurações e o CRM já existente. Fundação obrigatória: evento e clique usam `node_id` do grafo como chave nos dois lados.** | — |
 
 ### 9 — Deploy incremental, leve e retomável
 
@@ -716,6 +718,126 @@ Validator.
 - Hotfix direto no banco é bloqueado ou detectado como drift.
 
 ---
+
+## 10 — Saída pública por template de blocos
+
+Uma página pública é uma lista de **blocos**. Cada bloco declara de onde no
+grafo vem o conteúdo — tipo de nó mais relações nomeadas — em vez de estar
+escrito em Python. Um resolvedor serve todos os formatos: página nova é linha
+nova de template, não código novo. Isso substitui `build_menu_payload`, que
+monta sempre a forma cardápio da Baita e depois carimba `format_key` por cima.
+
+Duas regras tornam isso seguro:
+
+1. **Escopo é branch anchor.** Todo template carrega `scope`: o id de um nó com
+   capability `branch_anchor`. Só entra no payload o que está no fecho daquele
+   galho, com as mesmas regras do `graph_compiler_v3` (árvore primária +
+   `global_context` + arestas que declaram `include_in_branch` /
+   `include_subtree_in_branch` / `applies_to`). Site e agente escopam
+   conhecimento do mesmo jeito. A Tock Fatal vende os mesmos 73 produtos sob
+   duas marcas com preços diferentes; sem isso uma página de varejo poderia
+   emitir preço de atacado.
+2. **Só relações registradas.** Um bloco só percorre relação que já existe em
+   `knowledge_relation_type_registry`. O vocabulário de blocos fica fechado por
+   uma tabela que já existe, em vez de virar linguagem de consulta ad-hoc.
+
+Slots de imagem reaproveitam `api/core/landing_slots.py`. Um bloco degrada sem
+mídia: a Tock tem imagem aprovada em 4 de 73 produtos, então foto é melhoria e
+nunca dependência.
+
+`catalogo_roupas` **não exige** criar `product_collection` — a migration 039 já
+canonizou `product_collection`/`category` sob `product_group`. A inferência de
+formato da migration 071 deve ser substituída por escolha explícita nas
+configurações, e a persona passa a poder ativar mais de uma página.
+
+**A invariante 2 continua valendo.** A projeção em FAQ segue sendo o embedding,
+e nenhuma FAQ é aposentada por causa de bloco. O caminho é tornar essas
+projeções mais automáticas com o tempo — espelhar o grafo em estruturas fixas
+consultando o versionamento — sem que o agente deixe de confiar na FAQ para
+retrieval nem bloqueie a mensagem.
+
+Entregue em 2026-09-04: `api/services/site_blocks.py`,
+`api/scripts/build_tock_lp_payload.py`, `tests/test_site_blocks_scope.py`, e a
+LP de varejo em `/lp/:personaSlug` no repositório renderizador.
+
+Falta: expor blocos por `/api/menu`, mover `structure` para
+`public_site_formats` no banco, auditoria de cobertura dos `requires`, e ligar a
+Sofia.
+
+### Dívida aberta — nós órfãos por renomeação de agente
+
+Em 2026-09-04 o operador confirmou a quem pertence cada agente: **Vitória é da
+tock-fatal**, **Lia é da Aurora**, e **Baita e VZ Lupas não têm agente
+nomeado**. Os documentos de vault diziam outra coisa — a Baita declarava
+Vitória como agente **com telefone**, e a VZ Lupas também a reivindicava.
+Corrigido em `docs/sdr/`.
+
+A correção mudou slugs, e o vault é projetado no grafo pelo `vault_sync`. **A
+publicação ativa da Baita ainda contém os nós antigos** (verificado em
+`.codex-run/baita-vps-v9-event.json`):
+
+| slug publicado | estado depois da correção |
+|---|---|
+| `briefing:vitoria` | sem origem no vault — o arquivo foi removido |
+| `briefing:checkout-vitoria` | renomeado para `checkout` |
+| `briefing:roteiro-comercial-vitoria` | renomeado para `roteiro-comercial` |
+| `tone:tom-vitoria` | renomeado para `tom-atendimento` |
+| `briefing:aurora` (agente) | renomeado para `lia` |
+
+Republicar Baita ou Aurora **cria os nós novos e deixa os antigos órfãos**, em
+vez de atualizá-los: o `vault_sync` casa por slug, então um slug que deixou de
+existir na origem não é reconciliado — ele simplesmente para de ser tocado, e
+continua ativo no grafo, visível ao agente e elegível a RAG. Um agente da Baita
+poderia citar "Vitória" a partir de um nó que nenhum arquivo sustenta mais.
+
+Portanto a republicação dessas duas personas exige **arquivamento explícito**
+dos slugs acima no mesmo plano, e não pode ser tratada como republicação
+rotineira. A VZ Lupas não tem publicação afetada — a correção lá foi só remover
+`public_agent_slug` do `persona.md` — mas segue **sem agente declarado**: se ela
+tiver um, falta o nome.
+
+## 11 — Plataforma Brain: cliente, CRM e páginas públicas integrados
+
+Hoje o cliente final da plataforma tem um portal (`/clientes/<persona>`) com
+leads, mensagens, disparos e pipeline, e as páginas públicas vivem fora dele,
+sem ligação nenhuma. O alvo é um só produto: **ao fazer login, o cliente
+administra suas páginas públicas, suas configurações e seu CRM no mesmo lugar**,
+com os três compartilhando a mesma fonte — o grafo da persona.
+
+O que isso implica, em ordem de dependência:
+
+1. **Configurações escolhem as páginas ativas.** `personas.config.public_site`
+   deixa de guardar um `format_key` único e passa a listar as páginas que a
+   persona publica (LP, cardápio/catálogo), cada uma com seu slug, rota e
+   `scope` de galho. Isso encerra a inferência de formato da migration 071.
+2. **A tela de assets vira a tela de slots.** O maquinário já existe —
+   `api/core/landing_slots.py`, `POST /assets/{id}/rebind-path` e
+   `GET /api/menu/{slug}/admin-blocks` já entregam a grade de blocos com o asset
+   atual de cada posição. Falta ligá-la ao template ativo em vez da landing fixa
+   da Baita.
+3. **A tela de FAQ elege FAQ de site.** A projeção em FAQ continua sendo o
+   embedding (invariante 2); o que muda é poder marcar uma FAQ autoral como
+   conteúdo público. Sem eleição, o bloco resolve vazio e a seção some.
+4. **Trackeamento com chave de grafo.** Não existe hoje: nenhuma rota pública
+   aceita evento e `whatsapp_href` não anexa parâmetro. A fundação obrigatória é
+   que clique no site e mensagem na conversa gravem o **mesmo `node_id`** do
+   grafo. A LP já emite `data-node-id`/`data-block-id` e um `ref` no `wa.me`
+   por isso. Se cada lado inventar id próprio, costurar "viu no catálogo →
+   perguntou no WhatsApp" depois exige tabela de conciliação.
+5. **Atribuição no lead.** `leads.metadata` (migração 060) é o único campo livre
+   já migrado; `leads.canal`/`origem` hoje só carregam constantes grosseiras
+   (`whatsapp`, `bulk_import`). Atenção ao guard-rail: `_execute_lead_write`
+   descarta em silêncio qualquer coluna que o PostgREST não conheça, então
+   atribuição nova precisa de migração ou vai para `metadata`.
+6. **Rota pública de evento.** Não existe. `system_events` é o sink natural
+   (append-only, fire-and-forget), mas `insert_event` filtra para 7 colunas e
+   toda rota de escrita hoje exige sessão. Uma rota pública de evento é
+   superfície nova e precisa de rate limit e de contrato próprio — não herda o
+   fato de `/api/menu/{slug}` ser anônimo.
+
+Ordem sugerida: 1 e 2 destravam o produto sem infra nova; 3 é conteúdo; 4 é
+disciplina de chave e custa quase nada se feita antes; 5 e 6 são o CRM de fato e
+exigem migração e superfície nova.
 
 ## Catálogo de agentes
 
