@@ -17,6 +17,9 @@ POLICY_SOURCE = "operator_conversation_unification_plan_2026-08-31"
 PRESERVED_CONTENT_SHA256 = "e41d00fe5bb7bbe3d36f0be7a528dc6da8b6d274d095ebd71f37683685a083ef"
 PRESERVED_EDGES_SHA256 = "9be24719adc32c24439683aae69daa549796eb954e63a5f549833b31db90ac1c"
 PRESERVED_RULES_SHA256 = "06c16d190d543394c010cbc15904115fb2644864a3aae4b0c858da0426f1699b"
+CATALOG_QUERY_ALIASES = {
+    "product:tock-conjuntos-conjunto-em-cotele": ["cotele", "cotelÃª"],
+}
 
 
 def _sha256(value: Any) -> str:
@@ -70,8 +73,23 @@ def _assert_v11_baseline(bundle: dict[str, Any]) -> None:
         raise ValueError("the v11 baseline contains a FAQ without an approved source")
 
 
+def _assert_existing_v12(bundle: dict[str, Any]) -> None:
+    metadata = bundle.get("metadata") or {}
+    if (bundle.get("persona") or {}).get("slug") != "tock-fatal":
+        raise ValueError("the existing candidate is not the Tock Fatal bundle")
+    if metadata.get("purpose") != "tock_fatal_v12_model_owned_conversation":
+        raise ValueError("the input is not the approved v11 baseline or v12 candidate")
+    if metadata.get("baseline_publication") != BASELINE_PUBLICATION:
+        raise ValueError("the v12 candidate baseline publication changed")
+    if len(bundle.get("nodes") or []) != 1001 or len(bundle.get("edges") or []) != 1904:
+        raise ValueError("the v12 candidate topology does not match its audited baseline")
+
+
 def build(source: dict[str, Any]) -> dict[str, Any]:
-    _assert_v11_baseline(source)
+    if (source.get("metadata") or {}).get("purpose") == EXPECTED_BASELINE_PURPOSE:
+        _assert_v11_baseline(source)
+    else:
+        _assert_existing_v12(source)
     candidate = copy.deepcopy(source)
 
     metadata = candidate.setdefault("metadata", {})
@@ -131,6 +149,11 @@ def build(source: dict[str, Any]) -> dict[str, Any]:
             "explicit_unknown_only": True,
         }
     )
+    doubt_handling = policy.setdefault("doubt_handling", {})
+    doubt_handling["deferred_response"] = (
+        "Vou registrar seu interesse. Um atendente confirmará os valores "
+        "ao final do atendimento."
+    )
     qualification = policy.setdefault("qualification", {})
     qualification.update(
         {
@@ -165,8 +188,89 @@ def build(source: dict[str, Any]) -> dict[str, Any]:
     ]
     clear_data["source"] = POLICY_SOURCE
 
-    # The content release changes only Persona/Tone policy plus bundle metadata.
-    # Catalog nodes, facts, offers, FAQs, assets and every edge remain untouched.
+    faq_aliases_projected = 0
+    targeted_aliases_added = 0
+    for faq in candidate.get("nodes") or []:
+        if faq.get("node_type") != "faq":
+            continue
+        data = faq.setdefault("data", {})
+        if faq.get("id") == "faq:tock-product-media-delivery":
+            # Database policy requires a FAQ to be approved before it can be
+            # projected into Embed through publishes_to.
+            faq["status"] = "approved"
+            data["status"] = "approved"
+        legacy_greeting_claim = [{
+            "claim_type": "other",
+            "policy": "published_accumulated_faq",
+            "evidence_node_ids": [str(faq.get("id") or "")],
+        }]
+        if (
+            data.get("role") == "greeting_response"
+            and data.get("claims") == legacy_greeting_claim
+        ):
+            data.pop("claims", None)
+        source_ids = {
+            str(item.get("node_id") or "")
+            for item in data.get("sources") or []
+            if isinstance(item, dict)
+        }
+        authored_short_names = [
+            alias
+            for product_id, aliases in CATALOG_QUERY_ALIASES.items()
+            if product_id in source_ids
+            for alias in aliases
+        ]
+        faq_id = str(faq.get("id") or "")
+        is_targeted_faq = bool(authored_short_names) and (
+            faq_id.endswith("-preco-canal-quantidade")
+            or faq_id.endswith("-descricao-indicacao")
+        )
+        generator = str((data.get("metadata") or {}).get("generator") or "")
+        if generator == "tock_conversation_faqs_v1" and not is_targeted_faq:
+            # An earlier v12 build projected aliases for every generated FAQ.
+            # Keep this publication narrowly scoped to the cotelê correction.
+            data.pop("aliases", None)
+
+        question_aliases = [
+            str(value).strip()
+            for value in data.get("question_aliases") or []
+            if str(value).strip()
+        ]
+        if is_targeted_faq and question_aliases:
+            # The FAQ projection contract reads `aliases`. Keep the authored
+            # question_aliases too, but materialize the runtime-facing field
+            # only for the targeted product FAQs.
+            data["aliases"] = list(dict.fromkeys([
+                *(data.get("aliases") or []), *question_aliases,
+            ]))
+            faq_aliases_projected += 1
+        extra_aliases: list[str] = []
+        if faq_id.endswith("-preco-canal-quantidade"):
+            for short_name in authored_short_names:
+                extra_aliases.extend([
+                    f"qual o valor do {short_name}",
+                    f"quanto custa o {short_name}",
+                    f"preÃ§o do {short_name}",
+                ])
+        elif faq_id.endswith("-descricao-indicacao"):
+            for short_name in authored_short_names:
+                extra_aliases.extend([
+                    f"qual o tecido do {short_name}",
+                    f"de que tecido Ã© o {short_name}",
+                ])
+        if extra_aliases:
+            data["aliases"] = list(dict.fromkeys([
+                *(data.get("aliases") or []), *extra_aliases,
+            ]))
+            targeted_aliases_added += len(set(extra_aliases))
+
+    metadata["faq_coverage_audit"].update({
+        "runtime_aliases_projected": faq_aliases_projected,
+        "targeted_query_aliases_added": targeted_aliases_added,
+    })
+
+    # Facts, offers, prices, assets and every edge remain untouched. FAQ
+    # changes are retrieval aliases only; answers and claims stay byte-stable.
     return candidate
 
 

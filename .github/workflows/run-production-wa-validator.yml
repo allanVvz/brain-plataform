@@ -6,7 +6,7 @@ on:
       persona_slug:
         description: Persona validated through the internal direct driver
         type: choice
-        options: [tock-fatal, aurora]
+        options: [tock-fatal, aurora, vz-lupas]
         required: true
       flow_id:
         description: Semantic validator flow compatible with the persona

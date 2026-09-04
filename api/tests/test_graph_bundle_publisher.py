@@ -118,6 +118,49 @@ def test_stage_bundle_materializes_then_requires_exact_runtime_checksum(monkeypa
     assert all(set(row["metadata"]) >= {"active", "graph_json_edge_id"} for row in replaced_edges)
 
 
+def test_preflight_ignores_edges_from_legacy_self_persona_projection():
+    normalized = graph_bundle.normalize_bundle(_bundle())
+    authored_persona = next(
+        node for node in normalized["nodes"] if node["node_type"] == "persona"
+    )
+    target = next(
+        node for node in normalized["nodes"] if node["node_type"] != "persona"
+    )
+    node_rows = [
+        {
+            "id": authored_persona["projection_node_id"],
+            "node_type": "persona",
+            "slug": authored_persona["slug"],
+            "status": "approved",
+            "metadata": {"graph_json_node_id": authored_persona["id"]},
+        },
+        {
+            "id": target["projection_node_id"],
+            "node_type": target["node_type"],
+            "slug": target["slug"],
+            "status": "approved",
+            "metadata": {"graph_json_node_id": target["id"]},
+        },
+        {
+            "id": "582e44b8-505d-4e1b-adb0-2c8e3684f980",
+            "node_type": "persona",
+            "slug": "self",
+            "status": "validated",
+            "metadata": {"role": "root"},
+        },
+    ]
+    edge_rows = [{
+        "source_node_id": "582e44b8-505d-4e1b-adb0-2c8e3684f980",
+        "target_node_id": target["projection_node_id"],
+        "relation_type": "belongs_to_persona",
+        "metadata": {"active": True},
+    }]
+
+    graph_bundle_publisher._preflight_source_scope(
+        normalized, node_rows, edge_rows
+    )
+
+
 def test_stage_bundle_rejects_stale_human_approval_before_writes(monkeypatch):
     writes: list[dict] = []
     monkeypatch.setattr(

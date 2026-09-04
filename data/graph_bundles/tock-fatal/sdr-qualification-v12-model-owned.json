@@ -46,7 +46,9 @@
       "product_group_navigation_faq_count": 7,
       "all_faqs_have_source": true,
       "all_faqs_projected_to_embedded": true,
-      "new_faqs_added": 0
+      "new_faqs_added": 0,
+      "runtime_aliases_projected": 4,
+      "targeted_query_aliases_added": 20
     }
   },
   "nodes": [
@@ -92,7 +94,7 @@
             }
           },
           "doubt_handling": {
-            "deferred_response": "Ainda não tenho uma informação publicada e validada sobre preço, estoque, prazo, política ou pedido mínimo. Vou encaminhar sua dúvida para a equipe."
+            "deferred_response": "Vou registrar seu interesse. Um atendente confirmará os valores ao final do atendimento."
           },
           "question_repetition": {
             "max_attempts": 1
@@ -37428,6 +37430,17 @@
               "faq:tock-conjuntos-conjunto-em-cotele-atacado-descricao-indicacao"
             ]
           }
+        ],
+        "aliases": [
+          "me fala sobre o Conjunto em cotele",
+          "como é esse Conjunto em cotele",
+          "para quem serve o Conjunto em cotele",
+          "o Conjunto em cotele combina com qual ocasião",
+          "vale a pena conhecer o Conjunto em cotele",
+          "qual o tecido do cotele",
+          "de que tecido Ã© o cotele",
+          "qual o tecido do cotelÃª",
+          "de que tecido Ã© o cotelÃª"
         ]
       }
     },
@@ -37495,6 +37508,19 @@
               "faq:tock-conjuntos-conjunto-em-cotele-atacado-preco-canal-quantidade"
             ]
           }
+        ],
+        "aliases": [
+          "quanto custa o Conjunto em cotele",
+          "preço do Conjunto em cotele no atacado",
+          "qual a quantidade mínima do Conjunto em cotele",
+          "esse valor é atacado ou varejo para Conjunto em cotele",
+          "posso comprar quantas peças de Conjunto em cotele",
+          "qual o valor do cotele",
+          "quanto custa o cotele",
+          "preÃ§o do cotele",
+          "qual o valor do cotelÃª",
+          "quanto custa o cotelÃª",
+          "preÃ§o do cotelÃª"
         ]
       }
     },
@@ -37696,6 +37722,17 @@
               "faq:tock-conjuntos-conjunto-em-cotele-varejo-descricao-indicacao"
             ]
           }
+        ],
+        "aliases": [
+          "me fala sobre o Conjunto em cotele",
+          "como é esse Conjunto em cotele",
+          "para quem serve o Conjunto em cotele",
+          "o Conjunto em cotele combina com qual ocasião",
+          "vale a pena conhecer o Conjunto em cotele",
+          "qual o tecido do cotele",
+          "de que tecido Ã© o cotele",
+          "qual o tecido do cotelÃª",
+          "de que tecido Ã© o cotelÃª"
         ]
       }
     },
@@ -37763,6 +37800,19 @@
               "faq:tock-conjuntos-conjunto-em-cotele-varejo-preco-canal-quantidade"
             ]
           }
+        ],
+        "aliases": [
+          "quanto custa o Conjunto em cotele",
+          "preço do Conjunto em cotele no varejo",
+          "qual a quantidade mínima do Conjunto em cotele",
+          "esse valor é atacado ou varejo para Conjunto em cotele",
+          "posso comprar quantas peças de Conjunto em cotele",
+          "qual o valor do cotele",
+          "quanto custa o cotele",
+          "preÃ§o do cotele",
+          "qual o valor do cotelÃª",
+          "quanto custa o cotelÃª",
+          "preÃ§o do cotelÃª"
         ]
       }
     },
@@ -48318,10 +48368,10 @@
       "slug": "product-media-delivery",
       "title": "Posso pedir fotos de varias roupas de uma vez?",
       "summary": "Sim. Podem ser solicitadas em uma mensagem as fotos aprovadas de ate 20 pecas publicadas.",
-      "status": "validated",
+      "status": "approved",
       "data": {
         "source": "operator_approved_tock_product_media_2026-08-26",
-        "status": "validated",
+        "status": "approved",
         "question": "Posso pedir fotos de varias roupas de uma vez?",
         "aliases": [
           "me manda as fotos dessas pecas",
