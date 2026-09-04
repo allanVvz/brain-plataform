@@ -779,9 +779,15 @@ poderia citar "Vitória" a partir de um nó que nenhum arquivo sustenta mais.
 
 Portanto a republicação dessas duas personas exige **arquivamento explícito**
 dos slugs acima no mesmo plano, e não pode ser tratada como republicação
-rotineira. A VZ Lupas não tem publicação afetada — a correção lá foi só remover
-`public_agent_slug` do `persona.md` — mas segue **sem agente declarado**: se ela
-tiver um, falta o nome.
+rotineira. A VZ Lupas não tem publicação afetada e sua agente é a **Zaya**,
+confirmada pelo operador em 2026-09-04.
+
+Atenção a uma homônima: existe outra Zaya, **interna da plataforma**, agente de
+marketing visual irmã da Sofia, que fala com o operador no dashboard
+(`api/services/kb_intake_service.py`). São agentes diferentes com o mesmo nome —
+uma atende cliente final no WhatsApp, a outra é ferramenta interna e nunca fala
+com cliente. Log e métrica agregados por `agent_slug` sem filtrar persona vão
+misturar as duas; é a mesma armadilha que a Vitória duplicada criou.
 
 ## 11 — Plataforma Brain: cliente, CRM e páginas públicas integrados
 
