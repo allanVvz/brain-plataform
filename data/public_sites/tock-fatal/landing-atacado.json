@@ -1,0 +1,206 @@
+{
+  "template": "landing_page",
+  "scope": "audience:tock-reseller",
+  "persona_slug": "tock-fatal",
+  "site": {
+    "site_slug": "tock-fatal-atacado",
+    "site_name": "Tock Fatal Atacado",
+    "format_key": "landing_page",
+    "whatsapp_phone": "5551992623375",
+    "whatsapp_message_template": "Oi! Vim pelo site e quero comprar para revender."
+  },
+  "blocks": [
+    {
+      "id": "hero",
+      "kind": "hero",
+      "data": {
+        "brand_node_id": "brand:tock-fatal-atacado",
+        "title": "Tock Fatal Atacado",
+        "positioning": "Moda de giro fácil para revenda, com desconto por volume e mix livre entre categorias.",
+        "vocabulary": [
+          {
+            "node_id": "audience:tock-ctx-conforto",
+            "label": "Cliente que prioriza conforto e praticidade",
+            "terms": [
+              "conforto",
+              "prático",
+              "moletinho",
+              "suplex",
+              "mousse"
+            ]
+          },
+          {
+            "node_id": "audience:tock-ctx-plus-size",
+            "label": "Cliente plus size",
+            "terms": [
+              "plus size",
+              "tamanho grande",
+              "G1",
+              "G2",
+              "G3",
+              "G4"
+            ]
+          },
+          {
+            "node_id": "audience:tock-ctx-preco-oportunidade",
+            "label": "Cliente sensível a preço e oportunidade",
+            "terms": [
+              "preço",
+              "promoção",
+              "oferta",
+              "custo-benefício"
+            ]
+          },
+          {
+            "node_id": "audience:tock-ctx-tendencia",
+            "label": "Cliente que busca tendência",
+            "terms": [
+              "tendência",
+              "poá",
+              "modal",
+              "tule",
+              "suede",
+              "canelado"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "groups",
+      "kind": "group_index",
+      "data": {
+        "groups": [
+          {
+            "node_id": "product_group:tock-blusas-bodies-camisas-e-partes-de-cima",
+            "slug": "blusas-bodies-camisas-e-partes-de-cima",
+            "title": "Blusas, bodies, camisas e partes de cima",
+            "summary": null,
+            "product_count": 23,
+            "price_from_cents": 1603,
+            "assets": [
+              {
+                "node_id": "asset:tock-blusas-bodies-camisas-e-partes-de-cima-blusa-em-poa-primary-image",
+                "alt": "Imagem principal - Blusa em POÁ — R$ 39,90",
+                "bucket": "assets-raw",
+                "path": "tock-fatal/product-media/blusa-em-poa.jpeg",
+                "url": null
+              },
+              {
+                "node_id": "asset:tock-blusas-bodies-camisas-e-partes-de-cima-body-rendado-primary-image",
+                "alt": "Imagem principal - Body rendado",
+                "bucket": "assets-raw",
+                "path": "tock-fatal/product-media/body-rendado.jpeg",
+                "url": null
+              },
+              {
+                "node_id": "asset:tock-blusas-bodies-camisas-e-partes-de-cima-body-mula-manca-primary-image",
+                "alt": "Imagem principal - Body mula manca",
+                "bucket": "assets-raw",
+                "path": "tock-fatal/product-media/body-mula-manca.jpeg",
+                "url": null
+              },
+              {
+                "node_id": "asset:tock-blusas-bodies-camisas-e-partes-de-cima-blusa-tule-texturizado-primary-image",
+                "alt": "Imagem principal - Blusa tule texturizado",
+                "bucket": "assets-raw",
+                "path": "tock-fatal/product-media/blusa-tule-texturizado.jpeg",
+                "url": null
+              }
+            ]
+          },
+          {
+            "node_id": "product_group:tock-calcas-leggings-shorts-e-partes-de-baixo",
+            "slug": "calcas-leggings-shorts-e-partes-de-baixo",
+            "title": "Calças, leggings, shorts e partes de baixo",
+            "summary": null,
+            "product_count": 12,
+            "price_from_cents": 1603,
+            "assets": []
+          },
+          {
+            "node_id": "product_group:tock-vestidos",
+            "slug": "vestidos",
+            "title": "Vestidos",
+            "summary": null,
+            "product_count": 10,
+            "price_from_cents": 5593,
+            "assets": []
+          },
+          {
+            "node_id": "product_group:tock-calcados",
+            "slug": "calcados",
+            "title": "Calçados",
+            "summary": null,
+            "product_count": 9,
+            "price_from_cents": 6993,
+            "assets": []
+          },
+          {
+            "node_id": "product_group:tock-conjuntos",
+            "slug": "conjuntos",
+            "title": "Conjuntos",
+            "summary": null,
+            "product_count": 8,
+            "price_from_cents": 6993,
+            "assets": []
+          },
+          {
+            "node_id": "product_group:tock-casacos-jaquetas-cardigans-e-sobreposicoes",
+            "slug": "casacos-jaquetas-cardigans-e-sobreposicoes",
+            "title": "Casacos, jaquetas, cardigans e sobreposições",
+            "summary": null,
+            "product_count": 8,
+            "price_from_cents": 4193,
+            "assets": []
+          },
+          {
+            "node_id": "product_group:tock-infantil-masculino-e-acessorios",
+            "slug": "infantil-masculino-e-acessorios",
+            "title": "Infantil, masculino e acessórios",
+            "summary": null,
+            "product_count": 3,
+            "price_from_cents": 2093,
+            "assets": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "brand",
+      "kind": "brand",
+      "data": {
+        "node_id": "brand:tock-fatal-atacado",
+        "title": "Tock Fatal Atacado",
+        "summary": "Moda pensada pra quem compra pensando em vender: peças de giro rápido, mix fácil de montar e desconto por volume pra melhorar margem.",
+        "positioning": "Moda de giro fácil para revenda, com desconto por volume e mix livre entre categorias.",
+        "personality": [
+          "direta",
+          "objetiva",
+          "parceira do giro",
+          "sem enrolação com número"
+        ],
+        "audience_fit": "revendedora, sacoleira, loja física ou perfil que compra em quantidade para revender",
+        "pricing_model": "preço por peça com desconto de 30% a partir de 3 peças, iguais ou diferentes, aplicado por unidade"
+      }
+    },
+    {
+      "id": "price_range",
+      "kind": "price_range",
+      "data": {
+        "min_cents": 1603,
+        "max_cents": 18193,
+        "offer_count": 73
+      }
+    },
+    {
+      "id": "whatsapp_cta",
+      "kind": "cta",
+      "data": {
+        "headline": "Me chama que eu te ajudo a montar o mix que mais gira.",
+        "phone": "5551992623375",
+        "message_template": "Oi! Vim pelo site e quero comprar para revender."
+      }
+    }
+  ]
+}
