@@ -72,6 +72,12 @@ def test_resume_uses_the_same_immutable_registry_repositories_as_deploy():
     assert "export API_IMAGE WORKER_IMAGE MIGRATE_IMAGE" in RESUME
 
 
+def test_resume_observes_only_canonical_burst_candidates():
+    assert "distinct on (coalesce(batch_key,id::text))" in RESUME
+    assert "order by coalesce(batch_key,id::text),created_at desc,id desc" in RESUME
+    assert "ignored) ;;" in RESUME
+
+
 def test_retention_is_dry_run_by_default_and_component_precise():
     assert 'MODE="${1:-${RETENTION_MODE:---dry-run}}"' in RETENTION
     assert "CLEANUP_AUTHORIZED=true" in RETENTION

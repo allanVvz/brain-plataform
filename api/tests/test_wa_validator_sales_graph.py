@@ -46,7 +46,106 @@ def test_sales_semantic_scripts_select_distinct_graph_branches():
     assert retail["driver"]["branch_anchor_node_id"] == "audience:tock-retail"
     assert reseller["driver"]["branch_anchor_node_id"] == "audience:tock-reseller"
     assert retail["driver"]["branch_anchor_node_id"] != reseller["driver"]["branch_anchor_node_id"]
-    assert retail["driver"]["doubt"]["forbidden_claim_patterns"]
+    assert retail["driver"]["doubt"]["expected_evidence_node_ids"] == [
+        "faq:tock-retail-minimum-quantity"
+    ]
+    assert retail["driver"]["doubt"]["forbidden_evidence_node_ids"] == [
+        "faq:tock-reseller-minimum-quantity"
+    ]
+    assert reseller["driver"]["doubt"]["expected_evidence_node_ids"] == [
+        "faq:tock-reseller-minimum-quantity"
+    ]
+    assert reseller["driver"]["doubt"]["forbidden_evidence_node_ids"] == [
+        "faq:tock-retail-minimum-quantity"
+    ]
+    assert retail["driver"]["unsupported_doubt"]["expected_evidence_node_ids"] == []
+    assert retail["driver"]["unsupported_doubt"]["forbidden_claim_patterns"]
+
+
+def test_sales_doubt_uses_only_the_active_branch_quantity_faq_after_switch():
+    script = wa_validator_service._semantic_sales_script(
+        publication=_publication(), flow_id="sdr_sales_branch_switch"
+    )
+    driver = script["driver"]
+    threshold = driver["interruption_after_answered_fields"]
+
+    retail = wa_validator_service._next_semantic_driver_step(
+        driver=driver,
+        state={},
+        asked_field="retail_style",
+        answered_fields={f"field:{index}" for index in range(threshold)},
+        active_anchor="audience:tock-retail",
+        expected_active_branches=["audience:tock-retail"],
+    )
+    reseller = wa_validator_service._next_semantic_driver_step(
+        driver=driver,
+        state={},
+        asked_field="volume_interest",
+        answered_fields={f"field:{index}" for index in range(threshold)},
+        active_anchor="audience:tock-reseller",
+        expected_active_branches=["audience:tock-reseller"],
+    )
+
+    assert retail["expected_evidence_node_ids"] == [
+        "faq:tock-retail-minimum-quantity"
+    ]
+    assert retail["expected_active_branch_node_ids"] == ["audience:tock-retail"]
+    assert retail["forbidden_evidence_node_ids"] == [
+        "faq:tock-reseller-minimum-quantity"
+    ]
+    assert reseller["expected_evidence_node_ids"] == [
+        "faq:tock-reseller-minimum-quantity"
+    ]
+    assert reseller["expected_active_branch_node_ids"] == ["audience:tock-reseller"]
+    assert reseller["forbidden_evidence_node_ids"] == [
+        "faq:tock-retail-minimum-quantity"
+    ]
+
+
+def test_sales_minimum_order_evidence_contains_the_published_channel_answers():
+    document = _publication()["document_json"]
+    retail = document["node_by_id"]["faq:tock-retail-minimum-quantity"]
+    reseller = document["node_by_id"]["faq:tock-reseller-minimum-quantity"]
+
+    assert retail["data"]["answer"] == "No varejo, a compra mínima é de 1 peça."
+    assert reseller["data"]["answer"] == (
+        "No atacado, o pedido mínimo é de 3 peças, iguais ou diferentes entre si."
+    )
+
+
+def test_sales_stock_and_deadline_remain_an_unsupported_safe_doubt():
+    driver = wa_validator_service._semantic_sales_script(
+        publication=_publication(), flow_id="sdr_sales_retail"
+    )["driver"]
+    state = {}
+    threshold = driver["interruption_after_answered_fields"]
+    answered = {f"field:{index}" for index in range(threshold)}
+    supported = wa_validator_service._next_semantic_driver_step(
+        driver=driver,
+        state=state,
+        asked_field="retail_style",
+        answered_fields=answered,
+        active_anchor="audience:tock-retail",
+        expected_active_branches=["audience:tock-retail"],
+    )
+    unsupported = wa_validator_service._next_semantic_driver_step(
+        driver=driver,
+        state=state,
+        asked_field="retail_style",
+        answered_fields=answered,
+        active_anchor="audience:tock-retail",
+        expected_active_branches=["audience:tock-retail"],
+    )
+
+    assert supported["kind"] == "doubt"
+    assert unsupported["kind"] == "unsupported_doubt"
+    assert unsupported["expected_evidence_node_ids"] == []
+    assert "estoque" in unsupported["text"].lower()
+    assert "prazo" in unsupported["text"].lower()
+    assert not any(
+        "pedido" in pattern or "mínimo" in pattern
+        for pattern in unsupported["forbidden_claim_patterns"]
+    )
 
 
 def test_sales_opening_resolves_and_emits_the_published_selector_field():
@@ -95,8 +194,8 @@ def test_sales_bundle_publishes_a_safe_unknown_commercial_deferral():
     policy = document["common_contract"]["conversation_policy"]
 
     assert policy["doubt_handling"]["deferred_response"] == (
-        "Ainda não tenho uma informação publicada e validada sobre preço, estoque, "
-        "prazo, política ou pedido mínimo. Vou encaminhar sua dúvida para a equipe."
+        "Ainda não tenho uma informação publicada e validada sobre estoque, prazo "
+        "ou outra política comercial. Vou encaminhar sua dúvida para a equipe."
     )
     assert policy["safety"][
         "forbid_unpublished_price_stock_deadline_policy"

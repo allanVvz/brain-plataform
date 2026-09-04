@@ -503,6 +503,27 @@ def test_semantic_turn_audit_accepts_acknowledgement_and_first_missing_question(
     assert audit["asked_field"] == "nome_cliente"
 
 
+def test_semantic_turn_audit_rejects_evidence_from_the_previous_branch():
+    inputs = _semantic_audit_inputs()
+    inputs["customer_step"].update({
+        "expected_evidence_node_ids": ["faq:quantity:new-branch"],
+        "forbidden_evidence_node_ids": ["faq:quantity:previous-branch"],
+    })
+    inputs["turn"]["evidence_node_ids"] = [
+        "faq:quantity:new-branch", "faq:quantity:previous-branch",
+    ]
+    inputs["turn"]["text"] = (
+        "O pedido mínimo deste ramo está publicado. Qual seu nome?"
+    )
+
+    audit = wv._semantic_turn_audit(**inputs)
+
+    assert audit["passed"] is False
+    assert audit["criteria"]["doubt_answered_first"] is True
+    assert audit["criteria"]["branch_evidence_isolated"] is False
+    assert "branch_evidence_isolated" in audit["failures"]
+
+
 def test_semantic_turn_audit_accepts_graph_bound_service_pending_confirmation():
     inputs = _semantic_audit_inputs()
     inputs["customer_step"] = {

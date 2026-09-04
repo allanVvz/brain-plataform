@@ -161,10 +161,14 @@ fi
 eligible_file=".deploy/resume-eligible-${TARGET_SHA}.txt"
 if [[ "$resume_already_released" == "false" ]]; then
   psql_scalar "
-select id::text from public.lead_buffer
-where direction='inbound'
-and status in ('received','buffered','retry')
-and payload->'conversation_commit' is null
+select id::text from (
+  select distinct on (coalesce(batch_key,id::text)) id,created_at
+  from public.lead_buffer
+  where direction='inbound'
+  and status in ('received','buffered','retry')
+  and payload->'conversation_commit' is null
+  order by coalesce(batch_key,id::text),created_at desc,id desc
+) canonical
 order by created_at,id;" > "$eligible_file"
   chmod 0600 "$eligible_file"
 else
@@ -232,6 +236,7 @@ while (( SECONDS < deadline )); do
       "select status from public.lead_buffer where id='$inbound_id'::uuid;")"
     case "$status" in
       received|buffered|retry|processing|awaiting_proof) ;;
+      ignored) ;;
       *) verified_inbound="$inbound_id"; break 2 ;;
     esac
   done < "$eligible_file"

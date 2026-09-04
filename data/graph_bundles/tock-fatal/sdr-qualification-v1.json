@@ -55,7 +55,7 @@
             }
           },
           "doubt_handling": {
-            "deferred_response": "Ainda não tenho uma informação publicada e validada sobre preço, estoque, prazo, política ou pedido mínimo. Vou encaminhar sua dúvida para a equipe."
+            "deferred_response": "Ainda não tenho uma informação publicada e validada sobre estoque, prazo ou outra política comercial. Vou encaminhar sua dúvida para a equipe."
           },
           "question_repetition": {
             "max_attempts": 1
@@ -475,11 +475,95 @@
       }
     },
     {
+      "id": "faq:tock-retail-minimum-quantity",
+      "node_type": "faq",
+      "slug": "retail-minimum-quantity",
+      "title": "Quantidade mínima — varejo",
+      "summary": "No varejo, a compra mínima é de 1 peça.",
+      "status": "approved",
+      "data": {
+        "question": "Qual é a quantidade mínima para comprar no varejo?",
+        "question_aliases": [
+          "qual é o pedido mínimo no varejo",
+          "posso comprar uma peça",
+          "quantas peças preciso comprar para uso próprio"
+        ],
+        "answer": "No varejo, a compra mínima é de 1 peça.",
+        "source_node_id": "audience:tock-retail",
+        "source_node_type": "audience",
+        "branch_path": [
+          "persona:tock-fatal",
+          "campaign:tock-whatsapp-qualification",
+          "audience:tock-retail",
+          "faq:tock-retail-minimum-quantity"
+        ],
+        "sources": [
+          {
+            "node_id": "audience:tock-retail",
+            "source": "user_instruction_2026-08-25"
+          }
+        ],
+        "channel": "varejo",
+        "source": "user_instruction_2026-08-25",
+        "status": "approved",
+        "metadata": {"role": "knowledge_faq"},
+        "claims": [
+          {
+            "claim_type": "minimum_order",
+            "policy": "published_accumulated_faq",
+            "evidence_node_ids": ["faq:tock-retail-minimum-quantity"]
+          }
+        ]
+      }
+    },
+    {
+      "id": "faq:tock-reseller-minimum-quantity",
+      "node_type": "faq",
+      "slug": "reseller-minimum-quantity",
+      "title": "Quantidade mínima — atacado",
+      "summary": "No atacado, o pedido mínimo é de 3 peças, iguais ou diferentes entre si.",
+      "status": "approved",
+      "data": {
+        "question": "Qual é a quantidade mínima para comprar no atacado?",
+        "question_aliases": [
+          "qual é o pedido mínimo no atacado",
+          "quantas peças preciso comprar para revenda",
+          "posso misturar peças no pedido mínimo"
+        ],
+        "answer": "No atacado, o pedido mínimo é de 3 peças, iguais ou diferentes entre si.",
+        "source_node_id": "audience:tock-reseller",
+        "source_node_type": "audience",
+        "branch_path": [
+          "persona:tock-fatal",
+          "campaign:tock-whatsapp-qualification",
+          "audience:tock-reseller",
+          "faq:tock-reseller-minimum-quantity"
+        ],
+        "sources": [
+          {
+            "node_id": "audience:tock-reseller",
+            "source": "user_instruction_2026-08-25"
+          }
+        ],
+        "channel": "atacado",
+        "source": "user_instruction_2026-08-25",
+        "status": "approved",
+        "metadata": {"role": "knowledge_faq"},
+        "claims": [
+          {
+            "claim_type": "minimum_order",
+            "policy": "published_accumulated_faq",
+            "evidence_node_ids": ["faq:tock-reseller-minimum-quantity"]
+          }
+        ]
+      }
+    },
+    {
       "id": "rule:tock-safe-handoff",
       "node_type": "rule",
       "slug": "safe-commercial-handoff",
       "title": "Encaminhamento comercial seguro",
-      "summary": "Sem fonte comercial publicada, Vitória registra o interesse e encaminha para a equipe sem confirmar preço, estoque, prazo, política ou pedido mínimo.",
+      "summary": "Sem fonte comercial publicada, Vitória registra o interesse e encaminha para a equipe sem confirmar estoque, prazo ou outra política comercial.",
       "status": "validated",
       "data": {
         "capabilities": {"global_context": true, "handoff_rule": true},
@@ -511,6 +595,10 @@
     {"id": "edge:tock-reseller-profile", "source": "audience:tock-reseller", "target": "faq:tock-reseller-profile", "relation_type": "contains"},
     {"id": "edge:tock-reseller-stage", "source": "audience:tock-reseller", "target": "faq:tock-reseller-stage", "relation_type": "contains"},
     {"id": "edge:tock-reseller-volume", "source": "audience:tock-reseller", "target": "faq:tock-reseller-volume", "relation_type": "contains"},
+    {"id": "edge:tock-retail-minimum-quantity", "source": "audience:tock-retail", "target": "faq:tock-retail-minimum-quantity", "relation_type": "contains"},
+    {"id": "edge:tock-reseller-minimum-quantity", "source": "audience:tock-reseller", "target": "faq:tock-reseller-minimum-quantity", "relation_type": "contains"},
+    {"id": "edge:publishes:faq:tock-retail-minimum-quantity:embed:tock-default", "source": "faq:tock-retail-minimum-quantity", "target": "embed:tock-default", "relation_type": "publishes_to"},
+    {"id": "edge:publishes:faq:tock-reseller-minimum-quantity:embed:tock-default", "source": "faq:tock-reseller-minimum-quantity", "target": "embed:tock-default", "relation_type": "publishes_to"},
     {"id": "edge:tock-campaign-handoff", "source": "campaign:tock-whatsapp-qualification", "target": "rule:tock-safe-handoff", "relation_type": "contains"}
   ]
 }

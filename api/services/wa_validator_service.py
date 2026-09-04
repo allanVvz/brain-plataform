@@ -574,6 +574,33 @@ def _graph_doubt(
     return None
 
 
+def _graph_faq_doubt_by_claim(
+    document: dict,
+    contract: dict,
+    claim_type: str,
+) -> dict | None:
+    """Select a published FAQ from the active branch contract by claim."""
+    node_by_id = document.get("node_by_id") or {}
+    for node_id in contract.get("eligible_faq_node_ids") or []:
+        node = node_by_id.get(node_id) or {}
+        if str(node.get("node_type") or "").lower() != "faq":
+            continue
+        data = node.get("data") or {}
+        claims = data.get("claims") or []
+        if not any(
+            str(claim.get("claim_type") or "") == claim_type
+            for claim in claims if isinstance(claim, dict)
+        ):
+            continue
+        question = str(data.get("question") or node.get("title") or "").strip()
+        if question:
+            return {
+                "text": question,
+                "expected_evidence_node_ids": [str(node_id)],
+            }
+    return None
+
+
 def _semantic_appointment_script(
     *, publication: dict, flow_id: str, initial_state: str,
 ) -> dict:
@@ -799,12 +826,36 @@ def _semantic_sales_script(*, publication: dict, flow_id: str) -> dict:
         if str(field.get("key") or "")
     ]
     driver_questions = dict(contract.get("questions") or {})
-    doubt = {
-        "text": str(profile.get("unsupported_commercial_question") or "Qual é o preço?"),
+    doubts_by_branch_node_id: dict[str, dict] = {}
+    for candidate_anchor, _candidate_node, candidate_contract in branches:
+        candidate_doubt = _graph_faq_doubt_by_claim(
+            document, candidate_contract, "minimum_order",
+        )
+        if not candidate_doubt:
+            raise ValueError(
+                f"Branch {candidate_anchor} não possui FAQ minimum_order publicada e elegível"
+            )
+        doubts_by_branch_node_id[candidate_anchor] = candidate_doubt
+    all_quantity_evidence = {
+        node_id
+        for candidate_doubt in doubts_by_branch_node_id.values()
+        for node_id in candidate_doubt.get("expected_evidence_node_ids") or []
+    }
+    for candidate_doubt in doubts_by_branch_node_id.values():
+        candidate_doubt["forbidden_evidence_node_ids"] = sorted(
+            all_quantity_evidence
+            - set(candidate_doubt.get("expected_evidence_node_ids") or [])
+        )
+    doubt = doubts_by_branch_node_id[anchor]
+    unsupported_doubt = {
+        "text": str(
+            profile.get("unsupported_commercial_question")
+            or "Tem estoque disponível e qual é o prazo de entrega?"
+        ),
         "expected_evidence_node_ids": [],
         "forbidden_claim_patterns": [
             r"R\$\s*\d", r"\bestoque\s+(?:disponível|garantido)\b",
-            r"\bentrega\s+em\s+\d+", r"\bpedido\s+mínimo\s+(?:é|de)\b",
+            r"\bentrega\s+em\s+\d+",
         ],
     }
     switch = None
@@ -847,10 +898,12 @@ def _semantic_sales_script(*, publication: dict, flow_id: str) -> dict:
         "required_fields": required_fields,
         "questions": driver_questions,
         "branch_anchor_node_id": anchor,
-        "max_turns": len(required_fields) + 7,
+        "max_turns": len(required_fields) + 8,
         "expected_handoff": True,
         "switch": switch,
         "doubt": doubt,
+        "doubts_by_branch_node_id": doubts_by_branch_node_id,
+        "unsupported_doubt": unsupported_doubt,
         "interruption_after_answered_fields": max(1, len(required_fields) - 1),
         "confirmation": {"text": "Sim"},
         "question_repetition": dict(
@@ -2040,6 +2093,7 @@ def _semantic_turn_audit(
         if sentence.strip() and "?" not in sentence
     ]
     expected_evidence = set(customer_step.get("expected_evidence_node_ids") or [])
+    forbidden_evidence = set(customer_step.get("forbidden_evidence_node_ids") or [])
     actual_evidence = set(turn.get("evidence_node_ids") or []) | set(
         decision.get("evidence_node_ids") or []
     )
@@ -2267,6 +2321,7 @@ def _semantic_turn_audit(
                 and (first_question_offset < 0 or acknowledgement_before_question)
             )
         ),
+        "branch_evidence_isolated": not bool(forbidden_evidence & actual_evidence),
         "unsupported_claim_not_invented": unsupported_claim_not_invented,
         "all_intended_facts_extracted": accepted_all,
         "service_value_not_reused_as_field": service_value_not_reused_as_field,
@@ -2567,7 +2622,8 @@ def _next_semantic_driver_step(
             "expected_active_branch_node_ids": list(expected_active_branches),
         }
 
-    doubt = driver.get("doubt")
+    branch_doubts = driver.get("doubts_by_branch_node_id") or {}
+    doubt = branch_doubts.get(active_anchor) or driver.get("doubt")
     interruption_threshold = int(driver.get("interruption_after_answered_fields") or 0)
     if (
         isinstance(doubt, dict)
@@ -2581,6 +2637,23 @@ def _next_semantic_driver_step(
             "kind": "doubt",
             "intended_facts": {},
             "expected_branch_node_id": active_anchor,
+            "expected_active_branch_node_ids": list(expected_active_branches),
+        }
+
+    unsupported_doubt = driver.get("unsupported_doubt")
+    if (
+        state.get("doubt_sent")
+        and not state.get("unsupported_doubt_sent")
+        and isinstance(unsupported_doubt, dict)
+        and str(unsupported_doubt.get("text") or "").strip()
+    ):
+        state["unsupported_doubt_sent"] = True
+        return {
+            **unsupported_doubt,
+            "kind": "unsupported_doubt",
+            "intended_facts": {},
+            "expected_branch_node_id": active_anchor,
+            "expected_active_branch_node_ids": list(expected_active_branches),
         }
 
     switch = driver.get("switch")

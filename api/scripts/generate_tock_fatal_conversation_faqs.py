@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +18,8 @@ DEFAULT_BUNDLE = (
     ROOT / "data" / "graph_bundles" / "tock-fatal"
     / "sdr-qualification-v10-full-catalog.json"
 )
-GENERATOR = "tock_conversation_faqs_v1"
+GENERATOR = "tock_conversation_faqs_v2"
+LEGACY_GENERATORS = {"tock_conversation_faqs_v1", GENERATOR}
 
 
 def _source(node: dict[str, Any]) -> str:
@@ -27,12 +30,46 @@ def _money(amount: Any) -> str:
     return f"R$ {float(amount):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def _semantic_fold(value: str) -> str:
+    return " ".join(
+        "".join(
+            char for char in unicodedata.normalize("NFKD", value)
+            if not unicodedata.combining(char)
+        ).lower().split()
+    )
+
+
+def _copy_without_quantity_policy(value: str) -> str:
+    """Keep persuasive copy while removing channel-wide quantity policy."""
+    quantity_terms = (
+        "pedido minimo",
+        "quantidade minima",
+        "a partir de 3 pecas",
+        "minimo de 3 pecas",
+        "compra unitaria",
+    )
+    sentences = re.split(r"(?<=[.!?])\s+", str(value or "").strip())
+    return " ".join(
+        sentence for sentence in sentences
+        if sentence and not any(term in _semantic_fold(sentence) for term in quantity_terms)
+    ).strip()
+
+
+def _generated_by_this_projection(node: dict[str, Any]) -> bool:
+    generator = ((node.get("data") or {}).get("metadata") or {}).get("generator")
+    return generator in LEGACY_GENERATORS
+
+
 def _faq(
     *, faq_id: str, slug: str, title: str, question: str, aliases: list[str],
     answer: str, source_node: dict[str, Any], branch_path: list[str],
-    sources: list[dict[str, str]], claim_type: str, channel: str, approved: bool,
+    sources: list[dict[str, str]], claim_types: str | list[str], channel: str,
+    approved: bool,
 ) -> dict[str, Any]:
     status = "approved" if approved else "pending_validation"
+    normalized_claim_types = (
+        [claim_types] if isinstance(claim_types, str) else list(claim_types)
+    )
     return {
         "id": faq_id,
         "node_type": "faq",
@@ -56,11 +93,14 @@ def _faq(
                 "generator": GENERATOR,
                 "accumulated_at_publication": True,
             },
-            "claims": [{
-                "claim_type": claim_type,
-                "policy": "published_accumulated_faq",
-                "evidence_node_ids": [faq_id],
-            }],
+            "claims": [
+                {
+                    "claim_type": claim_type,
+                    "policy": "published_accumulated_faq",
+                    "evidence_node_ids": [faq_id],
+                }
+                for claim_type in normalized_claim_types
+            ],
         },
     }
 
@@ -68,11 +108,11 @@ def _faq(
 def generate(bundle: dict[str, Any], *, approved: bool) -> dict[str, Any]:
     nodes = [
         node for node in bundle.get("nodes") or []
-        if ((node.get("data") or {}).get("metadata") or {}).get("generator") != GENERATOR
+        if not _generated_by_this_projection(node)
     ]
     generated_ids = {
         str(node.get("id") or "") for node in bundle.get("nodes") or []
-        if ((node.get("data") or {}).get("metadata") or {}).get("generator") == GENERATOR
+        if _generated_by_this_projection(node)
     }
     edges = [
         edge for edge in bundle.get("edges") or []
@@ -133,13 +173,9 @@ def generate(bundle: dict[str, Any], *, approved: bool) -> dict[str, Any]:
         offer_data = offer.get("data") or {}
         offer_summary = str(offer.get("summary") or "").strip()
         price = _money((offer_data.get("price") or {}).get("amount"))
-        minimum = int(offer_data.get("min_quantity") or 1)
         channel_label = "varejo" if channel == "varejo" else "atacado"
-        quantity_text = (
-            "A compra é unitária."
-            if channel == "varejo"
-            else f"A condição vale a partir de {minimum} peças no pedido, que podem ser iguais ou diferentes entre si."
-        )
+        commercial_copy = _copy_without_quantity_policy(copy_summary)
+        commercial_offer = _copy_without_quantity_policy(offer_summary)
         sources = [
             {"node_id": str(group["id"]), "source": _source(group)},
             {"node_id": str(product["id"]), "source": _source(product)},
@@ -151,98 +187,145 @@ def generate(bundle: dict[str, Any], *, approved: bool) -> dict[str, Any]:
             str(product["id"]), str(offer["id"]), copy_id,
         ]
         stem = str(copy.get("slug") or copy_id.replace(":", "-"))
-        variants = [
-            (
-                "descricao-indicacao", "Descrição e indicação",
-                f"Como é o {product_title} e para quem ele é indicado?",
-                [
-                    f"me fala sobre o {product_title}",
-                    f"como é esse {product_title}",
-                    f"para quem serve o {product_title}",
-                    f"o {product_title} combina com qual ocasião",
-                    f"vale a pena conhecer o {product_title}",
-                ],
-                f"{product_summary} {copy_summary}".strip(), "service_detail",
-            ),
-            (
-                "preco-canal-quantidade", "Preço, canal e quantidade",
-                f"Qual é o preço do {product_title} no {channel_label}?",
-                [
-                    f"quanto custa o {product_title}",
-                    f"preço do {product_title} no {channel_label}",
-                    f"qual a quantidade mínima do {product_title}",
-                    f"esse valor é atacado ou varejo para {product_title}",
-                    f"posso comprar quantas peças de {product_title}",
-                ],
-                f"No {channel_label}, o {product_title} custa {price}. {quantity_text} {offer_summary}".strip(),
-                "price",
-            ),
-            (
-                "recomendacao-comparacao", "Recomendação, comparação e objeção",
-                f"O {product_title} é uma boa opção ou devo comparar com outro produto?",
-                [
-                    f"você recomenda o {product_title}",
-                    f"qual a vantagem do {product_title}",
-                    f"estou em dúvida sobre o {product_title}",
-                    f"tem opção parecida com o {product_title}",
-                    f"o {product_title} faz sentido para mim",
-                ],
-                (
-                    f"O {product_title} pertence ao grupo {group_title}. {product_summary} "
-                    f"{copy_summary} A comparação ideal depende do estilo, da ocasião ou do objetivo informado pelo cliente."
-                ).strip(),
-                "service_detail",
-            ),
-            (
-                "duvida-indireta-proxima-acao", "Dúvida indireta e próxima ação",
-                f"Estou procurando algo em {group_title}; o {product_title} pode fazer sentido?",
-                [
-                    f"quero algo de {group_title}",
-                    f"procuro uma peça como o {product_title}",
-                    f"não sei qual produto escolher em {group_title}",
-                    f"o que você sugere em {group_title}",
-                    f"quero ver opções parecidas com {product_title}",
-                ],
-                (
-                    f"O {product_title} é uma opção do grupo {group_title}. {product_summary} "
-                    f"{copy_summary} A próxima recomendação pode ser refinada pelo uso, estilo, ocasião ou canal de compra que o cliente informar."
-                ).strip(),
-                "service_detail",
-            ),
+        faq_id = f"faq:tock-{stem}-produto-canal"
+        aliases = [
+            f"me fala sobre o {product_title}",
+            f"como é esse {product_title}",
+            f"para quem serve o {product_title}",
+            f"o {product_title} combina com qual ocasião",
+            f"vale a pena conhecer o {product_title}",
+            f"quanto custa o {product_title}",
+            f"preço do {product_title} no {channel_label}",
+            f"esse valor é atacado ou varejo para {product_title}",
+            f"você recomenda o {product_title}",
+            f"qual a vantagem do {product_title}",
+            f"estou em dúvida sobre o {product_title}",
+            f"tem opção parecida com o {product_title}",
+            f"o {product_title} faz sentido para mim",
+            f"quero algo de {group_title}",
+            f"procuro uma peça como o {product_title}",
+            f"não sei qual produto escolher em {group_title}",
+            f"o que você sugere em {group_title}",
+            f"quero ver opções parecidas com {product_title}",
         ]
-        for suffix, label, question, aliases, answer, claim_type in variants:
-            faq_id = f"faq:tock-{stem}-{suffix}"
-            faq = _faq(
-                faq_id=faq_id,
-                slug=f"{stem}-{suffix}",
-                title=f"{label} — {product_title} ({channel_label})",
-                question=question,
-                aliases=aliases,
-                answer=answer,
-                source_node=copy,
-                branch_path=[*base_path, faq_id],
-                sources=sources,
-                claim_type=claim_type,
-                channel=channel,
-                approved=approved,
-            )
-            generated.append(faq)
-            generated_edges.extend([
+        answer = (
+            f"O {product_title} pertence ao grupo {group_title}. {product_summary} "
+            f"{commercial_copy} No {channel_label}, custa {price}. {commercial_offer} "
+            "A recomendação pode ser refinada pelo estilo, ocasião ou objetivo informado pelo cliente."
+        ).strip()
+        faq = _faq(
+            faq_id=faq_id,
+            slug=f"{stem}-produto-canal",
+            title=f"Produto e preço — {product_title} ({channel_label})",
+            question=f"Como é e quanto custa o {product_title} no {channel_label}?",
+            aliases=aliases,
+            answer=answer,
+            source_node=copy,
+            branch_path=[*base_path, faq_id],
+            sources=sources,
+            claim_types=["service_detail", "price"],
+            channel=channel,
+            approved=approved,
+        )
+        generated.append(faq)
+        generated_edges.extend([
+            {
+                "id": f"edge:contains:{copy_id}:{faq_id}",
+                "source": copy_id,
+                "target": faq_id,
+                "relation_type": "contains",
+                "metadata": {"generator": GENERATOR},
+            },
+            {
+                "id": f"edge:publishes:{faq_id}:{embedded['id']}",
+                "source": faq_id,
+                "target": embedded["id"],
+                "relation_type": "publishes_to",
+                "metadata": {"generator": GENERATOR},
+            },
+        ])
+
+    quantity_policies = [
+        {
+            "faq_id": "faq:tock-retail-minimum-quantity",
+            "audience_id": "audience:tock-retail",
+            "channel": "varejo",
+            "title": "Quantidade mínima — varejo",
+            "question": "Qual é a quantidade mínima para comprar no varejo?",
+            "aliases": [
+                "qual é o pedido mínimo no varejo",
+                "posso comprar uma peça",
+                "quantas peças preciso comprar para uso próprio",
+            ],
+            "answer": "No varejo, a compra mínima é de 1 peça.",
+            "sources": [
                 {
-                    "id": f"edge:contains:{copy_id}:{faq_id}",
-                    "source": copy_id,
-                    "target": faq_id,
-                    "relation_type": "contains",
-                    "metadata": {"generator": GENERATOR},
+                    "node_id": "audience:tock-retail",
+                    "source": "user_instruction_2026-08-25",
+                },
+            ],
+        },
+        {
+            "faq_id": "faq:tock-reseller-minimum-quantity",
+            "audience_id": "audience:tock-reseller",
+            "channel": "atacado",
+            "title": "Quantidade mínima — atacado",
+            "question": "Qual é a quantidade mínima para comprar no atacado?",
+            "aliases": [
+                "qual é o pedido mínimo no atacado",
+                "quantas peças preciso comprar para revenda",
+                "posso misturar peças no pedido mínimo",
+            ],
+            "answer": "No atacado, o pedido mínimo é de 3 peças, iguais ou diferentes entre si.",
+            "sources": [
+                {
+                    "node_id": "audience:tock-reseller",
+                    "source": "user_instruction_2026-08-25",
                 },
                 {
-                    "id": f"edge:publishes:{faq_id}:{embedded['id']}",
-                    "source": faq_id,
-                    "target": embedded["id"],
-                    "relation_type": "publishes_to",
-                    "metadata": {"generator": GENERATOR},
+                    "node_id": "rule:tock-desconto-atacado-30",
+                    "source": _source(by_id["rule:tock-desconto-atacado-30"]),
                 },
-            ])
+            ],
+        },
+    ]
+    qualification_campaign_id = "campaign:tock-whatsapp-qualification"
+    for policy in quantity_policies:
+        audience = by_id[policy["audience_id"]]
+        faq_id = policy["faq_id"]
+        faq = _faq(
+            faq_id=faq_id,
+            slug=faq_id.removeprefix("faq:tock-"),
+            title=policy["title"],
+            question=policy["question"],
+            aliases=policy["aliases"],
+            answer=policy["answer"],
+            source_node=audience,
+            branch_path=[
+                persona_id, qualification_campaign_id, policy["audience_id"], faq_id,
+            ],
+            sources=policy["sources"],
+            claim_types="minimum_order",
+            channel=policy["channel"],
+            approved=approved,
+        )
+        generated.append(faq)
+        generated_edges.extend([
+            {
+                "id": f"edge:contains:{policy['audience_id']}:{faq_id}",
+                "source": policy["audience_id"],
+                "target": faq_id,
+                "relation_type": "contains",
+                "metadata": {"generator": GENERATOR},
+            },
+            {
+                "id": f"edge:publishes:{faq_id}:{embedded['id']}",
+                "source": faq_id,
+                "target": embedded["id"],
+                "relation_type": "publishes_to",
+                "metadata": {"generator": GENERATOR},
+            },
+        ])
 
     groups = sorted(
         (node for node in nodes if node.get("node_type") == "product_group"),
@@ -264,7 +347,7 @@ def generate(bundle: dict[str, Any], *, approved: bool) -> dict[str, Any]:
         source_node=overview_source,
         branch_path=[persona_id, campaign_id, overview_id],
         sources=[{"node_id": campaign_id, "source": _source(overview_source)}],
-        claim_type="service_detail",
+        claim_types="service_detail",
         channel="all",
         approved=approved,
     )
@@ -340,7 +423,7 @@ def generate(bundle: dict[str, Any], *, approved: bool) -> dict[str, Any]:
             source_node=group,
             branch_path=[persona_id, campaign_id, group_id, faq_id],
             sources=sources,
-            claim_type="service_detail",
+            claim_types="service_detail",
             channel="all",
             approved=approved,
         )
