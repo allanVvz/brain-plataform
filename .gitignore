@@ -121,6 +121,19 @@ dashboard/modes.json
 !.claude/settings.json
 !.claude/agents/
 !.claude/skills/
+# O Claude Code so carrega skills de .claude/skills/. As skills compartilhadas
+# vivem em .agents/skills/ (formato universal, lido tambem por Codex/Copilot/
+# Amp) e sao espelhadas aqui por junction de diretorio -- criadas localmente com
+# scripts/link-skills.ps1, nao versionadas, senao o mesmo conteudo entraria no
+# repositorio duas vezes. Skills que nascem em .claude/skills/ como diretorio
+# real (aurora-*) continuam versionadas normalmente.
+.claude/skills/brain-agent-e2e/
+.claude/skills/brain-appointment-graph/
+.claude/skills/frontend-design/
+.claude/skills/humanizer/
+.claude/skills/sofia-graph-publication-plan/
+.claude/skills/validate-production-release/
+.claude/skills/whatsapp-binding-reassignment/
 tmp/
 memory.backup-*.md
 .pytest_cache/
