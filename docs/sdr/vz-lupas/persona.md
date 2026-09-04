@@ -15,6 +15,7 @@
   ],
   "metadata": {
     "language": "pt-BR",
+    "public_agent_slug": "zaya",
     "greeting": "Oi! Bem-vindo a Vz Lupas, como posso ajudar?"
   },
   "relations": []
