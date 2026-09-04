@@ -141,13 +141,13 @@ def test_contrato_comum_aceita_confirmacao_pendente_do_servico():
     assert "needs_confirmation" in servico["accepted_statuses"]
 
 
-def test_campo_comum_que_nao_seleciona_galho_nao_ganha_o_status():
-    """`needs_confirmation` no servico e sobre resolucao aproximada de
-    catalogo. Um campo qualquer da persona nao herda isso -- quem precisa dele
-    declara `semantic_type` proprio."""
+def test_campo_comum_aceita_estados_conversacionais_universais():
+    """Campos publicados compartilham os estados conversacionais universais."""
     nome = _campo_por_chave(_grafo_aurora()["common_contract"]["fields"], "nome_cliente")
     assert nome is not None
-    assert nome["accepted_statuses"] == ["known"]
+    assert nome["accepted_statuses"] == [
+        "known", "unknown", "declined", "needs_confirmation",
+    ]
 
 
 def _grafo_com_galho_de_suporte():

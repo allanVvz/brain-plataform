@@ -1,0 +1,35 @@
+{
+  "source": "operator_approved_tock_product_media_2026-08-26",
+  "persona_slug": "tock-fatal",
+  "status": "validated",
+  "items": [
+    {
+      "file": "body-rendado.jpeg",
+      "sha256": "74ece5d0aeb7457ddd4bcb21882038519af9829e80cd504aa400e2b7924c7768",
+      "mime": "image/jpeg",
+      "product_node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-body-rendado",
+      "product_name_read_from_image": "Body rendado"
+    },
+    {
+      "file": "body-mula-manca.jpeg",
+      "sha256": "b303cc2339a540e2cd0eb85b671c0110ef77e6d76f503a3c870eb9758130778e",
+      "mime": "image/jpeg",
+      "product_node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-body-mula-manca",
+      "product_name_read_from_image": "Body mula manca"
+    },
+    {
+      "file": "blusa-em-poa.jpeg",
+      "sha256": "0917ac0c53bb5a0c0026de6243ca4b5039b348b9ffbebcfb279f3eb367caebdb",
+      "mime": "image/jpeg",
+      "product_node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-blusa-em-poa",
+      "product_name_read_from_image": "Blusa em POA"
+    },
+    {
+      "file": "blusa-tule-texturizado.jpeg",
+      "sha256": "1689b51c577293d7f1b6f9cdd3a5a5e942db6d93f445d6c0f957f81a3fbc6817",
+      "mime": "image/jpeg",
+      "product_node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-blusa-tule-texturizado",
+      "product_name_read_from_image": "Blusa tule texturizado"
+    }
+  ]
+}

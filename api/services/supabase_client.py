@@ -5016,6 +5016,41 @@ def commit_graph_turn_and_outbox_v4(
     )
 
 
+def commit_graph_turn_and_outbox_v5(
+    *, turn: dict, outbound_buffer: dict | list[dict] | None,
+    outbound_message: dict | list[dict] | None, result_payload: dict,
+) -> dict:
+    """Atomic graph commit supporting one ordered media batch."""
+    if not isinstance(outbound_buffer, list):
+        return commit_graph_turn_and_outbox_v4(
+            turn=turn, outbound_buffer=outbound_buffer,
+            outbound_message=outbound_message if isinstance(outbound_message, dict) else None,
+            result_payload=result_payload,
+        )
+    result = get_client().rpc(
+        "commit_graph_turn_and_outbox_v5",
+        {
+            "p_turn": turn,
+            "p_outbound_buffer": outbound_buffer,
+            "p_outbound_message": outbound_message,
+            "p_result": result_payload,
+        },
+    ).execute()
+    value = getattr(result, "data", None)
+    if isinstance(value, list):
+        value = value[0] if value else {}
+    return value if isinstance(value, dict) else {}
+
+
+def release_next_graph_media_batch_item(completed_buffer_id: str) -> str | None:
+    result = get_client().rpc(
+        "release_next_graph_media_batch_item",
+        {"p_completed_buffer_id": completed_buffer_id},
+    ).execute()
+    value = getattr(result, "data", None)
+    return str(value) if value else None
+
+
 def audit_conversation_turn_v3(inbound_buffer_id: str) -> dict:
     result = get_client().rpc(
         "audit_conversation_turn_v3", {"p_inbound_id": inbound_buffer_id}

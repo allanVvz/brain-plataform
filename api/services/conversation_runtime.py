@@ -149,16 +149,16 @@ def _commit_graph_turn_and_outbox_or_raise(
     *, inbound_id: str | None, correlation_id: str, **payload: Any,
 ) -> dict:
     try:
-        return supabase_client.commit_graph_turn_and_outbox_v4(**payload)
+        return supabase_client.commit_graph_turn_and_outbox_v5(**payload)
     except Exception as exc:
         logger.exception(
-            "atomic conversation commit failed step=commit_graph_turn_and_outbox_v4 "
+            "atomic conversation commit failed step=commit_graph_turn_and_outbox_v5 "
             "inbound_id=%s correlation_id=%s",
             inbound_id,
             correlation_id,
         )
         raise ConversationCommitFailed(
-            failed_step="commit_graph_turn_and_outbox_v4",
+            failed_step="commit_graph_turn_and_outbox_v5",
             inbound_id=inbound_id,
             correlation_id=correlation_id,
             cause=exc,
@@ -1997,7 +1997,7 @@ def _ensure_reply_text_or_log(
     from the graph -- proof["text"] is graph-approved content (the doubt
     resolution's answer) when present, nothing else.
     """
-    if response.reply_text:
+    if response.reply_text or response.media_batch:
         return response
     if response.proof.get("text"):
         return response.model_copy(update={"reply_text": response.proof["text"]})
@@ -2007,6 +2007,22 @@ def _ensure_reply_text_or_log(
         lead_ref, correlation_id, response.proof.get("mode"),
     )
     return response
+
+
+def _graph_handoff_level(response: AgentResponse) -> str:
+    """Derive the only pause-capable handoff from committed proof invariants."""
+    qualification_complete = bool(response.proof.get("qualification_complete"))
+    context_failure_handoff = bool(response.proof.get("context_failure_handoff"))
+    has_next_question = bool(response.proof.get("next_question_node_id"))
+    has_customer_notice = bool(str(response.reply_text or "").strip())
+    if (
+        response.handoff_required
+        and (qualification_complete or context_failure_handoff)
+        and not has_next_question
+        and has_customer_notice
+    ):
+        return "full"
+    return "partial"
 
 
 AgentRole = Literal["sdr", "closer", "cs"]
@@ -2222,9 +2238,14 @@ def commit(
             raise RuntimeError("conversation commit claim returned an invalid state")
 
     message_id = f"ai:{correlation_id}"
+    outbound_guard_key = (
+        message_id if response.reply_text
+        else f"{message_id}:media:1" if response.media_batch
+        else None
+    )
     existing_outbound = (
-        supabase_client.get_whatsapp_buffer_by_idempotency(message_id)
-        if response.reply_text
+        supabase_client.get_whatsapp_buffer_by_idempotency(outbound_guard_key)
+        if outbound_guard_key
         else None
     )
     if existing_outbound:
@@ -2248,7 +2269,7 @@ def commit(
         graph_turn = None
         result = {
             "ok": True,
-            "message_id": message_id,
+            "message_id": outbound_guard_key,
             "outbound_buffer_id": existing_outbound.get("id"),
             "deduplicated": True,
             "handoff": response.handoff_required,
@@ -2473,26 +2494,12 @@ def commit(
             else (facts.get(selection_key) or {}).get("value")
         )
 
-        def _is_known(fact: Any) -> bool:
-            return (
-                bool(fact)
-                and str(fact.get("status")) == "known"
-                and fact.get("value") not in (None, "")
-            )
-
-        # A handoff-authorizing turn only silences the AI outright (level=
-        # "full") once the lead's minimum registration -- name + service --
-        # is known, this turn or from an earlier session (facts persist for
-        # the lead's whole lifetime, see conversation_ledgers). Otherwise
-        # it's "partial": the lead is flagged for eventual human attention,
-        # but lead_buffer keeps flowing so the SDR can keep collecting what's
-        # missing instead of going silent on a customer who, say, wants to
-        # complain but hasn't given their name yet.
-        handoff_level = (
-            "full"
-            if (_is_known(facts.get("nome_cliente")) and _is_known(facts.get(selection_key)))
-            else "partial"
-        )
+        # Full handoff is derived from proof, never from a pair of commercial
+        # field names. A technical context failure is the only incomplete
+        # safety exception; it already carries an explicit customer-facing
+        # handoff notice. A turn that still owns a qualification question can
+        # never pause the AI completely.
+        handoff_level = _graph_handoff_level(response)
     else:
         customer_name = (
             appointment_request.get("nome_cliente")
@@ -2554,7 +2561,90 @@ def commit(
 
     buffer = None
     prepared_outbound: dict[str, Any] | None = None
-    if response.reply_text and is_validation_lead:
+    if response.media_batch:
+        total = len(response.media_batch)
+        batch_id = f"media:{correlation_id}"
+        buffers: list[dict[str, Any]] = []
+        messages: list[dict[str, Any]] = []
+        for index, item in enumerate(response.media_batch, start=1):
+            item_message_id = f"{message_id}:media:{index}"
+            caption = f"{index}/{total} - {str(item.get('title') or '').strip()}"
+            media = {
+                key: item.get(key)
+                for key in ("kind", "mime", "bucket", "path", "filename", "sha256")
+                if item.get(key) not in (None, "")
+            }
+            batch_metadata = {
+                "batch_id": batch_id,
+                "index": index,
+                "total": total,
+                "product_node_id": item.get("product_node_id"),
+                "asset_node_id": item.get("asset_node_id"),
+            }
+            outbound_metadata = {
+                "agent_slug": context.agent_slug,
+                "role": response.role.value,
+                "intent": decision.intent,
+                "graph_version": context.graph_version,
+                "graph_checksum": context.graph_checksum,
+                "trace_id": inbound_buffer_id,
+                "n8n_execution_id": n8n_execution_id,
+                "media_batch": batch_metadata,
+                "validation": is_validation_lead,
+            }
+            if is_validation_lead:
+                prepared = {
+                    "buffer": {
+                        "persona_id": lead.get("persona_id"),
+                        "lead_ref": lead_ref,
+                        "channel_binding_id": channel_binding_id,
+                        "direction": "outbound",
+                        "status": "awaiting_proof",
+                        "batch_key": f"{lead.get('persona_id')}:{lead_ref}",
+                        "idempotency_key": item_message_id,
+                        "correlation_id": item_message_id,
+                        "payload": {
+                            "text": caption,
+                            "sender_type": "agent",
+                            "validation": True,
+                            "media": media,
+                            "media_batch": batch_metadata,
+                        },
+                    },
+                    "message": {
+                        "lead_id": lead_ref,
+                        "role": "assistant",
+                        "content": caption,
+                        "direction": "outbound",
+                        "status": "sent",
+                        "channel": "whatsapp",
+                        "sender_id": item_message_id,
+                        "channel_binding_id": channel_binding_id,
+                        "correlation_id": item_message_id,
+                        "metadata": outbound_metadata,
+                    },
+                }
+            else:
+                prepared = whatsapp_outbox.prepare_outbound_envelope(
+                    lead=lead,
+                    text=caption,
+                    sender_type="agent",
+                    message_id=item_message_id,
+                    correlation_id=item_message_id,
+                    idempotency_key=item_message_id,
+                    initial_status="awaiting_proof",
+                    metadata=outbound_metadata,
+                    media=media,
+                )
+                prepared["buffer"]["payload"]["media_batch"] = batch_metadata
+                if index == 1 and (
+                    (prepared.get("binding") or {}).get("provider") != "evolution_baileys"
+                ):
+                    raise RuntimeError("graph media batch requires an Evolution binding")
+            buffers.append(prepared["buffer"])
+            messages.append(prepared["message"])
+        prepared_outbound = {"buffer": buffers, "message": messages}
+    elif response.reply_text and is_validation_lead:
         # Confirmed live 2026-08-08: whatsapp_outbox.enqueue_outbound's
         # _recipient_for_lead 409s for a validation lead (no real WhatsApp
         # recipient by design) -- correct, since giving it a fake-but-valid-
@@ -2699,9 +2789,9 @@ def commit(
             "final_decision": decision.model_dump(mode="json"),
         }
         atomic_seed = {
-            "ok": True, "message_id": message_id if response.reply_text else None,
+            "ok": True, "message_id": outbound_guard_key,
             "deduplicated": False, "handoff": response.handoff_required,
-            "ai_paused": response.handoff_required, "route": decision.route.value,
+            "ai_paused": response.handoff_required and handoff_level == "full",
             "role": response.role.value, "intent": decision.intent,
             "reply_text": response.reply_text, "graph_version": context.graph_version,
             "graph_checksum": context.graph_checksum, "stage": qualified_stage,
@@ -2738,6 +2828,9 @@ def commit(
                 "id": atomic_commit["outbound_buffer_id"],
                 "status": atomic_commit.get("outbound_status"),
             }
+        media_batch_buffer_ids = list(
+            atomic_commit.get("media_batch_buffer_ids") or []
+        )
         # Projection only: ledger/facts/proof/outbox above are already durable.
         if response.proof.get("journey_action") == "none":
             pass
@@ -2766,6 +2859,7 @@ def commit(
                 "graph_version": context.graph_version,
                 "graph_checksum": context.graph_checksum,
                 "outbound_buffer_id": (buffer or {}).get("id"),
+                "media_batch_buffer_ids": locals().get("media_batch_buffer_ids", []),
                 "qualification": qualification,
             },
         },
@@ -2787,7 +2881,8 @@ def commit(
         token_input=_turn_token_usage.get("prompt_tokens"),
         token_output=_turn_token_usage.get("completion_tokens"),
         output_data={
-            "outbound_message_id": message_id if response.reply_text else None,
+            "outbound_message_id": outbound_guard_key,
+            "media_batch_size": len(response.media_batch),
             "handoff_required": response.handoff_required,
             "handoff_reason": decision.handoff_reason,
             "evidence_node_ids": decision.evidence_node_ids,
@@ -2810,15 +2905,17 @@ def commit(
     )
     result = {
         "ok": True,
-        "message_id": message_id if response.reply_text else None,
+        "message_id": outbound_guard_key,
         "outbound_buffer_id": (buffer or {}).get("id"),
+        "media_batch_buffer_ids": locals().get("media_batch_buffer_ids", []),
         "deduplicated": False,
         "handoff": response.handoff_required,
-        "ai_paused": response.handoff_required,
+        "ai_paused": response.handoff_required and handoff_level == "full",
         "route": decision.route.value,
         "role": response.role.value,
         "intent": decision.intent,
         "reply_text": response.reply_text,
+        "media_batch": response.media_batch,
         "classifier": decision.classifier,
         "evidence_node_ids": decision.evidence_node_ids,
         "graph_version": context.graph_version,

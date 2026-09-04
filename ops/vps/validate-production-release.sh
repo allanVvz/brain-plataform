@@ -103,7 +103,9 @@ where filename in (
   '127_sdr_name_service_confirmation.sql',
   '128_confirm_branch_offering_within_journey.sql',
   '129_carry_over_facts_by_lead.sql',
-  '130_shared_lead_memory_and_journey_commit_v4.sql'
+  '130_shared_lead_memory_and_journey_commit_v4.sql',
+  '131_graph_media_batch_outbox.sql',
+  '132_repair_literal_conversation_fact.sql'
 ) order by filename;
 
 select 'unsafe_table_grants' metric, count(*)::text value
@@ -174,6 +176,11 @@ begin
       '129_carry_over_facts_by_lead.sql',
       '130_shared_lead_memory_and_journey_commit_v4.sql')) <> 19 then
     raise exception 'release migrations 112-130 are incomplete';
+  end if;
+  if (select count(*) from public._compose_migrations where filename in (
+      '131_graph_media_batch_outbox.sql',
+      '132_repair_literal_conversation_fact.sql')) <> 2 then
+    raise exception 'release migrations 131-132 are incomplete';
   end if;
   if exists (
     select 1 from information_schema.role_table_grants

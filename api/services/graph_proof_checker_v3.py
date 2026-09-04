@@ -50,6 +50,17 @@ def _literal_span(message: str, span: Any) -> bool:
     return bool(value and value in canonical)
 
 
+def _literal_slice(message: str, span: Any) -> str | None:
+    """Return the exact customer text represented by a whitespace-folded span."""
+    raw_message = str(message or "")
+    target = re.sub(r"\s+", " ", str(span or "")).strip()
+    if not target:
+        return None
+    pattern = r"\s+".join(re.escape(part) for part in target.split(" "))
+    match = re.search(pattern, raw_message)
+    return match.group(0) if match else None
+
+
 def name_token_bounds(validation: Any) -> tuple[int, int]:
     """Token limits for a name field, published by the graph.
 
@@ -387,9 +398,17 @@ def _schema_error(schema: dict[str, Any], value: Any) -> str | None:
 
 
 def _canonical_field_value(
-    field: dict[str, Any], value: Any, evidence_span: Any,
+    field: dict[str, Any], value: Any, evidence_span: Any, *, message: str = "",
 ) -> tuple[Any, str | None]:
     """Validate and normalize a value using only its compiled declaration."""
+    if str(field.get("capture_mode") or "schema") == "literal_text_v1":
+        literal = _literal_slice(message, evidence_span)
+        if literal is None:
+            return value, "literal text evidence is not present in the current message"
+        canonical = re.sub(r"\s+", " ", literal).strip()
+        if not canonical:
+            return value, "literal text value must be non-empty"
+        return canonical, _schema_error(field.get("value_schema") or {}, canonical)
     validation = field.get("validation") or {}
     mode = str(validation.get("mode") or "schema")
     if mode == "enum":
@@ -669,16 +688,31 @@ def check(
         if status not in VALID_STATUSES or status not in set(field.get("accepted_statuses") or ["known"]):
             errors.append(f"fact_status_not_accepted:{key}:{status}")
         value = fact.get("value")
+        validation = field.get("validation") or {}
+        try:
+            confidence_floor = float(validation.get("model_confidence_min", 0.0))
+        except (TypeError, ValueError):
+            confidence_floor = 0.0
+        if float(fact.get("confidence") or 0) < confidence_floor:
+            errors.append(f"fact_confidence_below_published_minimum:{key}")
         if status == "known":
             if _MEDIA_PLACEHOLDER.fullmatch(str(value or "").strip()):
                 errors.append(f"fact_evidence_placeholder:{key}")
             value, schema_error = _canonical_field_value(
-                field, value, fact.get("evidence_span"),
+                field, value, fact.get("evidence_span"), message=message,
             )
             if schema_error:
                 errors.append(f"fact_schema_invalid:{key}:{schema_error}")
         elif value is not None:
             errors.append(f"non_known_fact_has_value:{key}")
+        if status in {"unknown", "declined", "needs_confirmation"}:
+            if not str(fact.get("evidence_span") or "").strip():
+                errors.append(f"non_known_fact_without_evidence:{key}:{status}")
+            asked = [str(item) for item in ledger.get("asked_question_node_ids") or []]
+            if status in {"unknown", "declined"} and (
+                not asked or asked[-1] != str(field.get("question_node_id") or "")
+            ):
+                errors.append(f"non_known_fact_not_answering_last_question:{key}:{status}")
         previous = facts.get(key)
         if previous and (previous.get("value"), previous.get("status")) != (value, status):
             policy = field.get("overwrite_policy") or "explicit_correction"

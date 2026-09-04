@@ -304,6 +304,7 @@ class CustomerQuestionKind(StrEnum):
     SCHEDULE = "schedule"
     DEADLINE = "deadline"
     PRODUCT_DETAIL = "product_detail"
+    MEDIA = "media"
     OTHER = "other"
 
 
@@ -379,9 +380,9 @@ class SemanticInterpretation(StrictModel):
     """The model's whole reading of one inbound, in one structured object.
 
     Replaces phrase-list interpretation in the backend. Every element carries
-    the span of the customer's own words that supports it -- deliberately no
-    numeric confidence anywhere, because a score is not an explanation and the
-    backend must be able to re-check each claim against the literal message.
+    the span of the customer's own words that supports it. Extracted facts also
+    carry model confidence, while literal evidence remains the authoritative
+    explanation that the backend re-checks.
     """
 
     intents: list[SemanticIntent] = Field(default_factory=list)
@@ -489,6 +490,9 @@ class AgentResponse(StrictModel):
     proposal: ConversationProposal | None = None
     proof: dict[str, Any] = Field(default_factory=dict)
     repair_context_cards: list[dict[str, Any]] = Field(default_factory=list)
+    # One logical graph-proved response may contain multiple physical media
+    # items. The commit boundary persists the complete batch atomically.
+    media_batch: list[dict[str, Any]] = Field(default_factory=list)
     # Billed usage reported by the reply-drafting model call (e.g. DeepSeek's
     # OpenAI-compatible {prompt_tokens, completion_tokens, total_tokens}).
     # Optional because not every route (deterministic fallbacks, HUMAN

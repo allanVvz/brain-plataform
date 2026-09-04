@@ -384,8 +384,11 @@ def test_new_aurora_fields_publish_specific_validation_examples() -> None:
     assert any(value["value"] == "nenhum" for value in previous["values"])
     assert fields["foco_brilho_riscos"]["validation"]["mode"] == "enum"
     assert fields["revestimento_bancos"]["validation"]["mode"] == "enum"
-    assert fields["vazamento_oleo"]["validation"]["mode"] == "enum"
-    assert fields["estrada_de_chao"]["validation"]["mode"] == "enum"
+    assert fields["vazamento_oleo"]["validation"]["mode"] == "semantic"
+    assert fields["vazamento_oleo"]["capture_mode"] == "literal_text_v1"
+    assert fields["estrada_de_chao"]["validation"]["mode"] == "semantic"
+    assert fields["estrada_de_chao"]["capture_mode"] == "literal_text_v1"
+    assert "frequência" in fields["estrada_de_chao"]["semantic_description"]
     assert fields["evaluation_route"]["validation"]["mode"] == "enum"
     remote = next(
         value for value in fields["evaluation_route"]["validation"]["values"]

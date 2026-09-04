@@ -284,9 +284,14 @@ def _field_declarations(
         validation = _compiled_field_validation(item)
         accepted = item.get("accepted_statuses")
         if not isinstance(accepted, list) or not accepted:
-            accepted = ["known", *(["unknown"] if item.get("accepts_unknown") else [])]
+            accepted = ["known"]
+        # Intermediate semantic states are universally representable. They do
+        # not resolve a required field; they only preserve what the customer
+        # actually said and keep deterministic handoff/next-question policy in
+        # the backend.
+        accepted = [*accepted, "unknown", "declined", "needs_confirmation"]
         if validation.get("semantic_type") == "human_full_name":
-            accepted = [*accepted, "needs_confirmation", "invalid"]
+            accepted = [*accepted, "invalid"]
         result.append({
             **item,
             "key": key,
@@ -300,6 +305,12 @@ def _field_declarations(
             "required": item.get("required", True) is True,
             "accepted_statuses": list(dict.fromkeys(str(value) for value in accepted)),
             "value_schema": item.get("value_schema") if isinstance(item.get("value_schema"), dict) else {},
+            "capture_mode": str(item.get("capture_mode") or "schema"),
+            "semantic_description": str(
+                item.get("semantic_description")
+                or validation.get("description")
+                or ""
+            ),
             "validation": validation,
             "normalization": item.get("normalization") or item.get("normalization_hint"),
             "depends_on": [str(value) for value in item.get("depends_on") or [] if value],

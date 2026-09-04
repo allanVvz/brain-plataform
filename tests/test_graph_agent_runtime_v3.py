@@ -309,13 +309,14 @@ def test_needs_confirmation_remains_askable():
     assert proof["missing_fields"] == ["metragem"]
 
 
-def test_unknown_rejected_and_json_schema_is_generic():
+def test_unknown_requires_literal_reply_to_last_published_question():
     document = compiled_fixture()
     unknown = proposal(document, extracted_facts=[{
         "field_key": "metragem", "owner_node_id": "branch:a", "status": "unknown",
         "value": None, "source_message_id": "msg-1", "evidence_span": "não sei", "confidence": 1,
     }])
-    assert "fact_status_not_accepted:metragem:unknown" in check(document, unknown, message="não sei")["errors"]
+    result = check(document, unknown, message="não sei")
+    assert "non_known_fact_not_answering_last_question:metragem:unknown" in result["errors"]
     invalid = proposal(document, extracted_facts=[{
         "field_key": "metragem", "owner_node_id": "branch:a", "status": "known",
         "value": "grande", "source_message_id": "msg-1", "evidence_span": "grande", "confidence": 1,
@@ -1181,7 +1182,7 @@ def test_recent_reply_similarity_is_detected_before_pending_question_exception()
     assert graph_agent_runtime_v3._repeats_recent_outbound(reply, messages) is True
 
 
-def test_third_pending_question_attempt_marks_field_unknown():
+def test_repetition_never_invents_an_unknown_fact():
     contract = {
         "fields": [{
             "key": "name", "owner_node_id": "persona:one", "required": True,
@@ -1215,12 +1216,7 @@ def test_third_pending_question_attempt_marks_field_unknown():
         max_attempts=1,
     )
 
-    assert fact == {
-        "field_key": "name", "owner_node_id": "persona:one",
-        "status": "unknown", "value": None, "source_message_id": "",
-        "evidence_span": "", "confidence": 1.0,
-        "reason": "ignored_twice", "metadata": {"reason": "ignored_twice"},
-    }
+    assert fact is None
 
 
 def test_repeated_field_gets_one_model_repair_then_safe_handoff(monkeypatch):
@@ -1301,7 +1297,7 @@ def test_repeated_field_gets_one_model_repair_then_safe_handoff(monkeypatch):
 
 
 
-def test_explicit_unknown_marks_field_unknown_immediately():
+def test_backend_does_not_interpret_explicit_unknown_without_model_fact():
     contract = {
         "fields": [{
             "key": "objective", "owner_node_id": "persona:one", "required": True,
@@ -1328,11 +1324,10 @@ def test_explicit_unknown_marks_field_unknown_immediately():
         context=context, contract=contract, ledger_facts={}, proposal=proposal,
     )
 
-    assert fact and fact["status"] == "unknown"
-    assert fact["metadata"] == {"reason": "explicit_unknown"}
+    assert fact is None
 
 
-def test_request_to_continue_without_pending_answer_marks_it_unknown():
+def test_backend_does_not_classify_request_to_continue_as_unknown():
     contract = {
         "fields": [{
             "key": "generic_field", "owner_node_id": "branch:a", "required": True,
@@ -1365,9 +1360,7 @@ def test_request_to_continue_without_pending_answer_marks_it_unknown():
         max_attempts=1, doubt_answered=True,
     )
 
-    assert fact and fact["status"] == "unknown"
-    assert fact["reason"] == "explicit_unknown"
-    assert fact["evidence_span"] == "Podemos seguir sem essa informação?"
+    assert fact is None
 
 
 def test_commercial_projection_separates_common_and_per_service_facts():
@@ -4359,11 +4352,10 @@ def test_bare_service_like_answer_does_not_override_pending_objective(monkeypatc
         for item in response.proof["repair_requirements"]
     )
     assert response.cart_state["facts"]["servico"] == existing_service
-    assert response.cart_state["facts"]["objective"]["status"] == "unknown"
-    assert response.cart_state["facts"]["objective"]["value"] is None
+    assert "objective" not in response.cart_state["facts"]
     assert response.cart_state["asked_question_node_ids"] == ["q:objective"]
     assert response.cart_state["active_branch_node_id"] == "aurora-product-polish-localized"
-    assert response.handoff_required is True
+    assert response.handoff_required is False
 
 
 

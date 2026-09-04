@@ -156,7 +156,7 @@ def _build_authored_graph() -> GraphJson:
                 ],
                 "invalid_response": invalid_response,
             }
-        if field_key in {"estrada_de_chao", "vazamento_oleo", "media_requested"}:
+        if field_key == "media_requested":
             return {
                 "mode": "enum",
                 "values": [
@@ -222,6 +222,14 @@ def _build_authored_graph() -> GraphJson:
                 "description": "Cor informada para o veículo.",
                 "examples": ["prata", "preto", "azul"],
             },
+            "estrada_de_chao": {
+                "description": "Relato literal sobre quando ou com que frequência o veículo circula em estrada de chão.",
+                "examples": ["Somente quando viajo", "Sim, toda semana"],
+            },
+            "vazamento_oleo": {
+                "description": "Relato literal sobre presença, ausência ou incerteza de vazamento de óleo.",
+                "examples": ["Nunca reparei", "Percebo algumas gotas às vezes"],
+            },
             "reclamacao_relato": {
                 "description": "Relato literal do cliente sobre a ocorrência reclamada.",
                 "examples": ["o problema voltou depois do atendimento"],
@@ -282,6 +290,14 @@ def _build_authored_graph() -> GraphJson:
                     ["known", "unknown"] if field_key == "vehicle_color" else ["known"]
                 ),
                 "value_schema": value_schema(field_key),
+                "capture_mode": (
+                    "literal_text_v1"
+                    if field_validation(field_key).get("mode") == "semantic"
+                    else "schema"
+                ),
+                "semantic_description": str(
+                    field_validation(field_key).get("description") or ""
+                ),
                 "validation": field_validation(field_key),
                 "normalization": (
                     "Retorne quatro dígitos." if field_key == "vehicle_year" else None

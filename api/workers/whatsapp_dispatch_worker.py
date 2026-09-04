@@ -434,6 +434,7 @@ class WhatsAppDispatchWorker(BaseWorker):
                 result = provider.send_media(binding, recipient, {
                     "mediatype": (
                         "image" if str(media.get("mime") or "").startswith("image/")
+                        else "video" if str(media.get("mime") or "").startswith("video/")
                         else "audio" if str(media.get("mime") or "").startswith("audio/")
                         else "document"
                     ),
@@ -483,6 +484,8 @@ class WhatsAppDispatchWorker(BaseWorker):
                 wamid=str(external_id),
                 success=True,
             )
+            if (outbound_payload.get("media_batch") or {}).get("batch_id"):
+                supabase_client.release_next_graph_media_batch_item(str(row["id"]))
             event_emitter.emit(
                 "whatsapp.outbound_accepted", entity_type="lead",
                 entity_id=str(row.get("lead_ref") or ""), persona_id=row["persona_id"],

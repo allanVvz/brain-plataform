@@ -358,7 +358,9 @@ def _invalid_proposal_fallback(
     confirmation_pending = False
     if context.active_branch_node_id and contract.get("fields") and not pending:
         confirmation_pending = not unconfirmed
-        terminal_intent = "qualification_incomplete" if unconfirmed else None
+        # Missing or explicitly unknown data remains an SDR state. A parse or
+        # retrieval fallback may not silently promote it to a full handoff.
+        terminal_intent = None
     if terminal_intent or confirmation_pending:
         # A malformed/unparseable model proposal must not collapse a
         # multi-service pedido back down to whichever single branch
@@ -2251,82 +2253,8 @@ def _unanswered_fact_after_question_limit(
     max_attempts: int = 1,
     doubt_answered: bool = False,
 ) -> dict[str, Any] | None:
-    """Mark an unanswered field unknown after initial ask plus allowed retries."""
-    pending = graph_proof_checker_v3.askable_pending_fields(contract, ledger_facts)
-    if not pending:
-        return None
-    field = pending[0]
-    key = str(field.get("key") or "")
-    owner = str(field.get("owner_node_id") or "")
-    question_id = str(field.get("question_node_id") or "")
-    if not key or not owner or not question_id:
-        return None
-    accepted_statuses = set(field.get("accepted_statuses") or ["known"])
-    proposed = next(
-        (
-            fact
-            for fact in proposal.extracted_facts
-            if fact.field_key == key and fact.owner_node_id == owner
-        ),
-        None,
-    )
-    proposed_status = str(
-        proposed.status.value if proposed and hasattr(proposed.status, "value")
-        else proposed.status if proposed else ""
-    )
-    if proposed and proposed_status in accepted_statuses and proposed_status != "unknown":
-        return None
-    message = _message_without_consumed_services(
-        _latest_user_message(context),
-        context.retrieval_trace.get("service_resolution") or {},
-    ).strip()
-    explicit_unknown = bool(
-        _EXPLICIT_UNKNOWN.fullmatch(message)
-        or _explicitly_defers_pending_field(message)
-    )
-    asked = [str(value) for value in context.cart.get("asked_question_node_ids") or []]
-    question_text = str(
-        ((contract.get("questions") or {}).get(question_id) or {}).get("text") or ""
-    ).strip()
-    observed_attempts = sum(
-        1
-        for row in context.messages
-        if (
-            str(row.get("role") or "") == "assistant"
-            or str(row.get("sender_type") or "") in {"agent", "assistant", "ai"}
-        )
-        and question_text
-        and graph_proof_checker_v3._question_already_asked(
-            question_text,
-            str(row.get("content") or row.get("texto") or row.get("text") or ""),
-        )
-    )
-    allowed_emissions = 1 + max(0, min(int(max_attempts), 1))
-    if (
-        not explicit_unknown
-        and max(asked.count(question_id), observed_attempts) < allowed_emissions
-    ):
-        return None
-    # The budget counts question emissions, not customer stonewalling, and the
-    # contract asks the agent to answer a doubt *and* resume the question. So a
-    # customer who asks two legitimate questions about the catalog exhausts the
-    # budget without ever having refused to answer, and the field is given up
-    # on. A turn that carried an answered doubt is not a non-answer.
-    if not explicit_unknown and doubt_answered:
-        return None
-    return {
-        "field_key": key,
-        "owner_node_id": owner,
-        "status": "unknown",
-        "value": None,
-        "source_message_id": _source_message_id(context.messages),
-        "evidence_span": message if explicit_unknown else "",
-        "confidence": 1.0,
-        "reason": "explicit_unknown" if explicit_unknown else "ignored_twice",
-        "metadata": {
-            "reason": "explicit_unknown" if explicit_unknown else "ignored_twice",
-        },
-    }
+    """Never synthesize a customer fact from a repetition counter."""
+    return None
 
 
 def _drop_premature_unknown_for_pending_question(
@@ -3059,6 +2987,11 @@ SYSTEM_PROMPT = (
     "o grafo limita fatos comerciais e o backend apenas prova evidencia, estado e "
     "idempotencia. Responda primeiro toda duvida do cliente e extraia todos os fatos "
     "sustentados por trechos literais, mesmo quando ele responder fora da ordem. "
+    "Para campos textuais, preserve a linguagem do cliente: value deve ficar igual "
+    "ou o mais proximo possivel do evidence_span, sem converter a resposta em uma "
+    "categoria comercial. Use needs_confirmation quando nao conseguir relacionar a "
+    "mensagem ao campo com seguranca. Use unknown somente quando o cliente disser "
+    "explicitamente que nao sabe, nao tem certeza ou prefere nao responder. "
     "Use somente conhecimento publicado para precos, estoque, prazo, politica e agenda. "
     "Preserve o foco da jornada e a memoria compartilhada; nao reinicie a descoberta, "
     "troque de branch nem aplique uma confirmacao sem evidencia explicita da mensagem "
@@ -4015,6 +3948,116 @@ def _merge_product_interest_nodes(
         if row.get("node_id"):
             merged[str(row["node_id"])] = row
     return list(merged.values())
+
+
+def _media_delivery_request(
+    result: semantic_interpretation_validator.ValidationResult | None,
+    document: dict[str, Any],
+    selected_products: Any,
+) -> dict[str, Any]:
+    """Resolve one graph-declared media request without persona knowledge."""
+    persona = _persona_node(document) or {}
+    policy = (
+        ((persona.get("data") or {}).get("conversation_policy") or {})
+        .get("content_delivery") or {}
+    )
+    if not policy.get("enabled") or result is None:
+        return {"requested": False, "items": [], "errors": []}
+    media_questions = [
+        question for question in result.interpretation.questions
+        if question.kind.value == "media"
+    ]
+    if not media_questions:
+        return {"requested": False, "items": [], "errors": []}
+
+    node_by_id = document.get("node_by_id") or {}
+    requested_ids = list(dict.fromkeys(
+        str(node_id)
+        for question in media_questions
+        for node_id in question.entity_node_ids
+        if str(node_id)
+    ))
+    if not requested_ids:
+        requested_ids = list(dict.fromkeys(
+            str(entity.node_id)
+            for entity in result.interpretation.entities
+            if entity.kind.value == "product" and entity.node_id
+        ))
+    if not requested_ids:
+        requested_ids = list(dict.fromkeys(
+            str(row.get("node_id"))
+            for row in selected_products if isinstance(row, dict) and row.get("node_id")
+        ))
+
+    maximum = int(policy.get("max_items") or 1)
+    if not requested_ids:
+        return {
+            "requested": True, "items": [], "errors": ["media_products_not_resolved"],
+            "reply_override": str((policy.get("responses") or {}).get("clarify") or "").strip(),
+        }
+    if len(requested_ids) > maximum:
+        return {
+            "requested": True, "items": [], "errors": ["media_batch_limit_exceeded"],
+            "reply_override": str((policy.get("responses") or {}).get("limit") or "").strip(),
+        }
+
+    allowed_types = {str(value) for value in policy.get("allowed_media_types") or ["image"]}
+    primary_role = str(policy.get("asset_role") or "primary_product_media")
+    asset_targets: dict[str, list[str]] = {}
+    gallery_assets: set[str] = set()
+    for edge in document.get("edges") or []:
+        if edge.get("relation_type") in {"contains", "uses_asset"}:
+            source = str(edge.get("source") or "")
+            target = str(edge.get("target") or "")
+            if (node_by_id.get(target) or {}).get("node_type") == "asset":
+                asset_targets.setdefault(source, []).append(target)
+        if edge.get("relation_type") == "gallery_asset":
+            gallery_assets.add(str(edge.get("source") or ""))
+
+    items: list[dict[str, Any]] = []
+    errors: list[str] = []
+    for product_id in requested_ids:
+        product = node_by_id.get(product_id) or {}
+        if product.get("node_type") != "product":
+            errors.append(f"media_product_not_published:{product_id}")
+            continue
+        candidates: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        for asset_id in asset_targets.get(product_id, []):
+            asset = node_by_id.get(asset_id) or {}
+            data = asset.get("data") or {}
+            media = data.get("media") or {}
+            if (
+                asset_id in gallery_assets
+                and str(asset.get("status") or data.get("status") or "") in {"validated", "active"}
+                and str(data.get("asset_role") or "") == primary_role
+                and str(media.get("kind") or "") in allowed_types
+                and media.get("bucket") and media.get("path") and media.get("mime")
+            ):
+                candidates.append((asset, media))
+        if len(candidates) != 1:
+            errors.append(f"media_primary_asset_count:{product_id}:{len(candidates)}")
+            continue
+        asset, media = candidates[0]
+        items.append({
+            "product_node_id": product_id,
+            "asset_node_id": str(asset.get("id") or ""),
+            "title": str(product.get("title") or product.get("label") or product_id),
+            "kind": str(media.get("kind") or ""),
+            "mime": str(media.get("mime") or ""),
+            "bucket": str(media.get("bucket") or ""),
+            "path": str(media.get("path") or ""),
+            "filename": str(media.get("filename") or ""),
+            "sha256": str(media.get("sha256") or ""),
+        })
+    if errors:
+        items = []
+    return {
+        "requested": True, "items": items, "errors": errors,
+        "reply_override": (
+            str((policy.get("responses") or {}).get("unavailable") or "").strip()
+            if errors else ""
+        ),
+    }
 
 
 def _with_semantic_branch_fallback(
@@ -5635,6 +5678,14 @@ def _decide(
     validated_product_interest_nodes = _product_interest_nodes_from_validation(
         validation, document,
     )
+    media_delivery = _media_delivery_request(
+        validation,
+        document,
+        _merge_product_interest_nodes(
+            context.cart.get("product_interest_nodes"),
+            validated_product_interest_nodes,
+        ),
+    )
     if validation is not None:
         proposal = semantic_conversation_policy.interpretation_to_proposal(
             validation.interpretation
@@ -6261,14 +6312,17 @@ def _decide(
             and not pending_branch_confirmation
         )
         confirmation_pending = bool(qualification_complete and not post_support)
-        terminal_intent = "qualification_incomplete" if qualification_incomplete else None
+        terminal_intent = None
         # A structured response makes the question independently discardable.
         # The backend publishes the model's answer byte-for-byte; it never
         # trims a monolithic reply or appends graph-authored copy.
         reply_seed = str(
-            proof.get("publishable_answer_text")
-            if proof.get("question_discarded")
-            else proposal.reply
+            media_delivery.get("reply_override")
+            or (
+                proof.get("publishable_answer_text")
+                if proof.get("question_discarded")
+                else proposal.reply
+            )
             or ""
         )
         pending_confirmation_fact = next(
@@ -6480,6 +6534,9 @@ def _decide(
             "fallback_used": bool(proof.get("fallback_used")) or empty_reply_handoff
             or repetition_repair_exhausted,
             "context_failure_handoff": empty_reply_handoff or repetition_repair_exhausted,
+            "media_delivery_requested": bool(media_delivery.get("requested")),
+            "media_delivery_errors": list(media_delivery.get("errors") or []),
+            "media_batch_size": len(media_delivery.get("items") or []),
             "model_proposal_errors": [
                 *(proof.get("model_proposal_errors") or []),
                 *(["empty_model_reply"] if empty_reply_handoff else []),
@@ -6504,11 +6561,17 @@ def _decide(
                                      if terminal_intent else None
                                  ),
                                  evidence_node_ids=evidence_node_ids),
-            AgentResponse(reply_text=None if quality_repair_required else (reply or None),
+            AgentResponse(
+                          reply_text=(
+                              None
+                              if quality_repair_required or media_delivery.get("items")
+                              else (reply or None)
+                          ),
                           role=route, evidence_node_ids=evidence_node_ids,
                           cart_state=state,
                           handoff_required=bool(terminal_intent),
-                          proposal=proposal, proof=proof),
+                          proposal=proposal, proof=proof,
+                          media_batch=list(media_delivery.get("items") or [])),
         )
     # A rejected model proposal may preserve accepted facts, but it never
     # authorizes the backend to choose or append a qualification question.
