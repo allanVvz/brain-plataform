@@ -1,1 +1,9 @@
 *.sh text eol=lf
+
+# Skill artifacts are content-addressed: data/skills/*.json pins the sha256 of
+# the SKILL.md it installs, and skill_catalog verifies it. Git's autocrlf would
+# rewrite those bytes on Windows checkout, so the same commit hashes differently
+# per platform and the integrity check fails locally while passing in CI.
+# Pinning eol=lf keeps one artifact, one checksum, everywhere.
+.agents/skills/** text eol=lf
+data/skills/** text eol=lf
