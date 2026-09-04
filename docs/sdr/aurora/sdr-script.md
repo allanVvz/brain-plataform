@@ -9,7 +9,7 @@
   "active": true,
   "tags": ["aurora", "sdr", "briefing"],
   "metadata": {
-    "agent_slug": "aurora",
+    "agent_slug": "lia",
     "allowed_roles": ["SDR"]
   },
   "relations": [

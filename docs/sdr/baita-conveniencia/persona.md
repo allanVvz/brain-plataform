@@ -11,7 +11,6 @@
   "tags": ["baita", "persona", "whatsapp"],
   "metadata": {
     "language": "pt-BR",
-    "public_agent_slug": "vitoria",
     "greeting": "Oi! Como posso ajudar?"
   },
   "relations": []

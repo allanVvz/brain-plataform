@@ -2,12 +2,12 @@
 {
   "type": "tone",
   "persona": "baita-conveniencia",
-  "slug": "tom-vitoria",
-  "title": "Tom de voz da Vitoria",
+  "slug": "tom-atendimento",
+  "title": "Tom de voz do atendimento",
   "source": "sources/operator-policy.md",
   "status": "validated",
   "active": true,
-  "tags": ["baita", "tone", "vitoria"],
+  "tags": ["baita", "tone"],
   "metadata": {
     "style": ["direto", "cordial"],
     "language": "pt-BR"
