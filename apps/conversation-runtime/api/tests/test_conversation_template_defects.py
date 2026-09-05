@@ -339,3 +339,69 @@ def test_interaction_observation_is_fixed_on_purpose_and_says_so(node_name):
     assert "interaction_observation" not in request
 
 
+# --------------------------------------------------------------------------
+# Defect 3 -- reported as "approved_chunks always empty"; it is not
+# --------------------------------------------------------------------------
+
+
+def test_published_rag_chunks_reach_the_prompt_as_approved_chunks():
+    """`const approvedChunks = [];` is an initializer, not the whole story: the
+    loop three lines below fills it from `context.rag_chunks`. Pinned here so
+    the report cannot quietly become true, and so the boundary the prompt
+    promises ("approved_nodes and approved_chunks already exclude every other
+    branch") keeps existing."""
+    _require_node()
+    chunks = [
+        {
+            "chunk_id": "chunk-retail-1",
+            "source_node_id": "faq:tock-retail-entry",
+            "chunk_kind": "faq",
+            "chunk_text": "Na loja de varejo a peca sai por R$ 99,90.",
+            "chunk_checksum": "sha256:retail",
+            "path_checksum": "sha256:path-retail",
+            "metadata": {"provenance": {"source": "published_graph", "status": "validated"}},
+        },
+        {
+            "chunk_id": "chunk-retail-2",
+            "source_node_id": "faq:tock-retail-entry",
+            "chunk_kind": "faq",
+            "chunk_text": "A porta de entrada do varejo comeca em 1 peca.",
+            "chunk_checksum": "sha256:retail-2",
+            "path_checksum": "sha256:path-retail",
+            "metadata": {"provenance": {}},
+        },
+    ]
+    result = _run_prompt_builder(_context(rag_chunks=chunks), _binding())
+    prompt = json.loads(result["request_body"]["messages"][1]["content"])
+    manifest = result["prompt_context_manifest"]
+
+    assert [chunk["chunk_id"] for chunk in prompt["approved_chunks"]] == [
+        "chunk-retail-1", "chunk-retail-2",
+    ]
+    assert prompt["approved_chunks"][0]["text"] == chunks[0]["chunk_text"]
+    assert prompt["approved_chunks"][0]["source_node_id"] == "faq:tock-retail-entry"
+    assert prompt["approved_chunks"][0]["checksum"] == "sha256:retail"
+    assert prompt["approved_chunks"][0]["provenance"]["status"] == "validated"
+
+    # The manifest must account for what was retained, never silently.
+    assert manifest["retained_chunk_count"] == 2
+    assert manifest["retained_rag_tokens"] > 0
+    assert manifest["removed_context"] == []
+    assert manifest["token_limits"] == "provider_managed"
+
+
+def test_prompt_only_claims_a_boundary_it_actually_ships():
+    """The instruction leans on approved_chunks as a real fence. If a future
+    change stops shipping chunks, the sentence has to go with it."""
+    initial = _node("Build graph grounded agent request")["parameters"]["jsCode"]
+
+    claims_boundary = "approved_nodes and approved_chunks already exclude every other branch" in initial
+    ships_chunks = (
+        "for (const chunk of (context.rag_chunks || []))" in initial
+        and "approvedChunks.push(compact)" in initial
+        and "approved_chunks: approvedChunks" in initial
+    )
+    assert claims_boundary is ships_chunks, (
+        "the prompt promises a branch boundary built from approved_chunks; "
+        "either keep populating them from context.rag_chunks or drop the claim"
+    )
