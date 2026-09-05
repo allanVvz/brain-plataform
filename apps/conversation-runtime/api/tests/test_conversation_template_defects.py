@@ -255,75 +255,68 @@ def test_branch_selection_instruction_does_not_depend_on_literal_matching():
 
 
 # --------------------------------------------------------------------------
-# Defect 2 -- next_question_node_id was a literal null
+# Defect 2 -- next_question_node_id, and who is allowed to resolve it
 # --------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("node_name", VALIDATOR_NODES)
-def test_validator_never_hardcodes_next_question_node_id(node_name):
+def test_validator_leaves_question_resolution_to_the_runtime(node_name):
+    """The null is real but it is not the whole story, and the fix is not here.
+
+    `graph_agent_runtime_v3._decide` already converts asked_field_key into a
+    question node id -- `if asked_field_key and not
+    proposal.next_question_node_id` -- using the contract it builds for the
+    branch THIS proposal selects. `/internal/v1/conversations/decide`, the
+    endpoint both reconcile nodes call, goes straight through it.
+
+    This node can only see `context.graph_contract`, fixed before the model
+    answered. When the two contracts name different question nodes for the
+    same field key -- two branches each publishing their own copy of the
+    selection question, the alphabetical accident that qualified retail
+    customers inside the wholesale branch -- a local resolver sends the wrong
+    id. And any non-null value, right or wrong, switches the runtime rescue
+    off, because that is its guard. A second resolver here can tie with the
+    runtime or lose to it; it can never win. So: one resolver, in the place
+    that knows the branch.
+    """
     code = _node(node_name)["parameters"]["jsCode"]
-    assert "next_question_node_id: null" not in code
-    assert "next_question_node_id: nextQuestionNodeId" in code
+
+    assert "next_question_node_id: null" in code
+    # No local resolver, under any name.
+    assert "graphContract.questions" not in code
+    assert "question_node_id" not in code.replace("next_question_node_id", "")
+    # And the reason is written where the null is, not only in a commit.
+    assert "graph_agent_runtime_v3._decide" in code
+    assert "One resolver," in code
 
 
 @pytest.mark.parametrize("node_name", VALIDATOR_NODES)
-def test_validator_maps_asked_field_key_to_its_published_question_node(node_name):
-    """The WA Validator criterion `question_semantically_askable` reads
-    `proof.next_question_node_id` and, in n8n_agents mode, requires it to be an
-    askable question id. Zeroing the field failed every turn that still had a
-    pending field -- the model was asking a perfectly good question."""
+def test_validator_forwards_asked_field_key_untouched(node_name):
+    """Whatever the runtime resolves, it resolves from this. If the key stops
+    arriving, the rescue has nothing to work with and the null becomes the
+    fatal one it was first reported to be."""
     result = _run_response_validator(
         node_name,
         _envelope(asked_field_key="purchase_profile"),
         _purchase_profile_contract(),
     )
-    proposal = result["model_observation"]["proposal"]
 
-    assert proposal["next_question_node_id"] == "faq:tock-purchase-profile"
-    # The semantic key still travels untouched in the interpretation.
-    assert result["model_observation"]["interpretation"]["asked_field_key"] == "purchase_profile"
-
-
-@pytest.mark.parametrize("node_name", VALIDATOR_NODES)
-def test_validator_falls_back_to_the_field_declaration(node_name):
-    contract = _purchase_profile_contract()
-    contract["questions"] = {}
-    result = _run_response_validator(
-        node_name, _envelope(asked_field_key="purchase_profile"), contract,
-    )
-
-    assert result["model_observation"]["proposal"]["next_question_node_id"] == (
-        "faq:tock-purchase-profile"
-    )
-
-
-@pytest.mark.parametrize("node_name", VALIDATOR_NODES)
-def test_validator_sends_null_when_the_question_is_ambiguous(node_name):
-    """Two branches each publishing their own copy of the selection question is
-    exactly the alphabetical accident that qualified retail customers inside
-    the wholesale branch. This node cannot tell which one the proposal means --
-    reconcile can, because it resolves the contract from the branch the
-    proposal selects. Guessing here would suppress that rescue."""
-    contract = _purchase_profile_contract()
-    contract["fields"][0].pop("question_node_id")
-    contract["questions"] = {
-        "faq:tock-retail-profile": {"field_key": "purchase_profile", "text": "?"},
-        "faq:tock-reseller-profile": {"field_key": "purchase_profile", "text": "?"},
-    }
-    result = _run_response_validator(
-        node_name, _envelope(asked_field_key="purchase_profile"), contract,
-    )
-
+    interpretation = result["model_observation"]["interpretation"]
+    assert interpretation["asked_field_key"] == "purchase_profile"
     assert result["model_observation"]["proposal"]["next_question_node_id"] is None
 
 
 @pytest.mark.parametrize("node_name", VALIDATOR_NODES)
-def test_validator_sends_null_when_the_model_asked_nothing(node_name):
-    result = _run_response_validator(
-        node_name, _envelope(asked_field_key=None), _purchase_profile_contract(),
-    )
+def test_the_open_case_is_named_where_someone_will_look_for_it(node_name):
+    """What is left is not a template defect: a legitimate consultative
+    question that is no contract field at all has no question node to resolve
+    to, so `question_semantically_askable` fails the turn. That criterion is
+    in wa_validator_service. Anyone reading this null must find that out here
+    rather than rediscovering it from a red validator run."""
+    code = _node(node_name)["parameters"]["jsCode"]
 
-    assert result["model_observation"]["proposal"]["next_question_node_id"] is None
+    assert "question_semantically_askable" in code
+    assert "wa_validator_service" in code
 
 
 @pytest.mark.parametrize("node_name", VALIDATOR_NODES)
