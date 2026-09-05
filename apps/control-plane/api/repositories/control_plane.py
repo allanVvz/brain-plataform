@@ -2006,6 +2006,11 @@ def list_knowledge_nodes_by_ids(node_ids: list[str]) -> list[dict]:
         return []
 
 
+# Node ids are rendered into the query string, so the batch stays well under
+# any gateway URL limit.
+_EDGE_LOOKUP_BATCH = 100
+
+
 def list_all_knowledge_graph(persona_id: Optional[str] = None, limit_nodes: int = 1500) -> tuple[list[dict], list[dict]]:
     """Return all nodes + edges (optionally scoped to persona). Used by /knowledge/graph-data."""
     global _KG_TABLES_MISSING
@@ -2024,10 +2029,27 @@ def list_all_knowledge_graph(persona_id: Optional[str] = None, limit_nodes: int 
     if not nodes:
         return [], []
     node_ids = [n["id"] for n in nodes]
-    try:
-        eq_in_source = client.table("knowledge_edges").select("*").in_("source_node_id", node_ids).limit(5000).execute().data or []
-    except Exception:
-        eq_in_source = []
+    # Batched on purpose: `in_` renders every id into the query string, so a
+    # large graph produced a URL the gateway rejects. The failure used to be
+    # swallowed into "no edges", which is indistinguishable from a genuinely
+    # edgeless graph -- and callers act on that. graph_bundle_publisher's
+    # preflight, for one, would see an empty existing-edge set and wave through
+    # a bundle that silently orphans every live edge. An unreadable graph must
+    # raise, never look empty.
+    eq_in_source: list[dict] = []
+    for start in range(0, len(node_ids), _EDGE_LOOKUP_BATCH):
+        batch = node_ids[start:start + _EDGE_LOOKUP_BATCH]
+        try:
+            rows = (
+                client.table("knowledge_edges").select("*")
+                .in_("source_node_id", batch).limit(5000).execute().data
+            ) or []
+        except Exception as exc:
+            if _kg_unavailable(exc):
+                _KG_TABLES_MISSING = True
+                return [], []
+            raise
+        eq_in_source.extend(rows)
     active_edges = [edge for edge in eq_in_source if not _edge_is_inactive(edge)]
     return nodes, active_edges
 
