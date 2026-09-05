@@ -1022,6 +1022,42 @@ propósito ou por acidente, e o porte — mudança conversacional — exige o
 teste-canário do `CLAUDE.md`. Detalhe completo em
 `docs/handoffs/TOCK_FATAL_BRANCH_STABILITY_2026-09-05.md`, seção 8.
 
+**6. `persona:self` bloqueia a publicação por bundle, e não é removível em
+geral.** Levantado em 2026-09-05 ao tentar publicar a v16 da Tock Fatal.
+
+`graph_bundle.build_publication_plan` compila **só o bundle**;
+`graph_bundle_publisher.stage_bundle` compila **o banco** depois de gravar. Toda
+persona carrega um nó `persona` de slug `self`, âncora do pipeline antigo de
+vault, que o bundle não declara — e que o próprio preflight tolera de propósito
+(`node_type == "persona" and slug != "self"`). Os dois lados nunca coincidem, e
+o staging aborta com `materialized_runtime_checksum_mismatch`.
+
+O aborto acontece **depois** de `stage_bundle` gravar nós e arestas. Uma
+tentativa deixa o grafo com o conteúdo novo e nenhuma publicação: o runtime
+segue na publicação anterior e não muda de comportamento, mas
+`/api/menu` lê nós crus e passa a mostrar o conteúdo não publicado.
+
+Estado por persona:
+
+| persona | arestas em `persona:self` | ativas | pode arquivar |
+|---|---|---|---|
+| `tock-fatal` | 1012 | **0** | **sim** — todas `belongs_to_persona` inativas |
+| `aurora` | 19 | 4 | **não** — 4 `conversation:` reais |
+| `baita-conveniencia` | 73 | 17 | **não** |
+| `vz-lupas` | 4 | 4 | **não** |
+
+A Tock é a exceção: suas arestas foram desativadas na migração para bundle. Nas
+outras três o nó ainda sustenta estrutura viva — na Aurora são as conversas
+`conversa-32`, `34`, `129` e `138`.
+
+**Consequência para o item 6 (Aurora migra para o bundle):** ela vai bater no
+mesmo aborto, e arquivar não será opção. As saídas são migrar aquelas 4 arestas
+para o nó de persona do bundle, ou fazer o plano prever o estado materializado
+(um parâmetro de linhas residentes em `build_publication_plan` /
+`compile_bundle`). A segunda é a correção estrutural: um plano que não prevê o
+que o staging produz não serve como aprovação, e é ele que a invariante 3
+pressupõe.
+
 ## Catálogo de agentes
 
 Cada agente vive em `.claude/agents/<nome>.md`, declara seu próprio modelo e
