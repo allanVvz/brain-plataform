@@ -139,7 +139,7 @@ referência de leitura. Plano completo:
 | 2f | Skills como blocos renderizáveis | **fase 1 entregue localmente — Humanizer instalada e manifestada; catálogo/projeções/UI permanecem a fazer, sem publicação produtiva** | `card-editor`, `graph-publisher` |
 | 3 | Sofia produz dados declarativos, não código | **a fazer — inclui: Sofia lê o grafo, atualiza FAQ e cria os blocos dos sites. Os `requires` do template ativo viram a checklist concreta que hoje é a instrução vaga "SAIDA PUBLICA DE SITE" em `agents/sofia_criar.md`.** | `faq-coverage`, `sdr-evaluator` |
 | 3a | Sofia Skill Connector | **a fazer — contrato definido; nenhuma skill entra no prompt ou runtime nesta fase** | `card-editor`, `graph-publisher` |
-| 4 | Tock Fatal nasce no pipeline novo | **em progresso — baseline produtiva v11 (`sha256:e139c137…a9a5dc65`) com catálogo, 605 FAQs e isolamento varejo/atacado; candidato declarativo v12 preparado somente em código, com política conversacional model-owned e sem FAQ nova. Dry-run local passou, mas publicação e ativação continuam sem autorização. Os nós de mídia (asset/gallery/`content_delivery`) do v11/v12 são **conteúdo autorado**, não feature ativa — ver item 8a e o checkpoint de mídia (2026-08-31). LP pública de varejo gerada do bundle em 2026-09-04 pelo item 10, sem publicar nem alterar checksum.** | `graph-publisher` |
+| 4 | Tock Fatal nasce no pipeline novo | **em progresso — baseline produtiva v11 (`sha256:e139c137…a9a5dc65`) com catálogo, 605 FAQs e isolamento varejo/atacado; candidato declarativo v12 preparado somente em código, com política conversacional model-owned e sem FAQ nova. Dry-run local passou, mas publicação e ativação continuam sem autorização. Os nós de mídia (asset/gallery/`content_delivery`) do v11/v12 são **conteúdo autorado**, não feature ativa — ver item 8a e o checkpoint de mídia (2026-08-31). LP pública de varejo gerada do bundle em 2026-09-04 pelo item 10. **Correção 2026-09-05:** a v12 **está ativa em produção desde 2026-09-01** — a afirmação anterior de que publicação e ativação seguiam sem autorização estava desatualizada. Bundles v14 (seletor de galho neutro), v15 (FAQ de fluxo) e v16 (voz alcançável) prontos e validados, `runtime_checksum sha256:a1033833…9eaae091`, aguardando publicação — ver `docs/handoffs/TOCK_FATAL_BRANCH_STABILITY_2026-09-05.md`.** | `graph-publisher` |
 | 5 | n8n estável e desacoplado do conteúdo | **em progresso — template único v3 preparado para ambas as personas, envelope único e validador determinístico advisory; provisionamento, teste produtivo e deploy permanecem pendentes de gates próprios.** | — |
 | 6 | Aurora migra para o bundle | **em preparação — baseline v75, checksum, projeções e binding produtivos auditados em 2026-08-31; importador shadow-only estrito preparado, mas o export autenticado da publicação ativa ainda não está disponível no workspace. Restam gerar o bundle a partir desse export, dry-run/shadow, revisão dos dois checksums, WA Validator interno e autorização separada de staging/ativação.** | `bundle-migrator` |
 | 7 | Orquestradores por estágio e campanha por ciclo → arquitetura multi-agente | **redesenhado 2026-08-20; decisão nova 2026-08-22: escopo de conhecimento por agente via cards Embedded — ver seção própria abaixo** | `graph-publisher`, `card-editor` |
@@ -921,6 +921,56 @@ Validator.
 - Hotfix direto no banco é bloqueado ou detectado como drift.
 
 ---
+
+## Dívida operacional de produção — aberta em 2026-09-05
+
+Encontrada ao tentar publicar a v16 da Tock Fatal. Nada disso foi causado por
+aquela mudança; os quatro estavam no caminho e bloqueiam qualquer publicação ou
+reprovisionamento até serem resolvidos.
+
+**1. Lifecycle de deploy travado desde 2026-08-29.** `.deploy/lifecycle.json`
+parou em `queue_drained` com `pause_reason: "runtime worker digest mismatch
+after resume"`. O `candidate_sha` registrado (`b6e871cc…`) não bate com o SHA
+instalado (`20e834cd…`), e `resume_authorization` está vazio.
+
+Consequência prática: **pausar claims hoje deixa o agente mudo sem volta**.
+`resume-claims` exige `resume_authorization.authorized == True`, e
+`authorize-resume` só é aceito no estágio `awaiting_resume_authorization` — de
+`queue_drained` seria preciso avançar por `migration_complete` e
+`candidate_healthy`, ou seja, um cutover completo.
+
+**2. Dois arquivos de estado discordam.**
+`.deploy/microservices/resume-state.json` diz `workers_resumed`;
+`.deploy/lifecycle.json` diz `queue_drained`. São trilhas diferentes e ninguém
+as reconciliou. Qualquer diagnóstico que leia só uma delas chega à conclusão
+errada.
+
+**3. O checkout de `/opt/brain-ai` derivou.** Está **576 commits atrás** de
+`origin/main`, com **137 alterações locais** — 35 arquivos modificados
+(incluindo `api/Dockerfile`, `api/requirements.txt`,
+`api/routes/conversations.py`) e 102 novos, muitos deles lixo de
+redirecionamento de shell (`runtime_version`, `repetition_audit`,
+`pipeline_contract`).
+
+Produção **não roda desse checkout** — roda de imagens Docker; o checkout serve
+aos scripts de `ops/vps`. É por isso que esses scripts divergem do repositório,
+como aconteceu com `run-microservice-wa-validator.sh`. Enquanto não for
+reconciliado, todo script de ops executado na VPS testa uma versão que não é a
+de `main`.
+
+**4. Reprovisionar o n8n exige claims pausados**, e portanto depende do item 1.
+`manage-production-conversation-workflow.yml` falha no preflight com
+`assert value.get("paused") is True`. O gate está correto: ressincronizar o
+workflow de conversa com tráfego vivo pode perder ou duplicar um turno.
+
+**Caminho que não depende de resolver isso tudo:** o publisher existe dentro do
+container `brain-ai-control-plane-green-1`
+(`services.graph_bundle_publisher.stage_bundle` / `activate_staged_bundle`), o
+que permite publicar um bundle sem tocar no checkout derivado.
+
+Ordem obrigatória em qualquer caso: **grafo antes do n8n**, porque o prompt novo
+aponta para `policy.rules.branch_selection.origin_binding`, que só existe a
+partir da v14.
 
 ## Catálogo de agentes
 
