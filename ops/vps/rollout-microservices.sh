@@ -173,15 +173,50 @@ case "$MODE" in
 
   finish)
     restored=0
+
+    # Every container name that belongs to a slot that is active right now.
+    # A blue/green deploy flips the slot between `prepare` and `finish`, so the
+    # workers `prepare` stopped are frequently the ones the deploy just retired.
+    # Restarting those put both slots on the queue at once, the retired one on
+    # the previous image -- including transport-dispatch, which sends WhatsApp.
+    # Observed on 2026-09-05 after rolling out three services in one window.
+    active_names=""
+    for service in gateway control-plane conversation-runtime transport; do
+      slot="$(slot_of "$service")"
+      compose_name="${service/conversation-runtime/runtime}"
+      active_names+=" brain-ai-${compose_name}-${slot}-1"
+      for worker in ${SERVICE_WORKERS[$service]}; do
+        active_names+=" brain-ai-${worker}-${slot}-1"
+      done
+    done
+    is_active_slot() { [[ " $active_names " == *" $1 "* ]]; }
+
     if [[ -s "$STOPPED_RECORD" ]]; then
       while IFS= read -r name; do
         [[ -n "$name" ]] || continue
+        if ! is_active_slot "$name"; then
+          echo "left $name stopped (its slot is no longer active)"
+          continue
+        fi
         if [[ -n "$(docker ps -aq --filter "name=^/${name}$")" && -z "$(docker ps -q --filter "name=^/${name}$")" ]]; then
           docker start "$name" >/dev/null && echo "started $name" && restored=$((restored + 1))
         fi
       done < "$STOPPED_RECORD"
       rm -f "$STOPPED_RECORD"
     fi
+
+    # The mirror of the rule above: a worker left running on a slot that is no
+    # longer active consumes the same queue on a stale image.
+    for service in gateway control-plane conversation-runtime transport; do
+      slot="$(slot_of "$service")"
+      idle="green"; [[ "$slot" == "green" ]] && idle="blue"
+      for worker in ${SERVICE_WORKERS[$service]}; do
+        name="brain-ai-${worker}-${idle}-1"
+        if [[ -n "$(docker ps -q --filter "name=^/${name}$")" ]]; then
+          docker stop "$name" >/dev/null && echo "stopped $name (retired slot still on the queue)"
+        fi
+      done
+    done
 
     # Safety net. A rollout may stop a container outside `prepare` -- by hand, or
     # because a deploy replaced a slot -- and leaving an active-slot worker down
