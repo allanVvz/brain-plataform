@@ -1090,6 +1090,39 @@ Corrigido em `b33d628`, com o teste de regressão em cada serviço dimensionado 
 grafo que quebrou. Falta chegar à produção: exige rebuild das quatro imagens no
 mesmo `source_sha` (o manifesto obriga) e deploy do control-plane.
 
+**8. O resync do n8n nunca fecha: o gate exige um campo que a escrita não
+alcança.** Encontrado em 2026-09-05 ao reprovisionar o workflow da Tock.
+
+`manage-production-conversation-workflow.yml` valida, na fase `after`, que
+`live_pipeline_contract == "conversation_v3"` — o `meta.binding.pipeline_contract`
+do workflow **dentro do n8n**. Hoje ele é `null`, e o resync não o corrige:
+
+```
+live_checksum      = candidate_checksum = stored_checksum = sha256:4b077bb7…d11397
+would_change       = false
+live_pipeline_contract = null      (antes e depois do resync)
+```
+
+`_workflow_checksum` não cobre o `meta`, então o resync vê `would_change: false`,
+pula a escrita, e a asserção seguinte cobra exatamente o campo que ele não
+escreveu. As auditorias *before* e *after* saem idênticas e o workflow falha sem
+ter mudado nada — **modo `resync` é inalcançável para a Tock** enquanto isso não
+for ajustado.
+
+Não é defeito de produção. O contrato está correto onde é lido: o binding no
+banco tem `conversation_v3` (`binding_pipeline_contract`) e o runtime reportou
+`pipeline_contract: conversation_v3` no turno do WA Validator. O `meta` do n8n
+não é consumido por ninguém.
+
+Correção certa: incluir o `meta` em `_workflow_checksum`, para o checksum cobrir
+o que o gate verifica. A alternativa — fazer o resync sempre escrever — remove o
+sintoma e mantém a causa, que é um checksum que não representa o objeto validado.
+Exige build e deploy do control-plane.
+
+Registro relacionado: o prompt reescrito **já estava vivo** no n8n antes desta
+tentativa. A pendência "reprovisionar o n8n" das seções anteriores estava
+resolvida sem que ninguém tivesse confirmado; o que faltava era só este gate.
+
 ## Catálogo de agentes
 
 Cada agente vive em `.claude/agents/<nome>.md`, declara seu próprio modelo e
