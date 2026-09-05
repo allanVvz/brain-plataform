@@ -79,6 +79,9 @@ PY
 }
 
 behind=()
+# Running workers whose digest does not match the manifest. The preflight
+# fails on each of these unless it is stopped while claims are paused.
+blocking=()
 for service in gateway control-plane conversation-runtime transport; do
   slot="$(slot_of "$service")"
   compose_name="${service/conversation-runtime/runtime}"
@@ -95,6 +98,19 @@ for service in gateway control-plane conversation-runtime transport; do
   fi
   printf '%-22s slot=%-6s %s\n' "$service" "$slot" "$state"
   [[ "$state" == "up to date" ]] || printf '%-22s   want %s\n%-22s   have %s\n' "" "$want" "" "${have:-<none>}"
+
+  # A worker is judged on its own digest, not on its service's state. The
+  # preflight compares every worker against the manifest, and a worker mismatch
+  # is a hard FAIL with no pending-digest escape, so a service can read "up to
+  # date" while its own workers block its deploy. That is what happened to
+  # control-plane on 2026-09-05: three workers on a digest nobody had noticed.
+  for worker in ${SERVICE_WORKERS[$service]}; do
+    name="brain-ai-${worker}-${slot}-1"
+    [[ -n "$(docker ps -q --filter "name=^/${name}$")" ]] || continue
+    if [[ "$(running_digest "$name")" != "$want" ]]; then
+      blocking+=("$name")
+    fi
+  done
 done
 
 if paused; then pause_state="paused"; else pause_state="NOT paused"; fi
@@ -102,7 +118,11 @@ printf '\nclaims: %s\n' "$pause_state"
 
 case "$MODE" in
   status)
-    if [[ ${#behind[@]} -eq 0 ]]; then
+    if [[ ${#blocking[@]} -gt 0 ]]; then
+      printf '\nworkers that fail the preflight until stopped (%d):\n' "${#blocking[@]}"
+      printf '  %s\n' "${blocking[@]}"
+    fi
+    if [[ ${#behind[@]} -eq 0 && ${#blocking[@]} -eq 0 ]]; then
       echo "nothing to roll out."
       exit 0
     fi
@@ -139,16 +159,11 @@ case "$MODE" in
     }
     mkdir -p "$(dirname "$STOPPED_RECORD")"
     : > "$STOPPED_RECORD"
-    # Only the workers of a service that is actually behind: stopping a service
-    # already on the target digest buys nothing and lengthens the outage.
-    for service in "${behind[@]}"; do
-      slot="$(slot_of "$service")"
-      for worker in ${SERVICE_WORKERS[$service]}; do
-        name="brain-ai-${worker}-${slot}-1"
-        if [[ -n "$(docker ps -q --filter "name=^/${name}$")" ]]; then
-          docker stop "$name" >/dev/null && echo "$name" >> "$STOPPED_RECORD" && echo "stopped $name"
-        fi
-      done
+    # Exactly the workers the preflight would reject. Stopping one already on
+    # the manifest digest buys nothing and lengthens the outage; leaving one
+    # that is off-digest fails the deploy after the pause is already in place.
+    for name in ${blocking[@]+"${blocking[@]}"}; do
+      docker stop "$name" >/dev/null && echo "$name" >> "$STOPPED_RECORD" && echo "stopped $name"
     done
     if [[ ! -s "$STOPPED_RECORD" ]]; then
       echo "no worker needed stopping."
