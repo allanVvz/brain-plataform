@@ -1058,6 +1058,38 @@ para o nó de persona do bundle, ou fazer o plano prever o estado materializado
 que o staging produz não serve como aprovação, e é ele que a invariante 3
 pressupõe.
 
+**7. O control-plane lia todo grafo grande como se não tivesse aresta.**
+Encontrado em 2026-09-05, depois de remover o `persona:self` da Tock e a v16
+continuar abortando com `materialized_runtime_checksum_mismatch`.
+
+`list_all_knowledge_graph` filtrava arestas com
+`in_("source_node_id", node_ids)`, o que renderiza **todos** os ids na query
+string. Acima de algumas centenas de nós o gateway recusa a URL, e um
+`except Exception: eq_in_source = []` transformava essa falha em lista vazia —
+indistinguível de um grafo que de fato não tem arestas. Para os 1015 nós da
+Tock o control-plane devolvia **0 arestas de 1924**.
+
+Isto é o que realmente bloqueava a v16, e o `persona:self` era só o primeiro
+obstáculo do caminho. Duas consequências, ambas graves:
+
+- `stage_bundle` grava, relê e recompila para conferir o checksum. Relendo sem
+  arestas, o documento recompilado nunca podia bater com o plano — **nenhuma
+  publicação por bundle era possível a partir da produção**. É a explicação da
+  anomalia registrada no item 5: a v12 ativa foi compilada fora da produção
+  porque de dentro dela não dava.
+- `_preflight_source_scope` compara o bundle com as arestas **existentes**. Com
+  o conjunto vazio, ele aprova em silêncio um bundle que orfana todas as arestas
+  vivas.
+
+O monólito já tinha a correção (`_EDGE_LOOKUP_BATCH`, lotes de 100, e falha de
+leitura que **levanta** em vez de parecer vazia). As duas cópias que rodam em
+produção carregavam a versão original — mais um caso do item 5, e o mais caro
+até agora, porque o sintoma não parecia um bug de leitura.
+
+Corrigido em `b33d628`, com o teste de regressão em cada serviço dimensionado no
+grafo que quebrou. Falta chegar à produção: exige rebuild das quatro imagens no
+mesmo `source_sha` (o manifesto obriga) e deploy do control-plane.
+
 ## Catálogo de agentes
 
 Cada agente vive em `.claude/agents/<nome>.md`, declara seu próprio modelo e
