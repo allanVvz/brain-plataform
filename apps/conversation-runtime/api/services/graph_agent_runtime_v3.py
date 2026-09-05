@@ -31,6 +31,7 @@ from schemas.conversation import (
     ServiceObservation,
 )
 from services import (
+    context_cards,
     conversation_repetition,
     graph_compiler_v3,
     graph_proof_checker_v3,
@@ -2107,6 +2108,71 @@ def _evidenced_branch_candidates(
     ][:limit]
 
 
+def _chunk_source_node_id(row: dict[str, Any]) -> str:
+    return str(
+        row.get("source_node_id")
+        or row.get("source_graph_node_id")
+        or row.get("faq_node_id")
+        or ""
+    )
+
+
+def neutral_scope_node_ids(document: dict[str, Any]) -> set[str]:
+    """Nodes no single branch owns -- what a branchless turn may cite.
+
+    A null branch means *no* brand, never every brand. Tock Fatal publishes
+    one catalogue under two brands at different prices, and on 2026-09-05 a
+    branchless turn (lead 208) retrieved the reseller package and quoted
+    R$ 69,93 a piece from `offer:tock-conjuntos-conjunto-canelado-atacado` to
+    a customer who had never said they resell; retail is R$ 99,90.
+
+    The compiler already computed each branch's closure into
+    `branch_memberships`, so the neutral scope is their intersection -- no
+    recomputation, and it cannot drift from the isolation the publication
+    was compiled with. Persona, campaign, the product groups and the profile
+    selector are in every branch and survive; a brand, its offers, its FAQs
+    and its discount rule are in exactly one and do not.
+
+    A document compiled before memberships were published falls back to the
+    common contract's own closure, which is narrow but never brand-scoped.
+    """
+    memberships = document.get("branch_memberships") or {}
+    closures = [set(members) for members in memberships.values() if members]
+    if not closures:
+        return {
+            str(node_id)
+            for node_id in (document.get("common_contract") or {}).get("closure_node_ids") or []
+            if node_id
+        }
+    return set.intersection(*closures)
+
+
+def _contract_scoped_to_neutral(
+    contract: dict[str, Any], neutral: set[str],
+) -> dict[str, Any]:
+    """Narrow a branch contract to the content the customer has authorized.
+
+    Only the reachable set changes. `branch_path_checksum`, fields and
+    questions stay verbatim so the model can still be asked to select this
+    branch and the proof checker keeps validating the same contract identity.
+    """
+    scoped = dict(contract)
+    scoped["closure_node_ids"] = sorted(
+        node_id for node_id in contract.get("closure_node_ids") or []
+        if node_id in neutral
+    )
+    scoped["eligible_faq_node_ids"] = sorted(
+        node_id for node_id in contract.get("eligible_faq_node_ids") or []
+        if node_id in neutral
+    )
+    scoped["handoff_rule_node_ids"] = [
+        node_id for node_id in contract.get("handoff_rule_node_ids") or []
+        if node_id in neutral
+    ]
+    scoped["brand_scope_withheld"] = True
+    return scoped
+
+
 def _fallback_retrieval_branch(
     *, active_branch: str | None, candidates: list[dict[str, Any]], branch_anchors: list[str],
 ) -> str | None:
@@ -2121,8 +2187,12 @@ def _fallback_retrieval_branch(
     behalf (the returned context's active_branch_node_id stays untouched,
     so branch_selection_allowed for the model's own proposal is unaffected)
     -- it only picks a deterministic retrieval target so context still
-    loads; persona-level content (tone, brand, global rules) is part of
-    every branch's closure regardless of which one is picked here.
+    loads.
+
+    What it picks is also commercially inert: a turn that reaches this
+    fallback has no branch the customer chose, so build_context() filters the
+    package down to `neutral_scope_node_ids()`, a subset of *every* branch's
+    closure. Whichever anchor is returned here yields the same neutral rows.
     """
     if active_branch:
         return active_branch
@@ -2895,6 +2965,15 @@ def build_context(
     if not retrieval_branch:
         raise RuntimeError("GraphRAG publication has no resolvable branch")
     contract = (document.get("branch_contracts") or {}).get(retrieval_branch) or {}
+    # The customer has not chosen a branch and did not name one literally, so
+    # `retrieval_branch` is a fallback the runtime picked, not a decision the
+    # customer made. Nothing exclusive to it may reach the model: on
+    # 2026-09-05 that is how a branchless lead was quoted the wholesale
+    # R$ 69,93 instead of the retail R$ 99,90 for the same conjunto canelado.
+    brand_scope_withheld = not active_branch and not deterministic_candidates
+    neutral_scope = neutral_scope_node_ids(document) if brand_scope_withheld else set()
+    if brand_scope_withheld:
+        contract = _contract_scoped_to_neutral(contract, neutral_scope)
     missing = [field["key"] for field in graph_proof_checker_v3.pending_fields(contract, ledger.get("facts") or {})]
     interrogative_clause = _interrogative_clause(message)
     faq_rows: list[dict[str, Any]] = []
@@ -2924,9 +3003,15 @@ def build_context(
         active_path_node_ids=((document.get("coordinates") or {}).get(retrieval_branch) or {}).get("path_node_ids") or [],
         missing_fields=missing, limit=48,
     )
+    if brand_scope_withheld:
+        rows = [row for row in rows if _chunk_source_node_id(row) in neutral_scope]
     required_nodes = _required_retrieval_node_ids(
         document, retrieval_branch, contract, missing,
     )
+    if brand_scope_withheld:
+        required_nodes = [
+            node_id for node_id in required_nodes if node_id in neutral_scope
+        ]
     branch_package = supabase_client.get_graph_branch_package_v3(
         publication_id=publication["id"], branch_node_id=retrieval_branch,
         chunk_ids=[str(row.get("chunk_id") or row.get("id")) for row in rows if row.get("chunk_id") or row.get("id")],
@@ -2934,6 +3019,10 @@ def build_context(
         limit=RAG_CHUNK_LIMIT,
     )
     structural = branch_package.get("chunks") or []
+    if brand_scope_withheld:
+        structural = [
+            row for row in structural if _chunk_source_node_id(row) in neutral_scope
+        ]
     branch_package_ms = round((time.perf_counter() - branch_package_started) * 1000, 3)
     faq_rows_by_chunk = {
         str(row.get("chunk_id") or row.get("id") or ""): row for row in faq_rows
@@ -2951,6 +3040,8 @@ def build_context(
             "chunk_kind": "faq",
             "hybrid_score": float(row.get("faq_score") or 1),
         }
+        if brand_scope_withheld and chunk["source_node_id"] not in neutral_scope:
+            continue
         if chunk.get("chunk_id") and chunk.get("source_node_id"):
             ranked_faq_chunks.append(chunk)
     merged = {
@@ -2993,6 +3084,25 @@ def build_context(
         for index, (node_id, chunks) in enumerate(by_source.items())
         if node_id in (document.get("node_by_id") or {})
     ]
+    if brand_scope_withheld and not cards:
+        # Withholding both brands must never make the agent mute. If a persona
+        # publishes nothing outside its branches there is no neutral content
+        # to open a conversation with, and that is a graph defect to fix in
+        # the graph -- not a reason to hand the customer a brand they never
+        # chose.
+        context_cards.emit_metric(
+            "knowledge_context.empty",
+            persona_id=str(persona.get("id") or ""),
+            lead_ref=lead_ref,
+            payload={
+                "persona_slug": persona_slug,
+                "publication_id": publication["id"],
+                "graph_version": publication["version"],
+                "brand_scope_withheld": True,
+                "neutral_scope_node_count": len(neutral_scope),
+                "retrieval_branch_node_id": retrieval_branch,
+            },
+        )
     possible_switches = [
         item["branch_anchor_node_id"] for item in candidates
         if item["branch_anchor_node_id"] != active_branch
@@ -3028,6 +3138,8 @@ def build_context(
             )
         ),
         "retrieval_branch_node_id": retrieval_branch,
+        "brand_scope_withheld": brand_scope_withheld,
+        "neutral_scope_node_count": len(neutral_scope) if brand_scope_withheld else None,
         "interrogative_clause": interrogative_clause or None,
         "faq_candidates": faq_candidates,
         "selected_faq_node_id": None,

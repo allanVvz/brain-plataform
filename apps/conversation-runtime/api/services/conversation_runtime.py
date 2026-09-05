@@ -843,11 +843,20 @@ def build_context(
         max_tokens=8000,
     )
     if not cards:
+        # `branch_ids` is the neutral scope while no branch is active, so an
+        # empty package here says the persona publishes nothing outside its
+        # branches -- the agent would go mute rather than leak a brand the
+        # customer never chose. Report it; do not widen the scope.
         context_cards_service.emit_metric(
             "knowledge_context.empty",
             persona_id=persona.get("id"),
             lead_ref=lead_ref,
-            payload={"persona_slug": persona_slug, "graph_version": version},
+            payload={
+                "persona_slug": persona_slug,
+                "graph_version": version,
+                "brand_scope_withheld": not active_branch_id,
+                "neutral_scope_node_count": len(branch_ids),
+            },
         )
     graph_nodes_by_id = {node.id: node for node in graph.nodes}
     nodes = [graph_nodes_by_id[card.id] for card in cards if card.id in graph_nodes_by_id]
