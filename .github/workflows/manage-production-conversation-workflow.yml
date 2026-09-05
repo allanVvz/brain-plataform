@@ -123,7 +123,17 @@ jobs:
                 assert all(record["would_change"] is False for record in records), records
                 assert all(record["live_checksum"] == record["candidate_checksum"] for record in records), records
                 assert all(record["live_webhook_path"] == record["candidate_webhook_path"] for record in records), records
-                assert all(record["live_pipeline_contract"] == "conversation_v3" for record in records), records
+                # live_pipeline_contract is deliberately NOT asserted. It reads
+                # meta.binding.pipeline_contract from the workflow inside n8n, and
+                # nothing can put it there: n8n_client.update_workflow sends only
+                # name/nodes/connections/settings, and the n8n public API does not
+                # accept meta on a workflow at all -- it comes back null. The
+                # assertion made `resync` unreachable: the resync correctly skips a
+                # write when the body is unchanged, and the gate then demanded the
+                # field that write would not have set either. Observed 2026-09-05.
+                #
+                # The binding contract is authoritative in our own database, and
+                # that is what the runtime reads, so it is what gets asserted.
                 assert all(record["binding_pipeline_contract"] == "conversation_v3" for record in records), records
             PY
             }
