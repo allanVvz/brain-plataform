@@ -1,0 +1,33 @@
+@font-face {
+  font-family: "Bodrum Sweet";
+  src: url("./bodrum-sweet-13-light.otf") format("opentype");
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+}
+
+[data-brand-family="tock-fatal"] {
+  color: var(--brand-text);
+  background-color: var(--brand-surface);
+}
+
+[data-brand-family="tock-fatal"] :is(h1, h2, h3, .brand-display) {
+  font-family: "Bodrum Sweet", "Inter", "Segoe UI", Arial, sans-serif;
+  font-weight: 300;
+}
+
+[data-brand-family="tock-fatal"][data-brand-channel="varejo"] {
+  --brand-primary: #9F2960;
+  --brand-secondary: #B55A69;
+  --brand-accent: #FBD0D9;
+  --brand-surface: #FFF7FA;
+  --brand-text: #3C1726;
+}
+
+[data-brand-family="tock-fatal"][data-brand-channel="atacado"] {
+  --brand-primary: #922B48;
+  --brand-secondary: #9F2960;
+  --brand-accent: #CEA265;
+  --brand-surface: #FFF8F1;
+  --brand-text: #2E111C;
+}

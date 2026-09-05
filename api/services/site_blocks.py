@@ -393,6 +393,7 @@ def resolve_blocks(
                 "brand_node_id": brand["id"],
                 "title": brand.get("title"),
                 "positioning": brand_data.get("positioning"),
+                "visual_identity": brand_data.get("visual_identity") or {},
                 "vocabulary": _vocabulary(nodes, scoped),
             }
         elif kind == "brand":
@@ -404,6 +405,7 @@ def resolve_blocks(
                 "personality": brand_data.get("personality") or [],
                 "audience_fit": brand_data.get("audience_fit"),
                 "pricing_model": brand_data.get("pricing_model"),
+                "visual_identity": brand_data.get("visual_identity") or {},
             }
         elif kind == "group_index":
             payload = {"groups": _resolve_groups(spec, nodes, edges, scoped)}
@@ -439,10 +441,12 @@ def resolve_blocks(
             continue
         blocks.append({"id": spec["id"], "kind": kind, "data": payload})
 
+    resolved_site = dict(site or {})
+    resolved_site["visual_identity"] = brand_data.get("visual_identity") or {}
     return {
         "template": template_key,
         "scope": scope,
         "persona_slug": bundle["persona"]["slug"],
-        "site": site or {},
+        "site": resolved_site,
         "blocks": blocks,
     }

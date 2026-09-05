@@ -67,3 +67,18 @@ New formats must be added by DB/migration for now.
 
 Do not expose Meta tokens, n8n secrets, user API keys or
 `whatsapp_phone_number_id` in this payload.
+
+## Branch block payload
+
+The generated branch-scoped landing payload additionally exposes:
+
+- `site.visual_identity.logo.primary|round|reverse`
+- `site.visual_identity.palette` with channel-specific semantic colors
+- `site.visual_identity.typography.display|body`
+- `site.visual_identity.css_variables`
+
+The same `visual_identity` object is repeated in the `hero` and `brand`
+blocks. This lets renderers apply the logo, palette and real brand font from
+the first paint while keeping every visual decision sourced by the selected
+branch in the graph. Tock Fatal uses distinct palettes for `varejo` and
+`atacado`; renderers must not merge or fall back across those branches.

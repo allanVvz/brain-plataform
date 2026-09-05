@@ -7,7 +7,83 @@
     "site_name": "Tock Fatal Atacado",
     "format_key": "landing_page",
     "whatsapp_phone": "5551992623375",
-    "whatsapp_message_template": "Oi! Vim pelo site e quero comprar para revender."
+    "whatsapp_message_template": "Oi! Vim pelo site e quero comprar para revender.",
+    "visual_identity": {
+      "channel": "atacado",
+      "stylesheet_url": "/brands/tock-fatal/brand.css",
+      "html_attributes": {
+        "data-brand-family": "tock-fatal",
+        "data-brand-channel": "atacado"
+      },
+      "logo": {
+        "primary": {
+          "url": "/brands/tock-fatal/logo-wordmark-atacado.png",
+          "repository_path": "dashboard/public/brands/tock-fatal/logo-wordmark-atacado.png",
+          "source_repository_path": "assets/brands/tock-fatal/source/Logo dourada/lodo dourada.png",
+          "sha256": "53e21b98335f1a81653e0aad0680b158fedeb8e4c48b31fb80cb13292b17fa0a",
+          "mime": "image/png"
+        },
+        "round": {
+          "url": "/brands/tock-fatal/logo-round-atacado.png",
+          "repository_path": "dashboard/public/brands/tock-fatal/logo-round-atacado.png",
+          "source_repository_path": "assets/brands/tock-fatal/source/Logo dourada/dourada 3.png",
+          "sha256": "51b355473cfb7556cddcd2d272f0cc24c2f926384426e5127af761757baa5f68",
+          "mime": "image/png"
+        },
+        "reverse": {
+          "url": "/brands/tock-fatal/logo-wordmark-reverse.png",
+          "repository_path": "dashboard/public/brands/tock-fatal/logo-wordmark-reverse.png",
+          "source_repository_path": "assets/brands/tock-fatal/source/Logo Transparente/branca reta sem brilho.png",
+          "sha256": "e26ce8ece46d5308d745ae7e0794d222c0ebc328bf25d65656d890ea79346a0e",
+          "mime": "image/png"
+        },
+        "alt": "Tock Fatal Atacado"
+      },
+      "palette": {
+        "primary": "#922B48",
+        "secondary": "#9F2960",
+        "accent": "#CEA265",
+        "surface": "#FFF8F1",
+        "text": "#2E111C"
+      },
+      "typography": {
+        "display": {
+          "family": "Bodrum Sweet",
+          "style": "13 Light",
+          "weight": 300,
+          "url": "/brands/tock-fatal/bodrum-sweet-13-light.otf",
+          "repository_path": "dashboard/public/brands/tock-fatal/bodrum-sweet-13-light.otf",
+          "source_repository_path": "assets/brands/tock-fatal/source/Fonte/bodrum-sweet-13-light.otf",
+          "sha256": "add8ed611542d8d3c6c877b5c9449dc154a35b6f86a6a3b040e7d3af199460c5",
+          "mime": "font/otf"
+        },
+        "body": {
+          "family": "Inter",
+          "fallbacks": [
+            "Segoe UI",
+            "Arial",
+            "sans-serif"
+          ]
+        }
+      },
+      "css_variables": {
+        "--brand-primary": "#922B48",
+        "--brand-secondary": "#9F2960",
+        "--brand-accent": "#CEA265",
+        "--brand-surface": "#FFF8F1",
+        "--brand-text": "#2E111C",
+        "--brand-display-font": "\"Bodrum Sweet\""
+      },
+      "source": "operator_supplied_identity_package_2026-09-04",
+      "manual_source_path": "assets/brands/tock-fatal/source/Manual de marca/Manual de marca atualizado.pdf",
+      "status": "validated",
+      "asset_node_ids": {
+        "brand_logo": "asset:tock-brand-atacado-brand_logo",
+        "brand_logo_round": "asset:tock-brand-atacado-brand_logo_round",
+        "brand_logo_reverse": "asset:tock-brand-atacado-brand_logo_reverse",
+        "brand_font": "asset:tock-brand-atacado-brand_font"
+      }
+    }
   },
   "blocks": [
     {
@@ -17,6 +93,82 @@
         "brand_node_id": "brand:tock-fatal-atacado",
         "title": "Tock Fatal Atacado",
         "positioning": "Moda de giro fácil para revenda, com desconto por volume e mix livre entre categorias.",
+        "visual_identity": {
+          "channel": "atacado",
+          "stylesheet_url": "/brands/tock-fatal/brand.css",
+          "html_attributes": {
+            "data-brand-family": "tock-fatal",
+            "data-brand-channel": "atacado"
+          },
+          "logo": {
+            "primary": {
+              "url": "/brands/tock-fatal/logo-wordmark-atacado.png",
+              "repository_path": "dashboard/public/brands/tock-fatal/logo-wordmark-atacado.png",
+              "source_repository_path": "assets/brands/tock-fatal/source/Logo dourada/lodo dourada.png",
+              "sha256": "53e21b98335f1a81653e0aad0680b158fedeb8e4c48b31fb80cb13292b17fa0a",
+              "mime": "image/png"
+            },
+            "round": {
+              "url": "/brands/tock-fatal/logo-round-atacado.png",
+              "repository_path": "dashboard/public/brands/tock-fatal/logo-round-atacado.png",
+              "source_repository_path": "assets/brands/tock-fatal/source/Logo dourada/dourada 3.png",
+              "sha256": "51b355473cfb7556cddcd2d272f0cc24c2f926384426e5127af761757baa5f68",
+              "mime": "image/png"
+            },
+            "reverse": {
+              "url": "/brands/tock-fatal/logo-wordmark-reverse.png",
+              "repository_path": "dashboard/public/brands/tock-fatal/logo-wordmark-reverse.png",
+              "source_repository_path": "assets/brands/tock-fatal/source/Logo Transparente/branca reta sem brilho.png",
+              "sha256": "e26ce8ece46d5308d745ae7e0794d222c0ebc328bf25d65656d890ea79346a0e",
+              "mime": "image/png"
+            },
+            "alt": "Tock Fatal Atacado"
+          },
+          "palette": {
+            "primary": "#922B48",
+            "secondary": "#9F2960",
+            "accent": "#CEA265",
+            "surface": "#FFF8F1",
+            "text": "#2E111C"
+          },
+          "typography": {
+            "display": {
+              "family": "Bodrum Sweet",
+              "style": "13 Light",
+              "weight": 300,
+              "url": "/brands/tock-fatal/bodrum-sweet-13-light.otf",
+              "repository_path": "dashboard/public/brands/tock-fatal/bodrum-sweet-13-light.otf",
+              "source_repository_path": "assets/brands/tock-fatal/source/Fonte/bodrum-sweet-13-light.otf",
+              "sha256": "add8ed611542d8d3c6c877b5c9449dc154a35b6f86a6a3b040e7d3af199460c5",
+              "mime": "font/otf"
+            },
+            "body": {
+              "family": "Inter",
+              "fallbacks": [
+                "Segoe UI",
+                "Arial",
+                "sans-serif"
+              ]
+            }
+          },
+          "css_variables": {
+            "--brand-primary": "#922B48",
+            "--brand-secondary": "#9F2960",
+            "--brand-accent": "#CEA265",
+            "--brand-surface": "#FFF8F1",
+            "--brand-text": "#2E111C",
+            "--brand-display-font": "\"Bodrum Sweet\""
+          },
+          "source": "operator_supplied_identity_package_2026-09-04",
+          "manual_source_path": "assets/brands/tock-fatal/source/Manual de marca/Manual de marca atualizado.pdf",
+          "status": "validated",
+          "asset_node_ids": {
+            "brand_logo": "asset:tock-brand-atacado-brand_logo",
+            "brand_logo_round": "asset:tock-brand-atacado-brand_logo_round",
+            "brand_logo_reverse": "asset:tock-brand-atacado-brand_logo_reverse",
+            "brand_font": "asset:tock-brand-atacado-brand_font"
+          }
+        },
         "vocabulary": [
           {
             "node_id": "audience:tock-ctx-conforto",
@@ -181,7 +333,83 @@
           "sem enrolação com número"
         ],
         "audience_fit": "revendedora, sacoleira, loja física ou perfil que compra em quantidade para revender",
-        "pricing_model": "preço por peça com desconto de 30% a partir de 3 peças, iguais ou diferentes, aplicado por unidade"
+        "pricing_model": "preço por peça com desconto de 30% a partir de 3 peças, iguais ou diferentes, aplicado por unidade",
+        "visual_identity": {
+          "channel": "atacado",
+          "stylesheet_url": "/brands/tock-fatal/brand.css",
+          "html_attributes": {
+            "data-brand-family": "tock-fatal",
+            "data-brand-channel": "atacado"
+          },
+          "logo": {
+            "primary": {
+              "url": "/brands/tock-fatal/logo-wordmark-atacado.png",
+              "repository_path": "dashboard/public/brands/tock-fatal/logo-wordmark-atacado.png",
+              "source_repository_path": "assets/brands/tock-fatal/source/Logo dourada/lodo dourada.png",
+              "sha256": "53e21b98335f1a81653e0aad0680b158fedeb8e4c48b31fb80cb13292b17fa0a",
+              "mime": "image/png"
+            },
+            "round": {
+              "url": "/brands/tock-fatal/logo-round-atacado.png",
+              "repository_path": "dashboard/public/brands/tock-fatal/logo-round-atacado.png",
+              "source_repository_path": "assets/brands/tock-fatal/source/Logo dourada/dourada 3.png",
+              "sha256": "51b355473cfb7556cddcd2d272f0cc24c2f926384426e5127af761757baa5f68",
+              "mime": "image/png"
+            },
+            "reverse": {
+              "url": "/brands/tock-fatal/logo-wordmark-reverse.png",
+              "repository_path": "dashboard/public/brands/tock-fatal/logo-wordmark-reverse.png",
+              "source_repository_path": "assets/brands/tock-fatal/source/Logo Transparente/branca reta sem brilho.png",
+              "sha256": "e26ce8ece46d5308d745ae7e0794d222c0ebc328bf25d65656d890ea79346a0e",
+              "mime": "image/png"
+            },
+            "alt": "Tock Fatal Atacado"
+          },
+          "palette": {
+            "primary": "#922B48",
+            "secondary": "#9F2960",
+            "accent": "#CEA265",
+            "surface": "#FFF8F1",
+            "text": "#2E111C"
+          },
+          "typography": {
+            "display": {
+              "family": "Bodrum Sweet",
+              "style": "13 Light",
+              "weight": 300,
+              "url": "/brands/tock-fatal/bodrum-sweet-13-light.otf",
+              "repository_path": "dashboard/public/brands/tock-fatal/bodrum-sweet-13-light.otf",
+              "source_repository_path": "assets/brands/tock-fatal/source/Fonte/bodrum-sweet-13-light.otf",
+              "sha256": "add8ed611542d8d3c6c877b5c9449dc154a35b6f86a6a3b040e7d3af199460c5",
+              "mime": "font/otf"
+            },
+            "body": {
+              "family": "Inter",
+              "fallbacks": [
+                "Segoe UI",
+                "Arial",
+                "sans-serif"
+              ]
+            }
+          },
+          "css_variables": {
+            "--brand-primary": "#922B48",
+            "--brand-secondary": "#9F2960",
+            "--brand-accent": "#CEA265",
+            "--brand-surface": "#FFF8F1",
+            "--brand-text": "#2E111C",
+            "--brand-display-font": "\"Bodrum Sweet\""
+          },
+          "source": "operator_supplied_identity_package_2026-09-04",
+          "manual_source_path": "assets/brands/tock-fatal/source/Manual de marca/Manual de marca atualizado.pdf",
+          "status": "validated",
+          "asset_node_ids": {
+            "brand_logo": "asset:tock-brand-atacado-brand_logo",
+            "brand_logo_round": "asset:tock-brand-atacado-brand_logo_round",
+            "brand_logo_reverse": "asset:tock-brand-atacado-brand_logo_reverse",
+            "brand_font": "asset:tock-brand-atacado-brand_font"
+          }
+        }
       }
     },
     {

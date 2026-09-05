@@ -7,7 +7,83 @@
     "site_name": "Tock Fatal",
     "format_key": "landing_page",
     "whatsapp_phone": "5551992623375",
-    "whatsapp_message_template": "Oi! Vim pelo site da Tock Fatal e quero ver as peças."
+    "whatsapp_message_template": "Oi! Vim pelo site da Tock Fatal e quero ver as peças.",
+    "visual_identity": {
+      "channel": "varejo",
+      "stylesheet_url": "/brands/tock-fatal/brand.css",
+      "html_attributes": {
+        "data-brand-family": "tock-fatal",
+        "data-brand-channel": "varejo"
+      },
+      "logo": {
+        "primary": {
+          "url": "/brands/tock-fatal/logo-wordmark-retail.png",
+          "repository_path": "dashboard/public/brands/tock-fatal/logo-wordmark-retail.png",
+          "source_repository_path": "assets/brands/tock-fatal/source/Logo Transparente/rosa 2.png",
+          "sha256": "15de9862bec93b87c516913c51229b3be4561ba0ba02a762c7628bb8185beff2",
+          "mime": "image/png"
+        },
+        "round": {
+          "url": "/brands/tock-fatal/logo-round-retail.png",
+          "repository_path": "dashboard/public/brands/tock-fatal/logo-round-retail.png",
+          "source_repository_path": "assets/brands/tock-fatal/source/Logo Transparente/redonda rosa 3.png",
+          "sha256": "d800c1ef6f959db0ec8550c33b6ee291361969581241a94e04427a25fab18fd8",
+          "mime": "image/png"
+        },
+        "reverse": {
+          "url": "/brands/tock-fatal/logo-wordmark-reverse.png",
+          "repository_path": "dashboard/public/brands/tock-fatal/logo-wordmark-reverse.png",
+          "source_repository_path": "assets/brands/tock-fatal/source/Logo Transparente/branca reta sem brilho.png",
+          "sha256": "e26ce8ece46d5308d745ae7e0794d222c0ebc328bf25d65656d890ea79346a0e",
+          "mime": "image/png"
+        },
+        "alt": "Tock Fatal Varejo"
+      },
+      "palette": {
+        "primary": "#9F2960",
+        "secondary": "#B55A69",
+        "accent": "#FBD0D9",
+        "surface": "#FFF7FA",
+        "text": "#3C1726"
+      },
+      "typography": {
+        "display": {
+          "family": "Bodrum Sweet",
+          "style": "13 Light",
+          "weight": 300,
+          "url": "/brands/tock-fatal/bodrum-sweet-13-light.otf",
+          "repository_path": "dashboard/public/brands/tock-fatal/bodrum-sweet-13-light.otf",
+          "source_repository_path": "assets/brands/tock-fatal/source/Fonte/bodrum-sweet-13-light.otf",
+          "sha256": "add8ed611542d8d3c6c877b5c9449dc154a35b6f86a6a3b040e7d3af199460c5",
+          "mime": "font/otf"
+        },
+        "body": {
+          "family": "Inter",
+          "fallbacks": [
+            "Segoe UI",
+            "Arial",
+            "sans-serif"
+          ]
+        }
+      },
+      "css_variables": {
+        "--brand-primary": "#9F2960",
+        "--brand-secondary": "#B55A69",
+        "--brand-accent": "#FBD0D9",
+        "--brand-surface": "#FFF7FA",
+        "--brand-text": "#3C1726",
+        "--brand-display-font": "\"Bodrum Sweet\""
+      },
+      "source": "operator_supplied_identity_package_2026-09-04",
+      "manual_source_path": "assets/brands/tock-fatal/source/Manual de marca/Manual de marca atualizado.pdf",
+      "status": "validated",
+      "asset_node_ids": {
+        "brand_logo": "asset:tock-brand-varejo-brand_logo",
+        "brand_logo_round": "asset:tock-brand-varejo-brand_logo_round",
+        "brand_logo_reverse": "asset:tock-brand-varejo-brand_logo_reverse",
+        "brand_font": "asset:tock-brand-varejo-brand_font"
+      }
+    }
   },
   "blocks": [
     {
@@ -17,6 +93,82 @@
         "brand_node_id": "brand:tock-fatal-varejo",
         "title": "Tock Fatal Varejo",
         "positioning": "Moda feminina acessível, atual e versátil, apresentada de forma acolhedora e comercial.",
+        "visual_identity": {
+          "channel": "varejo",
+          "stylesheet_url": "/brands/tock-fatal/brand.css",
+          "html_attributes": {
+            "data-brand-family": "tock-fatal",
+            "data-brand-channel": "varejo"
+          },
+          "logo": {
+            "primary": {
+              "url": "/brands/tock-fatal/logo-wordmark-retail.png",
+              "repository_path": "dashboard/public/brands/tock-fatal/logo-wordmark-retail.png",
+              "source_repository_path": "assets/brands/tock-fatal/source/Logo Transparente/rosa 2.png",
+              "sha256": "15de9862bec93b87c516913c51229b3be4561ba0ba02a762c7628bb8185beff2",
+              "mime": "image/png"
+            },
+            "round": {
+              "url": "/brands/tock-fatal/logo-round-retail.png",
+              "repository_path": "dashboard/public/brands/tock-fatal/logo-round-retail.png",
+              "source_repository_path": "assets/brands/tock-fatal/source/Logo Transparente/redonda rosa 3.png",
+              "sha256": "d800c1ef6f959db0ec8550c33b6ee291361969581241a94e04427a25fab18fd8",
+              "mime": "image/png"
+            },
+            "reverse": {
+              "url": "/brands/tock-fatal/logo-wordmark-reverse.png",
+              "repository_path": "dashboard/public/brands/tock-fatal/logo-wordmark-reverse.png",
+              "source_repository_path": "assets/brands/tock-fatal/source/Logo Transparente/branca reta sem brilho.png",
+              "sha256": "e26ce8ece46d5308d745ae7e0794d222c0ebc328bf25d65656d890ea79346a0e",
+              "mime": "image/png"
+            },
+            "alt": "Tock Fatal Varejo"
+          },
+          "palette": {
+            "primary": "#9F2960",
+            "secondary": "#B55A69",
+            "accent": "#FBD0D9",
+            "surface": "#FFF7FA",
+            "text": "#3C1726"
+          },
+          "typography": {
+            "display": {
+              "family": "Bodrum Sweet",
+              "style": "13 Light",
+              "weight": 300,
+              "url": "/brands/tock-fatal/bodrum-sweet-13-light.otf",
+              "repository_path": "dashboard/public/brands/tock-fatal/bodrum-sweet-13-light.otf",
+              "source_repository_path": "assets/brands/tock-fatal/source/Fonte/bodrum-sweet-13-light.otf",
+              "sha256": "add8ed611542d8d3c6c877b5c9449dc154a35b6f86a6a3b040e7d3af199460c5",
+              "mime": "font/otf"
+            },
+            "body": {
+              "family": "Inter",
+              "fallbacks": [
+                "Segoe UI",
+                "Arial",
+                "sans-serif"
+              ]
+            }
+          },
+          "css_variables": {
+            "--brand-primary": "#9F2960",
+            "--brand-secondary": "#B55A69",
+            "--brand-accent": "#FBD0D9",
+            "--brand-surface": "#FFF7FA",
+            "--brand-text": "#3C1726",
+            "--brand-display-font": "\"Bodrum Sweet\""
+          },
+          "source": "operator_supplied_identity_package_2026-09-04",
+          "manual_source_path": "assets/brands/tock-fatal/source/Manual de marca/Manual de marca atualizado.pdf",
+          "status": "validated",
+          "asset_node_ids": {
+            "brand_logo": "asset:tock-brand-varejo-brand_logo",
+            "brand_logo_round": "asset:tock-brand-varejo-brand_logo_round",
+            "brand_logo_reverse": "asset:tock-brand-varejo-brand_logo_reverse",
+            "brand_font": "asset:tock-brand-varejo-brand_font"
+          }
+        },
         "vocabulary": [
           {
             "node_id": "audience:tock-ctx-conforto",
@@ -184,7 +336,83 @@
           "objetiva"
         ],
         "audience_fit": "cliente final que compra para uso próprio, peça a peça ou em pequena quantidade",
-        "pricing_model": "preço unitário de vitrine, por peça"
+        "pricing_model": "preço unitário de vitrine, por peça",
+        "visual_identity": {
+          "channel": "varejo",
+          "stylesheet_url": "/brands/tock-fatal/brand.css",
+          "html_attributes": {
+            "data-brand-family": "tock-fatal",
+            "data-brand-channel": "varejo"
+          },
+          "logo": {
+            "primary": {
+              "url": "/brands/tock-fatal/logo-wordmark-retail.png",
+              "repository_path": "dashboard/public/brands/tock-fatal/logo-wordmark-retail.png",
+              "source_repository_path": "assets/brands/tock-fatal/source/Logo Transparente/rosa 2.png",
+              "sha256": "15de9862bec93b87c516913c51229b3be4561ba0ba02a762c7628bb8185beff2",
+              "mime": "image/png"
+            },
+            "round": {
+              "url": "/brands/tock-fatal/logo-round-retail.png",
+              "repository_path": "dashboard/public/brands/tock-fatal/logo-round-retail.png",
+              "source_repository_path": "assets/brands/tock-fatal/source/Logo Transparente/redonda rosa 3.png",
+              "sha256": "d800c1ef6f959db0ec8550c33b6ee291361969581241a94e04427a25fab18fd8",
+              "mime": "image/png"
+            },
+            "reverse": {
+              "url": "/brands/tock-fatal/logo-wordmark-reverse.png",
+              "repository_path": "dashboard/public/brands/tock-fatal/logo-wordmark-reverse.png",
+              "source_repository_path": "assets/brands/tock-fatal/source/Logo Transparente/branca reta sem brilho.png",
+              "sha256": "e26ce8ece46d5308d745ae7e0794d222c0ebc328bf25d65656d890ea79346a0e",
+              "mime": "image/png"
+            },
+            "alt": "Tock Fatal Varejo"
+          },
+          "palette": {
+            "primary": "#9F2960",
+            "secondary": "#B55A69",
+            "accent": "#FBD0D9",
+            "surface": "#FFF7FA",
+            "text": "#3C1726"
+          },
+          "typography": {
+            "display": {
+              "family": "Bodrum Sweet",
+              "style": "13 Light",
+              "weight": 300,
+              "url": "/brands/tock-fatal/bodrum-sweet-13-light.otf",
+              "repository_path": "dashboard/public/brands/tock-fatal/bodrum-sweet-13-light.otf",
+              "source_repository_path": "assets/brands/tock-fatal/source/Fonte/bodrum-sweet-13-light.otf",
+              "sha256": "add8ed611542d8d3c6c877b5c9449dc154a35b6f86a6a3b040e7d3af199460c5",
+              "mime": "font/otf"
+            },
+            "body": {
+              "family": "Inter",
+              "fallbacks": [
+                "Segoe UI",
+                "Arial",
+                "sans-serif"
+              ]
+            }
+          },
+          "css_variables": {
+            "--brand-primary": "#9F2960",
+            "--brand-secondary": "#B55A69",
+            "--brand-accent": "#FBD0D9",
+            "--brand-surface": "#FFF7FA",
+            "--brand-text": "#3C1726",
+            "--brand-display-font": "\"Bodrum Sweet\""
+          },
+          "source": "operator_supplied_identity_package_2026-09-04",
+          "manual_source_path": "assets/brands/tock-fatal/source/Manual de marca/Manual de marca atualizado.pdf",
+          "status": "validated",
+          "asset_node_ids": {
+            "brand_logo": "asset:tock-brand-varejo-brand_logo",
+            "brand_logo_round": "asset:tock-brand-varejo-brand_logo_round",
+            "brand_logo_reverse": "asset:tock-brand-varejo-brand_logo_reverse",
+            "brand_font": "asset:tock-brand-varejo-brand_font"
+          }
+        }
       }
     },
     {

@@ -20,7 +20,7 @@ sys.path.insert(0, str(ROOT / "api"))
 from services import site_blocks  # noqa: E402
 
 BUNDLE_PATH = (
-    ROOT / "data/graph_bundles/tock-fatal/sdr-qualification-v12-model-owned.json"
+    ROOT / "data/graph_bundles/tock-fatal/sdr-qualification-v16-voice-reachable.json"
 )
 
 RETAIL = "audience:tock-retail"
@@ -96,6 +96,30 @@ def test_wholesale_payload_prices_differ_from_retail(bundle):
 
     assert price_range(retail) != price_range(wholesale)
     assert price_range(wholesale)[1] < price_range(retail)[1]
+
+
+@pytest.mark.unit
+def test_each_channel_exposes_a_distinct_complete_visual_identity(bundle):
+    retail = _resolve(bundle, RETAIL)
+    wholesale = _resolve(bundle, RESELLER)
+
+    retail_identity = retail["site"]["visual_identity"]
+    wholesale_identity = wholesale["site"]["visual_identity"]
+    assert retail_identity["channel"] == "varejo"
+    assert wholesale_identity["channel"] == "atacado"
+    assert retail_identity["palette"]["primary"] == "#9F2960"
+    assert wholesale_identity["palette"]["primary"] == "#922B48"
+    assert retail_identity["palette"] != wholesale_identity["palette"]
+    assert retail_identity["logo"]["primary"]["url"].endswith("logo-wordmark-retail.png")
+    assert wholesale_identity["logo"]["primary"]["url"].endswith("logo-wordmark-atacado.png")
+    assert retail_identity["typography"]["display"]["family"] == "Bodrum Sweet"
+    assert wholesale_identity["typography"]["display"]["family"] == "Bodrum Sweet"
+
+    for payload in (retail, wholesale):
+        hero = next(block for block in payload["blocks"] if block["kind"] == "hero")
+        brand = next(block for block in payload["blocks"] if block["kind"] == "brand")
+        assert hero["data"]["visual_identity"] == payload["site"]["visual_identity"]
+        assert brand["data"]["visual_identity"] == payload["site"]["visual_identity"]
 
 
 @pytest.mark.unit

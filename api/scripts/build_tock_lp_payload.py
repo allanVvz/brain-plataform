@@ -21,7 +21,7 @@ sys.path.insert(0, str(REPO_ROOT / "api"))
 
 from services import site_blocks  # noqa: E402
 
-BUNDLE = REPO_ROOT / "data/graph_bundles/tock-fatal/sdr-qualification-v12-model-owned.json"
+BUNDLE = REPO_ROOT / "data/graph_bundles/tock-fatal/sdr-qualification-v16-voice-reachable.json"
 OUT_DIR = REPO_ROOT / "data/public_sites/tock-fatal"
 
 # The public contact number, confirmed by the operator on 2026-09-04. This is
