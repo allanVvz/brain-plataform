@@ -135,6 +135,15 @@ Vocabulário publicado passou a ser exposto: os aliases de enum de cada campo s�
 literalmente como a cliente fraseia a resposta, e eram usados só para validação.
 Lidos do grafo, então o template continua agnóstico de persona.
 
+> **Correção 2026-09-05 (fim do dia).** Esta frase está certa sobre a origem do
+> vocabulário e **errada sobre o que ele garante**. Expor os aliases ao modelo é
+> bom; o defeito é a instrução que veio junto — "normalize it with that field
+> validation aliases" — somada a `validation.mode = "enum"` com lista fechada.
+> Uma cliente que responde "Proprio" fica fora da lista, o modelo não emite o
+> fato, e sem fato não há galho. Foi assim que o vazamento de marca da seção 10
+> aconteceu. Alias é exemplo de fraseado, não o filtro que decide se o fato
+> existe — ver a invariante 4 do `AGENT_ROADMAP.md`.
+
 **Duas coisas revertidas de propósito:**
 
 - Orçamento de chunks: quatro testes de contrato fixam `provider_managed`.
@@ -160,7 +169,13 @@ Validado pelo workflow **Publish GraphBundle** (run 33933699806, ambos os jobs
 verdes). O workflow **só planeja** — ele mesmo imprime que staging e ativação
 exigem autorização separada.
 
-**Produção segue na v12.** O agente ainda responde com o defeito.
+~~**Produção segue na v12.** O agente ainda responde com o defeito.~~
+
+> **Correção 2026-09-05 (fim do dia).** Superado: o conteúdo foi publicado como
+> **v13** e está ativo. O seletor duplicado da seção 2 está corrigido em
+> produção — nenhum lead novo é qualificado por dentro do galho de atacado por
+> acidente alfabético. O que apareceu depois é um defeito diferente, no caminho
+> em que **nenhum** galho é selecionado: seção 10.
 
 ## 5. Bloqueios operacionais encontrados
 
@@ -218,9 +233,13 @@ reprovisionar antes deixa as instruções sem efeito.
 1. Publicar e ativar a v16 pelo container do control-plane.
 2. Reprovisionar o workflow n8n (exige pausar claims, que exige 5.1 resolvido).
 3. Reconciliar o lifecycle e o checkout da VPS.
-4. Rodar o cenário `sdr_sales_branch_switch` do WA Validator como prova.
+4. ~~Rodar o cenário `sdr_sales_branch_switch` do WA Validator como prova.~~
+   **Corrigido 2026-09-05:** ele foi rodado, **passou**, e a publicação vazou
+   marca mesmo assim. Aquele cenário não é prova de isolamento — ele exercita só
+   a direção fácil. Ver 10.5 para os cenários que faltam.
 5. Item 4 do `AGENT_ROADMAP.md` está desatualizado: diz que a v12 está sem
-   autorização de publicação; ela está ativa desde 2026-09-01.
+   autorização de publicação; ela está ativa desde 2026-09-01. **Atualizado no roadmap em
+   2026-09-05, junto com a publicação da v13.**
 
 ## 8. Bloqueio novo: as cópias de serviço divergiram, e produção roda a velha
 
@@ -363,3 +382,292 @@ a tolerância de digest pendente que o serviço tem. O control-plane aparecia co
 `up to date` e seus três workers não — o deploy falharia depois da pausa já estar
 em vigor. Agora `status` nomeia todos os workers que reprovariam e `prepare` para
 exatamente esse conjunto.
+
+## 10. Depois da v13: vazamento de marca quando nenhum galho é selecionado
+
+A publicação da v13 (conteúdo do bundle `sdr-qualification-v16-voice-reachable.json`)
+fechou o defeito das seções 1 e 2. Este é outro, e é pior: não é o galho errado,
+é galho **nenhum**. A `tock-fatal` vende o mesmo catálogo sob duas marcas a
+preços diferentes — varejo e atacado, 30% de desconto, mínimo de 3 peças —, e o
+isolamento entre elas é a garantia comercial mais importante do produto.
+
+### 10.1 Os dois atendimentos
+
+**lead 208 — sem perfil declarado, recebeu preço de atacado.**
+
+```
+preço citado       R$ 69,93     <- offer:...-atacado
+preço de varejo    R$ 99,90
+mínimo             3 peças
+reply              "Você está comprando para revenda, certo?"
+card citado        atacado
+```
+
+O cliente nunca disse nada que o colocasse no atacado. Este é o vazamento puro:
+sem galho ativo, o RAG entregou as duas marcas e o modelo falou pela que
+apareceu.
+
+**lead 209 — respondeu ao perfil e o fato não existiu.**
+
+```
+[in ] Proprio
+[out] "Perfeito! Então você quer para uso próprio"
+      facts: []            branch_selections: []
+[out, turno seguinte] "você está começando a revender agora ou já tem loja?"
+```
+
+O reply afirma o perfil; o envelope não. É a assinatura do defeito, e é
+detectável por máquina — ver 10.5, cenário A.
+
+### 10.2 A cadeia verificada elo a elo
+
+Tudo abaixo foi **confirmado em produção**. Nenhum item é hipótese.
+
+| # | Elo | Estado observado |
+|---|---|---|
+| 1 | contrato publicado | `purchase_profile`, `owner_node_id: persona:tock-fatal`, `scope: persona` |
+| 2 | `contract.questions` | `faq:tock-purchase-profile` -> `purchase_profile` |
+| 3 | projeção `cart` (de `lead.metadata.conversation_state`) | `asked_question_node_ids: ["faq:tock-purchase-profile"]` |
+| 4 | prompt | `expected_answer_field_key: purchase_profile` |
+| 5 | proof checker | `valid: true`, `errors: []`, `gating_errors: []`, `accepted_facts: []` |
+| 6 | validação do campo | `mode: "enum"`, aliases fechados — "Proprio" fora da lista |
+| 7 | retrieval | galho nulo, `context_cards` não escopados, as duas marcas |
+
+O elo 1 merece nota: o bundle declara `purchase_profile` **por galho**
+(`owner_node_id: audience:tock-retail` e `audience:tock-reseller`,
+`scope: branch`); quem o promove a `persona` é o compilador, em
+`_selector_shared_field` (`graph_compiler_v3`). Ler só o bundle leva à conclusão
+errada sobre quem é o dono do campo.
+
+O elo 5 é o que importa: **o checker não rejeitou nada. Não havia o que
+aceitar.** O elo 6 é a causa: os aliases publicados são
+
+```
+uso-proprio-varejo   uso próprio · pra mim · varejo · comprar para mim
+atacado-revenda      revenda · revender · atacado · minha loja · empreender
+```
+
+e o prompt instrui "When expected_answer_field_key is set and the customer
+answers that question, emit the fact under that exact field key and **normalize
+it with that field validation aliases**". O modelo entendeu a resposta — o reply
+prova — e, não conseguindo normalizar para um valor canônico, não emitiu. Sem
+fato, `branch_selections` vazio; sem galho, o elo 7.
+
+Não existe correção por alias. Sempre haverá uma palavra fora da lista. É o que
+a **invariante 4** do `AGENT_ROADMAP.md` passa a proibir: o isolamento é
+determinístico, o vocabulário do cliente não.
+
+### 10.3 Defeitos mecânicos no template n8n encontrados no caminho
+
+Em `apps/conversation-runtime/n8n/persona-conversation-template.json`, nós
+`Validate agent response` e `Validate repaired agent response`:
+
+1. **`next_question_node_id: null` fixado** na montagem de `legacyProposal`. O
+   `asked_field_key` que o modelo devolve no envelope não entra ali.
+   **É esta a causa do `semantic_turn_failed:question_semantically_askable` do
+   WA Validator, e não o modelo improvisando pergunta.** O critério lê
+   `proof.next_question_node_id` e, no modo `n8n_agents`, exige que ele pertença
+   a `askable_question_ids` (`wa_validator_service`). Com `null`, só passa o
+   turno que não tem campo faltando.
+
+   Ressalva verificada no repositório: desde `a9b3bb2` o runtime tem um resgate
+   parcial — `interpretation.asked_field_key` vira `next_question_node_id`
+   **quando** a chave nomeia um campo do contrato com `question_node_id`
+   publicado (`graph_agent_runtime_v3`). Por isso o critério não reprova sempre;
+   ele reprova toda vez que o modelo pergunta algo que não é campo pendente do
+   contrato — que é justamente o comportamento consultivo que o roadmap pede.
+
+2. **`interaction_observation` fixado** em `{kind: 'unclear', evidence_span: '',
+   confidence: 0}`, nos mesmos dois nós, independentemente do que o modelo
+   observou.
+
+3. **Terceiro defeito relatado que não se reproduz — conflito registrado, não
+   fato.** A leitura de que `const approvedChunks = [];` faz o nó
+   `Build graph grounded agent request` descartar os `rag_chunks` **não se
+   confirma** no repositório: três linhas abaixo, `for (const chunk of
+   (context.rag_chunks || []))` preenche a lista, que vai ao prompt como
+   `approved_chunks`, e o manifesto reporta `retained_chunk_count`. Antes de
+   tratar como defeito é preciso comparar com o JSON **vivo** dentro do n8n — a
+   seção 8 registra que o prompt reescrito já estava provisionado sem que
+   ninguém tivesse confirmado, e o workflow no n8n é outro artefato. Governança
+   regra 3: reportado, não escolhido em silêncio.
+
+### 10.4 Dois diagnósticos errados, e o que os derrubou
+
+O registro dos erros vale mais que o do acerto: os dois têm o mesmo vício.
+
+**Erro 1 — "os aliases de varejo são assimétricos; o casamento literal falhou".**
+Concluído a partir de um `evidence_span: "revenda"` visto num turno
+bem-sucedido, do qual se inferiu que a extração era casamento de string feito
+pelo runtime. **Falso.** A extração é do modelo, e aquele `evidence_span` era o
+próprio modelo citando a evidência dele. O mecanismo foi inferido de um artefato
+de saída em vez de lido na proposta do modelo. A correção que decorreria daí —
+mexer nos aliases — teria sido inócua: o problema não é "casou errado", é "não
+propôs".
+
+**Erro 2 — "incluir `meta` em `_workflow_checksum` para o gate do n8n fechar".**
+**Falso.** `n8n_client.update_workflow` envia somente
+`name/nodes/connections/settings`, e a API pública v1 do n8n não aceita `meta`.
+`would_change` viraria permanentemente `true`, e a mesma fase `after` **também**
+assere `would_change is False` — duas asserções impossíveis no lugar de uma. A
+proposta foi feita antes de verificar se a API aceitava o campo. A correção que
+de fato fechou o gate está no `AGENT_ROADMAP.md`, dívida operacional, item 8.
+
+**O que destravou os dois foi o operador questionar a premissa** — "porque
+alias? o prompt e o rag nao esta totalmente pronto para isso?" — e não mais
+evidência.
+
+**A regra que sai daqui**, fixada como governança 9 do `AGENT_ROADMAP.md`:
+
+> Quando o sintoma for "campo estruturado vazio no turno", a primeira leitura é
+> `conversation_turn_proofs.model_proposal` comparada com
+> `proof_result.accepted_facts`. Isso separa em um passo **"o modelo não
+> propôs"** de **"algo rejeitou"** — e as duas causas levam a correções opostas.
+> Inferir o mecanismo a partir de um campo de saída é o que produziu os dois
+> erros acima.
+
+### 10.5 O que teria pego isso antes de chegar no cliente
+
+Nada do que existe hoje pegaria. E há uma razão estrutural, não um descuido:
+
+**o WA Validator só sabe falar o vocabulário publicado.** As falas do cliente
+sintético saem de `api/evaluation/wa_validator_customer_profiles.json`, e as
+aberturas de `sales` usam alias exato:
+
+```
+sdr_sales_retail         "Oi! Quero algumas peças para uso próprio."   <- alias
+sdr_sales_reseller       "Oi! Quero conhecer opções para revenda."     <- alias
+sdr_sales_branch_switch  "Oi! Quero conhecer opções para revenda."     <- alias
+branch_switch_text       "Na verdade, é para uso próprio."             <- alias
+```
+
+E `_semantic_sales_script` escolhe o galho alvo casando
+`preferred_terms = ("revenda", "atacado")` ou `("varejo", "uso-proprio", "uso
+próprio")` contra o texto do anchor. Ou seja: o gerador do cenário **é ele
+próprio** um casador de alias. Por construção ele nunca produziu um cliente fora
+da lista — e por isso `sdr_sales_branch_switch` passou
+(`active_branch_node_id: audience:tock-reseller`,
+`deterministic_branch_match: true`) enquanto o cliente real vazava.
+
+O único critério vermelho da rodada foi `question_semantically_askable`, lido
+como "o modelo improvisa". Era o bug de 10.3.1. **Um sinal verdadeiro atribuído
+à causa errada custa mais que sinal nenhum**: ele consumiu a atenção que o
+vazamento não recebeu.
+
+Os cenários abaixo estão especificados para implementação, mas **não foram
+implementados aqui** — eles vivem em `wa_validator_service` e no JSON de perfis,
+que estão sob edição de outro agente e são cópias duplicadas (`api/`,
+`apps/conversation-runtime/`, `apps/control-plane/`, `apps/transport/`; ver
+seção 8, a divergência entre cópias). Quem implementar precisa tocar todas as
+cópias vivas, ou o cenário existe só no monolito, que não é deployado.
+
+---
+
+**Cenário A — `sdr_sales_retail_colloquial`: varejo respondendo fora da lista.**
+
+*O caso do lead 209.* Registrar em `_FLOWS` e mapear
+`_FLOW_BUSINESS_MODELS["sdr_sales_retail_colloquial"] = {"sales"}`.
+
+- Abertura sem alias e sem origem: `"Oi, vi as roupas de vocês e queria dar uma
+  olhada"`. Nenhum `origin_ref`.
+- Resposta à pergunta de perfil tirada de um **corpus de fraseado**, não de uma
+  string única — a mesma forma que `_sdr_flow_corpus()` já usa. Mínimo:
+  `"Proprio"` (literalmente o do lead 209), `"é pra mim mesmo"`, `"pra usar"`,
+  `"só uma pecinha pra mim"`, `"nao é pra revender"`. Nenhum deles pode estar
+  entre os aliases publicados — a asserção de que estão fora é parte do teste, e
+  deve falhar se alguém adicionar o alias em vez de corrigir a classificação.
+- Asserções: `purchase_profile = uso-proprio-varejo` em `accepted_facts`;
+  `branch_selections` com `action=select` e
+  `branch_anchor_node_id: audience:tock-retail`; `active_branch_node_id ==
+  audience:tock-retail`; nenhum `cited_node_ids`/`cited_chunk_ids` no fecho de
+  `audience:tock-reseller`.
+- **Critério novo, o mais valioso — `reply_claims_no_unextracted_field`:**
+  reprovar quando o `reply` afirma o valor de um campo pendente (casando com os
+  valores canônicos **ou** com seus aliases) e `accepted_facts` não contém
+  aquele campo. É exatamente a assinatura de 10.1 — "Perfeito! Então você quer
+  para uso próprio" com `facts: []` — e pega a família inteira do defeito sem
+  depender de saber qual palavra o cliente usou.
+
+**Cenário B — `sdr_sales_price_before_profile`: o vazamento puro.**
+
+*O caso do lead 208.* É o mais importante dos quatro, porque não depende de o
+cliente responder nada.
+
+- Abertura: `"Oi, quanto custa?"` — sem perfil, sem `origin_ref`, sem qualquer
+  termo de galho. Máximo de 2 turnos.
+- Estado esperado no turno 1: `active_branch_node_ids == []`.
+- **Critério novo — `no_branch_scoped_claim_without_branch`:** com
+  `active_branch_node_ids` vazio, reprovar qualquer `claim`, `cited_node_ids` ou
+  `cited_chunk_ids` cujo nó pertença ao fecho de um `branch_anchor`. Sem galho,
+  só conteúdo de `global_context` é citável. Este critério é a tradução direta
+  da garantia comercial, e o lugar definitivo dele é o proof checker — mas ele
+  precisa existir primeiro como critério de validador, onde não bloqueia
+  atendimento enquanto está sendo calibrado.
+- Asserções de texto como rede secundária: proibir `R\$\s*\d`, `mínimo de 3`,
+  `revenda` e `atacado` no reply. Rede, não garantia — a garantia é a citação.
+- O reply correto aqui é responder o que dá para responder sem galho e fazer a
+  pergunta de perfil.
+
+**Cenário C — `sdr_sales_brand_asymmetry`: os dois sentidos, e o gatilho.**
+
+Quatro trechos, rodados contra os dois galhos, provando que a assimetria
+varejo/atacado é respeitada nas duas direções e que a troca só acontece por
+gatilho declarado.
+
+1. *Varejo por fraseado livre* (reusa o corpus do cenário A), depois pergunta de
+   preço. Esperado: **R$ 99,90**, sem `30%`, sem `mínimo de 3`, e sem citar
+   `rule:tock-desconto-atacado-30` — citá-la de uma FAQ de varejo já é recusado
+   como `commercial_claim_evidence_outside_scope`, e o cenário prova que a
+   recusa acontece.
+2. *Atacado por fraseado livre* — `"tenho uma lojinha"`, `"quero pra vender"` —
+   depois pergunta de preço. Esperado: **R$ 69,93** e o mínimo de 3 peças, e
+   **nunca** o preço de varejo apresentado como o dele.
+3. *Gatilho legítimo de troca*, a partir do galho de varejo: `"na verdade quero
+   5 peças"`. O bundle declara em `stability.switch_triggers`
+   `customer_requests_more_pieces` e `order_reaches_wholesale_minimum`
+   (`min_total_quantity: 3`). Esperado: troca para `audience:tock-reseller`, com
+   `evidence_span` apontando a frase, e os fatos compatíveis preservados.
+4. *Menção casual que NÃO é gatilho*: `"uma amiga minha revende"`. O bundle é
+   explícito — "Nenhuma outra evidência troca o galho. Menção casual a revenda,
+   atacado ou preço não é gatilho." Esperado: galho **inalterado** e nenhum card
+   de atacado citado. Este trecho é o teste da regra de estabilidade da v14, que
+   hoje nada exercita.
+
+**Cenário D — `sdr_sales_origin_binding`: a origem decide antes do turno 1.**
+
+Cobre a regra `origin_binding` introduzida na v14, hoje sem nenhuma cobertura.
+
+- Inbound com `origin_ref: cabecalho:tock-fatal` e mensagem neutra
+  (`"Oi, vi no site"`).
+- Esperado: `purchase_profile = uso-proprio-varejo` e
+  `active_branch_node_id = audience:tock-retail` **já no turno 1**, com a
+  pergunta de perfil **não** feita (`faq:tock-purchase-profile` fora de
+  `asked_question_node_ids`).
+- Variante negativa: `origin_ref` desconhecido — a pergunta de perfil **é**
+  feita e o galho continua nulo.
+
+---
+
+**Correção transversal necessária antes que qualquer cenário acima signifique
+alguma coisa:** desfixar `next_question_node_id` no template (10.3.1). Enquanto
+ele for `null`, `question_semantically_askable` reprova por um motivo que não é
+o do cenário, e um vermelho falso volta a consumir a atenção — foi exatamente o
+que aconteceu nesta rodada.
+
+### 10.6 O que fica para depois
+
+1. **Substituir o enum fechado por classificação do modelo** em
+   `purchase_profile`: valores canônicos como alvo, aliases rebaixados a
+   exemplos ilustrativos no prompt, e a instrução "normalize it with that field
+   validation aliases" reescrita. Muda bundle e prompt; é mudança conversacional
+   e exige o teste-canário do `CLAUDE.md`.
+2. **Desfixar `next_question_node_id` e `interaction_observation`** no template
+   n8n e reprovisionar — depende de pausar claims, portanto do item 1 da dívida
+   operacional.
+3. **Conferir o `approved_chunks` do workflow vivo** contra o do repositório
+   (10.3.3) antes de tratar aquilo como defeito.
+4. **Implementar os quatro cenários e os dois critérios novos** de 10.5, em
+   todas as cópias vivas do `wa_validator_service`.
+5. **Levar `no_branch_scoped_claim_without_branch` ao proof checker** depois de
+   calibrado no validador. Enquanto ele não existir lá, o isolamento comercial
+   depende de o modelo se comportar — que é precisamente o que falhou aqui.
