@@ -17,4 +17,6 @@ Route traffic back to the previous component images and reactivate the previous 
 
 ## Initial-load dry run
 
-`scripts/audit_catalog_media.py` found four declared asset nodes and four product associations in `sdr-qualification-v16-voice-reachable.json`. The declared local evidence files were absent, so byte hashes and production object availability are still unverified. The dry run uploaded zero files and performed zero database changes.
+`scripts/audit_catalog_media.py` found four declared asset nodes and four product associations in `sdr-qualification-v16-voice-reachable.json`. The approved source files were recovered byte-for-byte from repository commit `6134f1c`; all four SHA-256 values match the manifest and GraphBundle. Production storage remains empty for these paths. The dry run uploaded zero files and performed zero database changes.
+
+The apply command is `python api/scripts/sync_graph_media_assets.py data/graph_bundles/tock-fatal/sdr-qualification-v16-voice-reachable.json --expected-count 4 --apply`. It reuses matching objects and `assets` rows, refuses to overwrite an object with a different hash, and emits the resulting non-secret IDs. Run it only after the Tock Fatal binding is paused and the production mutation is explicitly authorized.
