@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from services import auth_service
 
 PUBLIC_EXACT_PATHS = {
+    "/internal/v1/conversations/authorize-catalog-response",
     "/health",
     "/health/live",
     "/health/ready",

@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import logging
 import io
+import hashlib
+from uuid import NAMESPACE_URL, uuid5
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -39,6 +41,7 @@ from services import auth_service, graph_document_publisher, graph_json_v2_store
 from services.asset_pipeline import AssetPipelineContext, compose_markdown, run_pipeline
 from services.event_emitter import emit
 from services.audit_helpers import current_actor, summarize_diff
+from services import catalog_media_plan
 
 logger = logging.getLogger("routes.assets")
 
@@ -53,6 +56,8 @@ def _publish_asset_path_to_canonical_graph(
     actor_id: Optional[str],
     source: str,
 ) -> dict:
+    if parent.get("node_type") in {"product", "product_group", "category"}:
+        return catalog_media_plan.uploaded_asset_plan(asset, parent, actor_id=actor_id)
     persona = supabase_client.get_persona_by_id(asset.get("persona_id")) or {}
     persona_slug = persona.get("slug")
     current = graph_json_v2_store.load_current(persona_slug) if persona_slug else None
@@ -345,6 +350,7 @@ def _effective_asset_function(asset_function: Optional[str], parent_node: dict) 
         "campaign": "campaign_hero",
         "product_collection": "campaign_hero",
         "category": "category_cover",
+        "product_group": "category_cover",
         "product": "product_image",
     }.get(parent_type)
 
@@ -363,7 +369,7 @@ def _bind_upload_to_landing_slot(
     parent_type = (parent_node.get("node_type") or "").lower()
     if cfg["parent_node_type"] == "brand" and parent_type != "brand":
         return None
-    if cfg["parent_node_type"] == "category" and parent_type != "category":
+    if cfg["parent_node_type"] == "category" and parent_type not in {"category", "product_group"}:
         return None
     if cfg["parent_node_type"] == "product" and parent_type != "product":
         return None
@@ -640,7 +646,14 @@ async def upload_asset(
         raise HTTPException(404, f"Parent node nao encontrado para slug/id={branch_hint}")
 
     try:
-        return await _upload_asset_impl(file, persona_id, persona_slug, parent_node, asset_function)
+        result = await _upload_asset_impl(file, persona_id, persona_slug, parent_node, asset_function)
+        if parent_node.get("node_type") in {"product", "product_group", "category"}:
+            try:
+                result["canonical_publication"] = catalog_media_plan.uploaded_asset_plan(
+                    result["asset"], parent_node, actor_id=(auth_service.current_user(request) or {}).get("id"))
+            except Exception:
+                result["canonical_publication"] = {"activation_pending": True, "error": "catalog_media_plan_pending"}
+        return result
     except HTTPException:
         raise
     except Exception as exc:
@@ -713,6 +726,17 @@ async def _upload_asset_impl(
     fname = file.filename or "upload"
     mime = file.content_type or ""
     effective_asset_function = _effective_asset_function(asset_function, parent_node)
+    digest = hashlib.sha256(content).hexdigest()
+    deterministic_asset_id = str(uuid5(NAMESPACE_URL, f"catalog-upload:{persona_id}:{digest}"))
+    existing_asset = supabase_client.get_asset(deterministic_asset_id)
+    if existing_asset:
+        graph = _ensure_asset_graph_contract(asset_id=deterministic_asset_id, asset_row=existing_asset,
+            persona_id=persona_id, parent_node=parent_node, storage_bucket=existing_asset.get("storage_bucket"),
+            storage_path=existing_asset.get("storage_path"), title=existing_asset.get("name") or fname,
+            summary=(existing_asset.get("metadata") or {}).get("visual_summary") or fname,
+            slug_seed=deterministic_asset_id, asset_type=existing_asset.get("type"), asset_function=effective_asset_function)
+        return {"success": True, "asset_id": deterministic_asset_id, "asset": graph.get("asset") or existing_asset,
+                "reused": True}
 
     # 1) Upload to Supabase Storage.
     # Supabase Storage rejects keys with spaces or non-ASCII characters
@@ -720,7 +744,7 @@ async def _upload_asset_impl(
     # (original_filename / metadata) but slug the storage path so the
     # PUT URL is always valid.
     storage_bucket = "assets-raw"
-    storage_path = f"{persona_id}/{_safe_storage_filename(fname)}"
+    storage_path = f"{persona_id}/{digest}/{_safe_storage_filename(fname)}"
     try:
         file_url = supabase_client.upload_to_storage(storage_bucket, storage_path, content, mime or "application/octet-stream")
     except Exception as exc:
@@ -798,11 +822,13 @@ async def _upload_asset_impl(
     # 3) Persist public.assets.
     asset_type = _bundle_to_asset_type(bundle.classification.kind)
     asset_row = supabase_client.insert_asset({
+        "id": deterministic_asset_id,
         "persona_id": persona_id,
         "type": asset_type,
         "name": bundle.rename.title or fname,
         "url": preview_url or file_url,
         "metadata": {
+            "sha256": digest,
             "session_id": None,
             "persona_slug": persona_slug,
             "original_filename": fname,
@@ -1472,7 +1498,7 @@ class BindSlotBody(BaseModel):
 
 
 class RebindPathBody(BindSlotBody):
-    remove_existing: bool = True
+    remove_existing: bool = False
 
 
 class AssetUpdateBody(BaseModel):
@@ -1687,6 +1713,8 @@ def _resolve_slot_parent(
         node = supabase_client.get_knowledge_node_by_slug(
             target_slug, persona_id=persona_id, node_type=parent_type,
         )
+        if not node and parent_type == "category":
+            node = supabase_client.get_knowledge_node_by_slug(target_slug, persona_id=persona_id, node_type="product_group")
         if not node:
             raise HTTPException(404, f"{parent_type} nao encontrado: {target_slug}")
         return node
@@ -1841,6 +1869,8 @@ def _remove_existing_slot_edges(
     product/slot removes previous active slot edges so the menu payload cannot
     return stale images before the new one.
     """
+    if slot in {LandingSlot.PRODUCT_IMAGE, LandingSlot.PRODUCT_GROUP_COVER}:
+        return []  # Catalog galleries retain every assignment.
     parent_id = parent.get("id")
     if not parent_id or not asset_node_id:
         return []

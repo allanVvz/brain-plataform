@@ -207,6 +207,7 @@ class ConversationProposal(StrictModel):
     cited_node_ids: list[str] = Field(default_factory=list)
     cited_chunk_ids: list[str] = Field(default_factory=list)
     reply: str = ""
+    images: list[dict[str, str]] = Field(default_factory=list, max_length=3)
     qualification_complete: bool = False
     handoff_requested: bool = False
 
@@ -222,6 +223,8 @@ class ConversationContext(StrictModel):
     rag_paths: list[list[str]]
     rag_chunks: list[dict[str, Any]] = Field(default_factory=list)
     context_cards: list[ContextCard] = Field(default_factory=list)
+    catalog_images: list[dict[str, Any]] = Field(default_factory=list)
+    max_response_images: int = Field(default=3, ge=0, le=3)
     system_prompt: str = ""
     available_services: list[dict[str, str]] = Field(default_factory=list)
     active_branch_node_id: str | None = None
@@ -269,6 +272,7 @@ class ConversationDecision(StrictModel):
 
 class AgentResponse(StrictModel):
     reply_text: str | None
+    images: list[dict[str, Any]] = Field(default_factory=list, max_length=3)
     role: ConversationRoute
     evidence_node_ids: list[str] = Field(default_factory=list)
     cart_state: dict[str, Any]

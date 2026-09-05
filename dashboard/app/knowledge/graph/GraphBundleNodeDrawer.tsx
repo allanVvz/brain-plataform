@@ -1,6 +1,7 @@
 "use client";
 
 import { X } from "lucide-react";
+import GraphCatalogMedia from "./GraphCatalogMedia";
 import { branchMembershipsForNode, GraphBundleViewPayload } from "@/lib/graph-bundle-v3";
 
 interface Props {
@@ -48,6 +49,9 @@ export default function GraphBundleNodeDrawer({ node, view, edges, onClose }: Pr
       </div>
 
       <div className="space-y-4">
+        {["product", "product_group", "category"].includes(raw.node_type) && Object.keys(view.branch_memberships).filter(anchor => view.branch_memberships[anchor]?.[node.id]).map(scope =>
+          <GraphCatalogMedia key={`${view.ref}:${node.id}:${scope}`} view={view} ownerId={node.id} scope={scope} />
+        )}
         <div className="grid grid-cols-2 gap-3">
           <Detail label="Tipo">{raw.node_type || "—"}</Detail>
           <Detail label="Status">{raw.status || raw.data?.status || "—"}</Detail>

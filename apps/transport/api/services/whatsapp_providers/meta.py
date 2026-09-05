@@ -186,4 +186,15 @@ class MetaWhatsAppProvider:
         raise NotImplementedError("Meta Cloud bindings have no local instance to log out")
 
     def send_media(self, binding: dict[str, Any], recipient: str, media: dict[str, Any]) -> dict[str, Any]:
-        raise NotImplementedError("Meta Cloud media send is not implemented yet")
+        if media.get("mediatype") != "image" or not binding.get("whatsapp_phone_number_id"):
+            raise ValueError("Meta catalog send requires an image and a phone number binding")
+        token, api_version = _credential(binding)
+        response = httpx.post(
+            f"https://graph.facebook.com/{api_version}/{binding['whatsapp_phone_number_id']}/messages",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"messaging_product": "whatsapp", "to": recipient, "type": "image",
+                  "image": {"link": media["media"], "caption": str(media.get("caption") or "")}},
+            timeout=30.0,
+        )
+        _raise_for_status_with_detail(response)
+        return response.json()

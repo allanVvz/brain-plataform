@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from routes import site_blocks
 from middleware.auth import auth_middleware
 from routes import (access, agent_harness, assets, audiences, auth, generation, graph,
                     graph_bundles, graph_documents, graph_projections,
@@ -19,3 +20,4 @@ for router in (health.router, auth.router, access.router, portal.router,
                agent_harness.router, qa_contract.router):
     app.include_router(router)
 app.include_router(qa_contract.router, prefix="/api")
+app.include_router(site_blocks.router)
