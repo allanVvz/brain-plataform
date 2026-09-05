@@ -38,6 +38,22 @@ em vez de escolher em silêncio.
 - Toda mudanca conversacional deve executar o teste-canario que prova a
   fronteira entre os dois motores e a preservacao byte a byte da reply agentic.
 
+## Rollout de microsservicos
+
+- Producao roda quatro imagens em blue/green: `gateway`, `control-plane`,
+  `conversation-runtime`, `transport`. O checkout `/opt/brain-ai` **nao e
+  executado** -- serve so aos scripts de `ops/vps`.
+- `bash ops/vps/rollout-microservices.sh status` e o ponto de partida: e
+  somente-leitura e responde numa tela quais servicos estao atras do manifesto,
+  se os claims estao pausados e os comandos exatos na ordem.
+- Pausar claims para um agente vivo e **acao de operador**, nunca de agente. O
+  script recusa `prepare` sem a pausa em vez de assumi-la.
+- `validate-production-release.sh` trata servico e worker com regras
+  diferentes: um servico tolera digest pendente e so avisa
+  (`ALLOW_PENDING_MICROSERVICE_DIGESTS`); um worker so passa **parado e com
+  claims pausados**. E por isso que um rollout de runtime exige parar
+  `runtime-conversation` e `runtime-validator` antes do preflight.
+
 ## Leitura obrigatória antes de mudanças maiores
 
 - `docs/roadmaps/AGENT_ROADMAP.md`

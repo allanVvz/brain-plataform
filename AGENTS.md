@@ -677,3 +677,25 @@ Se nao aparece no grafo, esta incompleto.
   retomada exigem autorizacoes explicitas e separadas.
 - Depois da prova produtiva registrada, release compativel usa blue/green sem
   pausa; falha de GraphBundle pausa somente a persona alvo.
+
+## Rollout de microsservicos
+
+Comece sempre por `bash ops/vps/rollout-microservices.sh status` (somente
+leitura). Ele compara o manifesto com o que roda, mostra o estado da pausa e
+imprime a sequencia exata.
+
+Ordem completa:
+
+1. **operador** autoriza a pausa -- `bash ops/vps/pause-worker-claims.sh '<motivo>' --safety-pause`
+2. `bash ops/vps/rollout-microservices.sh prepare` (para os workers estritos)
+3. `gh workflow run "Deploy <servico>" --ref main -f manifest_sha=<sha> -f action=deploy`
+4. `bash ops/vps/rollout-microservices.sh finish` (sobe os workers, limpa a pausa)
+5. `status` de novo para confirmar
+
+Antes do passo 3, confira se o manifesto (`ops/microservices/release-manifest.json`)
+aponta para o build atual. Se `source_sha` estiver velho, renderize um novo com
+`ops/microservices/render-monorepo-release-manifest.py` usando os digests do build
+correspondente -- deployar por manifesto velho reinstala imagem antiga.
+
+O preflight exige backup data-only com menos de 26h quando o impacto e
+`migration`: `bash ops/vps/backup.sh`.
