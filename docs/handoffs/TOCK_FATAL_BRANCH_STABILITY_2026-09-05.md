@@ -297,3 +297,69 @@ conversacional** e precisa do teste-canário exigido pelo `CLAUDE.md` ("Toda
 mudança conversacional deve executar o teste-canário que prova a fronteira
 entre os dois motores e a preservação byte a byte da reply agentic") antes de
 ir para produção.
+
+## 9. A causa real: o control-plane lia o grafo sem arestas
+
+Encontrada em 2026-09-05, depois que o `persona:self` foi removido e o staging
+**continuou** abortando com `materialized_runtime_checksum_mismatch`. As seções
+6 e 8 descrevem obstáculos reais no caminho, mas nenhum deles era o bloqueio.
+
+`list_all_knowledge_graph` filtrava arestas assim:
+
+```python
+eq_in_source = client.table("knowledge_edges").select("*") \
+    .in_("source_node_id", node_ids).limit(5000).execute().data or []
+```
+
+`in_` renderiza **todos** os ids na query string. Com os 1015 nós da Tock a URL
+passa do que o gateway aceita, e o `except Exception: eq_in_source = []` logo
+abaixo transformava a recusa em lista vazia. Medido dentro do container:
+
+```
+db nodes: 1015   db edges: 0
+bundle nodes: 1015   bundle edges: 1924
+```
+
+`stage_bundle` grava nós e arestas, relê o grafo pela mesma função e recompila
+para conferir o checksum contra o plano. Relendo sem arestas, o documento
+recompilado nunca podia bater — **publicar um bundle a partir da produção era
+impossível**, para qualquer persona grande. É a explicação de uma anomalia que
+esta investigação vinha carregando sem resposta: a v12 ativa foi compilada
+**fora** da produção porque de dentro dela não dava.
+
+A segunda consequência é pior e ainda não tinha aparecido: o
+`_preflight_source_scope` compara o bundle com as arestas **existentes**. Com o
+conjunto vazio, ele aprova em silêncio um bundle que orfana todas as arestas
+vivas.
+
+O monólito já tinha a correção — lotes de 100 ids (`_EDGE_LOOKUP_BATCH`) e falha
+de leitura que **levanta** em vez de parecer vazia — com um comentário que
+descreve exatamente este cenário, inclusive o efeito sobre o preflight. As duas
+cópias que rodam em produção carregavam a versão original: mais um caso da seção
+8, e o mais caro dela, porque o sintoma não se parecia com um bug de leitura.
+
+### Como diagnosticar isso de novo
+
+O erro `materialized_runtime_checksum_mismatch` não diz o que difere. O que
+resolve é comparar `plan["candidate_document"]` com o documento recompilado do
+banco, campo a campo, dentro do container. Foi assim que `edges: len db=0
+cand=1924` apareceu. Um primeiro diagnóstico chamou
+`list_all_knowledge_graph(persona_id=None)` e leu **todas** as personas (2589
+nós, com a Baita junto) — o plano não expõe `persona_id`; ele vem de
+`graph_bundle.normalize_bundle(bundle)["persona"]["id"]`.
+
+### Correção
+
+`b33d628` porta a leitura em lotes para `apps/control-plane/api/repositories/`
+`control_plane.py` e `apps/conversation-runtime/api/repositories/runtime.py`, com
+o teste de regressão em cada serviço dimensionado nos 1015 nós que quebraram.
+Canário de fecho de galho, fronteira de monorepo e divergência de cópias
+seguem verdes.
+
+`9381bfa` corrige um segundo obstáculo, descoberto no dry-run do deploy: o
+`prepare` do `rollout-microservices.sh` parava os workers dos serviços marcados
+como *behind*, mas o preflight julga **cada worker pelo seu próprio digest**, sem
+a tolerância de digest pendente que o serviço tem. O control-plane aparecia como
+`up to date` e seus três workers não — o deploy falharia depois da pausa já estar
+em vigor. Agora `status` nomeia todos os workers que reprovariam e `prepare` para
+exatamente esse conjunto.
