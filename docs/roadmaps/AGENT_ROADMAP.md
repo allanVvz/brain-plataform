@@ -35,7 +35,7 @@ Transporte  : n8n / WhatsApp
 
 **Uma mudança de conteúdo deve tocar somente a primeira camada.**
 
-Três invariantes sustentam tudo:
+Quatro invariantes sustentam tudo:
 
 1. **Card = node do grafo = arquivo Markdown.** O que o operador edita na tela de
    grafos, o que a Sofia escreve e o que o agente lê é o mesmo objeto. Nenhum
@@ -45,6 +45,18 @@ Três invariantes sustentam tudo:
    resolve com mais FAQs validadas, nunca com prompt maior.
 3. **O checksum aprovado é o checksum ativado.** A normalização acontece antes da
    aprovação; publicar não pode produzir outro checksum.
+4. **O isolamento é determinístico; o vocabulário do cliente não é.** Enum
+   fechado e lista de alias são travas frágeis: uma palavra fora da lista
+   derruba a extração inteira e, sem fato, não há galho — e sem galho o
+   retrieval deixa de ser escopado e entrega as duas marcas. Classificar a
+   resposta do cliente é trabalho do modelo: os valores canônicos do campo são
+   o alvo, e os aliases são exemplos ilustrativos do fraseado, nunca o filtro
+   que decide se o fato existe. O que permanece determinístico e não negociável
+   é o **isolamento** — o que o modelo pode ver, citar e afirmar —, não o
+   vocabulário com que o cliente se expressa. Fechar vocabulário para proteger
+   isolamento troca uma garantia forte por uma frágil: foi assim que dois
+   clientes de varejo receberam preço de atacado em 2026-09-05 (dívida
+   operacional de produção, item 9).
 
 O que **nunca** é removível, por mais que simplifique: proof e exactly-once;
 bloqueio de preço/agenda/promessa sem fonte; teste sintético sem WhatsApp real.
@@ -139,7 +151,7 @@ referência de leitura. Plano completo:
 | 2f | Skills como blocos renderizáveis | **fase 1 entregue localmente — Humanizer instalada e manifestada; catálogo/projeções/UI permanecem a fazer, sem publicação produtiva** | `card-editor`, `graph-publisher` |
 | 3 | Sofia produz dados declarativos, não código | **a fazer — inclui: Sofia lê o grafo, atualiza FAQ e cria os blocos dos sites. Os `requires` do template ativo viram a checklist concreta que hoje é a instrução vaga "SAIDA PUBLICA DE SITE" em `agents/sofia_criar.md`.** | `faq-coverage`, `sdr-evaluator` |
 | 3a | Sofia Skill Connector | **a fazer — contrato definido; nenhuma skill entra no prompt ou runtime nesta fase** | `card-editor`, `graph-publisher` |
-| 4 | Tock Fatal nasce no pipeline novo | **em progresso — baseline produtiva v11 (`sha256:e139c137…a9a5dc65`) com catálogo, 605 FAQs e isolamento varejo/atacado; candidato declarativo v12 preparado somente em código, com política conversacional model-owned e sem FAQ nova. Dry-run local passou, mas publicação e ativação continuam sem autorização. Os nós de mídia (asset/gallery/`content_delivery`) do v11/v12 são **conteúdo autorado**, não feature ativa — ver item 8a e o checkpoint de mídia (2026-08-31). LP pública de varejo gerada do bundle em 2026-09-04 pelo item 10. **Correção 2026-09-05:** a v12 **está ativa em produção desde 2026-09-01** — a afirmação anterior de que publicação e ativação seguiam sem autorização estava desatualizada. Bundles v14 (seletor de galho neutro), v15 (FAQ de fluxo) e v16 (voz alcançável) prontos e validados, `runtime_checksum sha256:a1033833…9eaae091`, aguardando publicação — ver `docs/handoffs/TOCK_FATAL_BRANCH_STABILITY_2026-09-05.md`.** | `graph-publisher` |
+| 4 | Tock Fatal nasce no pipeline novo | **em progresso — baseline produtiva v11 (`sha256:e139c137…a9a5dc65`) com catálogo, 605 FAQs e isolamento varejo/atacado; candidato declarativo v12 preparado somente em código, com política conversacional model-owned e sem FAQ nova. Dry-run local passou, mas publicação e ativação continuam sem autorização. Os nós de mídia (asset/gallery/`content_delivery`) do v11/v12 são **conteúdo autorado**, não feature ativa — ver item 8a e o checkpoint de mídia (2026-08-31). LP pública de varejo gerada do bundle em 2026-09-04 pelo item 10. **Correção 2026-09-05:** a v12 **está ativa em produção desde 2026-09-01** — a afirmação anterior de que publicação e ativação seguiam sem autorização estava desatualizada. Bundles v14 (seletor de galho neutro), v15 (FAQ de fluxo) e v16 (voz alcançável), `runtime_checksum sha256:a1033833…9eaae091`. **Correção 2026-09-05 (fim do dia):** deixaram de estar "aguardando publicação" — o conteúdo foi publicado como **v13** e está ativo. O seletor duplicado está corrigido em produção; o vazamento de marca com galho nulo que apareceu depois é o item 9 da dívida operacional, não uma regressão desta publicação — ver `docs/handoffs/TOCK_FATAL_BRANCH_STABILITY_2026-09-05.md`.** | `graph-publisher` |
 | 5 | n8n estável e desacoplado do conteúdo | **em progresso — template único v3 preparado para ambas as personas, envelope único e validador determinístico advisory; provisionamento, teste produtivo e deploy permanecem pendentes de gates próprios.** | — |
 | 6 | Aurora migra para o bundle | **em preparação — baseline v75, checksum, projeções e binding produtivos auditados em 2026-08-31; importador shadow-only estrito preparado, mas o export autenticado da publicação ativa ainda não está disponível no workspace. Restam gerar o bundle a partir desse export, dry-run/shadow, revisão dos dois checksums, WA Validator interno e autorização separada de staging/ativação.** | `bundle-migrator` |
 | 7 | Orquestradores por estágio e campanha por ciclo → arquitetura multi-agente | **redesenhado 2026-08-20; decisão nova 2026-08-22: escopo de conhecimento por agente via cards Embedded — ver seção própria abaixo** | `graph-publisher`, `card-editor` |
@@ -928,6 +940,14 @@ Encontrada ao tentar publicar a v16 da Tock Fatal. Nada disso foi causado por
 aquela mudança; os quatro estavam no caminho e bloqueiam qualquer publicação ou
 reprovisionamento até serem resolvidos.
 
+> **Correção 2026-09-05 (fim do dia).** Esta seção nasceu com quatro itens e
+> hoje tem nove; e a frase "bloqueiam qualquer publicação" **deixou de valer**:
+> o bundle foi publicado como **v13** e está ativo em produção. Os itens 1 a 4
+> continuam abertos como dívida de operação; o que caiu foi a consequência
+> "publicação bloqueada" dos itens 5 e 7, resolvida por `b33d628` (leitura de
+> arestas em lotes) e pelo porte do compilador. O item 9 é posterior à
+> publicação e foi causado pelo tráfego real que ela liberou.
+
 **1. Lifecycle de deploy travado desde 2026-08-29.** `.deploy/lifecycle.json`
 parou em `queue_drained` com `pause_reason: "runtime worker digest mismatch
 after resume"`. O `candidate_sha` registrado (`b6e871cc…`) não bate com o SHA
@@ -1013,10 +1033,12 @@ por isso passou despercebido.
 > correta.
 
 
-Consequência ativa: publicar a v16 da Tock Fatal está bloqueado — os checksums
+Consequência ativa ~~publicar a v16 da Tock Fatal está bloqueado~~ —
+**resolvida em 2026-09-05**, o conteúdo foi publicado como v13 depois do porte
+do compilador. O registro do bloqueio fica porque explica a causa: os checksums
 aprovados (seção 4 do handoff abaixo) foram computados com `3.6.4`; o
-control-plane deployado roda `3.6.2`, rejeita as seis FAQ de saudação como
-`factual_faq_without_claim` e computa checksum diferente. Antes de portar
+control-plane deployado rodava `3.6.2`, rejeitava as seis FAQ de saudação como
+`factual_faq_without_claim` e computava checksum diferente. Antes de portar
 `3.6.2` → `3.6.4`, falta decisão humana sobre se `3.6.2` foi escolhido de
 propósito ou por acidente, e o porte — mudança conversacional — exige o
 teste-canário do `CLAUDE.md`. Detalhe completo em
@@ -1087,8 +1109,11 @@ produção carregavam a versão original — mais um caso do item 5, e o mais ca
 até agora, porque o sintoma não parecia um bug de leitura.
 
 Corrigido em `b33d628`, com o teste de regressão em cada serviço dimensionado no
-grafo que quebrou. Falta chegar à produção: exige rebuild das quatro imagens no
-mesmo `source_sha` (o manifesto obriga) e deploy do control-plane.
+grafo que quebrou. ~~Falta chegar à produção~~ — **chegou em 2026-09-05**: o
+rebuild das quatro imagens no mesmo `source_sha` e o deploy do control-plane
+foram feitos, e a publicação da v13 é a prova de que a leitura em lotes está
+valendo (de dentro da produção, sem arestas, nenhuma publicação por bundle
+completava).
 
 **8. O gate do resync do n8n exigia um campo que o n8n não guarda.**
 Encontrado em 2026-09-05 ao reprovisionar o workflow da Tock; corrigido no mesmo
@@ -1129,6 +1154,113 @@ Registro relacionado: o prompt reescrito **já estava vivo** no n8n antes desta
 tentativa. A pendência "reprovisionar o n8n" das seções anteriores já estava
 resolvida sem que ninguém tivesse confirmado; o que faltava era só este gate.
 
+**9. Vazamento de marca com galho nulo: o enum fechado derruba o fato, e sem
+fato o retrieval entrega as duas marcas.** Aberto em 2026-09-05, depois de
+publicar a **v13** a partir do bundle `sdr-qualification-v16-voice-reachable.json`.
+Aquela publicação corrigiu de verdade o seletor de perfil duplicado descrito no
+handoff (seção 2) — ela simplesmente não cobre este caminho. O isolamento entre
+as duas marcas da `tock-fatal` (varejo e atacado, 30% de desconto, mínimo de 3
+peças) é a garantia comercial mais importante do produto, e foi ele que caiu.
+
+Dois atendimentos reais receberam conteúdo de atacado sem estarem qualificados
+para ele:
+
+- **lead 208** — sem perfil declarado. Recebeu **R$ 69,93** (o preço de
+  `offer:…-atacado`; o de varejo é **R$ 99,90**), o mínimo de 3 peças e "Você
+  está comprando para revenda, certo?". O turno citou um card de atacado.
+- **lead 209** — respondeu **"Proprio"** à pergunta de perfil. O modelo escreveu
+  "Perfeito! Então você quer para uso próprio" e devolveu `facts: []` e
+  `branch_selections: []`. Sem fato, sem galho. O turno seguinte perguntou
+  "você está começando a revender agora ou já tem loja?" a um cliente de varejo.
+
+A cadeia causal foi verificada elo a elo em produção. Nenhum elo abaixo é
+hipótese:
+
+1. O contrato publicado declara `purchase_profile` com
+   `owner_node_id: persona:tock-fatal` e `scope: persona` — o compilador
+   reescreve assim todo campo seletor (`_selector_shared_field`,
+   `graph_compiler_v3`), ainda que o bundle o declare por galho nos dois
+   `audience:`.
+2. `contract.questions` resolve `faq:tock-purchase-profile` → `purchase_profile`.
+3. A projeção `cart`, vinda de `lead.metadata.conversation_state`, trazia
+   `asked_question_node_ids: ["faq:tock-purchase-profile"]`.
+4. `expected_answer_field_key` chegou ao prompt como `purchase_profile`.
+5. O proof checker **não rejeitou nada**: `valid: true`, `errors: []`,
+   `gating_errors: []`, `accepted_facts: []`. Não havia o que aceitar.
+6. O campo tem `validation.mode = "enum"` com aliases fechados
+   (`uso-proprio-varejo`: "uso próprio", "pra mim", "varejo", "comprar para mim";
+   `atacado-revenda`: "revenda", "revender", "atacado", "minha loja",
+   "empreender"). **"Proprio" não está na lista.** O prompt manda "normalize it
+   with that field validation aliases"; o modelo não conseguiu normalizar e não
+   emitiu o fato.
+7. Com galho nulo, os `context_cards` não são escopados e o RAG entrega
+   conteúdo das duas marcas. É exatamente o que o item 10 deste roadmap já
+   nomeia como risco do lado do site — "sem isso uma página de varejo poderia
+   emitir preço de atacado" —, aqui realizado do lado da conversa.
+
+O ponto 6 é a razão da **invariante 4**: a trava que devia proteger o
+isolamento foi quem o quebrou. Não há correção possível por alias — sempre
+existirá uma palavra fora da lista.
+
+Três defeitos mecânicos encontrados no caminho, todos no
+`apps/conversation-runtime/n8n/persona-conversation-template.json`:
+
+- **`next_question_node_id: null` fixado.** Os nós `Validate agent response` e
+  `Validate repaired agent response` montam `legacyProposal` com esse campo
+  literalmente `null`. **É esta a causa do
+  `semantic_turn_failed:question_semantically_askable` do WA Validator, não o
+  modelo improvisando pergunta.** O critério lê
+  `proof.next_question_node_id` e, no modo `n8n_agents`, exige que ele esteja em
+  `askable_question_ids` (`wa_validator_service`); com `null`, só passa o turno
+  que não tem campo faltando. Existe um resgate parcial no runtime desde
+  `a9b3bb2` — `asked_field_key` vira `next_question_node_id` quando a chave
+  nomeia um campo do contrato **com** `question_node_id` publicado —, e é por
+  isso que o critério não reprova sempre: ele reprova toda vez que o modelo
+  pergunta algo que não é campo pendente do contrato.
+- **`interaction_observation` fixado** em `{kind: 'unclear', evidence_span: '',
+  confidence: 0}` nos mesmos dois nós, independentemente do que o modelo
+  observou.
+- **Terceiro defeito não reproduzido — registrar como conflito, não como fato.**
+  A leitura de que `const approvedChunks = [];` faz o template descartar os
+  `rag_chunks` **não se confirma** no repositório: três linhas abaixo o laço
+  `for (const chunk of (context.rag_chunks || []))` preenche a lista, e ela vai
+  ao prompt como `approved_chunks`. Antes de tratar isso como defeito é preciso
+  comparar com o JSON **vivo** dentro do n8n, que é outro artefato — o handoff
+  registra (seção 8) que o prompt reescrito já estava provisionado sem que
+  ninguém tivesse confirmado.
+
+> **Registro de correção — o alias assimétrico.** O primeiro diagnóstico desta
+> sessão concluiu que "os aliases de varejo são assimétricos e o casamento
+> literal falhou", a partir de um `evidence_span: "revenda"` visto num turno
+> bem-sucedido. **Está errado.** A extração é do modelo; aquele `evidence_span`
+> era o próprio modelo citando a evidência dele, não um matcher do runtime
+> deixando rastro. O mecanismo foi inferido de um artefato de saída em vez de
+> lido na proposta do modelo. O sintoma real não é "casou errado", é "não
+> propôs".
+
+> **Registro de correção — o `meta` no checksum.** Ao implementar, propôs-se
+> incluir `meta` em `_workflow_checksum` para o gate do n8n fechar. Também
+> errado, e pelo mesmo vício: proposta antes de verificar. `n8n_client.update_workflow`
+> envia só `name/nodes/connections/settings`, e a API pública do n8n não aceita
+> `meta` — `would_change` viraria permanentemente `true`, e a fase `after`
+> **também** assere `would_change is False`. Duas asserções impossíveis no lugar
+> de uma. O item 8 acima registra a correção que de fato fechou o gate.
+
+**A regra que sai daqui.** Quando o sintoma for "campo estruturado vazio no
+turno", a primeira leitura é `conversation_turn_proofs.model_proposal` — o que o
+modelo propôs — comparada com `proof_result.accepted_facts` — o que foi aceito.
+Isso separa em um passo "o modelo não propôs" de "algo rejeitou", e as duas
+causas levam a correções opostas. Está fixado como regra de governança 9.
+
+**O que fica em aberto:** a prevenção. O WA Validator rodou
+`sdr_sales_branch_switch` e **passou** o galho
+(`active_branch_node_id: audience:tock-reseller`,
+`deterministic_branch_match: true`), porque exercitou a direção fácil — o
+cliente disse "Quero conhecer opções para revenda", e "revenda" é alias exato.
+Nenhum cenário jamais exercitou um cliente de varejo respondendo com palavra
+fora da lista. Os cenários que faltam estão especificados em
+`docs/handoffs/TOCK_FATAL_BRANCH_STABILITY_2026-09-05.md`, seção 10.5.
+
 ## Catálogo de agentes
 
 Cada agente vive em `.claude/agents/<nome>.md`, declara seu próprio modelo e
@@ -1163,3 +1295,8 @@ demanda. Nenhum deles re-deriva o projeto do zero.
 7. Nunca criar tabela nova sem perguntar (`AGENTS.md` §2).
 8. Nunca ramificar código de produção por cliente, persona, produto ou serviço
    (`AGENTS.md` §26).
+9. Diante de campo estruturado vazio num turno, ler
+   `conversation_turn_proofs.model_proposal` **antes** de formular hipótese, e
+   compará-lo com `proof_result.accepted_facts`. "O modelo não propôs" e "algo
+   rejeitou" levam a correções opostas; inferir o mecanismo de um campo de saída
+   é o que produziu os dois diagnósticos errados de 2026-09-05.
