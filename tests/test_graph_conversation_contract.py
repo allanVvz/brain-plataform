@@ -135,6 +135,54 @@ def test_branch_closure_excludes_historical_sibling_products():
     assert "aurora-faq-polish-includes" not in closure
 
 
+def test_null_branch_closure_is_neutral_not_everything():
+    """A customer who has not chosen a branch sees no branch's content.
+
+    Until 2026-09-05 a null branch returned every published node, which is how
+    a Tock Fatal lead with no declared profile was quoted the wholesale
+    R$ 69,93 instead of the retail R$ 99,90 for the same item: the closure fed
+    the RAG, and the RAG handed the model both brands. Aurora has the same
+    shape with services instead of brands.
+    """
+    graph = _graph()
+    everything = contract_service.branch_closure(graph, "aurora-product-interior")
+    neutral = contract_service.branch_closure(graph, None)
+
+    assert neutral, "a branchless customer must still be answerable"
+    # Nothing that belongs to one service only.
+    for node_id in (
+        "aurora-product-interior", "aurora-faq-interior-includes",
+        "aurora-product-polish", "aurora-faq-polish-includes",
+    ):
+        assert node_id not in neutral, node_id
+    # What carries the conversation to the choice survives.
+    assert "aurora-persona" in neutral
+    assert "aurora-services" in neutral
+    assert "faq:qualification:aurora:servico" in neutral
+    # And the branchless scope is never wider than a chosen branch's: a
+    # customer learns more by choosing, never less.
+    assert neutral < everything
+
+
+def test_null_branch_closure_matches_every_branch_closure():
+    """The general rule: neutral is what *no* branch owns exclusively."""
+    graph = _graph()
+    anchors = contract_service.branch_anchor_ids(graph)
+    neutral = contract_service.branch_closure(graph, None)
+
+    assert len(anchors) > 1
+    exclusive = set()
+    closures = {
+        anchor: contract_service.branch_closure(graph, anchor) for anchor in anchors
+    }
+    for anchor, closure in closures.items():
+        for other, members in closures.items():
+            if other != anchor:
+                exclusive |= closure - members
+    assert exclusive, "the graph no longer isolates anything between branches"
+    assert not (neutral & exclusive)
+
+
 def test_proof_checker_keeps_unknown_unresolved_when_graph_disallows_it():
     graph = _graph()
     branch_id = "aurora-product-interior"

@@ -248,34 +248,79 @@ def _descendants(children: dict[str, list[str]], node_id: str) -> set[str]:
     return result
 
 
-def branch_closure(graph: GraphJson, branch_anchor_node_id: str | None) -> set[str]:
-    """Return ancestors, branch descendants and graph-applicable policy nodes."""
-    by_id = {node.id: node for node in graph.nodes}
-    published = {
+def _published_ids(graph: GraphJson) -> set[str]:
+    return {
         node.id for node in graph.nodes
         if node.node_class == "knowledge" and node.lifecycle.status in APPROVED
     }
-    if not branch_anchor_node_id or branch_anchor_node_id not in by_id:
-        return published
-    parents, children = hierarchy(graph)
+
+
+def _has_capability(node: Node, name: str) -> bool:
+    capabilities = (node.data or {}).get("capabilities")
+    if isinstance(capabilities, dict):
+        return bool(capabilities.get(name))
+    if isinstance(capabilities, list):
+        return name in capabilities
+    return False
+
+
+def branch_anchor_ids(graph: GraphJson) -> list[str]:
+    """The nodes that split this persona's knowledge into competing branches.
+
+    A compiled publication declares them with the ``branch_anchor``
+    capability, which is what lets an audience -- not only a product or a
+    service -- own a branch.  Graph JSON authored before that capability
+    existed marks its branches by ``node_type``, and ``BRANCH_TYPES`` keeps
+    those graphs working unchanged.
+    """
+    published = _published_ids(graph)
+    declared = sorted(
+        node.id for node in graph.nodes
+        if node.id in published and _has_capability(node, "branch_anchor")
+    )
+    if declared:
+        return declared
+    return sorted(
+        node.id for node in graph.nodes
+        if node.id in published and node.node_type in BRANCH_TYPES
+    )
+
+
+def _closure_for_anchor(
+    graph: GraphJson,
+    branch_anchor_node_id: str,
+    *,
+    by_id: dict[str, Node],
+    parents: dict[str, tuple[str, str]],
+    children: dict[str, list[str]],
+    published: set[str],
+    persona_wide_types: bool,
+    contract_nodes: bool,
+) -> set[str]:
     result = _descendants(children, branch_anchor_node_id)
     current = branch_anchor_node_id
     while current in parents:
         current = parents[current][0]
         result.add(current)
-    result.update(
-        node.id for node in graph.nodes
-        if node.node_type in PERMANENT_TYPES and node.id in published
-    )
+    if persona_wide_types:
+        # A single-brand persona keeps its brand/tone/rule nodes reachable
+        # from every branch.  The neutral scope deliberately does not use
+        # this shortcut: when two brands compete, "always visible" is exactly
+        # the assumption that leaks one brand's pricing into the other.
+        result.update(
+            node.id for node in graph.nodes
+            if node.node_type in PERMANENT_TYPES and node.id in published
+        )
 
     # Include executable questions referenced by any reachable field contract.
-    contract = compile_branch_contract(graph, branch_anchor_node_id)
-    result.update(
-        str(field.get("question_node_id"))
-        for field in contract.get("fields") or []
-        if field.get("question_node_id")
-    )
-    result.update(contract.get("handoff_rule_node_ids") or [])
+    if contract_nodes:
+        contract = compile_branch_contract(graph, branch_anchor_node_id)
+        result.update(
+            str(field.get("question_node_id"))
+            for field in contract.get("fields") or []
+            if field.get("question_node_id")
+        )
+        result.update(contract.get("handoff_rule_node_ids") or [])
 
     # One-hop semantic rules/FAQs may be outside the primary tree branch.
     frontier = set(result)
@@ -292,6 +337,65 @@ def branch_closure(graph: GraphJson, branch_anchor_node_id: str | None) -> set[s
             if candidate.node_type in {"faq", "rule", "copy", "tone"}:
                 result.add(candidate.id)
     return result & published
+
+
+def neutral_closure(graph: GraphJson) -> set[str]:
+    """What a customer who has not chosen a branch yet may be told.
+
+    A null branch means *no* brand, never every brand.  Tock Fatal sells one
+    catalogue under two brands (`brand:tock-fatal-varejo`,
+    `brand:tock-fatal-atacado`) at different prices; returning every published
+    node for a null branch handed the wholesale card set to lead 208 on
+    2026-09-05 and the agent quoted R$ 69,93 -- the reseller price -- to a
+    customer who had never said they resell.
+
+    So the neutral scope is the intersection of every branch's closure: the
+    content no branch owns exclusively.  Persona, campaign, product groups and
+    the profile selector survive it, because every branch can see them; a
+    brand, its offers and its rules do not, because only one branch can.  The
+    persona-scope contract's own questions are added back so the agent keeps
+    the question that ends the ambiguity.
+
+    A persona with a single anchor has nothing to leak between, so that
+    anchor's closure is its common content by definition.
+    """
+    published = _published_ids(graph)
+    anchors = branch_anchor_ids(graph)
+    if not anchors:
+        return published
+    by_id = {node.id: node for node in graph.nodes}
+    parents, children = hierarchy(graph)
+    neutral: set[str] | None = None
+    for anchor in anchors:
+        members = _closure_for_anchor(
+            graph, anchor, by_id=by_id, parents=parents, children=children,
+            published=published, persona_wide_types=False, contract_nodes=False,
+        )
+        neutral = members if neutral is None else (neutral & members)
+        if not neutral:
+            break
+    result = neutral or set()
+    common = compile_branch_contract(graph, None)
+    result.update(
+        str(field.get("question_node_id"))
+        for field in common.get("fields") or []
+        if field.get("question_node_id")
+    )
+    return result & published
+
+
+def branch_closure(graph: GraphJson, branch_anchor_node_id: str | None) -> set[str]:
+    """Return ancestors, branch descendants and graph-applicable policy nodes."""
+    by_id = {node.id: node for node in graph.nodes}
+    published = _published_ids(graph)
+    if not branch_anchor_node_id or branch_anchor_node_id not in by_id:
+        return neutral_closure(graph)
+    parents, children = hierarchy(graph)
+    return _closure_for_anchor(
+        graph, branch_anchor_node_id, by_id=by_id, parents=parents,
+        children=children, published=published, persona_wide_types=True,
+        contract_nodes=True,
+    )
 
 
 def _qualification_question_nodes(graph: GraphJson) -> dict[tuple[str, str], Node]:
