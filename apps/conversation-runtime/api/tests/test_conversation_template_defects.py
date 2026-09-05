@@ -254,3 +254,88 @@ def test_branch_selection_instruction_does_not_depend_on_literal_matching():
     assert "policy.rules.branch_selection.origin_binding" in instructions
 
 
+# --------------------------------------------------------------------------
+# Defect 2 -- next_question_node_id was a literal null
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("node_name", VALIDATOR_NODES)
+def test_validator_never_hardcodes_next_question_node_id(node_name):
+    code = _node(node_name)["parameters"]["jsCode"]
+    assert "next_question_node_id: null" not in code
+    assert "next_question_node_id: nextQuestionNodeId" in code
+
+
+@pytest.mark.parametrize("node_name", VALIDATOR_NODES)
+def test_validator_maps_asked_field_key_to_its_published_question_node(node_name):
+    """The WA Validator criterion `question_semantically_askable` reads
+    `proof.next_question_node_id` and, in n8n_agents mode, requires it to be an
+    askable question id. Zeroing the field failed every turn that still had a
+    pending field -- the model was asking a perfectly good question."""
+    result = _run_response_validator(
+        node_name,
+        _envelope(asked_field_key="purchase_profile"),
+        _purchase_profile_contract(),
+    )
+    proposal = result["model_observation"]["proposal"]
+
+    assert proposal["next_question_node_id"] == "faq:tock-purchase-profile"
+    # The semantic key still travels untouched in the interpretation.
+    assert result["model_observation"]["interpretation"]["asked_field_key"] == "purchase_profile"
+
+
+@pytest.mark.parametrize("node_name", VALIDATOR_NODES)
+def test_validator_falls_back_to_the_field_declaration(node_name):
+    contract = _purchase_profile_contract()
+    contract["questions"] = {}
+    result = _run_response_validator(
+        node_name, _envelope(asked_field_key="purchase_profile"), contract,
+    )
+
+    assert result["model_observation"]["proposal"]["next_question_node_id"] == (
+        "faq:tock-purchase-profile"
+    )
+
+
+@pytest.mark.parametrize("node_name", VALIDATOR_NODES)
+def test_validator_sends_null_when_the_question_is_ambiguous(node_name):
+    """Two branches each publishing their own copy of the selection question is
+    exactly the alphabetical accident that qualified retail customers inside
+    the wholesale branch. This node cannot tell which one the proposal means --
+    reconcile can, because it resolves the contract from the branch the
+    proposal selects. Guessing here would suppress that rescue."""
+    contract = _purchase_profile_contract()
+    contract["fields"][0].pop("question_node_id")
+    contract["questions"] = {
+        "faq:tock-retail-profile": {"field_key": "purchase_profile", "text": "?"},
+        "faq:tock-reseller-profile": {"field_key": "purchase_profile", "text": "?"},
+    }
+    result = _run_response_validator(
+        node_name, _envelope(asked_field_key="purchase_profile"), contract,
+    )
+
+    assert result["model_observation"]["proposal"]["next_question_node_id"] is None
+
+
+@pytest.mark.parametrize("node_name", VALIDATOR_NODES)
+def test_validator_sends_null_when_the_model_asked_nothing(node_name):
+    result = _run_response_validator(
+        node_name, _envelope(asked_field_key=None), _purchase_profile_contract(),
+    )
+
+    assert result["model_observation"]["proposal"]["next_question_node_id"] is None
+
+
+@pytest.mark.parametrize("node_name", VALIDATOR_NODES)
+def test_interaction_observation_is_fixed_on_purpose_and_says_so(node_name):
+    """Envelope v3 is additionalProperties:false and declares no
+    interaction_observation, so there is nothing to forward. Anyone reading
+    the fixed object must find the reason next to it instead of filing a bug."""
+    code = _node(node_name)["parameters"]["jsCode"]
+    request = _node("Build graph grounded agent request")["parameters"]["jsCode"]
+
+    assert "interaction_observation: { kind: 'unclear', evidence_span: '', confidence: 0 }" in code
+    assert "Envelope v3 does not declare the key" in code
+    assert "interaction_observation" not in request
+
+
