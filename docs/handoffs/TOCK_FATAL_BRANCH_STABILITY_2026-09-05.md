@@ -221,3 +221,79 @@ reprovisionar antes deixa as instruções sem efeito.
 4. Rodar o cenário `sdr_sales_branch_switch` do WA Validator como prova.
 5. Item 4 do `AGENT_ROADMAP.md` está desatualizado: diz que a v12 está sem
    autorização de publicação; ela está ativa desde 2026-09-01.
+
+## 8. Bloqueio novo: as cópias de serviço divergiram, e produção roda a velha
+
+Achado ao investigar por que o publisher recusa a v16 mesmo com o checksum
+aprovado. Não é causado por esta mudança — estava lá desde o carve-out do
+monorepo — mas é ele quem impede a publicação agora.
+
+**O monorepo duplica módulo de serviço**: existe `api/services/<nome>.py` (o
+monolito) e `apps/<serviço>/api/services/<nome>.py` (o microsserviço
+deployável). **Produção roda a cópia do microsserviço. O monolito não é
+deployado.** Qualquer leitura de `api/services/` como fonte de comportamento em
+produção está lendo o código errado.
+
+As duas cópias de `graph_compiler_v3.py` provam o ponto:
+
+```
+api/services/graph_compiler_v3.py                       COMPILER_VERSION = "graph-compiler-v3.6.4"
+apps/control-plane/api/services/graph_compiler_v3.py     COMPILER_VERSION = "graph-compiler-v3.6.2"
+```
+
+A divergência nasceu no carve-out, não é deriva posterior. O commit
+`252cac8 feat: consolidate microservices and contracts in monorepo` criou
+`apps/control-plane/api/services/graph_compiler_v3.py` a partir de um snapshot
+já desatualizado do monolito — em `graph-compiler-v3.6.2`, enquanto
+`api/services/graph_compiler_v3.py` já estava em `v3.6.4`. Desde esse commit a
+cópia do control-plane **não recebeu nenhum commit seguinte**. O salto de
+versão que falta é exatamente `72dceca fix(tock): canonicalize approved FAQ
+projections` — uma correção de projeção de FAQ do Tock Fatal que, por estar só
+do lado do monolito, **nunca chegou a produção**.
+
+Escopo medido hoje entre `api/services/` e `apps/control-plane/api/services/`:
+**57 arquivos duplicados, 23 divergentes, 34 idênticos.** Entre os divergentes:
+`graph_compiler_v3.py`, `graph_bundle.py`, `graph_bundle_publisher.py`,
+`kb_intake_service.py`, `sofia_orchestrator.py`, `knowledge_graph.py`.
+
+> **Correção 2026-09-05.** A primeira medição desta seção dizia "23 divergentes"
+> para o control-plane. Estava errada: comparava byte a byte e contava 12
+> arquivos que diferem **apenas em fim de linha** (CRLF deste checkout Windows
+> contra LF), não em conteúdo. Normalizando a quebra de linha, a divergência
+> real é:
+>
+> | app | divergentes de verdade |
+> |---|---|
+> | `control-plane` | **11** |
+> | `conversation-runtime` | **13** |
+> | `transport` | **5** |
+>
+> O `graph_compiler_v3.py` continua entre eles em control-plane e
+> conversation-runtime, então o bloqueio da v16 não muda. Mas `graph_bundle.py`,
+> que eu havia citado como divergente, é só fim de linha — está idêntico.
+> `tests/test_service_copy_divergence.py` usa a comparação normalizada, que é a
+> correta.
+
+
+`tests/test_monorepo_boundaries.py` é o teste que governa dono de serviço e
+fronteira de import entre monolito e microsserviços. Ele não verifica se as
+duas cópias de um mesmo módulo continuam iguais — por isso a divergência ficou
+sem detecção desde 31/08.
+
+**Consequência concreta, hoje:** a publicação do bundle Tock Fatal v16 está
+bloqueada. Os checksums aprovados na seção 4 acima
+(`draft sha256:838bf4a0…34360ff5`, `runtime sha256:a1033833…9eaae091`) foram
+computados pelo compilador `3.6.4`. O control-plane deployado roda `3.6.2`,
+rejeita as seis FAQ de saudação como `factual_faq_without_claim`, e computa um
+draft checksum diferente (`sha256:3dcd510d…429864bc`). O invariante 3 do
+roadmap exige que o checksum aprovado seja o ativado — com compiladores
+diferentes nas duas pontas, isso não é possível.
+
+**Antes de portar `3.6.2` → `3.6.4` no control-plane**, uma pergunta em aberto
+exige humano: se o `3.6.2` foi escolhido de propósito no carve-out ou copiado
+por acidente — a mensagem do commit `252cac8` não diz. E, sendo o compilador
+parte do runtime de conversa, portar essa mudança é uma **mudança
+conversacional** e precisa do teste-canário exigido pelo `CLAUDE.md` ("Toda
+mudança conversacional deve executar o teste-canário que prova a fronteira
+entre os dois motores e a preservação byte a byte da reply agentic") antes de
+ir para produção.

@@ -972,6 +972,56 @@ Ordem obrigatória em qualquer caso: **grafo antes do n8n**, porque o prompt nov
 aponta para `policy.rules.branch_selection.origin_binding`, que só existe a
 partir da v14.
 
+**5. As cópias de serviço duplicadas divergiram; produção roda a cópia
+antiga.** `api/services/<nome>.py` (monolito) e
+`apps/<serviço>/api/services/<nome>.py` (microsserviço) coexistem desde o
+carve-out. **Produção roda só a cópia do microsserviço; o monolito não é
+deployado** — qualquer leitura de `api/services/` para entender comportamento
+em produção está lendo o código errado.
+
+`252cac8 feat: consolidate microservices and contracts in monorepo` carvou
+`apps/control-plane/api/services/graph_compiler_v3.py` de um snapshot já
+desatualizado: `COMPILER_VERSION = "graph-compiler-v3.6.2"`, enquanto
+`api/services/graph_compiler_v3.py` já estava em `v3.6.4`. A divergência nasceu
+no carve-out, não é deriva posterior — a cópia do control-plane não recebeu
+nenhum commit desde então. O gap traça para `72dceca fix(tock): canonicalize
+approved FAQ projections`, que portanto nunca chegou a produção.
+
+Escopo hoje: **57 arquivos duplicados entre `api/services/` e
+`apps/control-plane/api/services/`, 23 divergentes, 34 idênticos** — incluindo
+`graph_bundle.py`, `graph_bundle_publisher.py`, `kb_intake_service.py`,
+`sofia_orchestrator.py`, `knowledge_graph.py`. `tests/test_monorepo_boundaries.py`
+verifica dono de serviço e fronteira de import, não sincronia entre cópias —
+por isso passou despercebido.
+
+> **Correção 2026-09-05.** A primeira medição desta seção dizia "23 divergentes"
+> para o control-plane. Estava errada: comparava byte a byte e contava 12
+> arquivos que diferem **apenas em fim de linha** (CRLF deste checkout Windows
+> contra LF), não em conteúdo. Normalizando a quebra de linha, a divergência
+> real é:
+>
+> | app | divergentes de verdade |
+> |---|---|
+> | `control-plane` | **11** |
+> | `conversation-runtime` | **13** |
+> | `transport` | **5** |
+>
+> O `graph_compiler_v3.py` continua entre eles em control-plane e
+> conversation-runtime, então o bloqueio da v16 não muda. Mas `graph_bundle.py`,
+> que eu havia citado como divergente, é só fim de linha — está idêntico.
+> `tests/test_service_copy_divergence.py` usa a comparação normalizada, que é a
+> correta.
+
+
+Consequência ativa: publicar a v16 da Tock Fatal está bloqueado — os checksums
+aprovados (seção 4 do handoff abaixo) foram computados com `3.6.4`; o
+control-plane deployado roda `3.6.2`, rejeita as seis FAQ de saudação como
+`factual_faq_without_claim` e computa checksum diferente. Antes de portar
+`3.6.2` → `3.6.4`, falta decisão humana sobre se `3.6.2` foi escolhido de
+propósito ou por acidente, e o porte — mudança conversacional — exige o
+teste-canário do `CLAUDE.md`. Detalhe completo em
+`docs/handoffs/TOCK_FATAL_BRANCH_STABILITY_2026-09-05.md`, seção 8.
+
 ## Catálogo de agentes
 
 Cada agente vive em `.claude/agents/<nome>.md`, declara seu próprio modelo e
