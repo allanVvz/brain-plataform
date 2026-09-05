@@ -34,9 +34,21 @@ MANIFEST="$ROOT_DIR/ops/microservices/release-manifest.json"
 SLOTS="$ROOT_DIR/.deploy/microservices/slots.json"
 PAUSE_MARKER="$ROOT_DIR/.deploy/control/claims-paused.json"
 
-# Workers held to the strict digest rule. They are the reason a rollout needs a
-# pause at all; the service containers themselves tolerate a pending digest.
-STRICT_WORKERS=(runtime-conversation runtime-validator)
+# Sidecar workers a service owns. They are the reason a rollout needs a pause at
+# all: the service container tolerates a pending digest and only warns, while a
+# worker has no such escape. This list was once two entries and that was wrong --
+# stopping only those left transport-dispatch, the outbound WhatsApp sender,
+# running on a stale digest, and a later manual stop of it was not restored by
+# `finish` because `finish` trusted the same short list.
+declare -A SERVICE_WORKERS=(
+  [conversation-runtime]="runtime-conversation runtime-validator"
+  [control-plane]="control-plane-knowledge control-plane-integrations control-plane-validator"
+  [transport]="transport-dispatch transport-media"
+  [gateway]=""
+)
+
+# What `prepare` stopped, so `finish` restores exactly that instead of guessing.
+STOPPED_RECORD="$ROOT_DIR/.deploy/control/rollout-stopped.txt"
 
 cd "$ROOT_DIR"
 
@@ -125,30 +137,55 @@ case "$MODE" in
       echo "  bash ops/vps/pause-worker-claims.sh 'rollout' --safety-pause" >&2
       exit 1
     }
-    for worker in "${STRICT_WORKERS[@]}"; do
-      for slot in blue green; do
+    mkdir -p "$(dirname "$STOPPED_RECORD")"
+    : > "$STOPPED_RECORD"
+    # Only the workers of a service that is actually behind: stopping a service
+    # already on the target digest buys nothing and lengthens the outage.
+    for service in "${behind[@]}"; do
+      slot="$(slot_of "$service")"
+      for worker in ${SERVICE_WORKERS[$service]}; do
         name="brain-ai-${worker}-${slot}-1"
         if [[ -n "$(docker ps -q --filter "name=^/${name}$")" ]]; then
-          docker stop "$name" >/dev/null && echo "stopped $name"
+          docker stop "$name" >/dev/null && echo "$name" >> "$STOPPED_RECORD" && echo "stopped $name"
         fi
       done
     done
-    echo "workers stopped; the preflight will now accept a pending worker digest."
+    if [[ ! -s "$STOPPED_RECORD" ]]; then
+      echo "no worker needed stopping."
+    fi
+    echo "recorded in $STOPPED_RECORD; 'finish' restarts exactly these."
     ;;
 
   finish)
-    for worker in "${STRICT_WORKERS[@]}"; do
-      for slot in blue green; do
-        name="brain-ai-${worker}-${slot}-1"
+    restored=0
+    if [[ -s "$STOPPED_RECORD" ]]; then
+      while IFS= read -r name; do
+        [[ -n "$name" ]] || continue
         if [[ -n "$(docker ps -aq --filter "name=^/${name}$")" && -z "$(docker ps -q --filter "name=^/${name}$")" ]]; then
-          docker start "$name" >/dev/null && echo "started $name"
+          docker start "$name" >/dev/null && echo "started $name" && restored=$((restored + 1))
+        fi
+      done < "$STOPPED_RECORD"
+      rm -f "$STOPPED_RECORD"
+    fi
+
+    # Safety net. A rollout may stop a container outside `prepare` -- by hand, or
+    # because a deploy replaced a slot -- and leaving an active-slot worker down
+    # is silent: the service reports healthy while nothing consumes its queue.
+    for service in gateway control-plane conversation-runtime transport; do
+      slot="$(slot_of "$service")"
+      compose_name="${service/conversation-runtime/runtime}"
+      for name in "brain-ai-${compose_name}-${slot}-1" $(for w in ${SERVICE_WORKERS[$service]}; do echo "brain-ai-${w}-${slot}-1"; done); do
+        [[ -n "$(docker ps -aq --filter "name=^/${name}$")" ]] || continue
+        if [[ -z "$(docker ps -q --filter "name=^/${name}$")" ]]; then
+          docker start "$name" >/dev/null             && echo "started $name (active slot was down; not recorded by prepare)"             && restored=$((restored + 1))
         fi
       done
     done
+
     if [[ -e "$PAUSE_MARKER" ]]; then
       rm -f "$PAUSE_MARKER" && echo "cleared $PAUSE_MARKER"
     fi
-    echo "rollout finished; re-run 'status' to confirm every service matches the manifest."
+    echo "restarted $restored container(s); re-run 'status' to confirm every service matches the manifest."
     ;;
 
   *)
