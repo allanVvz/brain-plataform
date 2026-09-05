@@ -7,7 +7,7 @@
   "metadata": {
     "purpose": "tock_fatal_v16_voice_reachable",
     "source": "brand_briefing_catalogo_2026-08-21",
-    "publication_allowed": false,
+    "publication_allowed": true,
     "internal_wa_validator_test_allowed": true,
     "commercial_claims_allowed": true,
     "embedding_profile": {
@@ -61,7 +61,9 @@
       "rule:tock-safe-handoff",
       "tone:tock-vitoria-clear-language",
       "tone:tock-vitoria-voice"
-    ]
+    ],
+    "publication_authorized_by_operator": "2026-09-04",
+    "publication_authorization_note": "Autorizado pelo operador para corrigir o vazamento de marca observado no lead 181 (galho nunca fechava; pergunta de revenda para cliente de varejo)."
   },
   "nodes": [
     {
