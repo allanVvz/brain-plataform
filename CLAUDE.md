@@ -37,6 +37,9 @@ em vez de escolher em silêncio.
   deterministico; proof valida evidencia, isolamento, seguranca e exactly-once.
 - Toda mudanca conversacional deve executar o teste-canario que prova a
   fronteira entre os dois motores e a preservacao byte a byte da reply agentic.
+- O isolamento de galho e deterministico; o vocabulario do cliente nao. Enum
+  fechado e alias sao exemplos de fraseado, nunca o filtro que decide se o fato
+  existe - invariante 4 do `docs/roadmaps/AGENT_ROADMAP.md`.
 
 ## Rollout de microsservicos
 
