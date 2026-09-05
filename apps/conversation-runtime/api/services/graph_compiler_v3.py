@@ -19,7 +19,7 @@ from typing import Any, Callable, Iterable
 from services import graph_conversation_contract, supabase_client
 
 
-COMPILER_VERSION = "graph-compiler-v3.6.2"
+COMPILER_VERSION = "graph-compiler-v3.6.4"
 FAQ_PROJECTION_CONTRACT = "v1"
 LOCAL_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 EMBEDDING_DIMENSION = 1536
@@ -558,7 +558,7 @@ def _common_persona_contract(
     # Sem isto o contrato comum publicava `claims: []`, e o cliente que compra
     # perguntando ("como funciona o PPF?") recebia
     # `claim_not_authorized`/`claim_evidence_not_authorized`: a proposta do
-    # modelo era descartada inteira e o turno caia em `published_fallback`
+    # modelo era descartada inteira e o turno caia no fallback legado
     # antes de qualquer servico poder ser escolhido. Precos e regras de um
     # servico especifico continuam de fora -- so um galho os declara.
     shared_claims = [
@@ -585,7 +585,7 @@ def _common_persona_contract(
     closure = list(dict.fromkeys([
         persona_id,
         *[str(field.get("owner_node_id") or "") for field in shared],
-        *question_ids,
+        *sorted(question_ids),
         *sorted(shared_closure & claim_evidence),
     ]))
     required = [
@@ -759,7 +759,7 @@ def compile_graph(
             node.get("node_type") == "faq"
             and role != "qualification_question"
             and all(_faq_question_answer(node))
-            and _self_evidenced_faq(node)
+            and (role == "greeting_response" or _self_evidenced_faq(node))
         ):
             eligible_faq_ids.add(node_id)
     global_context_members: set[str] = set()
@@ -789,15 +789,34 @@ def compile_graph(
         # product closures through that shared sink.
         frontier = set(reasons)
         for edge in edges:
+            metadata = edge.get("metadata") or {}
+            subtree = metadata.get("include_subtree_in_branch") is True
             if edge["primary"] or not (
-                (edge.get("metadata") or {}).get("include_in_branch") is True
+                metadata.get("include_in_branch") is True
+                or subtree
                 or edge["relation_type"] == "applies_to"
             ):
                 continue
+
+            def admit(node_id: str, relation: str = edge["relation_type"]) -> None:
+                # `include_in_branch` admits exactly the node it points at.
+                # `include_subtree_in_branch` admits the node AND everything
+                # below it in the primary tree, so one edge can scope a whole
+                # shared catalog to a branch instead of needing one edge per
+                # node -- the pattern that made a persona-rooted repair leak
+                # every node into every branch and erase the branches'
+                # differences.
+                for member in (descendants(node_id) if subtree else {node_id}):
+                    if member not in reasons:
+                        reasons[member] = (
+                            f"semantic_subtree:{relation}" if subtree
+                            else f"semantic:{relation}"
+                        )
+
             if edge["source"] in frontier and edge["target"] not in reasons:
-                reasons[edge["target"]] = f"semantic:{edge['relation_type']}"
+                admit(edge["target"])
             elif edge["target"] in frontier and edge["source"] not in reasons:
-                reasons[edge["source"]] = f"semantic:{edge['relation_type']}"
+                admit(edge["source"])
 
         fields_by_key: dict[str, dict[str, Any]] = {}
         for node_id in sorted(reasons):
@@ -958,7 +977,7 @@ def compile_graph(
             metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
             if node.get("node_type") != "faq" or node_id not in embedded_faq_ids or (
                 metadata.get("role") or data.get("role")
-            ) == "qualification_question":
+            ) in {"qualification_question", "greeting_response"}:
                 continue
             if not str(data.get("answer") or "").strip():
                 continue
@@ -1072,10 +1091,15 @@ def compile_graph(
     if errors:
         raise GraphCompilationError(errors)
     contract_markdown = CONTRACT_DOCUMENT.read_text(encoding="utf-8")
+    # The conversational RAG is the publication's approved FAQ projection.
+    # Product/Offer/Copy remain the authored source of truth and are folded
+    # into each descendant FAQ before publication; runtime retrieval does not
+    # rebuild that hierarchy on every turn.
     projected_nodes = {
         node_id: semantic_chunks(node)
         for node_id, node in node_by_id.items()
-        if any(node_id in members for members in memberships.values())
+        if node_id in eligible_faq_ids
+        and any(node_id in members for members in memberships.values())
     }
     branch_chunk_counts = {
         branch: sum(len(projected_nodes.get(node_id) or []) for node_id in members)
@@ -1161,7 +1185,45 @@ def semantic_chunks(node: dict[str, Any]) -> list[dict[str, Any]]:
     values: list[tuple[str, str]] = []
     faq_question, faq_answer = _faq_question_answer(node)
     if node.get("node_type") == "faq" and faq_question and faq_answer:
-        values.append(("faq", f"Pergunta: {faq_question}\nResposta: {faq_answer}"))
+        aliases = data.get("question_aliases") or data.get("aliases") or []
+        sources = data.get("sources") or data.get("source") or []
+        branch_path = data.get("branch_path") or []
+        channel = str(data.get("channel") or "").strip()
+        source_node_id = str(data.get("source_node_id") or "").strip()
+        source_node_type = str(data.get("source_node_type") or "").strip()
+        claims = data.get("claims") or []
+        text = "\n".join(filter(None, [
+            f"Pergunta: {faq_question}",
+            (
+                "Variações naturais: "
+                + " | ".join(str(value) for value in aliases if value)
+                if isinstance(aliases, list) and aliases else ""
+            ),
+            f"Resposta: {faq_answer}",
+            f"Canal: {channel}" if channel else "",
+            (
+                f"Origem acumulada: {source_node_type}:{source_node_id}"
+                if source_node_id else ""
+            ),
+            (
+                "Caminho publicado: " + " -> ".join(str(value) for value in branch_path)
+                if isinstance(branch_path, list) and branch_path else ""
+            ),
+            (
+                "Fontes: " + json.dumps(sources, ensure_ascii=False, sort_keys=True)
+                if sources else ""
+            ),
+            (
+                "Claims comprováveis: "
+                + json.dumps(claims, ensure_ascii=False, sort_keys=True)
+                if claims else ""
+            ),
+        ]))
+        checksum = canonical_checksum({"kind": "faq", "text": text})
+        # Approved FAQs are already the accumulated conversational view of
+        # Product + Offer + Copy. Emit one self-sufficient vector chunk so the
+        # runtime never retrieves an alias/claim fragment without its answer.
+        return [{"kind": "faq", "text": text, "checksum": checksum}]
     question = _question_text(node)
     if question:
         values.append(("question", question))
@@ -1323,20 +1385,34 @@ def query_embeddings(texts: list[str]) -> list[list[float]]:
     return generate_embeddings(texts, input_type="query")
 
 
+def publication_index_node_ids(document: dict[str, Any]) -> list[str]:
+    """Return the compiler-approved FAQ projection set for RAG persistence."""
+    node_by_id = document.get("node_by_id") or {}
+    node_ids = list(document.get("eligible_faq_node_ids") or [])
+    missing = [node_id for node_id in node_ids if node_id not in node_by_id]
+    if missing:
+        raise RuntimeError(f"eligible FAQ nodes missing from publication: {missing}")
+    return node_ids
+
+
 def compile_persona_publication(
     persona_slug: str,
     *,
     activate: bool = True,
     embedder: Callable[[list[str]], list[list[float]]] | None = None,
     embedding_profile: dict[str, Any] | None = None,
+    source_rows: tuple[list[dict[str, Any]], list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     """Compile, persist, embed, and atomically activate one persona snapshot."""
     persona = supabase_client.get_persona(persona_slug)
     if not persona:
         raise LookupError(f"persona not found: {persona_slug}")
-    node_rows, edge_rows = supabase_client.list_all_knowledge_graph(
-        persona_id=str(persona["id"]), limit_nodes=10000
-    )
+    if source_rows is None:
+        node_rows, edge_rows = supabase_client.list_all_knowledge_graph(
+            persona_id=str(persona["id"]), limit_nodes=10000
+        )
+    else:
+        node_rows, edge_rows = source_rows
     document = compile_graph(
         persona=persona,
         node_rows=node_rows,
@@ -1396,7 +1472,8 @@ def compile_persona_publication(
             ))
             if embedding_profile else openai_embeddings
         )
-        for node_id, node in document["node_by_id"].items():
+        for node_id in publication_index_node_ids(document):
+            node = document["node_by_id"][node_id]
             chunks = semantic_chunks(node)
             if not chunks:
                 continue
