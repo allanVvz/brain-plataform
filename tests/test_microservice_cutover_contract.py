@@ -193,9 +193,9 @@ def test_control_plane_and_transport_receive_internal_n8n_endpoint_in_both_slots
     assert "N8N_BASE_URL: ${N8N_BASE_URL:-http://n8n:5678}" in green_dispatch
 
 
-def test_runtime_uses_a_writable_local_embedding_cache_in_every_green_process():
+def test_runtime_uses_the_image_baked_embedding_cache_in_every_process():
     compose = (ROOT / "infra" / "microservices" / "docker-compose.blue-green.yml").read_text()
-    cache_setting = "FASTEMBED_CACHE_PATH: ${FASTEMBED_CACHE_PATH:-/tmp/brain-fastembed-cache}"
+    cache_setting = "FASTEMBED_CACHE_PATH: /opt/brain/fastembed-cache"
     assert compose.count(cache_setting) == 4
     for service, next_service in (
         ("runtime-green", "transport-blue"),
@@ -204,6 +204,16 @@ def test_runtime_uses_a_writable_local_embedding_cache_in_every_green_process():
     ):
         block = compose.split(f"  {service}:", 1)[1].split(f"  {next_service}:", 1)[0]
         assert cache_setting in block
+
+    dockerfile = (ROOT / "apps" / "conversation-runtime" / "Dockerfile").read_text()
+    assert "TextEmbedding(model_name='${GRAPH_RAG_LOCAL_EMBEDDING_MODEL}'" in dockerfile
+    assert "FASTEMBED_CACHE_PATH=/opt/brain/fastembed-cache" in dockerfile
+    assert "HF_HUB_OFFLINE=1" in dockerfile
+
+    build_workflow = (ROOT / ".github" / "workflows" / "build-monorepo-images.yml").read_text()
+    assert "Smoke-test baked runtime embeddings without network" in build_workflow
+    assert "--network none" in build_workflow
+    assert "generate_embeddings(['offline-cache-check']" in build_workflow
 
 
 def test_split_runtime_does_not_reject_graph_owned_chunks_with_a_fixed_token_ceiling():

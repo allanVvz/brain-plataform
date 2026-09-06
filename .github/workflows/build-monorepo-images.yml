@@ -111,3 +111,10 @@ jobs:
           docker run --rm --entrypoint python \
             "ghcr.io/allanvvz/brain-${{ matrix.app }}:${{ github.sha }}" \
             -c "import main; assert hasattr(main, 'app')"
+      - name: Smoke-test baked runtime embeddings without network
+        if: github.event_name != 'pull_request' && matrix.app == 'conversation-runtime'
+        shell: bash
+        run: |
+          docker run --rm --network none --entrypoint python \
+            "ghcr.io/allanvvz/brain-conversation-runtime:${{ github.sha }}" \
+            -c "from services.graph_compiler_v3 import generate_embeddings; assert len(generate_embeddings(['offline-cache-check'], input_type='query')) == 1"
