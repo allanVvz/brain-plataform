@@ -1,0 +1,44 @@
+{
+  "approval_scope": "publication_plan",
+  "branches_affected": [
+    "audience:tock-reseller",
+    "audience:tock-retail"
+  ],
+  "breaking_contract_changes": [
+    "branch_contract_changed:audience:tock-reseller",
+    "branch_contract_changed:audience:tock-retail"
+  ],
+  "chunks_reused": 1451,
+  "chunks_to_embed": 0,
+  "compiler_version": "graph-compiler-v3.6.4",
+  "disposition": "awaiting_approval",
+  "draft_checksum": "sha256:b676be490b4bcb06d0dc83dbcaad66b89ffc0fbdd917281f0cd9c1b585357f95",
+  "edge_changes": {
+    "added": [],
+    "changed": [],
+    "removed": []
+  },
+  "edges_added": 0,
+  "edges_changed": 0,
+  "edges_removed": 0,
+  "estimated_embedding_cost": {
+    "amount": null,
+    "currency": "USD",
+    "reason": "provider_pricing_not_configured"
+  },
+  "next_version": 21,
+  "node_changes": {
+    "added": [],
+    "changed": [
+      "persona:tock-fatal"
+    ],
+    "removed": []
+  },
+  "nodes_added": 0,
+  "nodes_changed": 1,
+  "nodes_removed": 0,
+  "plan_version": "1.0",
+  "publication_allowed": true,
+  "runtime_checksum": "sha256:2d99e33a2fedf8633607647b3fc808409df686f51be9314bbda72163926a0716",
+  "validation_errors": []
+}
