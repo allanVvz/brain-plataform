@@ -1,0 +1,96 @@
+name: Diagnose production conversation executions
+
+on:
+  workflow_dispatch:
+    inputs:
+      persona_slug:
+        description: Persona whose canonical n8n executions are inspected
+        type: choice
+        options: [tock-fatal, aurora, vz-lupas]
+        required: true
+      limit:
+        description: Number of recent executions (maximum 20)
+        required: true
+        default: "10"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: brain-ai-production-read-only
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect sanitized n8n execution timings
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        env:
+          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+          PERSONA_SLUG: ${{ inputs.persona_slug }}
+          EXECUTION_LIMIT: ${{ inputs.limit }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          command_timeout: 5m
+          envs: VPS_APP_DIR,PERSONA_SLUG,EXECUTION_LIMIT
+          script: |
+            set -Eeuo pipefail
+            cd "$VPS_APP_DIR"
+            [[ "$PERSONA_SLUG" =~ ^(tock-fatal|aurora|vz-lupas)$ ]]
+            [[ "$EXECUTION_LIMIT" =~ ^[0-9]+$ ]]
+            (( EXECUTION_LIMIT >= 1 && EXECUTION_LIMIT <= 20 ))
+            state_file=.deploy/microservices/slots.json
+            slot="$(python3 -c 'import json; print(json.load(open(".deploy/microservices/slots.json", encoding="utf-8"))["control-plane"]["active"])')"
+            container="brain-ai-control-plane-${slot}-1"
+            docker exec -i -e PERSONA_SLUG="$PERSONA_SLUG" -e EXECUTION_LIMIT="$EXECUTION_LIMIT" "$container" python - <<'PY'
+            import json
+            import os
+            from services import n8n_client, supabase_client
+
+            slug = os.environ["PERSONA_SLUG"]
+            limit = int(os.environ["EXECUTION_LIMIT"])
+            persona = supabase_client.get_persona(slug)
+            bindings = supabase_client.get_workflow_bindings(str(persona["id"]))
+            binding = next(row for row in bindings if row.get("active"))
+            workflow_id = str(binding.get("n8n_workflow_id") or "")
+            assert workflow_id, "active binding has no n8n workflow"
+            executions = n8n_client.get_executions(
+                limit=limit,
+                workflow_id=workflow_id,
+                include_data=True,
+            )
+            sanitized = []
+            for execution in executions:
+                result = ((execution.get("data") or {}).get("resultData") or {})
+                run_data = result.get("runData") or {}
+                nodes = []
+                for name, attempts in run_data.items():
+                    for attempt in attempts or []:
+                        error = attempt.get("error") or {}
+                        nodes.append({
+                            "name": name,
+                            "execution_time_ms": attempt.get("executionTime"),
+                            "start_time_ms": attempt.get("startTime"),
+                            "error_name": error.get("name"),
+                            "error_message": str(error.get("message") or "")[:300] or None,
+                            "http_code": error.get("httpCode"),
+                        })
+                sanitized.append({
+                    "id": execution.get("id"),
+                    "status": execution.get("status"),
+                    "started_at": execution.get("startedAt"),
+                    "stopped_at": execution.get("stoppedAt"),
+                    "last_node_executed": result.get("lastNodeExecuted"),
+                    "top_error": str((result.get("error") or {}).get("message") or "")[:300] or None,
+                    "nodes": nodes,
+                })
+            print("N8N_EXECUTION_DIAGNOSTIC=" + json.dumps({
+                "persona_slug": slug,
+                "workflow_id": workflow_id,
+                "executions": sanitized,
+            }, ensure_ascii=True, sort_keys=True))
+            PY
