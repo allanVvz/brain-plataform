@@ -44,6 +44,8 @@ def test_v17_adds_persona_owned_name_readiness_and_fulfillment_fields():
     assert question_policy["current_turn_facts_precede_question"] is True
     assert question_policy["never_ask_field_answered_in_current_message"] is True
     assert question_policy["branch_selection_question_forbidden_after_profile_understood"] is True
+    assert question_policy["after_purchase_profile_when_name_missing"] == "ask_nome_cliente_before_any_other_question"
+    assert question_policy["never_repeat_nome_cliente_after_branch_switch"] is True
     assert question_policy["preferred_field_order_after_purchase_profile"][0] == "nome_cliente"
     assert any("Nunca pergunte novamente o perfil de compra" in item for item in question_policy["instructions"])
     assert any("pode me chamar de X" in item for item in question_policy["instructions"])
@@ -93,6 +95,8 @@ def test_v17_introduces_vitoria_as_ai_only_in_opening_content():
         assert "inteligência artificial" in answer
     opening = nodes["persona:tock-fatal"]["data"]["conversation_policy"]["opening"]
     assert opening["self_introduction_required_on_first_reply"] is True
+    assert opening["introduction_precedes_all_other_first_reply_content"] is True
+    assert "assistente_virtual_com_inteligencia_artificial" in opening["first_reply_required_elements"]
 
 
 def test_v17_removes_technical_navigation_language():

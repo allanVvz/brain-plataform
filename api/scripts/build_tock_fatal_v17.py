@@ -373,6 +373,12 @@ def build(source: dict[str, Any]) -> dict[str, Any]:
         **(policy.get("opening") or {}),
         "self_introduction_required_on_first_reply": True,
         "self_introduction_identity": "Vitória, assistente virtual com inteligência artificial da Tock Fatal",
+        "introduction_precedes_all_other_first_reply_content": True,
+        "first_reply_required_elements": [
+            "nome_vitoria",
+            "assistente_virtual_com_inteligencia_artificial",
+            "tock_fatal",
+        ],
         "request_customer_name": "once_after_purchase_profile_is_understood",
         "customer_name_required_before_help": False,
     }
@@ -383,6 +389,9 @@ def build(source: dict[str, Any]) -> dict[str, Any]:
         "question_must_target_eligible_missing_field": True,
         "asked_field_key_required_for_qualification_question": True,
         "branch_selection_question_forbidden_after_profile_understood": True,
+        "after_purchase_profile_when_name_missing": "ask_nome_cliente_before_any_other_question",
+        "catalog_navigation_question_forbidden_until_name_resolved_or_already_asked": True,
+        "never_repeat_nome_cliente_after_branch_switch": True,
         "preferred_field_order_after_purchase_profile": [
             "nome_cliente",
             "grau_qualificacao",
@@ -392,6 +401,9 @@ def build(source: dict[str, Any]) -> dict[str, Any]:
             "Antes de formular uma pergunta, considere todos os fatos extraídos da mensagem atual e os fatos já conhecidos.",
             "Nunca pergunte novamente o perfil de compra quando a pessoa já disse uso próprio, varejo, atacado ou revenda.",
             "Depois de entender o perfil de compra, pergunte o nome uma única vez se ele ainda não for conhecido nem tiver sido perguntado.",
+            "No primeiro turno da assistente, apresente-se como Vitória, assistente virtual com inteligência artificial da Tock Fatal antes de qualquer outro conteúdo.",
+            "Se o perfil de compra acabou de ser entendido e nome_cliente ainda não foi perguntado nem conhecido, a única pergunta permitida é nome_cliente com asked_field_key igual a nome_cliente.",
+            "Se nome_cliente já foi perguntado, não o pergunte novamente após uma correção ou troca de perfil; reconheça a mudança sem repetir a pergunta.",
             "Quando nome_cliente for a resposta esperada, frases como meu nome é X, pode me chamar de X, sou X ou apenas X informam o nome. Extraia nome_cliente como known usando somente o nome como value e um trecho literal da mensagem como evidence_span.",
             "Se a resposta pública usar o nome informado, o mesmo turno deve obrigatoriamente persistir nome_cliente; nunca cumprimente a pessoa pelo nome deixando esse fato fora de facts.",
             "Toda pergunta de qualificação deve tratar de um campo ainda elegível e informar esse campo em asked_field_key.",
