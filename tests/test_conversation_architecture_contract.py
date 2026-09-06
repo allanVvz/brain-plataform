@@ -227,6 +227,10 @@ def test_model_prompt_is_compact_and_provider_managed():
     assert "proof.model_proposal_errors" in repair
     assert "proof.policy_feedback" in repair
     assert "approved_faq" not in repair
+    assert "Build facts before composing reply" in initial
+    assert "every answer supplied in customer_message is present in facts" in initial
+    assert "Extract and normalize all facts from customer_message first" in initial
+    assert "Never acknowledge or use an understood value while omitting its fact" in initial
 
 
 def test_aurora_sized_audio_prompt_preserves_full_relevant_evidence():
