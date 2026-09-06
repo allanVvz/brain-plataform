@@ -344,6 +344,38 @@ def test_prompt_does_not_replace_eligible_qualification_with_consultative_questi
     assert "untracked product-selection or consultative question" in instructions
 
 
+def test_prompt_exposes_optional_collect_once_field_without_making_it_required():
+    contract = _purchase_profile_contract()
+    contract["fields"].append({
+        "key": "nome_cliente",
+        "label": "seu nome",
+        "owner_node_id": "persona:tock-fatal",
+        "question_node_id": "faq:tock-customer-name",
+        "required": False,
+        "collection_mode": "ask_once_optional",
+        "depends_on": ["purchase_profile"],
+        "validation": {"mode": "semantic", "semantic_type": "human_full_name"},
+    })
+    contract["questions"]["faq:tock-customer-name"] = {
+        "field_key": "nome_cliente",
+        "text": "Como voce prefere que eu te chame?",
+        "depends_on": ["purchase_profile"],
+    }
+
+    result = _run_prompt_builder(_context(graph_contract=contract), _binding())
+    prompt = json.loads(result["request_body"]["messages"][1]["content"])
+    name_field = next(
+        field for field in prompt["graph_contract"]["fields"]
+        if field["key"] == "nome_cliente"
+    )
+    instructions = " ".join(prompt["policy"]["instructions"])
+
+    assert name_field["required"] is False
+    assert name_field["collection_mode"] == "ask_once_optional"
+    assert "eligible to ask exactly once" in instructions
+    assert "never required for completion" in instructions
+
+
 def test_asked_field_key_is_required_and_auditable_in_every_model_response():
     result = _run_prompt_builder(_context(), _binding())
     schema = result["envelope_schema"]

@@ -248,6 +248,95 @@ def test_agentic_proof_discards_invalid_question_metadata_without_blocking_reply
     ]
 
 
+def test_optional_collect_once_field_is_askable_then_stops_without_blocking_completion():
+    contract = {
+        "branch_path_checksum": "checksum:retail",
+        "closure_node_ids": ["audience:retail", "q:name"],
+        "fields": [{
+            "key": "nome_cliente",
+            "owner_node_id": "persona:one",
+            "required": False,
+            "collection_mode": "ask_once_optional",
+            "question_node_id": "q:name",
+            "accepted_statuses": ["known"],
+        }],
+        "questions": {
+            "q:name": {
+                "field_key": "nome_cliente",
+                "text": "Como voce prefere que eu te chame?",
+            },
+        },
+    }
+
+    first = graph_proof_checker_v3.askable_pending_fields(
+        contract, {}, asked_question_node_ids=[],
+    )
+    after_ask = graph_proof_checker_v3.askable_pending_fields(
+        contract, {}, asked_question_node_ids=["q:name"],
+    )
+
+    assert [field["key"] for field in first] == ["nome_cliente"]
+    assert after_ask == []
+    assert graph_proof_checker_v3.pending_fields(contract, {}) == []
+    assert graph_proof_checker_v3.required_field_count(contract, {}) == 0
+
+
+def test_agentic_proof_accepts_graph_authored_optional_collect_once_question():
+    contract = {
+        "branch_path_checksum": "checksum:retail",
+        "closure_node_ids": ["audience:retail", "q:name"],
+        "fields": [{
+            "key": "nome_cliente",
+            "owner_node_id": "persona:one",
+            "required": False,
+            "collection_mode": "ask_once_optional",
+            "question_node_id": "q:name",
+            "accepted_statuses": ["known"],
+        }],
+        "questions": {
+            "q:name": {
+                "field_key": "nome_cliente",
+                "text": "Como voce prefere que eu te chame?",
+            },
+        },
+    }
+    proof = graph_proof_checker_v3.check(
+        publication={
+            "status": "active",
+            "checksum": "graph-checksum",
+            "document_json": {"branch_anchors": ["audience:retail"]},
+        },
+        contract=contract,
+        ledger={
+            "graph_checksum": "graph-checksum",
+            "facts": {},
+            "asked_question_node_ids": [],
+        },
+        proposal={
+            "reply": "Como voce prefere que eu te chame?",
+            "branch_action": "keep",
+            "branch_anchor_node_id": "audience:retail",
+            "branch_path_checksum": "checksum:retail",
+            "extracted_facts": [],
+            "next_question_node_id": "q:name",
+            "claims": [],
+        },
+        message="Quero comprar para uso proprio.",
+        source_message_id="inbound:1",
+        package_node_ids=set(),
+        package_chunk_ids=set(),
+        active_branch_node_id="audience:retail",
+        active_branch_node_ids=["audience:retail"],
+        branch_selection_allowed=False,
+        branch_switch_allowed=False,
+    )
+
+    assert proof["valid"] is True
+    assert proof["metadata_errors"] == []
+    assert proof["next_question_node_id"] == "q:name"
+    assert proof["qualification_complete"] is True
+
+
 def test_decision_request_requires_model_observation():
     with pytest.raises(ValidationError):
         conversations.DecisionRequest.model_validate({"context": _context().model_dump()})

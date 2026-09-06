@@ -102,6 +102,29 @@ def test_deterministic_validator_keeps_first_published_question_contract():
     assert "question_semantically_askable" in audit["failures"]
 
 
+def test_agentic_validator_accepts_optional_collect_once_name_before_required_field():
+    inputs = _audit_inputs(conversation_mode="n8n_agents")
+    name_field = inputs["contract"]["fields"][0]
+    name_field.update({
+        "key": "nome_cliente",
+        "required": False,
+        "collection_mode": "ask_once_optional",
+    })
+    inputs["contract"]["questions"]["q:name"]["field_key"] = "nome_cliente"
+    inputs["proof_record"]["proof_result"].update({
+        "missing_fields": ["objective"],
+        "next_question_node_id": "q:name",
+    })
+    inputs["turn"]["text"] = "Como voce prefere que eu te chame?"
+
+    audit = wa_validator_service._semantic_turn_audit(**inputs)
+
+    assert audit["passed"] is True
+    assert audit["asked_field"] == "nome_cliente"
+    assert audit["first_missing_field"] == "objective"
+    assert audit["criteria"]["question_semantically_askable"] is True
+
+
 def test_sales_driver_answers_unresolved_question_without_requiring_branch_switch_repetition():
     driver = {
         "switch": {

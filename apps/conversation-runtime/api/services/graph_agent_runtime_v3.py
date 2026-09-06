@@ -2901,6 +2901,7 @@ def build_context(
         ledger["graph_checksum"] = publication["checksum"]
     pending_fields = graph_proof_checker_v3.askable_pending_fields(
         active_contract, ledger.get("facts") or {},
+        asked_question_node_ids=ledger.get("asked_question_node_ids") or [],
     )
     missing = [field["key"] for field in graph_proof_checker_v3.pending_fields(active_contract, ledger.get("facts") or {})]
     pending_field = pending_fields[0] if pending_fields else {}
@@ -4495,6 +4496,9 @@ def _decide(
             )
             aggregate_askable = graph_proof_checker_v3.aggregate_askable_fields(
                 document.get("branch_contracts") or {}, active_branch_ids, next_grouped,
+                asked_question_node_ids=(
+                    context.cart.get("asked_question_node_ids") or []
+                ),
             )
             aggregate_required_count = graph_proof_checker_v3.aggregate_required_field_count(
                 document.get("branch_contracts") or {}, active_branch_ids, next_grouped,
@@ -4507,6 +4511,9 @@ def _decide(
             )
             aggregate_askable = graph_proof_checker_v3.askable_pending_fields(
                 preselection_contract, preselection_facts,
+                asked_question_node_ids=(
+                    context.cart.get("asked_question_node_ids") or []
+                ),
             )
             aggregate_required_count = graph_proof_checker_v3.required_field_count(
                 preselection_contract, preselection_facts,
@@ -4722,7 +4729,7 @@ def _decide(
             "aggregate_missing_fields": terminal_unconfirmed,
             "next_question_node_id": next_question_id,
             "asked_field_key": next(
-                (field.get("key") for field in terminal_unconfirmed
+                (field.get("key") for field in aggregate_askable
                  if field.get("question_node_id") == next_question_id),
                 None,
             ),

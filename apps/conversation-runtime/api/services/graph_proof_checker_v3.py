@@ -191,10 +191,28 @@ def pending_fields(contract: dict[str, Any], facts: dict[str, Any]) -> list[dict
 
 def askable_pending_fields(
     contract: dict[str, Any], facts: dict[str, Any],
+    *, asked_question_node_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Pending fields that have not exhausted their published-question limit."""
+    """Fields the agent may ask now without changing completion semantics.
+
+    Required fields remain pending until resolved. A graph may also author an
+    optional ``ask_once_optional`` field: it is a useful, one-time collection
+    opportunity (for example, the customer's name), but its absence never
+    blocks confirmation or handoff. The already-asked ledger is authoritative
+    for that one-attempt budget.
+    """
+    asked_ids = {str(value) for value in asked_question_node_ids or [] if value}
     return [
-        field for field in pending_fields(contract, facts)
+        field for field in contract.get("fields") or []
+        if _condition_matches(field.get("condition"), facts)
+        and not _resolved_for_field_owner(field, facts.get(field["key"]))
+        and (
+            field.get("required", True)
+            or (
+                field.get("collection_mode") == "ask_once_optional"
+                and str(field.get("question_node_id") or "") not in asked_ids
+            )
+        )
         if not (
             (fact := facts.get(field["key"]))
             and fact.get("owner_node_id") == field.get("owner_node_id")
@@ -257,19 +275,36 @@ def aggregate_askable_fields(
     branch_contracts: dict[str, dict[str, Any]],
     active_branch_anchors: list[str],
     facts_by_key: dict[str, list[dict[str, Any]]],
+    *,
+    asked_question_node_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Aggregate pending fields excluding owners explicitly marked unknown."""
-    return [
-        field
-        for field in aggregate_missing_fields(
-            branch_contracts, active_branch_anchors, facts_by_key,
-        )
-        if not any(
-            fact.get("owner_node_id") == field.get("owner_node_id")
-            and fact.get("status") in {"unknown", "declined"}
-            for fact in facts_by_key.get(str(field.get("key") or ""), [])
-        )
-    ]
+    """Union of required and graph-authored optional one-time questions."""
+    seen: set[tuple[str, str]] = set()
+    aggregated: list[dict[str, Any]] = []
+    for anchor in active_branch_anchors:
+        contract = branch_contracts.get(anchor) or {}
+        scoped_facts = {
+            field["key"]: fact
+            for field in contract.get("fields") or []
+            if (fact := next((
+                candidate
+                for candidate in facts_by_key.get(str(field.get("key") or ""), [])
+                if candidate.get("owner_node_id") == field.get("owner_node_id")
+            ), None)) is not None
+        }
+        for field in askable_pending_fields(
+            contract, scoped_facts,
+            asked_question_node_ids=asked_question_node_ids,
+        ):
+            identity = (
+                str(field.get("key") or ""),
+                str(field.get("owner_node_id") or anchor),
+            )
+            if identity in seen:
+                continue
+            seen.add(identity)
+            aggregated.append(field)
+    return aggregated
 
 
 def aggregate_required_field_count(
@@ -708,7 +743,10 @@ def check(
     missing_keys = [field["key"] for field in missing]
     question_id = proposal.get("next_question_node_id")
     questions = contract.get("questions") or {}
-    askable = askable_pending_fields(contract, facts)
+    askable = askable_pending_fields(
+        contract, facts,
+        asked_question_node_ids=next_ledger.get("asked_question_node_ids") or [],
+    )
     if question_id:
         question = questions.get(str(question_id or ""))
         askable_by_question = {

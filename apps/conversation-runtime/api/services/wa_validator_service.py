@@ -2107,8 +2107,10 @@ def _semantic_turn_audit(
         field
         for field in graph_proof_checker_v3.askable_pending_fields(
             contract, facts_after,
+            asked_question_node_ids=(
+                ledger_before.get("asked_question_node_ids") or []
+            ),
         )
-        if str(field.get("key") or "") in set(missing)
     ]
     askable_question_ids = {
         str(field.get("question_node_id") or "")
