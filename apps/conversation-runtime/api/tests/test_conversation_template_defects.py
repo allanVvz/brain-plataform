@@ -63,6 +63,33 @@ process.stdout.write(JSON.stringify(result[0].json));
     return json.loads(completed.stdout)
 
 
+def _run_repair_builder(original_request_body: dict, first_interpretation: dict, proof: dict) -> dict:
+    _require_node()
+    harness = """
+const fs = require('fs');
+const fixture = JSON.parse(fs.readFileSync(0, 'utf8'));
+const nodes = {
+  'Build graph grounded agent request': {request_body: fixture.originalRequestBody, prompt_context_manifest: {}},
+  'Validate agent response': {model_observation: {interpretation: fixture.firstInterpretation, interpretation_parse_errors: []}},
+  'Reconcile fields with graph policy': {response: {proof: fixture.proof}},
+};
+const select = (name) => ({item: {json: nodes[name]}});
+const result = new Function('$', fixture.javascript)(select);
+process.stdout.write(JSON.stringify(result[0].json));
+"""
+    completed = subprocess.run(
+        ["node", "-e", harness],
+        input=json.dumps({
+            "javascript": _node("Build graph repair request")["parameters"]["jsCode"],
+            "originalRequestBody": original_request_body,
+            "firstInterpretation": first_interpretation,
+            "proof": proof,
+        }),
+        text=True, capture_output=True, check=True,
+    )
+    return json.loads(completed.stdout)
+
+
 def _run_response_validator(node_name: str, interpretation: dict, graph_contract: dict) -> dict:
     _require_node()
     harness = """
@@ -318,7 +345,23 @@ def test_prompt_does_not_replace_eligible_qualification_with_consultative_questi
 
 
 def test_prompt_does_not_repeat_pending_name_after_branch_switch():
+    contract = _purchase_profile_contract()
+    contract["fields"].append({
+        "key": "nome_cliente",
+        "label": "seu nome",
+        "owner_node_id": "persona:tock-fatal",
+        "question_node_id": "faq:tock-customer-name",
+        "required": True,
+        "depends_on": ["purchase_profile"],
+        "validation": {"mode": "semantic", "semantic_type": "human_full_name"},
+    })
+    contract["questions"]["faq:tock-customer-name"] = {
+        "field_key": "nome_cliente",
+        "text": "Como voce prefere que eu te chame?",
+        "depends_on": ["purchase_profile"],
+    }
     context = _context(
+        graph_contract=contract,
         cart={
             "asked_question_node_ids": ["faq:tock-customer-name"],
             "asked_field_keys": ["nome_cliente"],
@@ -334,6 +377,9 @@ def test_prompt_does_not_repeat_pending_name_after_branch_switch():
     assert prompt["asked_field_keys"] == ["nome_cliente"]
     assert prompt["do_not_ask_field_keys"] == ["nome_cliente"]
     assert prompt["expected_answer_field_key"] == "nome_cliente"
+    name_field = next(field for field in prompt["graph_contract"]["fields"] if field["key"] == "nome_cliente")
+    assert name_field["question_node_id"] == "faq:tock-customer-name"
+    assert name_field["question_text"] == "Como voce prefere que eu te chame?"
     assert "hard per-conversation prohibition" in instructions
     assert "changes branch" in instructions
     assert "without asking the pending field again" in instructions
@@ -346,13 +392,59 @@ def test_prompt_does_not_repeat_pending_name_after_branch_switch():
 
 
 def test_repair_prompt_carries_the_no_repeat_turn_guard():
-    code = _node("Build graph repair request")["parameters"]["jsCode"]
+    contract = _purchase_profile_contract()
+    contract["fields"].append({
+        "key": "nome_cliente",
+        "label": "seu nome",
+        "owner_node_id": "persona:tock-fatal",
+        "question_node_id": "faq:tock-customer-name",
+        "required": True,
+        "depends_on": ["purchase_profile"],
+        "validation": {"mode": "semantic", "semantic_type": "human_full_name"},
+    })
+    contract["questions"]["faq:tock-customer-name"] = {
+        "field_key": "nome_cliente",
+        "text": "Como voce prefere que eu te chame?",
+        "depends_on": ["purchase_profile"],
+    }
+    initial = _run_prompt_builder(
+        _context(
+            graph_contract=contract,
+            cart={"asked_field_keys": ["nome_cliente"], "facts_by_key": {}},
+            shared_memory={
+                "recent_messages": [
+                    {"role": "assistant", "content": "Como voce prefere que eu te chame?"},
+                ],
+            },
+        ),
+        _binding(message="Na verdade, e para uso proprio."),
+    )
+    repaired = _run_repair_builder(
+        initial["request_body"],
+        _envelope(
+            reply="Entendi. Para uso proprio, qual e o seu nome?",
+            asked_field_key="nome_cliente",
+        ),
+        {
+            "gating_errors": ["question_repetition_budget_exceeded"],
+            "repair_requirements": ["remove_repeated_question"],
+        },
+    )
+    compact = json.loads(repaired["request_body"]["messages"][1]["content"])
+    forbidden = compact["turn_controls"]["forbidden_fields"]
 
-    assert "originalPrompt = JSON.parse" in code
-    assert "do_not_ask_field_keys" in code
-    assert "turn_controls: turnControls" in code
-    assert "rewrite the reply to remove that repeated question" in code
-    assert "set asked_field_key to null" in code
+    assert compact["customer_message"] == "Na verdade, e para uso proprio."
+    assert forbidden == [{
+        "key": "nome_cliente",
+        "label": "seu nome",
+        "question_node_id": "faq:tock-customer-name",
+        "question_text": "Como voce prefere que eu te chame?",
+    }]
+    assert "remove every question whose meaning matches" in compact["instruction"]
+    assert "branch change by itself never authorizes handoff" in compact["instruction"]
+    system = repaired["request_body"]["messages"][0]["content"]
+    assert "exact human questions already asked" in system
+    assert "Do not invent a handoff" in system
 
 
 def test_prompt_uses_published_confirmation_then_announced_handoff():
@@ -505,5 +597,6 @@ def test_prompt_owns_sales_language_media_and_pre_handoff_notice():
 
 def test_repair_prompt_prefers_announced_handoff_over_silence():
     code = _node("Build graph repair request")["parameters"]["jsCode"]
-    assert "published customer-facing pre-handoff notice" in code
+    assert "published_handoff.notice" in code
     assert "never hand off silently" in code
+    assert "Do not invent a handoff" in code
