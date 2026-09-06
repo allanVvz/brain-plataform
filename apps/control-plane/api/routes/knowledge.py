@@ -455,8 +455,28 @@ def generate_faqs_for_graph_node(node_id: str, body: GenerateFaqsBody, request: 
     if base is None:
         raise HTTPException(409, "Persona has no live GraphBundle-materialized graph yet")
     metadata = (node.get("metadata") or {})
+    source = str(metadata.get("source") or "").strip()
+    if not source or source == "pending_source":
+        raise HTTPException(
+            409,
+            "FAQ generation requires a verified source on the selected graph node",
+        )
     parent_bundle_id = str(metadata.get("graph_json_node_id") or f"{node.get('node_type')}:{node.get('slug')}")
     base_node_ids = {n["id"] for n in base["nodes"]}
+    embed_ids = [
+        str(item.get("id") or "") for item in base["nodes"]
+        if str(item.get("node_type") or "").lower() in {"embed", "embedded"}
+    ]
+    if len(embed_ids) != 1:
+        raise HTTPException(
+            409,
+            "FAQ generation requires exactly one protected Embedded node in the persona graph",
+        )
+    embed_id = embed_ids[0]
+    stable_branch_path = list(reversed([
+        str(item.get("graph_node_id") or "") for item in chain
+        if str(item.get("graph_node_id") or "")
+    ]))
     new_nodes = []
     new_edges = []
     for i, pair in enumerate(pairs, start=1):
@@ -477,11 +497,43 @@ def generate_faqs_for_graph_node(node_id: str, body: GenerateFaqsBody, request: 
             # "pending_validation" here would make build_publication_plan
             # reject the whole bundle with no way to ever un-block it.
             "status": "validated",
-            "data": {"question": pair["question"], "answer": pair["answer"], "source": "knowledge_graph_sidebar_generate_faqs"},
+            "data": {
+                "question": pair["question"],
+                "question_aliases": pair.get("aliases") or [],
+                "answer": pair["answer"],
+                "source": source,
+                "status": "validated",
+                "source_node_id": parent_bundle_id,
+                "source_node_type": str(node.get("node_type") or ""),
+                "branch_path": [*stable_branch_path, faq_id],
+                "claims": [{
+                    "claim_type": "other",
+                    "policy": "published_accumulated_faq",
+                    "evidence_node_ids": [faq_id],
+                }],
+                "metadata": {
+                    "generator": "knowledge_graph_sidebar_generate_faqs_v2",
+                    "intent": pair.get("intent") or "other",
+                    "embedded_after_operator_approval": True,
+                    "validation_state": "pending_operator_approval",
+                },
+            },
         })
         new_edges.append({
             "id": f"edge:{parent_bundle_id}->{faq_id}", "source": parent_bundle_id, "target": faq_id,
             "relation_type": "contains", "weight": 1.0, "metadata": {},
+        })
+        new_edges.append({
+            "id": f"edge:{faq_id}->{embed_id}:publishes_to",
+            "source": faq_id,
+            "target": embed_id,
+            "relation_type": "publishes_to",
+            "weight": 1.0,
+            "metadata": {
+                "canonical_projection": True,
+                "generator": "knowledge_graph_sidebar_generate_faqs_v2",
+                "activation_gate": "operator_approved_publication_plan",
+            },
         })
 
     bundle = {

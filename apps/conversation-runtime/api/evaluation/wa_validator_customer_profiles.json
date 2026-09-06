@@ -98,9 +98,22 @@
       "sdr_sales_retail": "Oi! Quero algumas peças para uso próprio.",
       "sdr_sales_reseller": "Oi! Quero conhecer opções para revenda.",
       "sdr_sales_branch_switch": "Oi! Quero conhecer opções para revenda.",
-      "sdr_sales_knowledge_gap": "Oi! Quero algumas peças para uso próprio."
+      "sdr_sales_knowledge_gap": "Oi! Quero algumas peças para uso próprio.",
+      "sdr_sales_freight": "Oi! Quero algumas peças para uso próprio. Quanto fica o frete?"
     },
     "answers": {
+      "nome_cliente": {
+        "text": "Pode me chamar de Beatriz",
+        "value": "Beatriz"
+      },
+      "grau_qualificacao": {
+        "text": "Estou comparando as opções",
+        "value": "comparando"
+      },
+      "forma_recebimento": {
+        "text": "Prefiro receber por envio",
+        "value": "envio"
+      },
       "retail_need": {
         "text": "Estou procurando algo para usar no dia a dia",
         "value": "roupa para uso no dia a dia"
@@ -118,6 +131,20 @@
         "value": "volume inicial a definir"
       }
     },
+    "answers_by_flow": {
+      "sdr_sales_retail": {
+        "forma_recebimento": {
+          "text": "Prefiro visitar a loja física",
+          "value": "visita_loja"
+        }
+      },
+      "sdr_sales_photo_available": {
+        "forma_recebimento": {
+          "text": "Prefiro visitar a loja física",
+          "value": "visita_loja"
+        }
+      }
+    },
     "unsupported_commercial_question": "Qual é o preço e o pedido mínimo?",
     "branch_switch_text": "Na verdade, é para uso próprio.",
     "regression_cases": [
@@ -133,6 +160,23 @@
         "id": "duplicate_inbound_exactly_once",
         "max_decisions": 1,
         "max_outbounds": 1
+      },
+      {
+        "id": "customer_name_collected_once",
+        "field": "nome_cliente",
+        "max_questions": 1
+      },
+      {
+        "id": "first_reply_identifies_ai",
+        "required_terms": ["Vitória", "assistente virtual", "inteligência artificial"]
+      },
+      {
+        "id": "handoff_is_announced",
+        "silent_handoff_forbidden": true
+      },
+      {
+        "id": "photo_offer_requires_exact_asset",
+        "without_asset": "human_followup_only_after_explicit_request"
       }
     ]
   }

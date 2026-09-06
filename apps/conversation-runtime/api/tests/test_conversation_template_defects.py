@@ -398,3 +398,40 @@ def test_prompt_only_claims_a_boundary_it_actually_ships():
         "the prompt promises a branch boundary built from approved_chunks; "
         "either keep populating them from context.rag_chunks or drop the claim"
     )
+
+
+def test_prompt_marks_first_assistant_turn_and_requires_one_ai_introduction():
+    first = _run_prompt_builder(_context(messages=[]), _binding())
+    first_prompt = json.loads(first["request_body"]["messages"][1]["content"])
+    assert first_prompt["is_first_assistant_turn"] is True
+
+    later = _run_prompt_builder(
+        _context(messages=[{"role": "assistant", "content": "Oi, eu sou a assistente virtual."}]),
+        _binding(),
+    )
+    later_prompt = json.loads(later["request_body"]["messages"][1]["content"])
+    assert later_prompt["is_first_assistant_turn"] is False
+
+    instructions = " ".join(first_prompt["policy"]["instructions"])
+    assert "introduce yourself once" in instructions
+    assert "AI/virtual assistant" in instructions
+    assert "Never repeat that introduction" in instructions
+
+
+def test_prompt_owns_sales_language_media_and_pre_handoff_notice():
+    result = _run_prompt_builder(_context(), _binding())
+    prompt = json.loads(result["request_body"]["messages"][1]["content"])
+    instructions = " ".join(prompt["policy"]["instructions"])
+
+    assert "product group or service when the graph business model is sales" in instructions
+    assert "asked_field_key must be that exact field key" in instructions
+    assert "approved image for the exact product" in instructions
+    assert "do not mention photos unless the customer explicitly asks" in instructions
+    assert "freight cost and delivery timing as specialist-confirmed" in instructions
+    assert "A conversational handoff is never silent" in instructions
+
+
+def test_repair_prompt_prefers_announced_handoff_over_silence():
+    code = _node("Build graph repair request")["parameters"]["jsCode"]
+    assert "published customer-facing pre-handoff notice" in code
+    assert "never hand off silently" in code

@@ -14,16 +14,19 @@ Prepare a deterministic, reviewable graph change without mutating production.
    source and validation status; unresolved facts remain `pending_source` or
    `pending_validation`.
 3. Run `api/scripts/compile_graph_bundle.py <bundle.json>` from the repository
-   root. This is a dry-run and must not call a publisher.
+   root. This entrypoint imports the production control-plane compiler. Use
+   `--against <compiled-document.json>` for a trusted live export, or
+   `--against-bundle <bundle.json>` only when that bundle is proven to be the
+   exact source of the active publication. Use `--output <plan.json>` when the
+   plan must be kept for review. This is a dry-run and must not call a publisher.
 4. Review both checksums, node/branch diff, chunk reuse, breaking changes and
    validation errors.
 5. Stop with `blocked` when validation errors exist. Return `dry_run_complete`
    when `publication_allowed=false`; only a source-approved bundle may return
    `awaiting_approval`. Identify the tests required by affected branches.
 
-Use `--against <compiled-document.json>` only when a trusted current compiled
-document was supplied through an approved read-only source. Never substitute a
-stale fixture for the active publication.
+Never substitute a stale fixture or an unverified historical bundle for the
+active publication.
 
 ## Guardrails
 

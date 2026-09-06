@@ -32,6 +32,25 @@ def _publication() -> dict:
     }
 
 
+def _v17_publication() -> dict:
+    bundle = json.loads(
+        (
+            REPO_ROOT
+            / "data"
+            / "graph_bundles"
+            / "tock-fatal"
+            / "sdr-qualification-v17-sales-conversation-repair.json"
+        ).read_text(encoding="utf-8")
+    )
+    document = graph_bundle.compile_bundle(bundle)
+    return {
+        "version": 14,
+        "status": "candidate",
+        "checksum": document["checksum"],
+        "document_json": document,
+    }
+
+
 def test_sales_semantic_scripts_select_distinct_graph_branches():
     publication = _publication()
 
@@ -219,3 +238,91 @@ def test_question_already_asked_detects_personalized_repeat():
     assert not wa_validator_service._question_already_asked(
         canonical, "Show! Como voce se chama?"
     )
+
+
+def test_v17_sales_validator_answers_new_fields_and_covers_store_and_shipping():
+    publication = _v17_publication()
+
+    retail = wa_validator_service._semantic_sales_script(
+        publication=publication, flow_id="sdr_sales_retail"
+    )["driver"]
+    reseller = wa_validator_service._semantic_sales_script(
+        publication=publication, flow_id="sdr_sales_reseller"
+    )["driver"]
+
+    assert {"nome_cliente", "grau_qualificacao", "forma_recebimento"}.issubset(
+        retail["required_fields"]
+    )
+    assert retail["answers"]["nome_cliente"]["value"] == "Beatriz"
+    assert retail["answers"]["forma_recebimento"]["value"] == "visita_loja"
+    assert reseller["answers"]["forma_recebimento"]["value"] == "envio"
+    assert wa_validator_service._resolve_initial_state(
+        "known_name", "sdr_sales_retail"
+    ) == "known_name"
+    known_name = wa_validator_service._semantic_sales_script(
+        publication=publication, flow_id="sdr_sales_retail", initial_state="known_name"
+    )
+    assert known_name["expected_dialogue"] == {
+        "branch_anchor_node_id": "audience:tock-retail",
+        "unsupported_claims_forbidden": True,
+        "known_name": "Beatriz",
+        "client_name_omitted": True,
+    }
+
+
+def test_v17_sales_validator_builds_exact_photo_and_no_photo_scenarios():
+    publication = _v17_publication()
+
+    available = wa_validator_service._semantic_sales_script(
+        publication=publication, flow_id="sdr_sales_photo_available"
+    )["steps"][0]
+    unavailable = wa_validator_service._semantic_sales_script(
+        publication=publication, flow_id="sdr_sales_photo_unavailable"
+    )["steps"][0]
+
+    assert available["photo_expectation"] == "approved_asset"
+    assert len(available["expected_evidence_node_ids"]) == 1
+    assert "approved-photo" in available["expected_evidence_node_ids"][0]
+    assert unavailable["photo_expectation"] == "human_followup"
+    assert unavailable["expected_evidence_node_ids"] == ["faq:tock-photo-unavailable"]
+    assert unavailable["expected_handoff_now"] is True
+    assert unavailable["allow_incomplete_handoff"] is True
+
+
+def test_v17_sales_validator_requires_ai_identity_and_human_freight_confirmation():
+    opening = wa_validator_service._semantic_sales_script(
+        publication=_v17_publication(), flow_id="sdr_sales_freight"
+    )["steps"][0]
+
+    requirements = wa_validator_service._reply_content_requirements(
+        opening,
+        "Oi! Eu sou a Vitória, assistente virtual com inteligência artificial da Tock Fatal. "
+        "Uma pessoa da equipe confirmará o frete para você.",
+    )
+    assert all(requirements.values())
+    assert not all(wa_validator_service._reply_content_requirements(
+        opening, "O frete custa R$ 20 e chega em 2 dias.",
+    ).values())
+
+
+def test_sales_quality_audit_rejects_internal_terms_and_silent_handoff():
+    contract = {
+        "conversation_policy": {
+            "sales_routing": {
+                "forbidden_customer_facing_terms": [
+                    "serviço", "grupo de produtos", "branch", "node", "retrieval"
+                ]
+            }
+        }
+    }
+
+    assert wa_validator_service._sales_internal_language_absent(
+        "Entre as opções de conjuntos, temos modelos casuais.", contract
+    )
+    assert not wa_validator_service._sales_internal_language_absent(
+        "Nesse grupo de produtos, escolha um serviço.", contract
+    )
+    assert wa_validator_service._pre_handoff_notice_observed(
+        "Vou avisar uma pessoa da equipe para continuar o atendimento com você."
+    )
+    assert not wa_validator_service._pre_handoff_notice_observed("")

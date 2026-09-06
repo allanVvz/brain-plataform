@@ -105,6 +105,10 @@ dashboard/modes.json
 !.agents/skills/brain-agent-e2e/**
 !.agents/skills/brain-appointment-graph/
 !.agents/skills/brain-appointment-graph/**
+!.agents/skills/brain-faq-branch/
+!.agents/skills/brain-faq-branch/**
+!.agents/skills/brain-sales-graph/
+!.agents/skills/brain-sales-graph/**
 !.agents/skills/whatsapp-binding-reassignment/
 !.agents/skills/whatsapp-binding-reassignment/**
 !.agents/skills/validate-production-release/

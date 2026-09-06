@@ -20,6 +20,7 @@ PERSONA_SLUG = "tock-fatal"
 NODE_PERSONA = "11111111-1111-1111-1111-111111111111"
 NODE_AUDIENCE = "22222222-2222-2222-2222-222222222222"
 NODE_PRODUCT = "33333333-3333-3333-3333-333333333333"
+NODE_EMBED = "44444444-4444-4444-4444-444444444444"
 
 
 def _persona_node(node_id):
@@ -47,7 +48,27 @@ def _audience_node():
 
 
 def _base_nodes():
-    return [_persona_node(NODE_PERSONA), _audience_node(), _product_node()]
+    return [
+        _persona_node(NODE_PERSONA),
+        _audience_node(),
+        _product_node(),
+        {
+            "id": NODE_EMBED,
+            "persona_id": PERSONA_ID,
+            "node_type": "embed",
+            "slug": "embedded-default",
+            "title": "Embedded",
+            "summary": "Protected knowledge destination.",
+            "tags": [],
+            "status": "active",
+            "metadata": {
+                "graph_json_node_id": "embed:default",
+                "source": "test",
+                "capabilities": {"detached_terminal": True},
+                "protected": True,
+            },
+        },
+    ]
 
 
 def _base_edges():
@@ -95,7 +116,12 @@ def test_generate_faqs_route_builds_plan_and_stores_session(monkeypatch):
     result = knowledge_routes.generate_faqs_for_graph_node(NODE_PRODUCT, body, request=_FakeRequest())
 
     assert result["ok"] is True
-    assert result["faqs"] == [{"question": "Tem tamanho?", "answer": "Tamanho unico."}]
+    assert result["faqs"] == [{
+        "question": "Tem tamanho?",
+        "answer": "Tamanho unico.",
+        "aliases": [],
+        "intent": "other",
+    }]
     assert result["publication_plan"]["validation_errors"] == []
     assert result["publication_plan"]["disposition"] == "awaiting_approval"
     assert result["session_id"] in saved_sessions
@@ -103,6 +129,17 @@ def test_generate_faqs_route_builds_plan_and_stores_session(monkeypatch):
     assert stored["stage"] == "awaiting_publication_approval"
     new_faq_ids = [n["id"] for n in stored["pending_graph_bundle"]["nodes"] if n["node_type"] == "faq"]
     assert len(new_faq_ids) == 1
+    faq_id = new_faq_ids[0]
+    faq_node = next(n for n in stored["pending_graph_bundle"]["nodes"] if n["id"] == faq_id)
+    assert faq_node["data"]["source_node_id"] == "product:produto-x"
+    assert faq_node["data"]["metadata"]["embedded_after_operator_approval"] is True
+    assert faq_node["data"]["metadata"]["validation_state"] == "pending_operator_approval"
+    assert any(
+        edge["source"] == faq_id
+        and edge["target"] == "embed:default"
+        and edge["relation_type"] == "publishes_to"
+        for edge in stored["pending_graph_bundle"]["edges"]
+    )
 
 
 def test_generate_faqs_route_returns_ok_false_when_generation_empty(monkeypatch):
@@ -126,3 +163,31 @@ def test_generate_faqs_route_returns_ok_false_when_generation_empty(monkeypatch)
     body = knowledge_routes.GenerateFaqsBody(max_questions=5)
     result = knowledge_routes.generate_faqs_for_graph_node(NODE_PRODUCT, body, request=_FakeRequest())
     assert result == {"ok": False, "faqs": [], "error": "FAQ generation produced no usable output"}
+
+
+def test_generate_faqs_route_refuses_publishable_plan_without_verified_source(monkeypatch):
+    product = _product_node()
+    product["metadata"]["source"] = "pending_source"
+    monkeypatch.setattr(knowledge_routes.auth_service, "assert_persona_access", lambda *a, **k: None)
+    monkeypatch.setattr(knowledge_routes.supabase_client, "get_knowledge_node", lambda _id: product)
+    monkeypatch.setattr(
+        knowledge_routes.supabase_client, "get_persona_by_id",
+        lambda _id: {"id": PERSONA_ID, "slug": PERSONA_SLUG},
+    )
+    monkeypatch.setattr(
+        knowledge_routes.supabase_client, "list_all_knowledge_graph",
+        lambda **_kw: (_base_nodes(), _base_edges()),
+    )
+    monkeypatch.setattr(
+        faq_bulk_generator.ModelRouter, "messages_create",
+        lambda self, **kw: '[{"question": "Tem tamanho?", "answer": "Tamanho unico."}]',
+    )
+
+    try:
+        knowledge_routes.generate_faqs_for_graph_node(
+            NODE_PRODUCT, knowledge_routes.GenerateFaqsBody(max_questions=5), request=_FakeRequest()
+        )
+        raise AssertionError("expected verified-source rejection")
+    except knowledge_routes.HTTPException as exc:
+        assert exc.status_code == 409
+        assert "verified source" in str(exc.detail)

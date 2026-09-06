@@ -46,6 +46,9 @@ logger = logging.getLogger("wa_validator_service")
 _NAME_COLLECTING_FLOWS = {
     "sdr_qualificacao_carro", "sdr_troca_servico", "sdr_multiplos_servicos",
     "sdr_reativacao_pos_handoff",
+    "sdr_sales_retail", "sdr_sales_reseller", "sdr_sales_branch_switch",
+    "sdr_sales_knowledge_gap", "sdr_sales_freight",
+    "sdr_sales_photo_available", "sdr_sales_photo_unavailable",
 }
 
 _MODEL_DEFAULT = "none"
@@ -382,6 +385,15 @@ _FLOWS = {
     "sdr_sales_knowledge_gap": (
         "Pergunta comercial sem fonte deve ser deferida sem invenção."
     ),
+    "sdr_sales_freight": (
+        "Frete sem valor publicado: informação fica para confirmação humana."
+    ),
+    "sdr_sales_photo_available": (
+        "Foto de produto com asset aprovado: oferta usa a evidência exata."
+    ),
+    "sdr_sales_photo_unavailable": (
+        "Pedido de foto sem asset aprovado: handoff humano anunciado, sem promessa automática."
+    ),
 }
 
 # A fixed name (previously always "Allan") made every validator run
@@ -419,6 +431,9 @@ _FLOW_BUSINESS_MODELS: dict[str, set[str]] = {
     "sdr_sales_reseller": {"sales"},
     "sdr_sales_branch_switch": {"sales"},
     "sdr_sales_knowledge_gap": {"sales"},
+    "sdr_sales_freight": {"sales"},
+    "sdr_sales_photo_available": {"sales"},
+    "sdr_sales_photo_unavailable": {"sales"},
 }
 
 
@@ -776,7 +791,9 @@ def _semantic_appointment_script(
     }
 
 
-def _semantic_sales_script(*, publication: dict, flow_id: str) -> dict:
+def _semantic_sales_script(
+    *, publication: dict, flow_id: str, initial_state: str = "cold",
+) -> dict:
     """Build a graph-driven sales customer without fixed products or prices."""
     document = publication.get("document_json") or {}
     branches = _appointment_branch_candidates(document)
@@ -808,7 +825,9 @@ def _semantic_sales_script(*, publication: dict, flow_id: str) -> dict:
     identity_key = str(identity_field.get("key") or "")
     identity_value = str(branch_node.get("slug") or branch_node.get("title") or anchor)
     profile = _customer_profile("sales")
-    configured_answers = profile.get("answers") or {}
+    configured_answers = dict(profile.get("answers") or {})
+    flow_answers = (profile.get("answers_by_flow") or {}).get(flow_id) or {}
+    configured_answers.update(flow_answers)
     answers: dict[str, dict] = {}
     missing_examples: list[str] = []
     for field in contract.get("fields") or []:
@@ -834,7 +853,85 @@ def _semantic_sales_script(*, publication: dict, flow_id: str) -> dict:
         "text": opening_text,
         "intended_facts": {identity_key: identity_value},
         "expected_branch_node_id": anchor,
+        "required_reply_patterns": [
+            r"\bvit[oó]ria\b",
+            r"\b(?:assistente\s+virtual|intelig[eê]ncia\s+artificial|ia)\b",
+        ],
     }
+
+    nodes_by_id = {
+        str(node.get("id") or ""): node
+        for node in document.get("nodes") or []
+        if str(node.get("id") or "")
+    }
+    photo_faqs = sorted(
+        (
+            node for node in nodes_by_id.values()
+            if node.get("node_type") == "faq"
+            and ((node.get("data") or {}).get("media_availability") or {}).get("status")
+            == "approved"
+        ),
+        key=lambda node: str(node.get("id") or ""),
+    )
+    approved_product_ids = {
+        str(((node.get("data") or {}).get("media_availability") or {}).get("product_node_id") or "")
+        for node in photo_faqs
+    }
+    products_without_photo = sorted(
+        (
+            node for node in nodes_by_id.values()
+            if node.get("node_type") == "product"
+            and node.get("status") in {"approved", "validated", "active"}
+            and str(node.get("id") or "") not in approved_product_ids
+        ),
+        key=lambda node: str(node.get("id") or ""),
+    )
+    if flow_id == "sdr_sales_photo_available":
+        if not photo_faqs:
+            raise ValueError("Grafo sales não possui FAQ de foto com asset aprovado")
+        photo_faq = photo_faqs[0]
+        media = (photo_faq.get("data") or {}).get("media_availability") or {}
+        product = nodes_by_id.get(str(media.get("product_node_id") or "")) or {}
+        product_title = str(product.get("title") or product.get("slug") or "a peça")
+        opening.update({
+            "text": f"Oi! Quero {product_title} para uso próprio. Você tem uma foto?",
+            "expected_evidence_node_ids": [str(photo_faq.get("id") or "")],
+            "required_reply_patterns": [
+                *opening["required_reply_patterns"],
+                r"\b(?:foto|imagem)\b",
+            ],
+            "photo_expectation": "approved_asset",
+        })
+    elif flow_id == "sdr_sales_photo_unavailable":
+        if not products_without_photo or "faq:tock-photo-unavailable" not in nodes_by_id:
+            raise ValueError("Grafo sales não possui produto sem foto e FAQ de indisponibilidade")
+        product = products_without_photo[0]
+        product_title = str(product.get("title") or product.get("slug") or "a peça")
+        opening.update({
+            "text": f"Oi! Quero {product_title} para uso próprio. Você pode me mandar uma foto?",
+            "expected_evidence_node_ids": ["faq:tock-photo-unavailable"],
+            "required_reply_patterns": [
+                *opening["required_reply_patterns"],
+                r"\b(?:foto|imagem)\b",
+                r"\b(?:atendente|pessoa\s+da\s+equipe|equipe)\b",
+            ],
+            "forbidden_reply_patterns": [
+                r"\b(?:vou|posso)\s+(?:te\s+)?enviar\s+(?:a\s+)?(?:foto|imagem)\b",
+            ],
+            "photo_expectation": "human_followup",
+            "expected_handoff_now": True,
+            "allow_incomplete_handoff": True,
+        })
+    elif flow_id == "sdr_sales_freight":
+        opening.update({
+            "expected_evidence_node_ids": ["faq:tock-freight-value"],
+            "required_reply_patterns": [
+                *opening["required_reply_patterns"],
+                r"\bconfirm",
+                r"\b(?:atendente|especialista|pessoa\s+da\s+equipe|equipe)\b",
+            ],
+            "forbidden_reply_patterns": [r"R\$\s*\d", r"\b\d+\s*dias?\b"],
+        })
     required_fields = [
         str(field.get("key") or "") for field in contract.get("fields") or []
         if str(field.get("key") or "")
@@ -908,6 +1005,8 @@ def _semantic_sales_script(*, publication: dict, flow_id: str) -> dict:
         "expected_dialogue": {
             "branch_anchor_node_id": anchor,
             "unsupported_claims_forbidden": True,
+            "known_name": (configured_answers.get("nome_cliente") or {}).get("value"),
+            "client_name_omitted": initial_state == "known_name",
         },
     }
 
@@ -1080,7 +1179,8 @@ def generate_script(
     }
     semantic_sales_flow = flow_id in {
         "sdr_sales_retail", "sdr_sales_reseller", "sdr_sales_branch_switch",
-        "sdr_sales_knowledge_gap",
+        "sdr_sales_knowledge_gap", "sdr_sales_freight",
+        "sdr_sales_photo_available", "sdr_sales_photo_unavailable",
     }
     if business_model == "appointment" and semantic_appointment_flow and not v3_publication:
         raise ValueError(
@@ -1102,6 +1202,7 @@ def generate_script(
         script_data = _semantic_sales_script(
             publication=v3_publication,
             flow_id=flow_id,
+            initial_state=resolved_initial_state,
         )
     else:
         script_data = _deterministic_script(
@@ -1907,6 +2008,54 @@ def _active_validator_contract(
     }
 
 
+def _reply_content_requirements(customer_step: dict, reply: str) -> dict[str, bool]:
+    """Evaluate customer-facing wording without changing the runtime proof.
+
+    These checks deliberately live in the WA Validator.  They turn prompt and
+    graph policies into observable conversation requirements while leaving the
+    proof checker responsible only for evidence, state and exactly-once rules.
+    """
+    required = [
+        str(pattern) for pattern in customer_step.get("required_reply_patterns") or []
+        if str(pattern)
+    ]
+    forbidden = [
+        str(pattern) for pattern in customer_step.get("forbidden_reply_patterns") or []
+        if str(pattern)
+    ]
+    return {
+        "required_reply_content": all(
+            re.search(pattern, reply, flags=re.IGNORECASE) for pattern in required
+        ),
+        "forbidden_reply_content_absent": not any(
+            re.search(pattern, reply, flags=re.IGNORECASE) for pattern in forbidden
+        ),
+    }
+
+
+def _sales_internal_language_absent(reply: str, contract: dict) -> bool:
+    routing = (contract.get("conversation_policy") or {}).get("sales_routing") or {}
+    forbidden = routing.get("forbidden_customer_facing_terms") or []
+    folded_reply = _semantic_fold(reply)
+    return not any(
+        re.search(rf"(?<!\w){re.escape(_semantic_fold(str(term)))}(?!\w)", folded_reply)
+        for term in forbidden
+        if str(term).strip()
+    )
+
+
+def _pre_handoff_notice_observed(reply: str) -> bool:
+    """Accept natural wording while requiring an explicit human transition."""
+    folded = _semantic_fold(reply)
+    mentions_human = bool(re.search(
+        r"\b(?:atendente|especialista|pessoa da equipe|equipe)\b", folded,
+    ))
+    announces_transition = bool(re.search(
+        r"\b(?:avis|encaminh|continu|assum|atend|solicit|envi|confirm)", folded,
+    ))
+    return bool(reply.strip() and mentions_human and announces_transition)
+
+
 def _semantic_turn_audit(
     *,
     customer_step: dict,
@@ -2223,6 +2372,33 @@ def _semantic_turn_audit(
         ) or None,
     )
     repetition_failures = set(repetition["failures"])
+    reply_requirements = _reply_content_requirements(customer_step, reply)
+    handoff_policy = (
+        (contract.get("conversation_policy") or {}).get("handoff") or {}
+    )
+    pre_handoff_required = bool(handoff_policy.get("pre_notice_required"))
+    name_question = next(
+        (
+            item for item in (contract.get("questions") or {}).values()
+            if str(item.get("field_key") or "") == "nome_cliente"
+        ),
+        {},
+    )
+    name_variants = [
+        value for value in (
+            str(name_question.get("text") or "").strip(),
+            *[str(item or "").strip() for item in name_question.get("paraphrases") or []],
+        )
+        if value
+    ]
+    name_question_count = sum(
+        1
+        for candidate_reply in [*recent_replies, reply]
+        if any(
+            _question_already_asked(variant, candidate_reply)
+            for variant in name_variants
+        )
+    )
     criteria = {
         "intent_identified": bool(decision.get("intent")),
         "doubt_answered_first": (
@@ -2234,6 +2410,17 @@ def _semantic_turn_audit(
             )
         ),
         "unsupported_claim_not_invented": unsupported_claim_not_invented,
+        **reply_requirements,
+        "sales_internal_language_absent": _sales_internal_language_absent(reply, contract),
+        "customer_name_question_once": name_question_count <= 1,
+        "pre_handoff_notice_observed": (
+            not handoff_observed
+            or not pre_handoff_required
+            or _pre_handoff_notice_observed(reply)
+        ),
+        "expected_immediate_handoff": (
+            not customer_step.get("expected_handoff_now") or handoff_observed
+        ),
         "all_intended_facts_extracted": accepted_all,
         "service_value_not_reused_as_field": service_value_not_reused_as_field,
         "service_operations_match_resolution": operations_match_resolution,
@@ -2344,6 +2531,7 @@ def _semantic_turn_audit(
             or qualification_complete
             or bool(missing and first_askable is None)
             or collection_complete
+            or bool(customer_step.get("allow_incomplete_handoff"))
         ),
         "expected_handoff_reached": (
             not expected_handoff

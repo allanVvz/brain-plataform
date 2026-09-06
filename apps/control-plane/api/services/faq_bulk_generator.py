@@ -16,10 +16,9 @@ present in the chain, mirroring the project's "não inventar produtos/preço"
 rule already enforced elsewhere (docs/tock-fatal-modal-marketing-graph.md's
 `regra-nao-inventar-produtos-tock`).
 
-Writing quality: extends the same "load a markdown file as prompt content"
-pattern already used by `kb_intake_service._load_agent_prompt` (which loads
-`agents/sofia_criar.md`), but for `.claude/skills/*/SKILL.md` files -- no
-production code read a skill file before this.
+Writing quality comes from repository-owned generic graph skills. A
+persona-specific skill is loaded only when the caller explicitly requests it,
+so one customer's voice cannot leak into another customer's FAQs.
 """
 from __future__ import annotations
 
@@ -30,22 +29,21 @@ from typing import Any
 
 from services.model_router import ModelRouter, ModelRouterError
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+_REPO_ROOT = Path(__file__).resolve().parents[4]
 
-# Skills whose guidance is relevant to writing FAQ copy for a conversational
-# sales/SDR agent. Extend this list as more persona-specific skills land
-# under .claude/skills/ -- missing files are skipped silently (fallback to
-# just the branch content, no skill has ever been a hard requirement).
-_DEFAULT_SKILLS = ("aurora-premium-sdr", "aurora-conversation-evaluator")
+# Only generic skills are safe defaults. Persona-specific skills can be passed
+# explicitly after the caller has resolved the persona.
+_DEFAULT_SKILLS = ("brain-faq-branch", "brain-sales-graph")
 
 
 def _load_skill_content(skill_name: str) -> str:
-    path = _REPO_ROOT / ".claude" / "skills" / skill_name / "SKILL.md"
-    try:
-        if path.exists():
-            return path.read_text(encoding="utf-8").strip()
-    except Exception:
-        pass
+    for root in (".agents", ".claude"):
+        path = _REPO_ROOT / root / "skills" / skill_name / "SKILL.md"
+        try:
+            if path.exists():
+                return path.read_text(encoding="utf-8").strip()
+        except Exception:
+            continue
     return ""
 
 
@@ -58,9 +56,9 @@ def _skills_context(skill_names: tuple[str, ...]) -> str:
     if not blocks:
         return ""
     return (
-        "Guias de tom/qualidade de escrita já validados neste projeto "
-        "(aplique o espírito, não copie literalmente -- essas skills foram "
-        "escritas para outra persona):\n\n" + "\n\n".join(blocks)
+        "Contratos de autoria e qualidade aplicáveis a este lote. Preserve os "
+        "fatos e o tom publicados pela persona; nunca copie identidade ou "
+        "exemplos de outra persona:\n\n" + "\n\n".join(blocks)
     )
 
 
@@ -70,7 +68,14 @@ def _chain_to_text(chain: list[dict[str, Any]]) -> str:
         title = str(node.get("title") or node.get("slug") or "").strip()
         content = str(node.get("content") or node.get("summary") or "").strip()
         node_type = str(node.get("node_type") or node.get("content_type") or "").strip()
-        line = f"- [{node_type}] {title}"
+        source = str(
+            node.get("source")
+            or (node.get("metadata") or {}).get("source")
+            or (node.get("data") or {}).get("source")
+            or "pending_source"
+        ).strip()
+        status = str(node.get("status") or "pending_validation").strip()
+        line = f"- [{node_type}] {title} (status={status}; source={source})"
         if content:
             line += f": {content[:500]}"
         lines.append(line)
@@ -83,7 +88,7 @@ def generate_faqs_for_chain(
     max_questions: int = 8,
     model: str = "gpt-4o-mini",
     skills: tuple[str, ...] = _DEFAULT_SKILLS,
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     """Return up to `max_questions` `{question, answer}` pairs grounded in
     `chain` (branch ancestors, closest node first -- see the two adapters
     below for how each caller builds this list). Returns [] on any LLM
@@ -95,15 +100,20 @@ def generate_faqs_for_chain(
     branch_text = _chain_to_text(chain)
     skills_text = _skills_context(skills)
     prompt = (
-        f"Gere até {max_questions} pares de pergunta e resposta (FAQ) que um "
+        f"Gere até {max_questions} pares de pergunta e resposta (FAQ) distintos que um "
         "cliente real perguntaria sobre este ramo do catálogo, no WhatsApp. "
         "Use SOMENTE os fatos abaixo -- nunca invente preço, prazo, estoque, "
-        "composição ou qualquer dado que não esteja explicitamente escrito. "
-        "Perguntas curtas e diretas, como uma pessoa real escreveria. "
-        "Respostas curtas, no mesmo tom do ramo.\n\n"
+        "frete, endereço, imagem, pagamento, troca, composição ou qualquer "
+        "dado que não esteja explicitamente escrito. Se uma intenção não tem "
+        "resposta factual no ramo, não gere essa FAQ. Perguntas curtas e "
+        "naturais, como uma pessoa escreveria no WhatsApp. Respostas curtas, "
+        "no tom publicado, sem termos internos como grupo de produtos, node, "
+        "branch, publicado ou retrieval. Cubra intenções diferentes; não "
+        "multiplique paráfrases da mesma resposta.\n\n"
         f"Ramo (do mais específico ao mais geral):\n{branch_text}\n\n"
         + (f"{skills_text}\n\n" if skills_text else "")
-        + 'Responda SOMENTE um array JSON: [{"question": str, "answer": str}, ...]. '
+        + 'Responda SOMENTE um array JSON: [{"question": str, "answer": str, '
+        '"aliases": [str], "intent": str}, ...]. '
         "Sem texto fora do array."
     )
     try:
@@ -126,14 +136,30 @@ def generate_faqs_for_chain(
         items = json.loads(match.group(0))
     except (json.JSONDecodeError, TypeError):
         return []
-    pairs: list[dict[str, str]] = []
+    pairs: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
     for item in items if isinstance(items, list) else []:
         if not isinstance(item, dict):
             continue
         question = str(item.get("question") or "").strip()
         answer = str(item.get("answer") or "").strip()
-        if question and answer:
-            pairs.append({"question": question, "answer": answer})
+        intent = str(item.get("intent") or "").strip()
+        aliases = [
+            str(value).strip() for value in item.get("aliases") or []
+            if str(value).strip()
+        ]
+        dedupe_key = (
+            re.sub(r"\W+", " ", (intent or question).casefold()).strip(),
+            re.sub(r"\W+", " ", answer.casefold()).strip(),
+        )
+        if question and answer and dedupe_key not in seen:
+            seen.add(dedupe_key)
+            pairs.append({
+                "question": question,
+                "answer": answer,
+                "aliases": list(dict.fromkeys(aliases)),
+                "intent": intent or "other",
+            })
     return pairs[:max_questions]
 
 
@@ -161,10 +187,16 @@ def build_chain_from_live_graph(node_rows: list[dict], edge_rows: list[dict], no
         if not row:
             break
         chain.append({
+            "id": row.get("id"),
+            "slug": row.get("slug"),
+            "graph_node_id": (row.get("metadata") or {}).get("graph_json_node_id"),
             "node_type": row.get("node_type"),
             "title": row.get("title"),
             "content": row.get("summary"),
             "tags": row.get("tags") or [],
+            "source": (row.get("metadata") or {}).get("source"),
+            "status": row.get("status"),
+            "metadata": row.get("metadata") or {},
         })
         cursor = parent_by_child.get(cursor) or ""
     return chain

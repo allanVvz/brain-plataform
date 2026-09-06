@@ -1,0 +1,125 @@
+name: Cleanup one production lead conversation
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Audit only or apply the reviewed single-lead cleanup
+        type: choice
+        options: [dry-run, apply]
+        default: dry-run
+      persona_slug:
+        description: Persona that owns the lead
+        type: choice
+        options: [tock-fatal, aurora, vz-lupas]
+        required: true
+      lead_ref:
+        description: Exact numeric lead id
+        required: true
+      expected_name:
+        description: Case-insensitive name fragment required as a safety gate
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: brain-ai-production
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Audit or clean exactly one scoped lead
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        env:
+          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+          CLEANUP_ACTION: ${{ inputs.action }}
+          PERSONA_SLUG: ${{ inputs.persona_slug }}
+          LEAD_REF: ${{ inputs.lead_ref }}
+          EXPECTED_NAME: ${{ inputs.expected_name }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          envs: VPS_APP_DIR,CLEANUP_ACTION,PERSONA_SLUG,LEAD_REF,EXPECTED_NAME
+          command_timeout: 10m
+          script: |
+            set -Eeuo pipefail
+            cd "$VPS_APP_DIR"
+            [[ "$CLEANUP_ACTION" == dry-run || "$CLEANUP_ACTION" == apply ]]
+            [[ "$LEAD_REF" =~ ^[1-9][0-9]*$ ]]
+            [[ "$PERSONA_SLUG" =~ ^[a-z0-9-]+$ ]]
+            [[ -n "$EXPECTED_NAME" && ${#EXPECTED_NAME} -le 120 ]]
+            python3 -c 'import json; value=json.load(open(".deploy/control/claims-paused.json", encoding="utf-8")); assert value.get("paused") is True, "claims are not paused"'
+            compose=(docker compose --env-file .env.compose -f docker-compose.yml -f infra/microservices/docker-compose.blue-green.yml)
+            psql=("${compose[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"')
+
+            audit="$(printf '%s\n' "
+            WITH target AS (
+              SELECT l.id,l.persona_id,l.name,p.slug AS persona_slug
+                FROM public.leads l JOIN public.personas p ON p.id=l.persona_id
+               WHERE l.id=${LEAD_REF}
+            ), ledgers AS (
+              SELECT id FROM public.conversation_ledgers WHERE lead_ref=${LEAD_REF}
+            )
+            SELECT jsonb_build_object(
+              'lead_ref',${LEAD_REF},
+              'target_count',(SELECT count(*) FROM target),
+              'persona_slug',(SELECT persona_slug FROM target),
+              'name',(SELECT name FROM target),
+              'name_matches',coalesce((SELECT position(lower('$(printf '%s' "$EXPECTED_NAME" | sed "s/'/''/g")') in lower(coalesce(name,'')))>0 FROM target),false),
+              'messages',(SELECT count(*) FROM public.messages WHERE lead_id=${LEAD_REF}),
+              'buffers',(SELECT count(*) FROM public.lead_buffer WHERE lead_ref=${LEAD_REF}),
+              'ledgers',(SELECT count(*) FROM ledgers),
+              'proofs',(SELECT count(*) FROM public.conversation_turn_proofs WHERE ledger_id IN (SELECT id FROM ledgers)),
+              'journeys',(SELECT count(*) FROM public.conversation_journeys WHERE lead_ref=${LEAD_REF}),
+              'conversions',(SELECT count(*) FROM public.sales_conversions WHERE lead_ref=${LEAD_REF}),
+              'memberships',(SELECT count(*) FROM public.lead_audience_memberships WHERE lead_id=${LEAD_REF}),
+              'campaign_recipients',(SELECT count(*) FROM public.campaign_recipients WHERE lead_id=${LEAD_REF}),
+              'contact_consents',(SELECT count(*) FROM public.contact_consents WHERE lead_id=${LEAD_REF}),
+              'assets',(SELECT count(*) FROM public.assets WHERE lead_id=${LEAD_REF})
+            );" | "${psql[@]}" -Atq)"
+            echo "LEAD_CLEANUP_AUDIT=$audit"
+            python3 -c 'import json,sys; row=json.loads(sys.argv[1]); assert row["target_count"] == 1, row; assert row["persona_slug"] == sys.argv[2], row; assert row["name_matches"] is True, row' "$audit" "$PERSONA_SLUG"
+            [[ "$CLEANUP_ACTION" == apply ]] || { echo "LEAD_CLEANUP_DRY_RUN=passed"; exit 0; }
+
+            printf '%s\n' "
+            BEGIN;
+            SELECT pg_advisory_xact_lock(hashtextextended('${PERSONA_SLUG}:${LEAD_REF}',0));
+            DO \$\$
+            DECLARE v_lead_id bigint;
+            BEGIN
+              SELECT l.id INTO v_lead_id
+                FROM public.leads l JOIN public.personas p ON p.id=l.persona_id
+               WHERE l.id=${LEAD_REF} AND p.slug='${PERSONA_SLUG}'
+                 AND position(lower('$(printf '%s' "$EXPECTED_NAME" | sed "s/'/''/g")') in lower(coalesce(l.name,'')))>0
+               FOR UPDATE OF l;
+              IF v_lead_id IS NULL THEN RAISE EXCEPTION 'lead cleanup scope changed'; END IF;
+            END \$\$;
+            DELETE FROM public.conversation_turn_proofs
+             WHERE ledger_id IN (SELECT id FROM public.conversation_ledgers WHERE lead_ref=${LEAD_REF});
+            DELETE FROM public.sales_conversions WHERE lead_ref=${LEAD_REF};
+            DELETE FROM public.conversation_ledgers WHERE lead_ref=${LEAD_REF};
+            DELETE FROM public.conversation_journeys WHERE lead_ref=${LEAD_REF};
+            DELETE FROM public.lead_buffer WHERE lead_ref=${LEAD_REF};
+            DELETE FROM public.messages WHERE lead_id=${LEAD_REF};
+            DELETE FROM public.lead_audience_memberships WHERE lead_id=${LEAD_REF};
+            DELETE FROM public.campaign_recipients WHERE lead_id=${LEAD_REF};
+            DELETE FROM public.contact_consents WHERE lead_id=${LEAD_REF};
+            UPDATE public.lead_import_rows SET lead_id=NULL WHERE lead_id=${LEAD_REF};
+            UPDATE public.assets SET lead_id=NULL WHERE lead_id=${LEAD_REF};
+            DELETE FROM public.chat_history
+             WHERE session_id='${LEAD_REF}' OR session_id='${PERSONA_SLUG}:${LEAD_REF}';
+            DELETE FROM public.system_events
+             WHERE (entity_type='lead' AND entity_id::text='${LEAD_REF}')
+                OR payload->>'lead_ref'='${LEAD_REF}';
+            DELETE FROM public.leads WHERE id=${LEAD_REF};
+            COMMIT;
+            " | "${psql[@]}" -Atq
+            remaining="$(printf '%s\n' "SELECT count(*) FROM public.leads WHERE id=${LEAD_REF};" | "${psql[@]}" -Atq)"
+            [[ "$remaining" == 0 ]]
+            echo "LEAD_CLEANUP_APPLY=passed lead_ref=$LEAD_REF persona_slug=$PERSONA_SLUG"

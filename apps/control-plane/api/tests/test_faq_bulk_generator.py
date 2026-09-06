@@ -30,8 +30,8 @@ def test_generate_faqs_for_chain_parses_llm_json_array(monkeypatch):
     )
     pairs = faq_bulk_generator.generate_faqs_for_chain(_chain(), max_questions=5)
     assert pairs == [
-        {"question": "Tem tamanho P?", "answer": "O modelo e tamanho unico."},
-        {"question": "Qual o preco?", "answer": "R$ 79,90."},
+        {"question": "Tem tamanho P?", "answer": "O modelo e tamanho unico.", "aliases": [], "intent": "other"},
+        {"question": "Qual o preco?", "answer": "R$ 79,90.", "aliases": [], "intent": "other"},
     ]
 
 
@@ -53,7 +53,7 @@ def test_generate_faqs_for_chain_empty_branch_short_circuits(monkeypatch):
     assert calls == []  # never calls the model for an empty branch
 
 
-def test_generate_faqs_for_chain_includes_skill_content_in_prompt(monkeypatch):
+def test_generate_faqs_for_chain_includes_generic_skill_content_in_prompt(monkeypatch):
     captured = {}
 
     def fake_create(self, **kwargs):
@@ -64,11 +64,30 @@ def test_generate_faqs_for_chain_includes_skill_content_in_prompt(monkeypatch):
     monkeypatch.setattr(
         faq_bulk_generator,
         "_load_skill_content",
-        lambda name: "Guia de escrita isolado para teste." if name == "aurora-premium-sdr" else "",
+        lambda name: "Guia de escrita isolado para teste." if name == "brain-faq-branch" else "",
     )
-    faq_bulk_generator.generate_faqs_for_chain(_chain(), skills=("aurora-premium-sdr",))
+    faq_bulk_generator.generate_faqs_for_chain(_chain(), skills=("brain-faq-branch",))
     prompt_text = captured["messages"][0]["content"]
-    assert "Skill: aurora-premium-sdr" in prompt_text
+    assert "Skill: brain-faq-branch" in prompt_text
+
+
+def test_default_skills_are_generic_and_resolve_from_repository():
+    assert faq_bulk_generator._DEFAULT_SKILLS == ("brain-faq-branch", "brain-sales-graph")
+    assert "FAQ -> Embedded" in faq_bulk_generator._load_skill_content("brain-faq-branch")
+    assert faq_bulk_generator._load_skill_content("brain-sales-graph")
+
+
+def test_generate_faqs_deduplicates_same_intent_and_answer(monkeypatch):
+    monkeypatch.setattr(
+        faq_bulk_generator.ModelRouter,
+        "messages_create",
+        lambda self, **kwargs: (
+            '[{"question":"Tem foto?","answer":"Há foto aprovada.","intent":"photo"},'
+            '{"question":"Posso ver uma imagem?","answer":"Há foto aprovada.","intent":"photo"}]'
+        ),
+    )
+    pairs = faq_bulk_generator.generate_faqs_for_chain(_chain())
+    assert len(pairs) == 1
 
 
 def test_build_chain_from_live_graph_walks_contains_edges_to_root():

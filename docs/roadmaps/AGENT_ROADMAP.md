@@ -136,6 +136,16 @@ reimplementar a execução limpa a partir do main atual, usando a worktree só c
 referência de leitura. Plano completo:
 `~/.claude/plans/lea-os-logs-de-atomic-candle.md`.
 
+**Direção futura — agente especialista de mídia e logística.** A arquitetura
+multiagente deverá incluir uma capability separada para resolver o envio de
+assets aprovados e, quando houver integração de cotação, calcular/confirmar
+frete com evidência. Até essa capability existir e ser validada, Vitória apenas
+reconhece a preferência por envio ou visita, oferece foto somente quando o
+grafo prova um asset aprovado para a peça exata e avisa antes de encaminhar. Sem
+asset aprovado, ela só menciona foto após pedido explícito do cliente e informa
+que um atendente poderá enviá-la. Valor e prazo de frete permanecem confirmação
+de especialista humano; a IA não estima nem promete.
+
 ---
 
 ## Estado do roadmap
@@ -156,7 +166,7 @@ referência de leitura. Plano completo:
 | 6 | Aurora migra para o bundle | **em preparação — baseline v75, checksum, projeções e binding produtivos auditados em 2026-08-31; importador shadow-only estrito preparado, mas o export autenticado da publicação ativa ainda não está disponível no workspace. Restam gerar o bundle a partir desse export, dry-run/shadow, revisão dos dois checksums, WA Validator interno e autorização separada de staging/ativação.** | `bundle-migrator` |
 | 7 | Orquestradores por estágio e campanha por ciclo → arquitetura multi-agente | **redesenhado 2026-08-20; decisão nova 2026-08-22: escopo de conhecimento por agente via cards Embedded — ver seção própria abaixo** | `graph-publisher`, `card-editor` |
 | 8 | Runtime semantic-first (interpretação pelo modelo, prova pelo backend) | **em progresso 2026-08-31 — resposta e próxima pergunta pertencem ao modelo no modo n8n; `missing_fields` mede completude e o proof preserva a fala, descartando apenas componentes inválidos. Runtime, migration funcional e rollout ainda aguardam revisão e autorizações separadas.** | `graph-publisher` |
-| 8a | Navegação consultiva de catálogo e mídia no SDR | **FAQ por ProductGroup entregue no candidato 2026-08-24. Envio de mídia: `MetaWhatsAppProvider.send_media` implementado 2026-08-31; falta retrieval multimodal (compiler não projeta asset), resolução de lote no runtime, prova de asset no proof, migration de lote, vídeos/links e avaliação offline. Rascunho de referência em `.worktrees/recovery-question-hotfix/` (não commitado). Plano: `~/.claude/plans/lea-os-logs-de-atomic-candle.md`.** | `faq-coverage`, `sdr-evaluator` |
+| 8a | Navegação consultiva de catálogo, mídia e logística no SDR | **FAQ por ProductGroup entregue no candidato 2026-08-24. Candidato Tock v17 preparado em 2026-09-05 com distinção autoral entre foto aprovada e ausente, envio/visita como qualificação, frete sempre confirmado por especialista e aviso pré-handoff; publicação ainda depende de plano e autorização. Envio de mídia: `MetaWhatsAppProvider.send_media` implementado 2026-08-31; ainda faltam retrieval multimodal, resolução de lote, execução pelo futuro agente especialista de mídia/logística, integração de cotação, vídeos/links e avaliação offline. Rascunho de referência em `.worktrees/recovery-question-hotfix/` (não commitado).** | `faq-coverage`, `sdr-evaluator` |
 | 9 | Deploy incremental, leve e retomável | **em progresso 2026-08-24 — lifecycle durável, classificação, pausa/drain/resume, proof do primeiro claim, blue-green da API, imagens separadas, retenção autorizada e gates semânticos implementados no candidato; medição real e prova em QA/produção ainda pendentes** | `release-gate` |
 | 10 | Saída pública por template de blocos | **em progresso 2026-09-04 — `api/services/site_blocks.py` resolve blocos declarativos com `scope` de galho; LP de varejo da Tock Fatal gerada e renderizada em `/lp/:personaSlug`. Falta expor os blocos por `/api/menu`, mover `structure` para o banco e ligar a Sofia.** | `graph-publisher`, `card-editor` |
 | 11 | Plataforma Brain: cliente, CRM e páginas públicas integrados | **a fazer — no login o cliente acessa suas páginas públicas (LP e cardápio/catálogo), configurações e o CRM já existente. Fundação obrigatória: evento e clique usam `node_id` do grafo como chave nos dois lados.** | — |
