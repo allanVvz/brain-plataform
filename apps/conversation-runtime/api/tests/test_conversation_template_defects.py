@@ -306,17 +306,23 @@ def test_validator_forwards_asked_field_key_untouched(node_name):
     assert result["model_observation"]["proposal"]["next_question_node_id"] is None
 
 
+def test_prompt_does_not_replace_eligible_qualification_with_consultative_question():
+    result = _run_prompt_builder(_context(), _binding())
+    prompt = json.loads(result["request_body"]["messages"][1]["content"])
+    instructions = " ".join(prompt["policy"]["instructions"])
+
+    assert "any question you choose to advance the conversation" in instructions
+    assert "exactly one of those eligible fields" in instructions
+    assert "asked_field_key must name it" in instructions
+    assert "untracked product-selection or consultative question" in instructions
+
+
 @pytest.mark.parametrize("node_name", VALIDATOR_NODES)
-def test_the_open_case_is_named_where_someone_will_look_for_it(node_name):
-    """What is left is not a template defect: a legitimate consultative
-    question that is no contract field at all has no question node to resolve
-    to, so `question_semantically_askable` fails the turn. That criterion is
-    in wa_validator_service. Anyone reading this null must find that out here
-    rather than rediscovering it from a red validator run."""
+def test_validator_documents_prompt_owned_consultative_question_boundary(node_name):
     code = _node(node_name)["parameters"]["jsCode"]
 
-    assert "question_semantically_askable" in code
-    assert "wa_validator_service" in code
+    assert "prevents an untracked consultative question" in code
+    assert "branch-aware runtime" in code
 
 
 @pytest.mark.parametrize("node_name", VALIDATOR_NODES)
