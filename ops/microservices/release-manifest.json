@@ -1,36 +1,36 @@
 {
-  "source_sha": "a21f3c26785689fdacc503b7bc8fa66d3e6e1ed0",
+  "source_sha": "36c5104976114f7055aca207fb6abe98c46ad3c8",
   "contracts_version": "3.0.0",
   "contracts_checksum": "sha256:c2418a764622b7c71fb62fded53669c5292db959a8c9dd5332a8a4a59cc49ec7",
   "schema_version": 132,
   "route_map_checksum": "sha256:0146765a3fed6f690566d212fee29d1a324183ce2106429bf52f891403fd5c64",
-  "n8n_checksum": "sha256:2faa64f2e905c18d1616c04ece644a51c97f7e475cdcfd5e15832976339458eb",
+  "n8n_checksum": "sha256:04539b30b940066363d126c186f982f2feec4ff7816c64f46395f6e090af7210",
   "services": {
     "gateway": {
       "repository": "allanVvz/brain-plataform",
-      "sha": "a21f3c26785689fdacc503b7bc8fa66d3e6e1ed0",
-      "digest": "sha256:b5511bdc02e88637a4136a0b4a8b6aa9a38c334b0c443b8b4733cd5ecf51d137",
+      "sha": "36c5104976114f7055aca207fb6abe98c46ad3c8",
+      "digest": "sha256:e627dc7c0978e4c8eba279109307dcb885c1672b9dd89137de6161e5baa200c6",
       "required_schema_version": 131,
       "build_context": "apps/gateway"
     },
     "control-plane": {
       "repository": "allanVvz/brain-plataform",
-      "sha": "a21f3c26785689fdacc503b7bc8fa66d3e6e1ed0",
-      "digest": "sha256:d88951db9c71f97bec3c1aa883d97ccf859974e9be7fac3dc8b8a6cb4ceb0b9e",
+      "sha": "36c5104976114f7055aca207fb6abe98c46ad3c8",
+      "digest": "sha256:0b0220dc77234cd9fec019d779e8271da82935aeeca24ad279acc029ad5a94b4",
       "required_schema_version": 131,
       "build_context": "apps/control-plane"
     },
     "conversation-runtime": {
       "repository": "allanVvz/brain-plataform",
-      "sha": "a21f3c26785689fdacc503b7bc8fa66d3e6e1ed0",
-      "digest": "sha256:80a767ac47cebd0b824f21754a436382a40c5fc429fbff7b2204ce355eb940fa",
+      "sha": "36c5104976114f7055aca207fb6abe98c46ad3c8",
+      "digest": "sha256:2146b9354ef0e0118299b703f19072202808b55d0b03c78f9a17d2e5e3fa4c8d",
       "required_schema_version": 131,
       "build_context": "apps/conversation-runtime"
     },
     "transport": {
       "repository": "allanVvz/brain-plataform",
-      "sha": "a21f3c26785689fdacc503b7bc8fa66d3e6e1ed0",
-      "digest": "sha256:aaf0b09f71a7013c64c94ba51a3d31439284971353b554739a83aa60f3ed9251",
+      "sha": "36c5104976114f7055aca207fb6abe98c46ad3c8",
+      "digest": "sha256:aa9778123cff086642c1a5a9502d4ecd11d70b20e0990f3bf4b53fedf659c918",
       "required_schema_version": 131,
       "build_context": "apps/transport"
     }
