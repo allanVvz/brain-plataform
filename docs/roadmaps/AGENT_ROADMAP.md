@@ -419,11 +419,10 @@ diagnóstico no GET de routing — não implementado ainda.
 Sintoma: os ciclos de SDR agora têm memória (migrations 129/130, commits
 `3153c8c`, `fd9e20b`) **mas o fluxo está travado**.
 
-Os relatórios de 2026-08-10 (`AURORA_INVESTIGATION_REPORT.md`,
-`investigation_aurora_allan.md`, `AURORA_HANDOFF_FIX.md`) descrevem uma trava de
-HANDOFF **anterior e já resolvida**. Foram arquivados em
-`docs/archive/DEPRECATED_2026-08-19/` justamente porque agentes os liam como
-diagnóstico corrente. Não usar.
+Os relatórios de 2026-08-10 sobre a trava de HANDOFF anterior foram removidos
+em 2026-09-05 porque descreviam um problema já resolvido e eram lidos por
+agentes como diagnóstico corrente. A evidência válida é sempre a indicada
+neste roadmap; não reconstruir comportamento atual a partir desses artefatos.
 
 **Nenhuma etapa da refatoração começa antes deste item fechar.**
 

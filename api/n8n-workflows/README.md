@@ -28,10 +28,8 @@ O contrato em Markdown faz parte do fluxo auditável:
 publicação, e `docs/runbooks/graph-agent-runtime-v3-rollout.md` governa
 ativação, E2E e rollback.
 
-Exports com nome de persona foram arquivados em 2026-08-19 para
-`docs/archive/DEPRECATED_2026-08-19/n8n-legacy-exports/`. Eram legados de
-auditoria, nunca importados nem usados pelo provisionador, e confundiam
-agentes de IA que os liam como template ativo. O bootstrap local importa
+Exports legados com nome de persona foram removidos. Nunca foram usados pelo
+provisionador e confundiam agentes de IA que os liam como template ativo. O bootstrap local importa
 somente os workflows de transporte `whatsapp-*`; workflows de conversa são
 criados pela plataforma.
 

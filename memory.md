@@ -418,10 +418,8 @@ total, mesmo com o texto certo já calculado. Corrigido em três frentes:
    o lado Python; editar o workflow n8n é um tipo de risco à parte, fica
    como pendência conhecida pra próxima rodada.
 
-## Histórico arquivado
+## Histórico removido
 
-A seção "Handoff atual — WA Validator em produção" (fase de 2026-08-12, Aurora
-pausada) foi movida em 2026-08-19 para
-`docs/archive/DEPRECATED_2026-08-19/memory-wa-validator-handoff-2026-08-12.md`.
-Ela descrevia um estado que já não vale e era lida por agentes como se fosse o
-estado corrente.
+A seção antiga sobre o WA Validator de 2026-08-12 foi removida porque descrevia
+um estado operacional que já não vale. O estado corrente deve ser obtido pelas
+auditorias oficiais e pelos handoffs indicados no roadmap.

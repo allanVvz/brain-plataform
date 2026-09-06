@@ -28,8 +28,7 @@ autorização explícita do humano (regra de governança 7 do roadmap,
 
 ## Armadilha já identificada
 
-`visible_to_agent` (relation_type usado num design anterior, arquivado em
-`docs/archive/DEPRECATED_2026-08-19/BRAIN_AI_MASTER_ROADMAP.md`) **não serve**
+`visible_to_agent` (relation_type usado num design anterior já removido) **não serve**
 pra condicionar visibilidade por agente/estágio — vira `publishes_to`
 genérico no upgrade v2.0→v2.1 (`api/services/graph_json_v21_adapter.py:14`) e
 perde toda semântica. O mecanismo real é `qualification.condition`/
