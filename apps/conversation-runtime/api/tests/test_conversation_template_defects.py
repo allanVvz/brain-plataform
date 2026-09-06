@@ -344,6 +344,24 @@ def test_prompt_does_not_replace_eligible_qualification_with_consultative_questi
     assert "untracked product-selection or consultative question" in instructions
 
 
+def test_asked_field_key_is_required_and_auditable_in_every_model_response():
+    result = _run_prompt_builder(_context(), _binding())
+    schema = result["envelope_schema"]
+    instructions = " ".join(
+        json.loads(result["request_body"]["messages"][1]["content"])["policy"]["instructions"]
+    )
+
+    assert "asked_field_key" in schema["required"]
+    assert "mandatory audit metadata" in instructions
+    for node_name in VALIDATOR_NODES:
+        validated = _run_response_validator(
+            node_name,
+            {key: value for key, value in _envelope().items() if key != "asked_field_key"},
+            _purchase_profile_contract(),
+        )
+        assert "missing:asked_field_key" in validated["model_observation"]["interpretation_parse_errors"]
+
+
 def test_prompt_does_not_repeat_pending_name_after_branch_switch():
     contract = _purchase_profile_contract()
     contract["fields"].append({
@@ -445,6 +463,26 @@ def test_repair_prompt_carries_the_no_repeat_turn_guard():
     system = repaired["request_body"]["messages"][0]["content"]
     assert "exact human questions already asked" in system
     assert "Do not invent a handoff" in system
+
+
+def test_repair_prompt_preserves_field_metadata_needed_to_audit_a_new_question():
+    initial = _run_prompt_builder(_context(), _binding())
+    repaired = _run_repair_builder(
+        initial["request_body"],
+        _envelope(reply="Como voce prefere que eu te chame?", asked_field_key=None),
+        {
+            "gating_errors": ["next_question_missing"],
+            "repair_requirements": ["identify_asked_field"],
+        },
+    )
+    compact = json.loads(repaired["request_body"]["messages"][1]["content"])
+    eligible = compact["turn_controls"]["eligible_fields"]
+
+    purchase_profile = next(field for field in eligible if field["key"] == "purchase_profile")
+    assert purchase_profile["question_node_id"] == "faq:tock-purchase-profile"
+    assert purchase_profile["question_text"]
+    assert "asked_field_key null means" in compact["instruction"]
+    assert "map it to turn_controls.eligible_fields" in repaired["request_body"]["messages"][0]["content"]
 
 
 def test_prompt_uses_published_confirmation_then_announced_handoff():
