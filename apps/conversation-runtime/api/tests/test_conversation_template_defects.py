@@ -317,6 +317,55 @@ def test_prompt_does_not_replace_eligible_qualification_with_consultative_questi
     assert "untracked product-selection or consultative question" in instructions
 
 
+def test_prompt_does_not_repeat_pending_name_after_branch_switch():
+    context = _context(
+        cart={
+            "asked_question_node_ids": ["faq:tock-customer-name"],
+            "asked_field_keys": ["nome_cliente"],
+            "facts_by_key": {},
+        },
+    )
+    result = _run_prompt_builder(
+        context, _binding(message="Na verdade, e para uso proprio."),
+    )
+    prompt = json.loads(result["request_body"]["messages"][1]["content"])
+    instructions = " ".join(prompt["policy"]["instructions"])
+
+    assert prompt["asked_field_keys"] == ["nome_cliente"]
+    assert prompt["expected_answer_field_key"] == "nome_cliente"
+    assert "changes branch" in instructions
+    assert "without asking the pending field again" in instructions
+    assert "Ask no question unless a different eligible field has never been asked" in instructions
+
+
+def test_prompt_uses_published_confirmation_then_announced_handoff():
+    contract = _purchase_profile_contract()
+    contract["conversation_policy"] = {
+        "qualification": {
+            "confirmation_question": "As informacoes estao corretas?",
+            "completion_message": "Perfeito. A equipe continua o atendimento.",
+        },
+        "handoff": {
+            "pre_notice_required": True,
+            "notice": "Vou avisar uma pessoa da equipe para continuar com voce.",
+        },
+    }
+    context = _context(
+        graph_contract=contract,
+        pending_confirmation_ref="qualification:current:7",
+    )
+    result = _run_prompt_builder(context, _binding(message="Sim"))
+    prompt = json.loads(result["request_body"]["messages"][1]["content"])
+    instructions = " ".join(prompt["policy"]["instructions"])
+
+    assert prompt["pending_confirmation_ref"] == "qualification:current:7"
+    assert "qualification completes on this turn" in instructions
+    assert "Do not ask a catalog, product-detail or consultative question" in instructions
+    assert "confirmation.target_ref exactly to pending_confirmation_ref" in instructions
+    assert "handoff_requested=true" in instructions
+    assert "without another question" in instructions
+
+
 @pytest.mark.parametrize("node_name", VALIDATOR_NODES)
 def test_validator_documents_prompt_owned_consultative_question_boundary(node_name):
     code = _node(node_name)["parameters"]["jsCode"]

@@ -2377,12 +2377,13 @@ def _semantic_turn_audit(
         (contract.get("conversation_policy") or {}).get("handoff") or {}
     )
     pre_handoff_required = bool(handoff_policy.get("pre_notice_required"))
-    name_question = next(
+    name_question_id, name_question = next(
         (
-            item for item in (contract.get("questions") or {}).values()
+            (str(question_id), item)
+            for question_id, item in (contract.get("questions") or {}).items()
             if str(item.get("field_key") or "") == "nome_cliente"
         ),
-        {},
+        ("", {}),
     )
     name_variants = [
         value for value in (
@@ -2391,7 +2392,7 @@ def _semantic_turn_audit(
         )
         if value
     ]
-    name_question_count = sum(
+    name_question_text_count = sum(
         1
         for candidate_reply in [*recent_replies, reply]
         if any(
@@ -2399,6 +2400,16 @@ def _semantic_turn_audit(
             for variant in name_variants
         )
     )
+    name_question_id_count = (
+        sum(
+            1
+            for question_id in ledger_after.get("asked_question_node_ids") or []
+            if str(question_id or "") == name_question_id
+        )
+        if name_question_id
+        else 0
+    )
+    name_question_count = max(name_question_text_count, name_question_id_count)
     criteria = {
         "intent_identified": bool(decision.get("intent")),
         "doubt_answered_first": (
@@ -2743,7 +2754,17 @@ def _next_semantic_driver_step(
         and len(answered_fields) >= int(switch.get("after_answered_fields") or 0)
     ):
         state["switch_sent"] = True
+        state["switch_interrupted_field"] = asked_field
         return {**switch, "kind": "branch_switch"}
+
+    # A branch correction does not erase the question the customer had just
+    # received. The agent acknowledges the correction without repeating that
+    # question, so the synthetic customer answers the still-pending field even
+    # when the acknowledgement carries no new ask.
+    if not asked_field and state.get("switch_sent"):
+        interrupted = str(state.get("switch_interrupted_field") or "")
+        if interrupted and interrupted not in answered_fields:
+            asked_field = interrupted
 
     deferred = driver.get("deferred_answer")
     if isinstance(deferred, dict):

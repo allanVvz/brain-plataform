@@ -100,3 +100,63 @@ def test_deterministic_validator_keeps_first_published_question_contract():
 
     assert audit["passed"] is False
     assert "question_semantically_askable" in audit["failures"]
+
+
+def test_sales_driver_answers_unresolved_question_without_requiring_branch_switch_repetition():
+    driver = {
+        "switch": {
+            "after_answered_fields": 0,
+            "text": "Na verdade, e para uso proprio.",
+            "expected_branch_node_id": "branch:retail",
+        },
+        "answers": {
+            "nome_cliente": {
+                "text": "Pode me chamar de Beatriz",
+                "value": "Beatriz",
+            },
+        },
+    }
+    state = {}
+
+    branch_switch = wa_validator_service._next_semantic_driver_step(
+        driver=driver,
+        state=state,
+        asked_field="nome_cliente",
+        answered_fields=set(),
+        active_anchor="branch:reseller",
+        expected_active_branches=["branch:reseller"],
+    )
+    name_answer = wa_validator_service._next_semantic_driver_step(
+        driver=driver,
+        state=state,
+        asked_field="",
+        answered_fields=set(),
+        active_anchor="branch:retail",
+        expected_active_branches=["branch:retail"],
+    )
+
+    assert branch_switch["kind"] == "branch_switch"
+    assert state["switch_interrupted_field"] == "nome_cliente"
+    assert name_answer == {
+        "text": "Pode me chamar de Beatriz",
+        "kind": "field_answer",
+        "intended_facts": {"nome_cliente": "Beatriz"},
+        "expected_branch_node_id": "branch:retail",
+        "expected_active_branch_node_ids": ["branch:retail"],
+    }
+
+
+def test_semantic_turn_audit_counts_name_question_ids_not_only_similar_wording():
+    inputs = _audit_inputs(conversation_mode="n8n_agents")
+    inputs["contract"]["fields"][0]["key"] = "nome_cliente"
+    inputs["contract"]["questions"]["q:name"]["field_key"] = "nome_cliente"
+    inputs["proof_record"]["proof_result"]["missing_fields"] = [
+        "nome_cliente", "objective",
+    ]
+    inputs["ledger_after"]["asked_question_node_ids"] = ["q:name", "q:name"]
+    inputs["turn"]["text"] = "Como posso te chamar para continuarmos?"
+
+    audit = wa_validator_service._semantic_turn_audit(**inputs)
+
+    assert audit["criteria"]["customer_name_question_once"] is False
+    assert "customer_name_question_once" in audit["failures"]
