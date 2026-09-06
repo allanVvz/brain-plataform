@@ -490,10 +490,12 @@ def build(source: dict[str, Any]) -> dict[str, Any]:
                 "overwrite_policy": "explicit_correction",
                 "validation": {
                     "mode": "enum",
+                    "extract_expected_answer_before_composing_reply": True,
+                    "acknowledgement_requires_fact": True,
                     "values": [
-                        {"value": "conhecendo", "aliases": ["só olhando", "conhecendo", "pesquisando"]},
-                        {"value": "comparando", "aliases": ["comparando", "vendo opções", "decidindo"]},
-                        {"value": "pronto_para_avancar", "aliases": ["quero comprar", "quero fechar", "pode avançar"]},
+                        {"value": "conhecendo", "aliases": ["só olhando", "conhecendo", "pesquisando", "estou conhecendo as opções"]},
+                        {"value": "comparando", "aliases": ["comparando", "vendo opções", "decidindo", "estou comparando as opções"]},
+                        {"value": "pronto_para_avancar", "aliases": ["quero comprar", "quero fechar", "pode avançar", "já quero avançar com a compra"]},
                     ],
                 },
             },
@@ -509,9 +511,11 @@ def build(source: dict[str, Any]) -> dict[str, Any]:
                 "overwrite_policy": "explicit_correction",
                 "validation": {
                     "mode": "enum",
+                    "extract_expected_answer_before_composing_reply": True,
+                    "acknowledgement_requires_fact": True,
                     "values": [
-                        {"value": "envio", "aliases": ["envio", "entrega", "frete", "receber em casa"]},
-                        {"value": "visita_loja", "aliases": ["ir à loja", "visitar", "buscar", "ver pessoalmente"]},
+                        {"value": "envio", "aliases": ["envio", "entrega", "frete", "receber em casa", "prefiro receber por envio"]},
+                        {"value": "visita_loja", "aliases": ["ir à loja", "visitar", "buscar", "ver pessoalmente", "prefiro visitar a loja física"]},
                         {"value": "a_definir", "aliases": ["não sei", "vou decidir", "tanto faz"]},
                     ],
                 },

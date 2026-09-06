@@ -347,13 +347,16 @@
               "overwrite_policy": "explicit_correction",
               "validation": {
                 "mode": "enum",
+                "extract_expected_answer_before_composing_reply": true,
+                "acknowledgement_requires_fact": true,
                 "values": [
                   {
                     "value": "conhecendo",
                     "aliases": [
                       "só olhando",
                       "conhecendo",
-                      "pesquisando"
+                      "pesquisando",
+                      "estou conhecendo as opções"
                     ]
                   },
                   {
@@ -361,7 +364,8 @@
                     "aliases": [
                       "comparando",
                       "vendo opções",
-                      "decidindo"
+                      "decidindo",
+                      "estou comparando as opções"
                     ]
                   },
                   {
@@ -369,7 +373,8 @@
                     "aliases": [
                       "quero comprar",
                       "quero fechar",
-                      "pode avançar"
+                      "pode avançar",
+                      "já quero avançar com a compra"
                     ]
                   }
                 ]
@@ -393,6 +398,8 @@
               "overwrite_policy": "explicit_correction",
               "validation": {
                 "mode": "enum",
+                "extract_expected_answer_before_composing_reply": true,
+                "acknowledgement_requires_fact": true,
                 "values": [
                   {
                     "value": "envio",
@@ -400,7 +407,8 @@
                       "envio",
                       "entrega",
                       "frete",
-                      "receber em casa"
+                      "receber em casa",
+                      "prefiro receber por envio"
                     ]
                   },
                   {
@@ -409,7 +417,8 @@
                       "ir à loja",
                       "visitar",
                       "buscar",
-                      "ver pessoalmente"
+                      "ver pessoalmente",
+                      "prefiro visitar a loja física"
                     ]
                   },
                   {

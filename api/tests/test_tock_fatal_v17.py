@@ -38,6 +38,16 @@ def test_v17_adds_persona_owned_name_readiness_and_fulfillment_fields():
     assert by_key["nome_cliente"]["validation"]["acknowledgement_requires_fact"] is True
     assert by_key["nome_cliente"]["validation"]["model_confidence_min"] == 0.0
     assert by_key["nome_cliente"]["depends_on"] == ["purchase_profile"]
+    readiness = by_key["grau_qualificacao"]["validation"]
+    assert readiness["extract_expected_answer_before_composing_reply"] is True
+    assert "estou comparando as opções" in next(
+        item["aliases"] for item in readiness["values"] if item["value"] == "comparando"
+    )
+    fulfillment = by_key["forma_recebimento"]["validation"]
+    assert fulfillment["acknowledgement_requires_fact"] is True
+    assert "prefiro receber por envio" in next(
+        item["aliases"] for item in fulfillment["values"] if item["value"] == "envio"
+    )
     assert persona["data"]["conversation_policy"]["sales_routing"]["service_selector_enabled"] is False
 
     question_policy = persona["data"]["conversation_policy"]["question_policy"]
