@@ -376,6 +376,25 @@ def build(source: dict[str, Any]) -> dict[str, Any]:
         "request_customer_name": "once_after_purchase_profile_is_understood",
         "customer_name_required_before_help": False,
     }
+    policy["question_policy"] = {
+        **(policy.get("question_policy") or {}),
+        "current_turn_facts_precede_question": True,
+        "never_ask_field_answered_in_current_message": True,
+        "question_must_target_eligible_missing_field": True,
+        "asked_field_key_required_for_qualification_question": True,
+        "branch_selection_question_forbidden_after_profile_understood": True,
+        "preferred_field_order_after_purchase_profile": [
+            "nome_cliente",
+            "grau_qualificacao",
+            "forma_recebimento",
+        ],
+        "instructions": [
+            "Antes de formular uma pergunta, considere todos os fatos extraídos da mensagem atual e os fatos já conhecidos.",
+            "Nunca pergunte novamente o perfil de compra quando a pessoa já disse uso próprio, varejo, atacado ou revenda.",
+            "Depois de entender o perfil de compra, pergunte o nome uma única vez se ele ainda não for conhecido nem tiver sido perguntado.",
+            "Toda pergunta de qualificação deve tratar de um campo ainda elegível e informar esse campo em asked_field_key.",
+        ],
+    }
     policy["sales_routing"] = {
         "selector_kind": "purchase_profile",
         "service_selector_enabled": False,

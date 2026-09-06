@@ -37,6 +37,13 @@ def test_v17_adds_persona_owned_name_readiness_and_fulfillment_fields():
     assert by_key["nome_cliente"]["depends_on"] == ["purchase_profile"]
     assert persona["data"]["conversation_policy"]["sales_routing"]["service_selector_enabled"] is False
 
+    question_policy = persona["data"]["conversation_policy"]["question_policy"]
+    assert question_policy["current_turn_facts_precede_question"] is True
+    assert question_policy["never_ask_field_answered_in_current_message"] is True
+    assert question_policy["branch_selection_question_forbidden_after_profile_understood"] is True
+    assert question_policy["preferred_field_order_after_purchase_profile"][0] == "nome_cliente"
+    assert any("Nunca pergunte novamente o perfil de compra" in item for item in question_policy["instructions"])
+
     for audience_id in ("audience:tock-retail", "audience:tock-reseller"):
         branch_fields = nodes[audience_id]["data"]["qualification"]["fields"]
         for field in branch_fields:
@@ -125,4 +132,3 @@ def test_handoff_notice_and_freight_specialist_are_graph_owned():
     assert "pessoa da equipe" in policy["handoff"]["notice"]
     assert "especialista" in nodes["faq:tock-freight-value"]["data"]["answer"]
     assert "visitar a loja física" in nodes["faq:tock-fulfillment-preference"]["data"]["question"]
-

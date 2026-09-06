@@ -233,7 +233,23 @@
               "acknowledgement",
               "customer_doubt"
             ],
-            "selection": "model_natural_from_eligible_graph_fields"
+            "selection": "model_natural_from_eligible_graph_fields",
+            "current_turn_facts_precede_question": true,
+            "never_ask_field_answered_in_current_message": true,
+            "question_must_target_eligible_missing_field": true,
+            "asked_field_key_required_for_qualification_question": true,
+            "branch_selection_question_forbidden_after_profile_understood": true,
+            "preferred_field_order_after_purchase_profile": [
+              "nome_cliente",
+              "grau_qualificacao",
+              "forma_recebimento"
+            ],
+            "instructions": [
+              "Antes de formular uma pergunta, considere todos os fatos extraídos da mensagem atual e os fatos já conhecidos.",
+              "Nunca pergunte novamente o perfil de compra quando a pessoa já disse uso próprio, varejo, atacado ou revenda.",
+              "Depois de entender o perfil de compra, pergunte o nome uma única vez se ele ainda não for conhecido nem tiver sido perguntado.",
+              "Toda pergunta de qualificação deve tratar de um campo ainda elegível e informar esse campo em asked_field_key."
+            ]
           },
           "catalog_discovery": {
             "allow_before_purchase_profile": true,
