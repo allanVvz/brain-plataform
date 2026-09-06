@@ -110,6 +110,22 @@ def test_retention_inventories_then_prunes_only_unreferenced_cache_without_volum
     assert "DISK_AFTER" in RETENTION
 
 
+def test_retention_can_isolate_all_unused_images_without_touching_backups_or_volumes():
+    workflow = (
+        ROOT / ".github" / "workflows" / "retain-production-images.yml"
+    ).read_text(encoding="utf-8")
+
+    assert 'IMAGE_PRUNE_ONLY="${IMAGE_PRUNE_ONLY:-false}"' in RETENTION
+    assert 'PRUNE_UNUSED_IMAGES="${PRUNE_UNUSED_IMAGES:-false}"' in RETENTION
+    assert "UNUSED_IMAGE_CANDIDATE" in RETENTION
+    assert "UNUSED_IMAGE_PROTECTED" in RETENTION
+    assert 'docker ps -a --filter "ancestor=$image_id"' in RETENTION
+    assert "docker image prune -a --force" in RETENTION
+    assert "Volumes and containers are outside the scope" in RETENTION
+    assert "prune_unused_images:" in workflow
+    assert "IMAGE_PRUNE_ONLY: ${{ inputs.prune_unused_images }}" in workflow
+
+
 def test_retention_cleanup_limits_apt_metadata_to_reviewed_literal_paths():
     workflow = (
         ROOT / ".github" / "workflows" / "retain-production-images.yml"

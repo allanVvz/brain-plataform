@@ -11,6 +11,10 @@ on:
         description: Remove only the two reviewed APT metadata cache files
         type: boolean
         default: false
+      prune_unused_images:
+        description: Remove images that are not referenced by any running or stopped container
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -32,12 +36,14 @@ jobs:
         env:
           BRAIN_RELEASE_ROOT: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           RETENTION_MODE: --dry-run
+          PRUNE_UNUSED_IMAGES: ${{ inputs.prune_unused_images }}
+          IMAGE_PRUNE_ONLY: ${{ inputs.prune_unused_images }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
-          envs: BRAIN_RELEASE_ROOT,RETENTION_MODE
+          envs: BRAIN_RELEASE_ROOT,RETENTION_MODE,PRUNE_UNUSED_IMAGES,IMAGE_PRUNE_ONLY
           script_path: ops/vps/retain-release-images.sh
 
       - name: Apply reviewed image and stopped-container retention
@@ -48,10 +54,12 @@ jobs:
           RETENTION_MODE: --apply
           CLEANUP_AUTHORIZED: "true"
           CLEAN_APT_METADATA: ${{ inputs.clean_apt_metadata }}
+          PRUNE_UNUSED_IMAGES: ${{ inputs.prune_unused_images }}
+          IMAGE_PRUNE_ONLY: ${{ inputs.prune_unused_images }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
-          envs: BRAIN_RELEASE_ROOT,RETENTION_MODE,CLEANUP_AUTHORIZED,CLEAN_APT_METADATA
+          envs: BRAIN_RELEASE_ROOT,RETENTION_MODE,CLEANUP_AUTHORIZED,CLEAN_APT_METADATA,PRUNE_UNUSED_IMAGES,IMAGE_PRUNE_ONLY
           script_path: ops/vps/retain-release-images.sh

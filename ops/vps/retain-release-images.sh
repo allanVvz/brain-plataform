@@ -3,9 +3,15 @@ set -Eeuo pipefail
 
 ROOT_DIR="${BRAIN_RELEASE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 MODE="${1:-${RETENTION_MODE:---dry-run}}"
+PRUNE_UNUSED_IMAGES="${PRUNE_UNUSED_IMAGES:-false}"
+IMAGE_PRUNE_ONLY="${IMAGE_PRUNE_ONLY:-false}"
 [[ "$MODE" == "--dry-run" || "$MODE" == "--apply" ]] || { echo "expected --dry-run or --apply" >&2; exit 2; }
 if [[ "$MODE" == "--apply" && "${CLEANUP_AUTHORIZED:-false}" != "true" ]]; then
   echo "cleanup apply requires CLEANUP_AUTHORIZED=true from a separately approved operation" >&2
+  exit 2
+fi
+if [[ "$IMAGE_PRUNE_ONLY" == "true" && "$PRUNE_UNUSED_IMAGES" != "true" ]]; then
+  echo "IMAGE_PRUNE_ONLY=true requires PRUNE_UNUSED_IMAGES=true" >&2
   exit 2
 fi
 cd "$ROOT_DIR"
@@ -37,6 +43,50 @@ for inventory_files_root in /var/backups/brain-ai /var/cache/apt /tmp; do
     -printf 'FILESYSTEM_FILE\t%p\tbytes=%s\tmodified=%TY-%Tm-%TdT%TH:%TM:%TSZ\n' 2>/dev/null | sort || true
 done
 printf 'FILESYSTEM_INVENTORY_END\n'
+
+inventory_unused_images() {
+  local image_id bytes references
+  local candidate_count=0 candidate_bytes=0 protected_count=0
+  local -a containers=()
+
+  while IFS= read -r image_id; do
+    [[ -n "$image_id" ]] || continue
+    bytes="$(docker image inspect --format '{{.Size}}' "$image_id")"
+    references="$(docker image inspect --format '{{json .RepoTags}}' "$image_id")"
+    mapfile -t containers < <(docker ps -a --filter "ancestor=$image_id" --format '{{.ID}}:{{.Names}}:{{.State}}')
+    if (( ${#containers[@]} > 0 )); then
+      printf 'UNUSED_IMAGE_PROTECTED\t%s\tbytes=%s\treferences=%s\tcontainers=%s\n' \
+        "$image_id" "$bytes" "$references" "$(IFS=,; echo "${containers[*]}")"
+      protected_count=$((protected_count + 1))
+      continue
+    fi
+    printf 'UNUSED_IMAGE_CANDIDATE\t%s\tbytes=%s\treferences=%s\n' \
+      "$image_id" "$bytes" "$references"
+    candidate_count=$((candidate_count + 1))
+    candidate_bytes=$((candidate_bytes + bytes))
+  done < <(docker image ls -a --no-trunc --format '{{.ID}}' | sort -u)
+
+  printf 'UNUSED_IMAGE_SUMMARY\tmode=%s\tcandidates=%s\tvirtual_bytes=%s\tprotected=%s\n' \
+    "$MODE" "$candidate_count" "$candidate_bytes" "$protected_count"
+}
+
+if [[ "$PRUNE_UNUSED_IMAGES" == "true" ]]; then
+  printf 'UNUSED_IMAGE_INVENTORY_BEGIN\n'
+  docker system df
+  inventory_unused_images
+  printf 'UNUSED_IMAGE_INVENTORY_END\n'
+fi
+
+if [[ "$IMAGE_PRUNE_ONLY" == "true" ]]; then
+  if [[ "$MODE" == "--apply" ]]; then
+    # Docker preserves every image referenced by a running or stopped container.
+    # Volumes and containers are outside the scope of this operation.
+    docker image prune -a --force
+  fi
+  printf 'DISK_AFTER\tpercent=%s\n' "$(disk_percent)"
+  printf 'SUMMARY\tmode=%s\toperation=unused-images-only\n' "$MODE"
+  exit 0
+fi
 
 apt_cache_candidates() {
   local target resolved bytes
@@ -319,8 +369,12 @@ while IFS=$'\t' read -r reference image_id; do
 done < <(docker image ls --no-trunc --format '{{.Repository}}:{{.Tag}}\t{{.ID}}')
 if [[ "$MODE" == "--apply" ]]; then
   # These commands never prune volumes. Docker itself limits image pruning to
-  # unreferenced dangling layers and builder pruning to unused build cache.
-  docker image prune --force
+  # unreferenced images and builder pruning to unused build cache.
+  if [[ "$PRUNE_UNUSED_IMAGES" == "true" ]]; then
+    docker image prune -a --force
+  else
+    docker image prune --force
+  fi
   docker builder prune --force
 fi
 printf 'DISK_AFTER\tpercent=%s\n' "$(disk_percent)"
