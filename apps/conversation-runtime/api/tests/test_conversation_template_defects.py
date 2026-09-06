@@ -332,10 +332,27 @@ def test_prompt_does_not_repeat_pending_name_after_branch_switch():
     instructions = " ".join(prompt["policy"]["instructions"])
 
     assert prompt["asked_field_keys"] == ["nome_cliente"]
+    assert prompt["do_not_ask_field_keys"] == ["nome_cliente"]
     assert prompt["expected_answer_field_key"] == "nome_cliente"
+    assert "hard per-conversation prohibition" in instructions
     assert "changes branch" in instructions
     assert "without asking the pending field again" in instructions
     assert "Ask no question unless a different eligible field has never been asked" in instructions
+
+    system = result["request_body"]["messages"][0]["content"]
+    assert "Highest-priority turn rule" in system
+    assert "Never ask any of those fields again" in system
+    assert "even after a branch switch" in system
+
+
+def test_repair_prompt_carries_the_no_repeat_turn_guard():
+    code = _node("Build graph repair request")["parameters"]["jsCode"]
+
+    assert "originalPrompt = JSON.parse" in code
+    assert "do_not_ask_field_keys" in code
+    assert "turn_controls: turnControls" in code
+    assert "rewrite the reply to remove that repeated question" in code
+    assert "set asked_field_key to null" in code
 
 
 def test_prompt_uses_published_confirmation_then_announced_handoff():
