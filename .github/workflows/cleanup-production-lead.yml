@@ -60,7 +60,7 @@ jobs:
 
             audit="$(printf '%s\n' "
             WITH target AS (
-              SELECT l.id,l.persona_id,l.name,p.slug AS persona_slug
+              SELECT l.id,l.persona_id,l.nome AS name,p.slug AS persona_slug
                 FROM public.leads l JOIN public.personas p ON p.id=l.persona_id
                WHERE l.id=${LEAD_REF}
             ), ledgers AS (
@@ -96,7 +96,7 @@ jobs:
               SELECT l.id INTO v_lead_id
                 FROM public.leads l JOIN public.personas p ON p.id=l.persona_id
                WHERE l.id=${LEAD_REF} AND p.slug='${PERSONA_SLUG}'
-                 AND position(lower('$(printf '%s' "$EXPECTED_NAME" | sed "s/'/''/g")') in lower(coalesce(l.name,'')))>0
+                 AND position(lower('$(printf '%s' "$EXPECTED_NAME" | sed "s/'/''/g")') in lower(coalesce(l.nome,'')))>0
                FOR UPDATE OF l;
               IF v_lead_id IS NULL THEN RAISE EXCEPTION 'lead cleanup scope changed'; END IF;
             END \$\$;
