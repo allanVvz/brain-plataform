@@ -56,7 +56,7 @@ jobs:
             [[ -n "$EXPECTED_NAME" && ${#EXPECTED_NAME} -le 120 ]]
             python3 -c 'import json; value=json.load(open(".deploy/control/claims-paused.json", encoding="utf-8")); assert value.get("paused") is True, "claims are not paused"'
             compose=(docker compose --env-file .env.compose -f docker-compose.yml -f infra/microservices/docker-compose.blue-green.yml)
-            psql=("${compose[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"')
+            psql=("${compose[@]}" exec -T db sh -c 'exec psql -v ON_ERROR_STOP=1 -Atq -U "$POSTGRES_USER" -d "$POSTGRES_DB"')
 
             audit="$(printf '%s\n' "
             WITH target AS (
@@ -82,7 +82,7 @@ jobs:
               'campaign_recipients',(SELECT count(*) FROM public.campaign_recipients WHERE lead_id=${LEAD_REF}),
               'contact_consents',(SELECT count(*) FROM public.contact_consents WHERE lead_id=${LEAD_REF}),
               'assets',(SELECT count(*) FROM public.assets WHERE lead_id=${LEAD_REF})
-            );" | "${psql[@]}" -Atq)"
+            );" | "${psql[@]}")"
             echo "LEAD_CLEANUP_AUDIT=$audit"
             python3 -c 'import json,sys; row=json.loads(sys.argv[1]); assert row["target_count"] == 1, row; assert row["persona_slug"] == sys.argv[2], row; assert row["name_matches"] is True, row' "$audit" "$PERSONA_SLUG"
             [[ "$CLEANUP_ACTION" == apply ]] || { echo "LEAD_CLEANUP_DRY_RUN=passed"; exit 0; }
@@ -119,7 +119,7 @@ jobs:
                 OR payload->>'lead_ref'='${LEAD_REF}';
             DELETE FROM public.leads WHERE id=${LEAD_REF};
             COMMIT;
-            " | "${psql[@]}" -Atq
-            remaining="$(printf '%s\n' "SELECT count(*) FROM public.leads WHERE id=${LEAD_REF};" | "${psql[@]}" -Atq)"
+            " | "${psql[@]}"
+            remaining="$(printf '%s\n' "SELECT count(*) FROM public.leads WHERE id=${LEAD_REF};" | "${psql[@]}")"
             [[ "$remaining" == 0 ]]
             echo "LEAD_CLEANUP_APPLY=passed lead_ref=$LEAD_REF persona_slug=$PERSONA_SLUG"
