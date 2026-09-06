@@ -36,6 +36,7 @@ def test_v17_adds_persona_owned_name_readiness_and_fulfillment_fields():
     assert by_key["nome_cliente"]["validation"]["min_tokens"] == 1
     assert by_key["nome_cliente"]["validation"]["extraction_required_when_expected"] is True
     assert by_key["nome_cliente"]["validation"]["acknowledgement_requires_fact"] is True
+    assert by_key["nome_cliente"]["validation"]["model_confidence_min"] == 0.0
     assert by_key["nome_cliente"]["depends_on"] == ["purchase_profile"]
     assert persona["data"]["conversation_policy"]["sales_routing"]["service_selector_enabled"] is False
 

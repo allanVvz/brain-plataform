@@ -12,7 +12,7 @@
   "chunks_to_embed": 0,
   "compiler_version": "graph-compiler-v3.6.4",
   "disposition": "awaiting_approval",
-  "draft_checksum": "sha256:f0e152d07a915457c35a02047ee8c15f8879eb262c2a559479763f97590161d2",
+  "draft_checksum": "sha256:5fe328a902d2121488227d3d23d3f0357865f4515b29d2cf72ba7781a9c6e3cc",
   "edge_changes": {
     "added": [],
     "changed": [],
@@ -26,7 +26,7 @@
     "currency": "USD",
     "reason": "provider_pricing_not_configured"
   },
-  "next_version": 16,
+  "next_version": 17,
   "node_changes": {
     "added": [],
     "changed": [
@@ -39,6 +39,6 @@
   "nodes_removed": 0,
   "plan_version": "1.0",
   "publication_allowed": true,
-  "runtime_checksum": "sha256:3937247acbaeba7d135f3030686b496c5b81108b291a3729887600c19c04a0ff",
+  "runtime_checksum": "sha256:2b1a808e411dc35071ea8282f8b7d99899609ea09ca9bc8b68171e8a97ae9eb1",
   "validation_errors": []
 }

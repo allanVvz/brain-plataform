@@ -454,7 +454,13 @@ def build(source: dict[str, Any]) -> dict[str, Any]:
                     "description": "Primeiro nome ou nome informado pela pessoa, inclusive em frases como pode me chamar de X, meu nome é X, sou X ou em uma resposta curta contendo somente o nome.",
                     "extraction_required_when_expected": True,
                     "acknowledgement_requires_fact": True,
-                    "model_confidence_min": 0.9,
+                    # The conversation envelope v3 does not expose a confidence
+                    # property for facts. The runtime therefore receives 0.0;
+                    # keeping this at 0.9 silently demoted valid answers such as
+                    # "Pode me chamar de Beatriz" after the model had already
+                    # used the name in its public reply. Literal evidence and the
+                    # human-name shape remain required by the proof layer.
+                    "model_confidence_min": 0.0,
                     "min_tokens": 1,
                     "max_tokens": 6,
                     "confirmation_policy": "last_resort",
