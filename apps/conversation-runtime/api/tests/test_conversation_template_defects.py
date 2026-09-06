@@ -548,6 +548,15 @@ def test_branch_switch_retry_excludes_fields_owned_by_the_abandoned_branch():
 
     assert "shared_need" in eligible_keys
     assert "resale_stage" not in eligible_keys
+    assert compact["turn_controls"]["must_ask_one"] is True
+    assert compact["turn_controls"]["eligible_field_count"] == len(eligible_keys)
+    assert "must_ask_one is true" in compact["instruction"]
+    assert "copy its published question_text" in compact["instruction"]
+
+    system = repaired["request_body"]["messages"][0]["content"]
+    assert "must_ask_one=true" in system
+    assert "rewrite the reply tail" in system
+    assert "preserve facts and branch_selections" in system
 
 
 def test_prompt_uses_published_confirmation_then_announced_handoff():
