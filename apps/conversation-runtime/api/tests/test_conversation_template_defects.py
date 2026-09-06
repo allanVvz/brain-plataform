@@ -401,7 +401,8 @@ def test_prompt_does_not_repeat_pending_name_after_branch_switch():
     assert "hard per-conversation prohibition" in instructions
     assert "changes branch" in instructions
     assert "without asking the pending field again" in instructions
-    assert "Ask no question unless a different eligible field has never been asked" in instructions
+    assert "ask exactly one of those fields so the conversation keeps moving" in instructions
+    assert "Ask no question only when no different field is eligible" in instructions
 
     system = result["request_body"]["messages"][0]["content"]
     assert "Highest-priority turn rule" in system
@@ -463,6 +464,7 @@ def test_repair_prompt_carries_the_no_repeat_turn_guard():
     system = repaired["request_body"]["messages"][0]["content"]
     assert "exact human questions already asked" in system
     assert "Do not invent a handoff" in system
+    assert "the repaired reply must ask exactly one" in system
 
 
 def test_repair_prompt_preserves_field_metadata_needed_to_audit_a_new_question():
@@ -482,7 +484,70 @@ def test_repair_prompt_preserves_field_metadata_needed_to_audit_a_new_question()
     assert purchase_profile["question_node_id"] == "faq:tock-purchase-profile"
     assert purchase_profile["question_text"]
     assert "asked_field_key null means" in compact["instruction"]
-    assert "map it to turn_controls.eligible_fields" in repaired["request_body"]["messages"][0]["content"]
+    assert "the repaired reply must ask exactly one" in repaired["request_body"]["messages"][0]["content"]
+
+
+def test_branch_switch_retry_excludes_fields_owned_by_the_abandoned_branch():
+    contract = _purchase_profile_contract()
+    contract["fields"].extend([
+        {
+            "key": "shared_need",
+            "label": "o que voce procura",
+            "owner_node_id": "persona:tock-fatal",
+            "question_node_id": "faq:tock-shared-need",
+            "required": True,
+            "depends_on": ["purchase_profile"],
+            "validation": {"mode": "semantic"},
+        },
+        {
+            "key": "resale_stage",
+            "label": "fase da revenda",
+            "owner_node_id": "audience:tock-reseller",
+            "question_node_id": "faq:tock-resale-stage",
+            "required": True,
+            "depends_on": ["purchase_profile"],
+            "validation": {"mode": "semantic"},
+        },
+    ])
+    contract["questions"].update({
+        "faq:tock-shared-need": {"field_key": "shared_need", "text": "O que voce procura?"},
+        "faq:tock-resale-stage": {"field_key": "resale_stage", "text": "Em que fase esta sua revenda?"},
+    })
+    initial = _run_prompt_builder(
+        _context(
+            graph_contract=contract,
+            active_branch_node_id="audience:tock-reseller",
+            cart={"asked_field_keys": ["nome_cliente"], "facts_by_key": {}},
+        ),
+        _binding(message="Na verdade, e para uso proprio."),
+    )
+    switched = _envelope(
+        facts=[{
+            "field_key": "purchase_profile",
+            "value": "uso-proprio-varejo",
+            "status": "known",
+            "owner_node_id": "audience:tock-retail",
+            "evidence_span": "uso proprio",
+            "source_message_id": "wamid.test",
+            "metadata": {},
+        }],
+        branch_selections=[{
+            "action": "switch",
+            "branch_anchor_node_id": "audience:tock-retail",
+            "evidence_span": "uso proprio",
+        }],
+    )
+    repaired = _run_repair_builder(
+        initial["request_body"], switched,
+        {"gating_errors": ["question_repetition_budget_exceeded"]},
+    )
+    compact = json.loads(repaired["request_body"]["messages"][1]["content"])
+    eligible_keys = {
+        field["key"] for field in compact["turn_controls"]["eligible_fields"]
+    }
+
+    assert "shared_need" in eligible_keys
+    assert "resale_stage" not in eligible_keys
 
 
 def test_prompt_uses_published_confirmation_then_announced_handoff():
