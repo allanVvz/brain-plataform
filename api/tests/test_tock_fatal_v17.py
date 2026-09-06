@@ -34,6 +34,8 @@ def test_v17_adds_persona_owned_name_readiness_and_fulfillment_fields():
     assert by_key["nome_cliente"]["owner_node_id"] == "persona:tock-fatal"
     assert by_key["nome_cliente"]["validation"]["semantic_type"] == "human_full_name"
     assert by_key["nome_cliente"]["validation"]["min_tokens"] == 1
+    assert by_key["nome_cliente"]["validation"]["extraction_required_when_expected"] is True
+    assert by_key["nome_cliente"]["validation"]["acknowledgement_requires_fact"] is True
     assert by_key["nome_cliente"]["depends_on"] == ["purchase_profile"]
     assert persona["data"]["conversation_policy"]["sales_routing"]["service_selector_enabled"] is False
 
@@ -43,6 +45,8 @@ def test_v17_adds_persona_owned_name_readiness_and_fulfillment_fields():
     assert question_policy["branch_selection_question_forbidden_after_profile_understood"] is True
     assert question_policy["preferred_field_order_after_purchase_profile"][0] == "nome_cliente"
     assert any("Nunca pergunte novamente o perfil de compra" in item for item in question_policy["instructions"])
+    assert any("pode me chamar de X" in item for item in question_policy["instructions"])
+    assert any("deixando esse fato fora de facts" in item for item in question_policy["instructions"])
 
     for audience_id in ("audience:tock-retail", "audience:tock-reseller"):
         branch_fields = nodes[audience_id]["data"]["qualification"]["fields"]

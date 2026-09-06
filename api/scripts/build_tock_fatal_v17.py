@@ -392,6 +392,8 @@ def build(source: dict[str, Any]) -> dict[str, Any]:
             "Antes de formular uma pergunta, considere todos os fatos extraídos da mensagem atual e os fatos já conhecidos.",
             "Nunca pergunte novamente o perfil de compra quando a pessoa já disse uso próprio, varejo, atacado ou revenda.",
             "Depois de entender o perfil de compra, pergunte o nome uma única vez se ele ainda não for conhecido nem tiver sido perguntado.",
+            "Quando nome_cliente for a resposta esperada, frases como meu nome é X, pode me chamar de X, sou X ou apenas X informam o nome. Extraia nome_cliente como known usando somente o nome como value e um trecho literal da mensagem como evidence_span.",
+            "Se a resposta pública usar o nome informado, o mesmo turno deve obrigatoriamente persistir nome_cliente; nunca cumprimente a pessoa pelo nome deixando esse fato fora de facts.",
             "Toda pergunta de qualificação deve tratar de um campo ainda elegível e informar esse campo em asked_field_key.",
         ],
     }
@@ -449,7 +451,9 @@ def build(source: dict[str, Any]) -> dict[str, Any]:
                 "validation": {
                     "mode": "semantic",
                     "semantic_type": "human_full_name",
-                    "description": "Primeiro nome ou nome informado pela pessoa.",
+                    "description": "Primeiro nome ou nome informado pela pessoa, inclusive em frases como pode me chamar de X, meu nome é X, sou X ou em uma resposta curta contendo somente o nome.",
+                    "extraction_required_when_expected": True,
+                    "acknowledgement_requires_fact": True,
                     "model_confidence_min": 0.9,
                     "min_tokens": 1,
                     "max_tokens": 6,
