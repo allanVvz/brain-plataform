@@ -10,25 +10,24 @@ RELEASE_GATES = (
     ROOT / "docs" / "runbooks" / "PRODUCTION_RELEASE_GATES.md"
 ).read_text(encoding="utf-8")
 GRAPH_BUNDLE_PUBLISHER = (
-    ROOT / "api" / "services" / "graph_bundle_publisher.py"
+    ROOT / "apps" / "control-plane" / "api" / "services" / "graph_bundle_publisher.py"
 ).read_text(encoding="utf-8")
-CONTENT_WORKFLOW = (
-    ROOT / ".github" / "workflows" / "publish-content.yml"
+RELEASE_WORKFLOW = (
+    ROOT / ".github" / "workflows" / "release-main.yml"
 ).read_text(encoding="utf-8")
 
 
 def test_graph_bundle_publisher_is_scoped_to_one_persona_and_not_bindings():
     assert 'persona_slug = normalized["persona"]["slug"]' in GRAPH_BUNDLE_PUBLISHER
     assert 'raise GraphBundlePublishError("persona_scope_mismatch")' in GRAPH_BUNDLE_PUBLISHER
-    assert "persona_id=persona_id" in GRAPH_BUNDLE_PUBLISHER
+    assert '"persona_id": persona_id' in GRAPH_BUNDLE_PUBLISHER
     assert "workflow_bindings" not in GRAPH_BUNDLE_PUBLISHER
 
 
-def test_legacy_content_workflow_is_not_the_graph_bundle_publisher():
-    assert "publish_persona_documents.py" in CONTENT_WORKFLOW
-    assert "publish_graph_bundle.py" not in CONTENT_WORKFLOW
-    assert "approved-draft-checksum" not in CONTENT_WORKFLOW
-    assert "approved-runtime-checksum" not in CONTENT_WORKFLOW
+def test_content_only_changes_do_not_build_or_deploy_images():
+    policy = (ROOT / "ops/release/release-services.json").read_text(encoding="utf-8")
+    assert '"ci_only"' in policy
+    assert "needs.classify.outputs.build_images == 'true'" in RELEASE_WORKFLOW
 
 
 def test_documents_keep_pause_and_publisher_scope_explicit():

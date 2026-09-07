@@ -2769,14 +2769,50 @@ def commit_graph_turn_and_outbox_v4(
             value = value[0] if value else {}
         if isinstance(value, dict):
             return value
-    except Exception:
+    except Exception as exc:
         # A v3 fallback is safe only for a real journey.  Falling back for
         # journey_action=none would recreate the exact phantom-journey bug.
-        if str(turn.get("journey_action") or "continue") == "none":
+        missing_rpc = (
+            str(getattr(exc, "code", "") or "") in {"PGRST202", "42883"}
+            or "could not find the function" in str(exc).casefold()
+        )
+        if not missing_rpc or str(turn.get("journey_action") or "continue") == "none":
             raise
     return commit_graph_turn_and_outbox_v3(
         turn=turn, outbound_buffer=outbound_buffer,
         outbound_message=outbound_message, result_payload=result_payload,
+    )
+
+
+def commit_graph_turn_and_outbox_v5(
+    *, turn: dict, outbound_buffer: dict | None,
+    outbound_message: dict | None, result_payload: dict,
+) -> dict:
+    """Replay-first commit; fall back only while the v5 RPC is unavailable."""
+    payload = {
+        "p_turn": turn,
+        "p_outbound_buffer": outbound_buffer,
+        "p_outbound_message": outbound_message,
+        "p_result": result_payload,
+    }
+    try:
+        result = get_client().rpc("commit_graph_turn_and_outbox_v5", payload).execute()
+        value = getattr(result, "data", None)
+        if isinstance(value, list):
+            value = value[0] if value else {}
+        return value if isinstance(value, dict) else {}
+    except Exception as exc:
+        missing_rpc = (
+            str(getattr(exc, "code", "") or "") in {"PGRST202", "42883"}
+            or "could not find the function" in str(exc).casefold()
+        )
+        if not missing_rpc:
+            raise
+    return commit_graph_turn_and_outbox_v4(
+        turn=turn,
+        outbound_buffer=outbound_buffer,
+        outbound_message=outbound_message,
+        result_payload=result_payload,
     )
 
 

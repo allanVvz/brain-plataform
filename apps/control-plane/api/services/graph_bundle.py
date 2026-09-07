@@ -308,6 +308,71 @@ def compile_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def compiler_source_rows(
+    bundle: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return compiler rows for an approved bundle without touching editable tables."""
+    _persona, node_rows, edge_rows, _profile = _compiler_inputs(bundle)
+    return node_rows, edge_rows
+
+
+def publication_candidate_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
+    """Return the publishable slice of an authoring draft.
+
+    Pending/rejected work remains in the draft ledger, but can never leak into
+    an immutable runtime publication or its RAG projection.
+    """
+    draft = deepcopy(bundle) if isinstance(bundle, dict) else {}
+    raw_nodes = draft.get("nodes") if isinstance(draft.get("nodes"), list) else []
+    included_ids = {
+        str(node.get("id") or "")
+        for node in raw_nodes
+        if isinstance(node, dict)
+        and str(node.get("status") or "pending_validation").lower()
+        in PUBLISHABLE_STATUSES
+    }
+    draft["nodes"] = [
+        node for node in raw_nodes
+        if isinstance(node, dict) and str(node.get("id") or "") in included_ids
+    ]
+    draft["edges"] = [
+        edge for edge in (draft.get("edges") or [])
+        if isinstance(edge, dict)
+        and str(edge.get("source") or "") in included_ids
+        and str(edge.get("target") or "") in included_ids
+    ]
+    return draft
+
+
+def build_draft_publication_plan(
+    bundle: dict[str, Any],
+    *,
+    current_document: dict[str, Any] | None = None,
+    next_version: int = 1,
+) -> dict[str, Any]:
+    """Seal one exact publishable candidate while retaining pending work."""
+    # Local import avoids a module cycle: draft_ops uses this compiler for its
+    # checksum, while this entrypoint also accepts API payloads directly.
+    from services import graph_bundle_draft_ops
+
+    draft = graph_bundle_draft_ops.canonicalize_draft(bundle)
+    candidate_bundle = publication_candidate_bundle(draft)
+    plan = build_publication_plan(
+        candidate_bundle,
+        current_document=current_document,
+        next_version=next_version,
+        publication_authorized=True,
+    )
+    plan["draft_checksum"] = graph_bundle_draft_ops.draft_checksum(draft)
+    plan["candidate_bundle"] = candidate_bundle
+    included = {str(node.get("id") or "") for node in candidate_bundle.get("nodes") or []}
+    plan["excluded_node_ids"] = sorted(
+        str(node.get("id") or "") for node in draft.get("nodes") or []
+        if str(node.get("id") or "") not in included
+    )
+    return plan
+
+
 def _chunk_identities(document: dict[str, Any] | None) -> set[str]:
     manifest = (document or {}).get("projection_manifest") or {}
     profile = {
@@ -516,6 +581,7 @@ def build_publication_plan(
     *,
     current_document: dict[str, Any] | None = None,
     next_version: int = 1,
+    publication_authorized: bool = False,
 ) -> dict[str, Any]:
     """Return a complete dry-run plan; never publish or activate anything."""
     try:
@@ -530,7 +596,13 @@ def build_publication_plan(
                 f"bundle_node_source_pending:{node_id}"
                 for node_id in pending_source_nodes
             ])
-        publication_allowed = normalized["metadata"].get("publication_allowed") is True
+        # Authorization is an authenticated operation concern, not editable
+        # GraphBundle content.  The metadata flag remains accepted only for
+        # offline/legacy publication plans.
+        publication_allowed = (
+            publication_authorized
+            or normalized["metadata"].get("publication_allowed") is True
+        )
         internal_test_allowed = (
             normalized["metadata"].get("internal_wa_validator_test_allowed") is True
         )

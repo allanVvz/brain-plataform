@@ -16,7 +16,7 @@ VALIDATOR = (
     ROOT / "ops" / "vps" / "validate-production-release.sh"
 ).read_text(encoding="utf-8")
 WORKFLOW = (
-    ROOT / ".github" / "workflows" / "deploy-production.yml"
+    ROOT / ".github" / "workflows" / "release-main.yml"
 ).read_text(encoding="utf-8")
 PORTAL_LAYOUT = (
     ROOT / "dashboard" / "app" / "clientes" / "[personaSlug]" / "layout.tsx"
@@ -58,7 +58,10 @@ def test_release_validator_requires_this_release_migration_and_exact_sha():
     assert "129_carry_over_facts_by_lead.sql" in VALIDATOR
     assert "130_shared_lead_memory_and_journey_commit_v4.sql" in VALIDATOR
     assert "131_microservice_role_grants.sql" in VALIDATOR
-    assert "release migrations 112-131 are incomplete" in VALIDATOR
+    assert "132_runtime_vector_distance_grant.sql" in VALIDATOR
+    assert "133_conversation_turn_exactly_once_v5.sql" in VALIDATOR
+    assert "134_graph_bundle_draft_ledger.sql" in VALIDATOR
+    assert "release migrations 112-134 are incomplete" in VALIDATOR
     assert "microservice database roles are missing or unsafe" in VALIDATOR
     assert "authenticator cannot assume every microservice role" in VALIDATOR
     assert "microservice role inherits universal service_role" in VALIDATOR
@@ -108,7 +111,8 @@ def test_graph_bundle_catalog_is_packaged_at_the_runtime_lookup_path():
 
 
 def test_api_image_application_layer_is_keyed_by_release_sha():
-    assert "SOURCE_SHA=${{ env.TARGET_SHA }}" in WORKFLOW
+    assert "SOURCE_SHA: ${{ needs.classify.outputs.sha }}" in WORKFLOW
+    assert "${{ needs.classify.outputs.sha }}" in WORKFLOW
     marker = 'RUN printf \'%s\' "${SOURCE_SHA}" > /image-source-sha'
     assert marker in API_DOCKERFILE
     assert API_DOCKERFILE.index(marker) < API_DOCKERFILE.index(

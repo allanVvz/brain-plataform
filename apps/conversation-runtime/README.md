@@ -21,3 +21,25 @@ for every runtime change.
 
 The root `api/services` tree and frozen repositories are compatibility sources,
 not implementation donors for this service.
+
+## Agent and execution identity
+
+The production conversation workflow currently executes only the `sdr` role.
+Every provisioned instance is identified by `persona_id` plus the persisted
+`agent_id` when available, otherwise by `persona_id:agent_slug`. The same
+canonical template is rendered for every instance; only technical binding,
+workflow, model and credential references differ. Raw API keys remain inside
+the n8n credential and never enter the graph, event payloads or workflow
+configuration returned to the dashboard.
+
+Closer and image-editor roles are catalog/roadmap contracts only. Provisioning
+fails closed for those roles until an executor is implemented, so configuration
+cannot make an unavailable agent appear operational. A future backend model
+orchestrator must consume the same published context and use the same
+proof/commit/transport boundary as `n8n_agents`.
+
+`conversation_turn_proofs` is the durable source for turn evidence. The
+`conversation.decision_committed` event is only a searchable projection that
+references the real proof id and distinguishes retrieved, model-cited and
+proof-authorized knowledge. WA Validator origin is accepted only from its
+canonical lead metadata; correlation-id prefixes are not trusted as identity.

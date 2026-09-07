@@ -25,7 +25,7 @@ services:
       SOURCE_SHA: ${GATEWAY_SHA:?gateway SHA required}
       BUILD_DIGEST: ${GATEWAY_DIGEST:?gateway digest required}
       BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
-      REQUIRED_SCHEMA_VERSION: "131"
+      REQUIRED_SCHEMA_VERSION: "134"
     labels: {brain.service: gateway, brain.slot: blue}
   gateway-green:
     <<: *gateway
@@ -36,7 +36,7 @@ services:
       SOURCE_SHA: ${GATEWAY_SHA:?gateway SHA required}
       BUILD_DIGEST: ${GATEWAY_DIGEST:?gateway digest required}
       BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
-      REQUIRED_SCHEMA_VERSION: "131"
+      REQUIRED_SCHEMA_VERSION: "134"
     labels: {brain.service: gateway, brain.slot: green}
 
   control-plane-blue: &control-plane
@@ -49,7 +49,7 @@ services:
       SOURCE_SHA: ${CONTROL_PLANE_SHA:?control-plane SHA required}
       BUILD_DIGEST: ${CONTROL_PLANE_DIGEST:?control-plane digest required}
       BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
-      REQUIRED_SCHEMA_VERSION: "131"
+      REQUIRED_SCHEMA_VERSION: "134"
       N8N_BASE_URL: ${N8N_BASE_URL:-http://n8n:5678}
     labels: {brain.service: control-plane, brain.slot: blue}
   control-plane-green:
@@ -61,7 +61,7 @@ services:
       SOURCE_SHA: ${CONTROL_PLANE_SHA:?control-plane SHA required}
       BUILD_DIGEST: ${CONTROL_PLANE_DIGEST:?control-plane digest required}
       BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
-      REQUIRED_SCHEMA_VERSION: "131"
+      REQUIRED_SCHEMA_VERSION: "134"
       N8N_BASE_URL: ${N8N_BASE_URL:-http://n8n:5678}
     labels: {brain.service: control-plane, brain.slot: green}
 
@@ -75,7 +75,7 @@ services:
       SOURCE_SHA: ${RUNTIME_SHA:?runtime SHA required}
       BUILD_DIGEST: ${RUNTIME_DIGEST:?runtime digest required}
       BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
-      REQUIRED_SCHEMA_VERSION: "131"
+      REQUIRED_SCHEMA_VERSION: "134"
       FASTEMBED_CACHE_PATH: /opt/brain/fastembed-cache
     labels: {brain.service: conversation-runtime, brain.slot: blue}
   runtime-green:
@@ -87,7 +87,7 @@ services:
       SOURCE_SHA: ${RUNTIME_SHA:?runtime SHA required}
       BUILD_DIGEST: ${RUNTIME_DIGEST:?runtime digest required}
       BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
-      REQUIRED_SCHEMA_VERSION: "131"
+      REQUIRED_SCHEMA_VERSION: "134"
       FASTEMBED_CACHE_PATH: /opt/brain/fastembed-cache
     labels: {brain.service: conversation-runtime, brain.slot: green}
 
@@ -101,7 +101,7 @@ services:
       SOURCE_SHA: ${TRANSPORT_SHA:?transport SHA required}
       BUILD_DIGEST: ${TRANSPORT_DIGEST:?transport digest required}
       BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
-      REQUIRED_SCHEMA_VERSION: "131"
+      REQUIRED_SCHEMA_VERSION: "134"
       N8N_BASE_URL: ${N8N_BASE_URL:-http://n8n:5678}
     labels: {brain.service: transport, brain.slot: blue}
   transport-green:
@@ -113,7 +113,7 @@ services:
       SOURCE_SHA: ${TRANSPORT_SHA:?transport SHA required}
       BUILD_DIGEST: ${TRANSPORT_DIGEST:?transport digest required}
       BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
-      REQUIRED_SCHEMA_VERSION: "131"
+      REQUIRED_SCHEMA_VERSION: "134"
       N8N_BASE_URL: ${N8N_BASE_URL:-http://n8n:5678}
     labels: {brain.service: transport, brain.slot: green}
 
@@ -131,7 +131,7 @@ services:
       SOURCE_SHA: ${CONTROL_PLANE_SHA:?control-plane SHA required}
       BUILD_DIGEST: ${CONTROL_PLANE_DIGEST:?control-plane digest required}
       BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
-      REQUIRED_SCHEMA_VERSION: "131"
+      REQUIRED_SCHEMA_VERSION: "134"
     labels: {brain.service: control-plane, brain.slot: green, brain.worker-group: knowledge}
 
   control-plane-integrations-blue: &control-plane-integrations
@@ -148,7 +148,7 @@ services:
       SOURCE_SHA: ${CONTROL_PLANE_SHA:?control-plane SHA required}
       BUILD_DIGEST: ${CONTROL_PLANE_DIGEST:?control-plane digest required}
       BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
-      REQUIRED_SCHEMA_VERSION: "131"
+      REQUIRED_SCHEMA_VERSION: "134"
     labels: {brain.service: control-plane, brain.slot: green, brain.worker-group: integrations}
 
   control-plane-validator-blue: &control-plane-validator
@@ -165,7 +165,7 @@ services:
       SOURCE_SHA: ${CONTROL_PLANE_SHA:?control-plane SHA required}
       BUILD_DIGEST: ${CONTROL_PLANE_DIGEST:?control-plane digest required}
       BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
-      REQUIRED_SCHEMA_VERSION: "131"
+      REQUIRED_SCHEMA_VERSION: "134"
     labels: {brain.service: control-plane, brain.slot: green, brain.worker-group: validator}
 
   runtime-conversation-blue: &runtime-conversation
@@ -182,7 +182,7 @@ services:
       SOURCE_SHA: ${RUNTIME_SHA:?runtime SHA required}
       BUILD_DIGEST: ${RUNTIME_DIGEST:?runtime digest required}
       BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
-      REQUIRED_SCHEMA_VERSION: "131"
+      REQUIRED_SCHEMA_VERSION: "134"
       FASTEMBED_CACHE_PATH: /opt/brain/fastembed-cache
     labels: {brain.service: conversation-runtime, brain.slot: green, brain.worker-group: conversation}
 
@@ -200,7 +200,7 @@ services:
       SOURCE_SHA: ${RUNTIME_SHA:?runtime SHA required}
       BUILD_DIGEST: ${RUNTIME_DIGEST:?runtime digest required}
       BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
-      REQUIRED_SCHEMA_VERSION: "131"
+      REQUIRED_SCHEMA_VERSION: "134"
       FASTEMBED_CACHE_PATH: /opt/brain/fastembed-cache
     labels: {brain.service: conversation-runtime, brain.slot: green, brain.worker-group: validator}
 
@@ -218,7 +218,7 @@ services:
       SOURCE_SHA: ${TRANSPORT_SHA:?transport SHA required}
       BUILD_DIGEST: ${TRANSPORT_DIGEST:?transport digest required}
       BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
-      REQUIRED_SCHEMA_VERSION: "131"
+      REQUIRED_SCHEMA_VERSION: "134"
       N8N_BASE_URL: ${N8N_BASE_URL:-http://n8n:5678}
     labels: {brain.service: transport, brain.slot: green, brain.worker-group: transport}
 
@@ -236,5 +236,5 @@ services:
       SOURCE_SHA: ${TRANSPORT_SHA:?transport SHA required}
       BUILD_DIGEST: ${TRANSPORT_DIGEST:?transport digest required}
       BRAIN_CONTRACTS_VERSION: ${BRAIN_CONTRACTS_VERSION:-1.0.0}
-      REQUIRED_SCHEMA_VERSION: "131"
+      REQUIRED_SCHEMA_VERSION: "134"
     labels: {brain.service: transport, brain.slot: green, brain.worker-group: media}

@@ -20,7 +20,7 @@ export interface GraphBundleVersionsPayload {
   persona: { id: string; slug: string; name?: string | null };
   versions: GraphBundleVersion[];
   default_ref?: string | null;
-  read_only: true;
+  read_only: boolean;
 }
 
 export interface GraphBundleViewPayload {
@@ -38,7 +38,51 @@ export interface GraphBundleViewPayload {
   validation_errors: string[];
   document: Record<string, any>;
   branch_memberships: Record<string, Record<string, any>>;
-  read_only: true;
+  read_only: boolean;
+}
+
+export interface GraphBundleDraftSnapshot {
+  draft_ref: string;
+  persona_id: string;
+  persona_slug: string;
+  base_publication_id: string;
+  base_runtime_checksum: string;
+  revision: number;
+  draft_checksum: string;
+  bundle: Record<string, any>;
+  state: "draft" | "blocked" | "published";
+  change_summary?: {
+    faq_nodes_requiring_review?: string[];
+    nodes_changed?: string[];
+    edges_changed?: string[];
+  };
+}
+
+export type GraphBundleDraftOperation =
+  | { op: "update_node"; node_id: string; patch: Record<string, any> }
+  | { op: "add_node"; node: Record<string, any> }
+  | { op: "archive_node"; node_id: string }
+  | { op: "add_edge"; edge: Record<string, any> }
+  | { op: "revoke_edge"; edge_id: string }
+  | { op: "approve_faq"; node_id: string }
+  | { op: "reject_faq"; node_id: string }
+  | { op: "add_faq_proposal"; node_id: string; slug: string; question: string; answer: string; source: string; source_node_id: string; source_node_type: string; branch_path: string[]; question_aliases: string[]; generator: string; generation_batch_id: string };
+
+export function draftSnapshotToView(draft: GraphBundleDraftSnapshot): GraphBundleViewPayload {
+  return {
+    backend: "v3",
+    persona: { id: draft.persona_id, slug: draft.persona_slug },
+    source: "draft",
+    ref: draft.draft_ref,
+    origin: "system_events",
+    state: draft.state === "blocked" ? "blocked" : "draft",
+    checksum: draft.draft_checksum,
+    runtime_checksum: null,
+    validation_errors: [],
+    document: draft.bundle,
+    branch_memberships: {},
+    read_only: false,
+  };
 }
 
 const NODE_COLORS: Record<string, string> = {
@@ -118,7 +162,7 @@ export function graphBundleToReactFlow(view: GraphBundleViewPayload) {
           primary_tree: primary,
           metadata: { ...metadata, primary_tree: primary },
           directional: true,
-          deletable: false,
+          deletable: view.read_only === false,
           bundle_edge: edge,
         },
       };

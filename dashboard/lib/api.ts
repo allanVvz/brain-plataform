@@ -1123,34 +1123,46 @@ export const api = {
       `/graph-bundles/view?${params.toString()}`,
     );
   },
-  // Canonical write path: publish the edited graph_json. The backend validates
-  // the whole document and materializes the derived knowledge_nodes/edges (reindex).
-  publishGraphDocument: (body: { persona_slug: string; brand_slug?: string | null; graph_json: any; source?: string; note?: string; expected_version?: number; idempotency_key?: string }) =>
-    req<any>("/graph-documents/publish", { method: "POST", body: JSON.stringify({ source: "graph_ui", ...body }) }),
-  commitGraphDocument: (body: { persona_slug: string; brand_slug?: string | null; graph_json?: any; operations?: any[]; source?: string; reason: string; expected_version: number; idempotency_key: string }) =>
-    req<any>("/graph-documents/commit", { method: "POST", body: JSON.stringify({ source: "graph_ui", ...body }) }),
-  graphDocumentActions: (personaSlug: string) =>
-    req<any>(`/graph-documents/current/actions?persona_slug=${encodeURIComponent(personaSlug)}`),
-  resolveGraphContext: (body: { persona_slug: string; destination_id: string; graph_version: number; intent: string; query: string; seed_refs?: string[]; max_nodes?: number; max_tokens?: number }) =>
-    req<any>("/knowledge/context/resolve", { method: "POST", body: JSON.stringify(body) }),
-  applyGraphPatch: (body: { persona_slug: string; graph_json: any; source?: string; note?: string; expected_version?: number; idempotency_key?: string }) =>
-    req<any>("/graph-documents/apply-patch", { method: "POST", body: JSON.stringify({ source: "graph_ui_patch", ...body }) }),
-  syncGraphDocument: (body: { persona_slug: string; brand_slug?: string | null; idempotency_key?: string }) =>
-    req<any>("/graph-documents/sync", { method: "POST", body: JSON.stringify(body) }),
-  createGraphEdge: (body: { source_node_id: string; target_node_id: string; relation_type?: string; persona_id?: string; weight?: number; metadata?: any }) =>
-    req<any>("/knowledge/graph-edges", { method: "POST", body: JSON.stringify(body) }),
-  deleteGraphEdge: (edgeId: string) =>
-    req<any>(`/knowledge/graph-edges/${encodeURIComponent(edgeId)}`, { method: "DELETE" }),
-  deleteGraphNode: (nodeId: string) =>
-    req<any>(`/knowledge/graph-nodes/${encodeURIComponent(nodeId)}`, { method: "DELETE" }),
-  updateGraphNode: (
-    nodeId: string,
-    body: { title?: string; markdown?: string; summary?: string; tags?: string[]; status?: string },
-  ) =>
-    req<any>(`/knowledge/graph-nodes/${encodeURIComponent(nodeId)}`, {
-      method: "PATCH",
-      body: JSON.stringify(body),
-    }),
+  graphBundleCreateDraft: (body: {
+    persona_slug: string;
+    expected_active_checksum: string;
+    reuse_open?: boolean;
+    reason: string;
+    source: { surface: "graph" | "kb" | "messages" | "api" | "import"; response_message_id?: string; source_ref?: string };
+    idempotency_key: string;
+  }) => req<import("./graph-bundle-v3").GraphBundleDraftSnapshot>("/graph-bundles/drafts", {
+    method: "POST", body: JSON.stringify(body),
+  }),
+  graphBundleDraft: (draftRef: string) =>
+    req<import("./graph-bundle-v3").GraphBundleDraftSnapshot>(`/graph-bundles/drafts/${encodeURIComponent(draftRef)}`),
+  graphBundlePatchDraft: (draftRef: string, body: {
+    expected_revision: number;
+    expected_draft_checksum: string;
+    reason: string;
+    source: { surface: "graph" | "kb" | "messages" | "api" | "import"; response_message_id?: string; source_ref?: string };
+    operations: import("./graph-bundle-v3").GraphBundleDraftOperation[];
+    idempotency_key: string;
+  }) => req<import("./graph-bundle-v3").GraphBundleDraftSnapshot>(`/graph-bundles/drafts/${encodeURIComponent(draftRef)}`, {
+    method: "PATCH", body: JSON.stringify(body),
+  }),
+  graphBundleDraftDiff: (draftRef: string) =>
+    req<any>(`/graph-bundles/drafts/${encodeURIComponent(draftRef)}/diff`),
+  graphBundleDraftPreview: (draftRef: string, surface: "agent" | "catalog" | "site") =>
+    req<any>(`/graph-bundles/drafts/${encodeURIComponent(draftRef)}/preview?surface=${surface}`),
+  graphBundleDraftPlan: (draftRef: string, body: { expected_revision: number; expected_draft_checksum: string; idempotency_key: string }) =>
+    req<any>(`/graph-bundles/drafts/${encodeURIComponent(draftRef)}/plan`, { method: "POST", body: JSON.stringify(body) }),
+  graphBundleDraftValidate: (draftRef: string, body: { expected_revision: number; expected_draft_checksum: string; idempotency_key: string }) =>
+    req<any>(`/graph-bundles/drafts/${encodeURIComponent(draftRef)}/validate`, { method: "POST", body: JSON.stringify(body) }),
+  graphBundleDraftPublish: (draftRef: string, body: {
+    expected_revision: number;
+    expected_draft_checksum: string;
+    plan_ref: string;
+    validation_ref: string;
+    approved_runtime_checksum: string;
+    confirmation: true;
+    reason: string;
+    idempotency_key: string;
+  }) => req<any>(`/graph-bundles/drafts/${encodeURIComponent(draftRef)}/publish`, { method: "POST", body: JSON.stringify(body) }),
   getPersonaAppointmentPolicy: (personaSlug: string) =>
     req<{ ok: boolean; texts: Record<string, string | null> }>(
       `/knowledge/personas/${encodeURIComponent(personaSlug)}/appointment-policy`,
@@ -1260,16 +1272,6 @@ export const api = {
     if (responseMessageId) params.set("response_message_id", responseMessageId);
     return req<any>(`/knowledge/chat-context?${params.toString()}`);
   },
-  publishContextCard: (nodeId: string, body: {
-    persona_slug: string;
-    content: string;
-    expected_version: number;
-    reason: string;
-    idempotency_key?: string;
-  }) => req<any>(`/knowledge/context-cards/${encodeURIComponent(nodeId)}/publish`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  }),
   knowledgeCatalog: (opts: { personaId?: string; personaSlug?: string } = {}) => {
     const params = new URLSearchParams();
     if (opts.personaId) params.set("persona_id", opts.personaId);

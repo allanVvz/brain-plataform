@@ -221,7 +221,7 @@ def branchless_turn(monkeypatch, document):
     """
     publication = {
         "id": "pub-1", "version": 13, "status": "active",
-        "checksum": "sha256:ba91e7b1c31f6eadf8ea6decd6fa57f58dddd1b1c58b64e0b7317dea8d3aa66d",
+        "checksum": document["checksum"],
         "document_json": document,
     }
     served = [
@@ -232,8 +232,9 @@ def branchless_turn(monkeypatch, document):
         _chunk("product_group:tock-conjuntos", "Conjuntos"),
     ]
     client = graph_agent_runtime_v3.supabase_client
-    monkeypatch.setattr(client, "get_persona", lambda slug: {"id": "persona-1", "slug": slug, "config": {}})
-    monkeypatch.setattr(client, "get_lead_by_ref", lambda ref: {"id": "lead-1", "persona_id": "persona-1", "metadata": {}})
+    persona_id = document["persona"]["id"]
+    monkeypatch.setattr(client, "get_persona", lambda slug: {"id": persona_id, "slug": slug, "config": {}})
+    monkeypatch.setattr(client, "get_lead_by_ref", lambda ref: {"id": "lead-1", "persona_id": persona_id, "metadata": {}})
     monkeypatch.setattr(
         client, "get_graph_turn_context_batch_v4",
         lambda **kwargs: {"publication": publication, "messages": [], "branches": []},

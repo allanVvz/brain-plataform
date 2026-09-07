@@ -113,12 +113,28 @@ def _workflow_for_persona(
     slug = str(persona.get("slug") or "").strip()
     if not slug:
         raise ValueError("persona slug is required")
+    persona_id = str(persona.get("id") or "").strip()
+    if not persona_id:
+        raise ValueError("persona id is required")
     config = persona.get("config") or {}
     agent_slug = str(
         config.get("agent_slug")
         or (config.get("automation") or {}).get("agent_slug")
         or "assistant"
-    )
+    ).strip()
+    agent_id = str(
+        config.get("agent_id")
+        or (config.get("automation") or {}).get("agent_id")
+        or ""
+    ).strip()
+    agent_role = str(
+        config.get("agent_role")
+        or (config.get("automation") or {}).get("agent_role")
+        or "sdr"
+    ).strip().lower()
+    if agent_role != "sdr":
+        raise ValueError("conversation workflow currently supports only the sdr role")
+    agent_identity_key = f"{persona_id}:{agent_id or agent_slug}"
     configured_model = dict(model_binding or {})
     model = str(configured_model.get("model") or "").strip()
     endpoint = str(configured_model.get("endpoint") or "").strip()
@@ -153,8 +169,12 @@ def _workflow_for_persona(
     workflow.setdefault("meta", {})
     workflow["meta"]["binding"] = {
         **(workflow["meta"].get("binding") or {}),
+        "persona_id": persona_id,
         "persona_slug": slug,
+        "agent_id": agent_id or None,
         "agent_slug": agent_slug,
+        "agent_role": agent_role,
+        "agent_identity_key": agent_identity_key,
         "decision_owner": "n8n_agents",
         "pipeline_contract": "conversation_v3",
         "runtime_version": "graph_agent_runtime_v3",
@@ -259,6 +279,11 @@ def provision(
         "fingerprint": hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:12],
         "persona_id": str(persona.get("id") or ""),
         "persona_slug": slug,
+        "agent_id": workflow["meta"]["binding"].get("agent_id"),
+        "agent_slug": workflow["meta"]["binding"]["agent_slug"],
+        "agent_role": workflow["meta"]["binding"]["agent_role"],
+        "agent_identity_key": workflow["meta"]["binding"]["agent_identity_key"],
+        "credential_ref": credential_id,
         "workflow_template": _TEMPLATE_VERSION,
         "workflow_checksum": workflow_checksum,
         "runtime_version": "graph_agent_runtime_v3",
@@ -360,6 +385,11 @@ def resync_workflow_for_persona(
         "conversation_webhook_path": f"{slug}/conversation",
         "persona_id": str(persona.get("id") or ""),
         "persona_slug": slug,
+        "agent_id": workflow["meta"]["binding"].get("agent_id"),
+        "agent_slug": workflow["meta"]["binding"]["agent_slug"],
+        "agent_role": workflow["meta"]["binding"]["agent_role"],
+        "agent_identity_key": workflow["meta"]["binding"]["agent_identity_key"],
+        "credential_ref": credential_id,
         "workflow_template": _TEMPLATE_VERSION,
         "workflow_checksum": workflow_checksum,
         "runtime_version": "graph_agent_runtime_v3",

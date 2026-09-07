@@ -66,6 +66,7 @@ jobs:
           python scripts/check_python_syntax.py
           python scripts/check_monorepo_boundaries.py
           python scripts/check_persona_hardcodes.py
+          test -z "$(radon cc apps/control-plane/api/routes/graph_bundles.py apps/control-plane/api/services/graph_bundle_draft_store.py apps/control-plane/api/services/graph_bundle_publisher.py -s -n C)"
           python -m json.tool apps/conversation-runtime/n8n/persona-conversation-template.json >/dev/null
 
       - name: Testar backend uma única vez

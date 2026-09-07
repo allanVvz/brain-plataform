@@ -12,7 +12,7 @@ const nextConfig = {
       { source: "/tools", destination: "/settings?tab=tools", permanent: false },
       { source: "/logs", destination: "/settings?tab=logs", permanent: false },
       { source: "/access", destination: "/settings?tab=access", permanent: false },
-      { source: "/knowledge/import-vault", destination: "/knowledge/sync", permanent: false },
+      { source: "/knowledge/import-vault", destination: "/knowledge/upload", permanent: false },
     ];
   },
   async rewrites() {

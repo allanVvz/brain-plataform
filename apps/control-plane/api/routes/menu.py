@@ -8,7 +8,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Response
 
 from core.landing_slots import LandingSlot, slot_for_metadata
-from services import public_site, supabase_client, graph_json_v2_store, graph_json_v21_adapter
+from services import public_site, supabase_client
 from utils.rich_text import to_clean_markdown
 
 router = APIRouter(tags=["menu"])
@@ -22,50 +22,71 @@ def _canonical_json_checksum(value: dict) -> str:
 
 
 def _public_graph_context(persona_slug: str) -> Optional[dict]:
-    """Return Gallery grants for an activated 2.1 graph; legacy stays untouched."""
-    try:
-        current = graph_json_v2_store.load_current(persona_slug)
-    except Exception:
+    """Return public grants exclusively from the active immutable v3 snapshot."""
+    persona = supabase_client.get_persona(persona_slug)
+    if not persona:
         return None
-    if not current or current[1].schema_version != "2.1":
+    publication = supabase_client.get_active_graph_publication(str(persona["id"]))
+    if not publication or publication.get("status") != "active":
         return None
-    version, graph = current
-    graph = graph_json_v21_adapter.upgrade_to_v21(graph)
+    document = publication.get("document_json") or {}
+    if not isinstance(document, dict) or document.get("schema_version") != "3.0":
+        return None
+    document_body = dict(document)
+    document_checksum = str(document_body.pop("checksum", ""))
+    publication_checksum = str(publication.get("checksum") or "")
+    document_persona = document.get("persona") or {}
+    if (
+        not document_checksum
+        or document_checksum != publication_checksum
+        or _canonical_json_checksum(document_body) != document_checksum
+        or str(document_persona.get("id") or "") != str(persona.get("id") or "")
+        or str(document_persona.get("slug") or "") != persona_slug
+    ):
+        return None
+    nodes = [node for node in document.get("nodes") or [] if isinstance(node, dict)]
+    edges = [edge for edge in document.get("edges") or [] if isinstance(edge, dict)]
     action = next(
         (
-            node for node in graph.nodes
-            if node.node_type == "gallery" and node.action and node.action.enabled
-            and node.action.destination_type == "public_site"
+            node for node in nodes
+            if str(node.get("node_type") or "").lower() == "gallery"
+            and ((node.get("data") or {}).get("action") or {}).get("enabled") is True
+            and ((node.get("data") or {}).get("action") or {}).get("destination_type") == "public_site"
         ),
         None,
     )
-    if action is None:
-        return {"version": version, "checksum": graph.content_checksum, "action": None, "allowed": {}}
-    by_id = {node.id: node for node in graph.nodes}
+    by_id = {str(node.get("id")): node for node in nodes}
     granted = {
-        edge.source for edge in graph.edges
-        if edge.relation_type == "publishes_to"
-        and edge.target == action.id
-        and edge.lifecycle.status == "active"
-        and by_id.get(edge.source)
-        and by_id[edge.source].lifecycle.status in {"approved", "active"}
+        str(edge.get("source")) for edge in edges
+        if action is not None
+        and edge.get("relation_type") in {"publishes_to", "gallery_asset"}
+        and edge.get("target") == action.get("id")
+        and (edge.get("metadata") or {}).get("active", True) is not False
+        and by_id.get(str(edge.get("source")))
+        and str(by_id[str(edge.get("source"))].get("status") or "").lower()
+        in {"approved", "active", "validated", "ativo", "embedded"}
     }
     allowed: dict[str, set[str]] = {}
     asset_registry_ids: set[str] = set()
     for node_id in granted:
         node = by_id[node_id]
-        allowed.setdefault(node.node_type, set()).add(node.slug)
-        if node.node_type == "asset":
-            blob = (node.spec or {}).get("blob") or {}
-            registry_id = blob.get("registry_id") or (node.spec or {}).get("registry_id")
+        node_type = str(node.get("node_type") or "")
+        data = node.get("data") or {}
+        allowed.setdefault(node_type, set()).add(str(node.get("slug") or ""))
+        if node_type == "asset":
+            blob = data.get("blob") or {}
+            registry_id = blob.get("registry_id") or data.get("registry_id")
             if registry_id:
                 asset_registry_ids.add(str(registry_id))
     return {
-        "version": version,
-        "checksum": graph.content_checksum or graph_json_v2_store.checksum_graph(graph),
+        "version": publication.get("version"),
+        "checksum": publication.get("checksum"),
+        "publication_id": publication.get("id"),
         "action": action,
         "allowed": allowed,
         "asset_registry_ids": asset_registry_ids,
+        "nodes": nodes,
+        "edges": edges,
     }
 
 
@@ -532,255 +553,246 @@ def _products_by_group(products: list[dict], group_ids: list[str]) -> dict[str, 
     return by_group
 
 
-def build_menu_payload(persona_slug: str, collection_slug: Optional[str] = None) -> dict:
-    persona = _resolve_persona(persona_slug)
-    persona_id = persona["id"]
-    effective_collection_slug = collection_slug or _default_collection_slug(persona, persona_slug)
+def _active_node_data(node: dict) -> dict:
+    data = node.get("data") or {}
+    return data if isinstance(data, dict) else {}
 
-    # Try to find an explicit collection node. Migration 039 canonicalized
-    # product_collection -> product_group, so try the legacy alias first and
-    # then the canonical type. When no anchor node exists we still serve the
-    # persona's product_groups + products under a synthetic container so
-    # universal personas (vz-lupas, etc.) work without seeding extra rows.
-    collection = supabase_client.get_knowledge_node_by_slug(
-        effective_collection_slug,
-        persona_id=persona_id,
-        node_type="product_collection",
-    ) or supabase_client.get_knowledge_node_by_slug(
-        effective_collection_slug,
-        persona_id=persona_id,
-        node_type="product_group",
-    )
-    synthesized_collection = False
-    if not collection:
-        if collection_slug is not None:
-            # Caller asked for a specific collection we cannot resolve.
-            raise HTTPException(404, f"Collection not found: {collection_slug}")
-        synthesized_collection = True
-        collection = {
-            "id": f"persona:{persona_id}:cardapio",
-            "slug": effective_collection_slug,
-            "title": persona.get("name") or persona_slug,
-            "metadata": {
-                "collection_type": "menu",
-                "display_name": persona.get("name") or persona_slug,
-                "synthesized": True,
-            },
-        }
 
-    cache: dict = {}
-
-    # Categories = canonical product_group nodes for this persona. When a
-    # collection_slug filter is provided AND any group carries that slug in
-    # metadata, narrow to that subset; otherwise show every product_group.
-    all_groups = supabase_client.list_product_collection_nodes(
-        persona_id=persona_id,
-        node_type="product_group",
-        limit=500,
-    )
-    # Archived legacy groups remain in the database until the destructive
-    # cleanup window. They must not leak into the public menu projection.
-    all_groups = [
-        row for row in all_groups
-        if str(row.get("status") or "").lower() != "archived"
-    ]
-    filtered_groups = [
-        row for row in all_groups
-        if _meta(row).get("collection_slug") == effective_collection_slug
-    ]
-    categories = filtered_groups if filtered_groups else all_groups
-
-    products = supabase_client.list_product_nodes(
-        persona_id=persona_id,
-        collection_slug=effective_collection_slug if filtered_groups else None,
-        limit=1000,
-    )
-    # When no metadata.collection_slug filter narrowed the result, list every
-    # product for the persona so canonical edges can still bind them to a group.
-    if not products:
-        products = supabase_client.list_product_nodes(persona_id=persona_id, limit=1000)
-    products_by_category: dict[str, list[dict]] = {}
-    product_assets = _product_assets(products, persona_id, cache=cache)
-    product_related, related_node_map = _related_nodes(products, ["product_has_copy", "supports_copy", "product_has_faq", "offer_has_copy"])
-    all_faq_nodes = [node for node in related_node_map.values() if node.get("node_type") == "faq"]
-    embedded_faq_ids = _embedded_faq_ids(all_faq_nodes)
-    product_to_group_id = {
-        product_id: group_id
-        for group_id, product_ids in _products_by_group(products, [row["id"] for row in categories if row.get("id")]).items()
-        for product_id in product_ids
+def _active_asset_payload(node: dict) -> dict:
+    data = _active_node_data(node)
+    blob = data.get("blob") or {}
+    return {
+        "id": str(node.get("id") or ""),
+        "asset_id": blob.get("registry_id") or data.get("registry_id") or node.get("id"),
+        "knowledge_node_id": node.get("id"),
+        "edge_id": None,
+        "type": data.get("type") or data.get("asset_type") or "image",
+        "url": blob.get("url") or data.get("url") or data.get("public_url") or "",
+        "alt": data.get("alt") or node.get("title") or "",
+        "role": data.get("role") or data.get("asset_function"),
+        "section": data.get("page_section"),
+        "slot_key": (data.get("page_binding") or {}).get("slot_key"),
+        "href": data.get("href") or data.get("cta_url"),
+        "markdown": data.get("markdown") or data.get("body"),
     }
-    categories_by_id = {row["id"]: row for row in categories if row.get("id")}
-    for product in products:
-        metadata = _meta(product)
-        related = product_related.get(product["id"], [])
-        copy_nodes = [node for node in related if node.get("node_type") == "copy" and node.get("status") != "archived"]
-        faq_nodes = [
-            node for node in related
-            if node.get("node_type") == "faq"
-            and node.get("status") != "archived"
-            and node.get("id") in embedded_faq_ids
+
+
+def build_menu_payload(persona_slug: str, collection_slug: Optional[str] = None) -> dict:
+    """Build the public site only from the active immutable GraphBundle v3."""
+    persona = _resolve_persona(persona_slug)
+    publication = _public_graph_context(persona_slug)
+    if publication is None:
+        raise HTTPException(409, "active_graph_publication_v3_required")
+
+    nodes = publication.get("nodes") or []
+    edges = [
+        edge for edge in publication.get("edges") or []
+        if (edge.get("metadata") or {}).get("active", True) is not False
+    ]
+    action = publication.get("action")
+    allowed = publication.get("allowed") or {}
+    allowed_slugs = {
+        slug for values in allowed.values() for slug in values if slug
+    }
+    public_nodes = [
+        node for node in nodes
+        if str(node.get("slug") or "") in allowed_slugs
+    ]
+    by_id = {str(node.get("id") or ""): node for node in public_nodes}
+    neighbours: dict[str, set[str]] = {}
+    for edge in edges:
+        source, target = str(edge.get("source") or ""), str(edge.get("target") or "")
+        if source in by_id and target in by_id:
+            neighbours.setdefault(source, set()).add(target)
+            neighbours.setdefault(target, set()).add(source)
+
+    def typed(node_type: str) -> list[dict]:
+        return [
+            node for node in public_nodes
+            if str(node.get("node_type") or "").lower() == node_type
         ]
-        product_payload = {
-            "id": product["id"],
-            "slug": product.get("slug") or product["id"],
-            "name": product.get("title") or product.get("slug") or "Produto",
-            "price_cents": _read_int(metadata.get("price_cents"), 0),
-            # Offer = preco/kits/variacoes comerciais (metadata.price: unit/kit_5/...).
-            # None quando ausente — nunca inventar preco.
-            "offer": metadata.get("price") or None,
-            # Limpa HTML importado -> markdown enxuto (sem tags cruas).
-            "description": to_clean_markdown(product.get("summary") or metadata.get("description") or ""),
-            "visible": metadata.get("visible") is not False and product.get("status") != "archived",
-            "position": _read_int(metadata.get("position"), 0),
-            "copies": [_copy_payload(node) for node in copy_nodes],
-            "faqs": [_faq_payload(node) for node in faq_nodes],
-            "assets": [
-                _asset_payload(asset, alt=product.get("title") or "", edge=asset.get("_edge"))
-                for asset in product_assets.get(product["id"], [])
-            ],
-        }
-        # Resolve product -> category via canonical edge first, then metadata.
-        group_id = product_to_group_id.get(product["id"])
-        category_slug: Optional[str] = None
-        if group_id and group_id in categories_by_id:
-            group_row = categories_by_id[group_id]
-            category_slug = group_row.get("slug") or _meta(group_row).get("category_slug")
-        if not category_slug:
-            category_slug = (
-                metadata.get("category_slug")
-                or metadata.get("product_group_slug")
-                or metadata.get("parent_group")
-                or "sem-categoria"
-            )
-        products_by_category.setdefault(str(category_slug), []).append(product_payload)
 
-    covers = _category_cover_assets(categories, persona_id, cache=cache)
-    category_payloads = []
-    for category in categories:
-        metadata = _meta(category)
-        cover_asset = covers.get(category["id"])
-        cover_edge = (cover_asset or {}).get("_edge") if cover_asset else None
-        category_slug = category.get("slug") or metadata.get("category_slug") or category["id"]
-        cover_url = (cover_asset or {}).get("url") or ""
-        # Fallback: toda categoria deve ter capa. Sem cover dedicado, usa a
-        # primeira imagem de um produto interno do grupo (os assets de produto
-        # ja foram resolvidos em products_by_category acima).
-        if not cover_url:
-            for product in products_by_category.get(str(category_slug), []):
-                product_cover = next((a.get("url") for a in product.get("assets") or [] if a.get("url")), None)
-                if product_cover:
-                    cover_url = product_cover
-                    break
-        category_payloads.append({
-            "id": category["id"],
-            "slug": category_slug,
-            "title": category.get("title") or category_slug,
-            "eyebrow": metadata.get("eyebrow") or metadata.get("category_eyebrow") or "",
-            "cover": cover_url,
-            "cover_alt": (cover_asset or {}).get("title") or category.get("title") or category_slug,
-            "cover_asset_id": (cover_asset or {}).get("id") if cover_asset else None,
-            "cover_edge_id": (cover_edge or {}).get("id") if cover_edge else None,
-            "cover_slot_key": LandingSlot.PRODUCT_GROUP_COVER.value if cover_asset else None,
-            "visible": metadata.get("visible") is not False and category.get("status") != "archived",
-            "position": _read_int(metadata.get("position") or metadata.get("sort_order"), 0),
-            "products": sorted(products_by_category.get(str(category_slug), []), key=lambda row: row.get("position", 0)),
-        })
+    def adjacent(node: dict, node_type: str) -> list[dict]:
+        return [
+            by_id[node_id] for node_id in neighbours.get(str(node.get("id") or ""), set())
+            if str(by_id[node_id].get("node_type") or "").lower() == node_type
+        ]
 
-    collection_meta = _meta(collection)
-    collection_cover = ""
-    sorted_categories = sorted(category_payloads, key=lambda row: row.get("position", 0))
-    for category in sorted_categories:
-        if category.get("cover"):
-            collection_cover = category["cover"]
-            break
-    collection_assets = _collection_campaign_assets(collection, persona_id, cache=cache)
-    campaign_display_name = (
-        collection_meta.get("campaign_name")
-        or collection_meta.get("display_name")
-        or collection.get("title")
-        or "Cardapio"
+    effective_collection_slug = collection_slug or _default_collection_slug(persona, persona_slug)
+    campaigns = typed("campaign")
+    collection_node = next(
+        (node for node in campaigns if node.get("slug") == effective_collection_slug),
+        campaigns[0] if campaigns else None,
     )
-    persona_display_name = persona.get("name") or persona_slug
+    if collection_slug and collection_node is None:
+        raise HTTPException(404, f"Collection not found: {collection_slug}")
 
-    brand = _brand_payload(persona, persona_slug, cache=cache)
+    products = typed("product")
+    groups = typed("product_group")
+    products_by_group: dict[str, list[dict]] = {str(group.get("id")): [] for group in groups}
+    ungrouped: list[dict] = []
+    for product in products:
+        linked = [
+            node for node in adjacent(product, "product_group")
+            if str(node.get("id") or "") in products_by_group
+        ]
+        if linked:
+            for group in linked:
+                products_by_group[str(group.get("id"))].append(product)
+        else:
+            ungrouped.append(product)
+    if ungrouped:
+        synthetic = {
+            "id": "public:sem-categoria",
+            "slug": "sem-categoria",
+            "title": "Produtos",
+            "node_type": "product_group",
+            "data": {"synthesized": True},
+        }
+        groups.append(synthetic)
+        products_by_group[synthetic["id"]] = ungrouped
+
+    def product_payload(product: dict) -> dict:
+        data = _active_node_data(product)
+        copies = adjacent(product, "copy")
+        faqs = adjacent(product, "faq")
+        assets = adjacent(product, "asset")
+        return {
+            "id": product.get("id"),
+            "slug": product.get("slug") or product.get("id"),
+            "name": product.get("title") or product.get("slug") or "Produto",
+            "price_cents": _read_int(data.get("price_cents"), 0),
+            "offer": data.get("price") or None,
+            "description": to_clean_markdown(
+                product.get("summary") or data.get("description") or ""
+            ),
+            "visible": data.get("visible") is not False,
+            "position": _read_int(data.get("position"), 0),
+            "copies": [{
+                "id": node.get("id"),
+                "slug": node.get("slug"),
+                "slot": _active_node_data(node).get("slot") or "body",
+                "body": to_clean_markdown(
+                    _active_node_data(node).get("content")
+                    or _active_node_data(node).get("body")
+                    or node.get("summary") or ""
+                ),
+            } for node in copies],
+            "faqs": [{
+                "id": node.get("id"),
+                "slug": node.get("slug"),
+                "question": _active_node_data(node).get("question") or node.get("title") or "",
+                "answer": (
+                    _active_node_data(node).get("answer")
+                    or _active_node_data(node).get("content")
+                    or node.get("summary") or ""
+                ),
+                "is_rag_eligible": True,
+            } for node in faqs],
+            "assets": [_active_asset_payload(node) for node in assets],
+        }
+
+    categories = []
+    for group in groups:
+        data = _active_node_data(group)
+        group_products = sorted(
+            (product_payload(node) for node in products_by_group.get(str(group.get("id")), [])),
+            key=lambda row: row["position"],
+        )
+        group_assets = adjacent(group, "asset") if str(group.get("id")) in by_id else []
+        cover = next(
+            (asset for asset in (_active_asset_payload(node) for node in group_assets) if asset["url"]),
+            None,
+        )
+        if cover is None:
+            cover = next(
+                (asset for product in group_products for asset in product["assets"] if asset["url"]),
+                None,
+            )
+        categories.append({
+            "id": group.get("id"),
+            "slug": group.get("slug") or group.get("id"),
+            "title": group.get("title") or group.get("slug") or "Produtos",
+            "eyebrow": data.get("eyebrow") or data.get("category_eyebrow") or "",
+            "cover": (cover or {}).get("url") or "",
+            "cover_alt": (cover or {}).get("alt") or group.get("title") or "",
+            "cover_asset_id": (cover or {}).get("asset_id"),
+            "cover_edge_id": None,
+            "cover_slot_key": (cover or {}).get("slot_key"),
+            "visible": data.get("visible") is not False,
+            "position": _read_int(data.get("position") or data.get("sort_order"), 0),
+            "products": group_products,
+        })
+    categories.sort(key=lambda row: row["position"])
+
     formats = supabase_client.list_public_site_formats(enabled_only=True)
+    site = public_site.public_site_payload(persona, formats, catalog_url=persona.get("catalog_url"))
+    action_data = ((_active_node_data(action).get("action") if action else None) or {})
+    projection = action_data.get("projection") or {}
+    for key in ("site_slug", "site_name", "default_collection_slug"):
+        if projection.get(key):
+            site[key] = projection[key]
 
+    brand_node = typed("brand")
+    brand = {}
+    if brand_node:
+        node = brand_node[0]
+        data = _active_node_data(node)
+        brand = {
+            "slug": node.get("slug"),
+            "name": node.get("title") or "",
+            "description": node.get("summary") or "",
+            **{key: data[key] for key in (
+                "logo_url", "primary_color", "secondary_color", "accent_color"
+            ) if data.get(key)},
+        }
+    collection_assets = [
+        _active_asset_payload(node) for node in typed("asset")
+        if not any(node in adjacent(product, "asset") for product in products)
+    ]
+    collection_data = _active_node_data(collection_node) if collection_node else {}
     payload = {
         "ok": True,
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "active_collection_id": collection["id"],
-        "site": public_site.public_site_payload(
-            persona,
-            formats,
-            catalog_url=persona.get("catalog_url"),
+        "active_collection_id": (
+            collection_node.get("id") if collection_node
+            else f"persona:{persona['id']}:cardapio"
         ),
+        "site": site,
         "persona": {
-            "id": persona_id,
+            "id": persona["id"],
             "slug": persona_slug,
-            "name": persona_display_name,
+            "name": persona.get("name") or persona_slug,
             "brand": brand,
             "collections": [{
-                "id": collection["id"],
-                "slug": collection.get("slug") or collection_slug,
-                "type": collection_meta.get("collection_type") or "menu",
-                "display_name": campaign_display_name,
-                "cover": collection_cover,
+                "id": collection_node.get("id") if collection_node else f"persona:{persona['id']}:cardapio",
+                "slug": collection_node.get("slug") if collection_node else effective_collection_slug,
+                "type": collection_data.get("collection_type") or "menu",
+                "display_name": (
+                    collection_data.get("display_name")
+                    or (collection_node or {}).get("title")
+                    or persona.get("name") or persona_slug
+                ),
+                "cover": next((row["cover"] for row in categories if row["cover"]), ""),
                 "assets": collection_assets,
-                "briefing": _collection_briefing(collection, persona_id),
-                "categories": sorted_categories,
+                "briefing": next((
+                    {
+                        "id": node.get("id"),
+                        "title": node.get("title"),
+                        "summary": node.get("summary") or _active_node_data(node).get("content") or "",
+                    }
+                    for node in typed("briefing")
+                ), None),
+                "categories": categories,
             }],
         },
+        "graph_version": publication.get("version"),
+        "graph_checksum": publication.get("checksum"),
+        "action_node_id": action.get("id") if action else None,
+        "publication_id": publication.get("publication_id"),
     }
-    publication = _public_graph_context(persona_slug)
-    if publication is not None:
-        action = publication.get("action")
-        allowed = publication.get("allowed") or {}
-        asset_ids = publication.get("asset_registry_ids") or set()
-        collection_payload = payload["persona"]["collections"][0]
-        filtered_categories = []
-        for category in collection_payload.get("categories") or []:
-            products = []
-            for product in category.get("products") or []:
-                if product.get("slug") not in allowed.get("product", set()):
-                    continue
-                product["copies"] = [
-                    row for row in product.get("copies") or []
-                    if row.get("slug") in allowed.get("copy", set())
-                ]
-                product["faqs"] = [
-                    row for row in product.get("faqs") or []
-                    if row.get("slug") in allowed.get("faq", set())
-                ]
-                product["assets"] = [
-                    row for row in product.get("assets") or []
-                    if str(row.get("asset_id") or row.get("id") or "") in asset_ids
-                ]
-                products.append(product)
-            category["products"] = products
-            if category.get("slug") in allowed.get("product_group", set()) or products:
-                filtered_categories.append(category)
-        collection_payload["categories"] = filtered_categories
-        collection_payload["assets"] = [
-            row for row in collection_payload.get("assets") or []
-            if str(row.get("asset_id") or row.get("id") or "") in asset_ids
-        ]
-        if payload["persona"].get("brand", {}).get("slug") not in allowed.get("brand", set()):
-            payload["persona"]["brand"] = {}
-        if action and action.action:
-            projection = action.action.projection.model_dump(mode="json")
-            site = payload.get("site") or {}
-            for key in ("site_slug", "site_name", "default_collection_slug"):
-                if projection.get(key):
-                    site[key] = projection[key]
-            payload["site"] = site
-        payload.update({
-            "graph_version": publication.get("version"),
-            "graph_checksum": publication.get("checksum"),
-            "action_node_id": action.id if action else None,
-        })
-        payload["projection_checksum"] = _canonical_json_checksum(payload)
+    payload["projection_checksum"] = _canonical_json_checksum(payload)
     return payload
-
 
 def _menu_response(persona_slug: str, collection_slug: Optional[str], response: Response, nocache: bool) -> dict:
     payload = build_menu_payload(persona_slug, collection_slug=collection_slug)

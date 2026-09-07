@@ -23,7 +23,7 @@ def _bundle() -> dict:
     )
 
 
-def test_stage_bundle_materializes_then_requires_exact_runtime_checksum(monkeypatch):
+def test_stage_bundle_does_not_materialize_editable_graph(monkeypatch):
     bundle = _bundle()
     plan = graph_bundle.build_publication_plan(bundle)
     normalized = graph_bundle.normalize_bundle(bundle)
@@ -83,10 +83,11 @@ def test_stage_bundle_materializes_then_requires_exact_runtime_checksum(monkeypa
         "update_knowledge_edge",
         lambda edge_id, row: replaced_edges.append(row) or {"id": edge_id, **row},
     )
+    compiler_kwargs: list[dict] = []
     monkeypatch.setattr(
         graph_bundle_publisher.graph_compiler_v3,
         "compile_persona_publication",
-        lambda *_args, **_kwargs: {
+        lambda *_args, **kwargs: compiler_kwargs.append(kwargs) or {
             "publication": {
                 "id": "publication-1",
                 "version": 1,
@@ -106,16 +107,16 @@ def test_stage_bundle_materializes_then_requires_exact_runtime_checksum(monkeypa
         approved_draft_checksum=plan["draft_checksum"],
         actor="test",
         embedder=lambda texts: [[0.0] * 1536 for _ in texts],
+        reviewed_plan=plan,
     )
 
     assert staged["publication"]["checksum"] == plan["runtime_checksum"]
     assert staged["activation"] is None
-    assert materialized_nodes
-    assert len(replaced_nodes) == len(normalized["nodes"])
-    assert len(replaced_edges) == len(normalized["edges"])
-    assert all("source_id" not in row for row in materialized_nodes)
-    assert all(row["metadata"].get("graph_json_node_id") for row in materialized_nodes)
-    assert all(set(row["metadata"]) >= {"active", "graph_json_edge_id"} for row in replaced_edges)
+    assert materialized_nodes == []
+    assert replaced_nodes == []
+    assert replaced_edges == []
+    assert compiler_kwargs[0]["precompiled_document"] == plan["candidate_document"]
+    assert "source_rows" not in compiler_kwargs[0]
 
 
 def test_stage_bundle_rejects_stale_human_approval_before_writes(monkeypatch):

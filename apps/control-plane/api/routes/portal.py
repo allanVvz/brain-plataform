@@ -303,22 +303,9 @@ def knowledge_chat_context(
     """Expose the operator evidence inside the authorized client portal."""
     persona = _persona(persona_slug, request)
     _lead(lead_ref, persona["id"])
-    context = knowledge_graph.get_chat_context(
-        lead_ref=lead_ref,
-        persona_id=persona["id"],
-        user_text=q,
-        limit=limit,
-    )
     # Context cards only need the latest conversational window. Full proof
     # history is fetched explicitly through the paginated messages endpoint.
     messages = supabase_client.get_messages(str(lead_ref), limit=50)
-    try:
-        projection_nodes, _projection_edges = supabase_client.list_all_knowledge_graph(
-            persona_id=str(persona["id"]),
-            limit_nodes=5000,
-        )
-    except Exception:
-        projection_nodes = list(context.get("nodes") or [])
     try:
         turn = context_cards_service.response_context(
             persona_slug=persona_slug,
@@ -327,12 +314,12 @@ def knowledge_chat_context(
             messages=messages,
             response_message_id=response_message_id,
             query=q or "",
-            projection_nodes=projection_nodes,
+            projection_nodes=[],
             limit=limit,
         )
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
-    return {**knowledge_graph.with_operator_context(context, limit=limit), **turn}
+    return turn
 
 
 @router.post("/messages", status_code=202)

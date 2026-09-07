@@ -443,6 +443,7 @@ function KnowledgeNode({ data, selected }: NodeProps) {
   const isAuxiliary = !!d.is_auxiliary;
   const isEmbedded = d.node_type === "embedded";
   const isGallery = d.node_type === "gallery";
+  const isPersona = d.node_type === "persona";
   const isPending = d.validated === false || Boolean((d as any)?.pending_visual || (d as any)?.metadata?.pending_visual);
   const branchComplete = Boolean((d as any).branch_complete_validated);
   const color = branchComplete
@@ -495,14 +496,20 @@ function KnowledgeNode({ data, selected }: NodeProps) {
             opacity: isPending ? 0.66 : isAuxiliary ? 0.78 : 1,
           }}
         >
-          <Handle id="graph-top-target" type="target" position={Position.Top} style={GRAPH_HANDLE_STYLE} />
-          <Handle id="graph-top-source" type="source" position={Position.Top} style={GRAPH_HANDLE_STYLE} />
-          <Handle id="graph-right-target" type="target" position={Position.Right} style={GRAPH_HANDLE_STYLE} />
-          <Handle id="graph-right-source" type="source" position={Position.Right} style={GRAPH_HANDLE_STYLE} />
-          <Handle id="graph-bottom-target" type="target" position={Position.Bottom} style={GRAPH_HANDLE_STYLE} />
-          <Handle id="graph-bottom-source" type="source" position={Position.Bottom} style={GRAPH_HANDLE_STYLE} />
-          <Handle id="graph-left-target" type="target" position={Position.Left} style={GRAPH_HANDLE_STYLE} />
-          <Handle id="graph-left-source" type="source" position={Position.Left} style={GRAPH_HANDLE_STYLE} />
+          {(isEmbedded || isGallery) ? (
+            <Handle id="graph-top-target" type="target" position={Position.Top} style={GRAPH_HANDLE_STYLE} />
+          ) : isPersona ? (
+            <Handle id="graph-bottom-source" type="source" position={Position.Bottom} style={GRAPH_HANDLE_STYLE} />
+          ) : <>
+            <Handle id="graph-top-target" type="target" position={Position.Top} style={GRAPH_HANDLE_STYLE} />
+            <Handle id="graph-top-source" type="source" position={Position.Top} style={GRAPH_HANDLE_STYLE} />
+            <Handle id="graph-right-target" type="target" position={Position.Right} style={GRAPH_HANDLE_STYLE} />
+            <Handle id="graph-right-source" type="source" position={Position.Right} style={GRAPH_HANDLE_STYLE} />
+            <Handle id="graph-bottom-target" type="target" position={Position.Bottom} style={GRAPH_HANDLE_STYLE} />
+            <Handle id="graph-bottom-source" type="source" position={Position.Bottom} style={GRAPH_HANDLE_STYLE} />
+            <Handle id="graph-left-target" type="target" position={Position.Left} style={GRAPH_HANDLE_STYLE} />
+            <Handle id="graph-left-source" type="source" position={Position.Left} style={GRAPH_HANDLE_STYLE} />
+          </>}
           <div className="absolute inset-0 flex items-center justify-center">
             {isEmbedded ? (
               <Database size={18} className="shrink-0" style={{ color: labelColor }} strokeWidth={2.2} />

@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env.compose}"
+RELEASE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+OPERATION_ROOT="${OPERATION_ROOT:-$RELEASE_ROOT}"
+ENV_FILE="${ENV_FILE:-$OPERATION_ROOT/.env.compose}"
 MANIFEST="${1:?usage: deploy-microservice-blue-green.sh MANIFEST SERVICE [--apply|--rollback]}"
 SERVICE="${2:?usage: deploy-microservice-blue-green.sh MANIFEST SERVICE [--apply|--rollback]}"
 ACTION="${3:---dry-run}"
-STATE_DIR="$ROOT_DIR/.deploy/microservices"
+STATE_DIR="$OPERATION_ROOT/.deploy/microservices"
 STATE_FILE="$STATE_DIR/slots.json"
-CADDY_DIR="$ROOT_DIR/.deploy/caddy"
-COMPOSE=(docker compose --env-file "$ENV_FILE" -f "$ROOT_DIR/docker-compose.yml" -f "$ROOT_DIR/infra/microservices/docker-compose.blue-green.yml")
+CADDY_DIR="$OPERATION_ROOT/.deploy/caddy"
+COMPOSE=(docker compose -p brain-ai --project-directory "$OPERATION_ROOT" --env-file "$ENV_FILE" -f "$RELEASE_ROOT/docker-compose.yml" -f "$RELEASE_ROOT/infra/microservices/docker-compose.blue-green.yml")
 
 case "$SERVICE" in
   gateway|control-plane|conversation-runtime|transport) ;;
@@ -20,10 +21,15 @@ case "$ACTION" in
   *) echo "unknown action: $ACTION" >&2; exit 2 ;;
 esac
 
-python3 "$ROOT_DIR/ops/microservices/validate-release-manifest.py" "$MANIFEST"
+python3 "$RELEASE_ROOT/ops/microservices/validate-release-manifest.py" "$MANIFEST"
 
 manifest_value() {
   python3 -c 'import json,sys; data=json.load(open(sys.argv[1], encoding="utf-8")); print(data[sys.argv[2]] if sys.argv[2] != "service" else data["services"][sys.argv[3]][sys.argv[4]])' "$MANIFEST" "$@"
+}
+
+policy_value() {
+  python3 -c 'import json,sys; data=json.load(open(sys.argv[1], encoding="utf-8"))["services"][sys.argv[2]]; value=data.get(sys.argv[3], []); print("\n".join(value) if isinstance(value, list) else value)' \
+    "$RELEASE_ROOT/ops/release/release-services.json" "$SERVICE" "$1"
 }
 
 export BRAIN_CONTRACTS_VERSION="$(manifest_value contracts_version)"
@@ -44,12 +50,13 @@ export RUNTIME_IMAGE_BLUE="ghcr.io/allanvvz/brain-conversation-runtime@$RUNTIME_
 export RUNTIME_IMAGE_GREEN="$RUNTIME_IMAGE_BLUE"
 export TRANSPORT_IMAGE_BLUE="ghcr.io/allanvvz/brain-transport@$TRANSPORT_DIGEST"
 export TRANSPORT_IMAGE_GREEN="$TRANSPORT_IMAGE_BLUE"
-export GATEWAY_ENV_FILE="${GATEWAY_ENV_FILE:-$ROOT_DIR/.env.microservices/gateway.env}"
-export CONTROL_PLANE_ENV_FILE="${CONTROL_PLANE_ENV_FILE:-$ROOT_DIR/.env.microservices/control-plane.env}"
-export RUNTIME_ENV_FILE="${RUNTIME_ENV_FILE:-$ROOT_DIR/.env.microservices/runtime.env}"
-export TRANSPORT_ENV_FILE="${TRANSPORT_ENV_FILE:-$ROOT_DIR/.env.microservices/transport.env}"
+export GATEWAY_ENV_FILE="${GATEWAY_ENV_FILE:-$OPERATION_ROOT/.env.microservices/gateway.env}"
+export CONTROL_PLANE_ENV_FILE="${CONTROL_PLANE_ENV_FILE:-$OPERATION_ROOT/.env.microservices/control-plane.env}"
+export RUNTIME_ENV_FILE="${RUNTIME_ENV_FILE:-$OPERATION_ROOT/.env.microservices/runtime.env}"
+export TRANSPORT_ENV_FILE="${TRANSPORT_ENV_FILE:-$OPERATION_ROOT/.env.microservices/transport.env}"
 
-compose_service="${SERVICE/conversation-runtime/runtime}"
+compose_service="$(policy_value compose_service)"
+mapfile -t worker_bases < <(policy_value workers)
 
 read_state() {
   local field="$1"
@@ -65,20 +72,10 @@ else
   [[ "$active" == "blue" ]] && target="green" || target="blue"
 fi
 target_service="$compose_service-$target"
-case "$SERVICE" in
-  gateway)
-    target_services=("$target_service")
-    ;;
-  control-plane)
-    target_services=("$target_service" "control-plane-knowledge-$target" "control-plane-integrations-$target" "control-plane-validator-$target")
-    ;;
-  conversation-runtime)
-    target_services=("$target_service" "runtime-conversation-$target" "runtime-validator-$target")
-    ;;
-  transport)
-    target_services=("$target_service" "transport-dispatch-$target" "transport-media-$target")
-    ;;
-esac
+target_services=("$target_service")
+for worker in "${worker_bases[@]}"; do
+  target_services+=("$worker-$target")
+done
 
 echo "service=$SERVICE action=$ACTION active=${active:-none} target=$target manifest=$(basename "$MANIFEST")"
 if [[ "$ACTION" == "--dry-run" ]]; then
@@ -89,10 +86,53 @@ fi
 for required in "$ENV_FILE" "$GATEWAY_ENV_FILE" "$CONTROL_PLANE_ENV_FILE" "$RUNTIME_ENV_FILE" "$TRANSPORT_ENV_FILE"; do
   [[ -s "$required" ]] || { echo "missing required environment file: $required" >&2; exit 1; }
 done
+schema_version="$(manifest_value schema_version)"
+python3 - "$schema_version" "$GATEWAY_ENV_FILE" "$CONTROL_PLANE_ENV_FILE" "$RUNTIME_ENV_FILE" "$TRANSPORT_ENV_FILE" <<'PY'
+import os, sys
+version, *paths = sys.argv[1:]
+for raw_path in paths:
+    path = os.path.realpath(raw_path)
+    rows = open(path, encoding="utf-8").read().splitlines()
+    rows = [row for row in rows if not row.startswith("CURRENT_SCHEMA_VERSION=")]
+    rows.append(f"CURRENT_SCHEMA_VERSION={version}")
+    temporary = path + ".schema.tmp"
+    with open(temporary, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write("\n".join(rows) + "\n")
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, path)
+PY
 mkdir -p "$STATE_DIR" "$CADDY_DIR"
 if [[ ! -s "$STATE_FILE" ]]; then
   printf '%s\n' '{"gateway":{"active":"legacy","previous":null}}' > "$STATE_FILE"
 fi
+
+cutover_started=false
+cutover_complete=false
+state_before="$STATE_DIR/slots.before-$SERVICE.json"
+cp "$STATE_FILE" "$state_before"
+rollback_failed_cutover() {
+  local rc="$1"
+  local rollback_services=()
+  [[ "$rc" -ne 0 && "$cutover_started" == "true" && "$cutover_complete" != "true" ]] || return 0
+  set +e
+  echo "cutover failed for $SERVICE; restoring slot and routes" >&2
+  cp "$state_before" "$STATE_FILE"
+  cp "$STATE_DIR/public-upstream.previous.caddy" "$CADDY_DIR/public-upstream.caddy" 2>/dev/null
+  cp "$STATE_DIR/internal-upstreams.previous.caddy" "$CADDY_DIR/internal-upstreams.caddy" 2>/dev/null
+  cp "$STATE_DIR/Caddyfile.previous" "$CADDY_DIR/Caddyfile" 2>/dev/null
+  "${COMPOSE[@]}" exec -T caddy caddy validate --config /etc/caddy/Caddyfile
+  "${COMPOSE[@]}" exec -T caddy caddy reload --config /etc/caddy/Caddyfile
+  if [[ "$active" =~ ^(blue|green)$ ]]; then
+    rollback_services=("$compose_service-$active")
+    for worker in "${worker_bases[@]}"; do rollback_services+=("$worker-$active"); done
+    "${COMPOSE[@]}" start "${rollback_services[0]}"
+    if [[ ! -s "$OPERATION_ROOT/.deploy/control/claims-paused.json" ]]; then
+      "${COMPOSE[@]}" start "${rollback_services[@]:1}"
+    fi
+  fi
+  "${COMPOSE[@]}" stop -t 120 "${target_services[@]}"
+}
+trap 'rc=$?; rollback_failed_cutover "$rc"; exit "$rc"' EXIT
 
 # The split services depend on the private :8090 listener. Older production
 # releases can have a valid active Caddyfile that predates that listener even
@@ -100,7 +140,7 @@ fi
 # approved base config atomically before waiting on gateway readiness, while
 # preserving the current public-upstream file (and therefore legacy traffic).
 install_active_caddy_config() {
-  local approved="$ROOT_DIR/infra/Caddyfile"
+  local approved="$RELEASE_ROOT/infra/Caddyfile"
   local active="$CADDY_DIR/Caddyfile"
   local previous="$STATE_DIR/Caddyfile.previous"
   local candidate
@@ -127,7 +167,11 @@ install_active_caddy_config() {
   echo "installed approved Caddy base config; public upstream unchanged"
 }
 
-install_active_caddy_config
+if [[ "$ACTION" != "--rollback" ]]; then
+  install_active_caddy_config
+elif [[ -s "$STATE_DIR/Caddyfile.previous" ]]; then
+  cp "$STATE_DIR/Caddyfile.previous" "$CADDY_DIR/Caddyfile"
+fi
 
 pull_candidate_images() {
   local pull_attempt
@@ -145,10 +189,17 @@ pull_candidate_images() {
 }
 
 if [[ "$ACTION" == "--rollback" ]]; then
-  "${COMPOSE[@]}" start "${target_services[@]}"
+  "${COMPOSE[@]}" start "${target_services[0]}"
+  if [[ -s "$OPERATION_ROOT/.deploy/control/claims-paused.json" ]]; then
+    "${COMPOSE[@]}" stop -t 120 "${target_services[@]:1}" >/dev/null 2>&1 || true
+    workers_paused=true
+  else
+    "${COMPOSE[@]}" start "${target_services[@]:1}"
+    workers_paused=false
+  fi
 else
   pull_candidate_images
-  if [[ -s "$ROOT_DIR/.deploy/control/claims-paused.json" && ${#target_services[@]} -gt 1 ]]; then
+  if [[ -s "$OPERATION_ROOT/.deploy/control/claims-paused.json" && ${#target_services[@]} -gt 1 ]]; then
     "${COMPOSE[@]}" up -d --no-deps --force-recreate "$target_service"
     "${COMPOSE[@]}" stop -t 120 "${target_services[@]:1}" >/dev/null 2>&1 || true
     workers_paused=true
@@ -184,11 +235,12 @@ with open(target_path, "w", encoding="utf-8") as handle:
 PY
 
 rendered="$STATE_DIR/caddy-candidate"
-python3 "$ROOT_DIR/ops/microservices/render-active-routes.py" "$candidate" "$rendered"
+python3 "$RELEASE_ROOT/ops/microservices/render-active-routes.py" "$candidate" "$rendered"
 cp "$CADDY_DIR/public-upstream.caddy" "$STATE_DIR/public-upstream.previous.caddy" 2>/dev/null || true
 cp "$CADDY_DIR/internal-upstreams.caddy" "$STATE_DIR/internal-upstreams.previous.caddy" 2>/dev/null || true
 cp "$rendered/public-upstream.caddy" "$CADDY_DIR/public-upstream.caddy"
 cp "$rendered/internal-upstreams.caddy" "$CADDY_DIR/internal-upstreams.caddy"
+cutover_started=true
 
 if ! "${COMPOSE[@]}" exec -T caddy caddy validate --config /etc/caddy/Caddyfile; then
   cp "$STATE_DIR/public-upstream.previous.caddy" "$CADDY_DIR/public-upstream.caddy" 2>/dev/null || true
@@ -200,11 +252,10 @@ mv "$candidate" "$STATE_FILE"
 
 if [[ "$active" =~ ^(blue|green)$ && "$active" != "$target" ]]; then
   old_services=("$compose_service-$active")
-  case "$SERVICE" in
-    control-plane) old_services+=("control-plane-knowledge-$active" "control-plane-integrations-$active" "control-plane-validator-$active") ;;
-    conversation-runtime) old_services+=("runtime-conversation-$active" "runtime-validator-$active") ;;
-    transport) old_services+=("transport-dispatch-$active" "transport-media-$active") ;;
-  esac
+  for worker in "${worker_bases[@]}"; do old_services+=("$worker-$active"); done
   "${COMPOSE[@]}" stop -t 120 "${old_services[@]}"
 fi
+cutover_complete=true
+rm -f -- "$state_before"
+trap - EXIT
 echo "activated service=$SERVICE slot=$target; previous=${active:-none} workers_paused=${workers_paused:-false}"

@@ -7,6 +7,7 @@ import { ApiError, api } from "@/lib/api";
 import { getStoredLanguage, UI_LANGUAGE_EVENT, type UiLanguage } from "@/lib/language";
 import { applyTheme, getStoredTheme, type Theme } from "@/lib/theme";
 import { resolveSessionDestination } from "@/lib/session-routing";
+import { GraphBundleDraftProvider } from "@/lib/GraphBundleDraftProvider";
 import {
   Activity,
   BookOpen,
@@ -20,7 +21,6 @@ import {
   Network,
   Package,
   Plus,
-  RefreshCw,
   Settings,
   Sparkles,
   Sun,
@@ -40,7 +40,6 @@ const nav = [
   { section: "Marketing", href: "/persona", label: "Persona", icon: UserCircle },
   { section: "Marketing", href: "/marketing/produtos", label: "Produtos", icon: Package },
   { section: "Marketing", href: "/marketing/assets", label: "Assets", icon: Image },
-  { section: "Knowledge", href: "/knowledge/sync", label: "Sync", icon: RefreshCw },
   { section: "Knowledge", href: "/knowledge/quality", label: "Quality", icon: CheckSquare },
   { section: "Knowledge", href: "/kb", label: "Golden Dataset", icon: BookOpen },
 ];
@@ -52,7 +51,6 @@ const NAV_TRANSLATIONS: Record<UiLanguage, Record<string, string>> = {
     Import: "Importar",
     Assets: "Assets",
     Knowledge: "Conhecimento",
-    Sync: "Sincronizar",
     Quality: "Qualidade",
     Configuracoes: "Configurações",
     Tools: "Ferramentas",
@@ -90,7 +88,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // mounting AppShell (i.e. every route) fails to build.
   return (
     <Suspense fallback={null}>
-      <AppShellInner>{children}</AppShellInner>
+      <GraphBundleDraftProvider><AppShellInner>{children}</AppShellInner></GraphBundleDraftProvider>
     </Suspense>
   );
 }

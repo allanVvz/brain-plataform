@@ -240,13 +240,18 @@ DUPLICATED_BASELINE: tuple[tuple[str, str], ...] = (
 # both control-plane and conversation-runtime, still uncorrected.
 DIVERGENT_BASELINE: tuple[tuple[str, str], ...] = (
     ("control-plane", "campaigns_service.py"),
+    ("control-plane", "context_cards.py"),
     ("control-plane", "conversation_repetition.py"),
     ("control-plane", "deepseek_n8n_service.py"),
+    ("control-plane", "faq_bulk_generator.py"),
+    ("control-plane", "graph_bundle.py"),
     ("control-plane", "graph_bundle_publisher.py"),
     ("control-plane", "graph_bundle_view.py"),
+    ("control-plane", "graph_compiler_v3.py"),
     ("control-plane", "graph_json_v2_validator.py"),
     ("control-plane", "integration_service.py"),
     ("control-plane", "kb_intake_service.py"),
+    ("control-plane", "knowledge_catalog.py"),
     ("control-plane", "sofia_orchestrator.py"),
     ("control-plane", "supabase_client.py"),
     ("conversation-runtime", "agents_service.py"),

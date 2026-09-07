@@ -59,7 +59,7 @@ def test_blue_green_has_gateway_and_role_separated_env_files():
         "control-plane-blue", "control-plane-green", "runtime-blue",
         "runtime-green", "transport-blue", "transport-green",
     ):
-        assert services[service]["environment"]["REQUIRED_SCHEMA_VERSION"] == "131"
+        assert services[service]["environment"]["REQUIRED_SCHEMA_VERSION"] == "134"
 
     groups = {
         service["labels"]["brain.worker-group"]
@@ -359,21 +359,40 @@ def test_microservice_resume_never_starts_legacy_worker_and_rolls_back_pause():
     assert "resume-production-workers.sh" not in workflow
 
 
-def test_microservice_preflight_runs_immutable_auditor_without_sync():
-    workflow = (ROOT / ".github/workflows/_deploy-microservice.yml").read_text(encoding="utf-8")
-    preflight = workflow.split("  mutate:", 1)[0]
-    assert "script_path: ops/vps/validate-production-release.sh" in preflight
-    assert "scp-action" not in preflight
-    assert 'ALLOW_PENDING_MICROSERVICE_DIGESTS: "true"' in preflight
-    assert "AUDIT_ROOT,ALLOW_PENDING_MICROSERVICE_DIGESTS" in preflight
-    assert 'with: {ref: "${{ inputs.manifest_sha }}"}' in workflow
+def test_unified_release_preflight_uses_installed_immutable_artifact():
+    workflow = (ROOT / ".github/workflows/release-main.yml").read_text(encoding="utf-8")
+    assert "sha256sum -c SHA256SUMS" in workflow
+    assert "AUDIT_ROOT=/opt/brain-ai" in workflow
+    assert 'OPERATION_ROOT=/opt/brain-ai bash ops/vps/deploy-microservice-blue-green.sh' in workflow
+    assert "validate-production-release.sh" in workflow
+    assert 'with: {ref: "${{ needs.classify.outputs.sha }}"}' in workflow
 
 
-def test_microservice_mutation_syncs_manifest_checksum_inputs():
-    workflow = (ROOT / ".github/workflows/_deploy-microservice.yml").read_text(encoding="utf-8")
-    mutate = workflow.split("  mutate:", 1)[1]
-    assert "ops/microservices" in mutate
-    assert "apps/conversation-runtime/n8n/persona-conversation-template.json" in mutate
+def test_unified_release_artifact_contains_manifest_checksum_inputs():
+    script = (ROOT / "ops/release/build-artifact.sh").read_text(encoding="utf-8")
+    assert 'cp -a "$ROOT_DIR/ops/microservices"' in script
+    assert 'cp -a "$ROOT_DIR/apps/conversation-runtime/n8n"' in script
+    assert 'cp -a "$ROOT_DIR/packages/brain-contracts"' in script
+    assert 'cp -a "$ROOT_DIR/ops/release"' in script
+
+
+def test_blue_green_rolls_back_routes_and_slot_after_late_failure():
+    script = (ROOT / "ops/vps/deploy-microservice-blue-green.sh").read_text()
+    assert "rollback_failed_cutover" in script
+    assert 'cp "$state_before" "$STATE_FILE"' in script
+    assert 'cp "$STATE_DIR/public-upstream.previous.caddy"' in script
+    assert 'caddy reload --config /etc/caddy/Caddyfile' in script
+    assert '"${COMPOSE[@]}" stop -t 120 "${target_services[@]}"' in script
+
+
+def test_generic_schema_apply_is_plan_backup_restore_and_pause_gated():
+    script = (ROOT / "ops/vps/apply-schema-plan.sh").read_text()
+    for evidence in (
+        "plan-schema-release.py", "schema plan does not match installed release",
+        "global claims must remain paused", "fresh data-only backup is required",
+        "controlled restore proof is missing or stale", "--single-transaction",
+    ):
+        assert evidence in script
 
 
 def test_service_env_bootstrap_never_distributes_universal_database_secrets():

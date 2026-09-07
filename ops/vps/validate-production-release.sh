@@ -190,7 +190,12 @@ else
 fi
 
 "${COMPOSE[@]}" ps
-"${COMPOSE[@]}" exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -P pager=off' <<'SQL'
+EXPECTED_MIGRATION_COUNT=23
+if [[ "${ALLOW_PENDING_SCHEMA_VERSION:-}" == "134" ]]; then
+  EXPECTED_MIGRATION_COUNT=22
+fi
+"${COMPOSE[@]}" exec -T -e EXPECTED_MIGRATION_COUNT="$EXPECTED_MIGRATION_COUNT" db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -v expected_migration_count="$EXPECTED_MIGRATION_COUNT" -P pager=off' <<'SQL'
+select set_config('brain.expected_migration_count', :'expected_migration_count', false);
 select 'migration' metric, filename value
 from public._compose_migrations
 where filename in (
@@ -213,7 +218,10 @@ where filename in (
   '128_confirm_branch_offering_within_journey.sql',
   '129_carry_over_facts_by_lead.sql',
   '130_shared_lead_memory_and_journey_commit_v4.sql',
-  '131_microservice_role_grants.sql'
+  '131_microservice_role_grants.sql',
+  '132_runtime_vector_distance_grant.sql',
+  '133_conversation_turn_exactly_once_v5.sql',
+  '134_graph_bundle_draft_ledger.sql'
 ) order by filename;
 
 select 'microservice_role' metric,
@@ -289,8 +297,11 @@ begin
       '128_confirm_branch_offering_within_journey.sql',
       '129_carry_over_facts_by_lead.sql',
       '130_shared_lead_memory_and_journey_commit_v4.sql',
-      '131_microservice_role_grants.sql')) <> 20 then
-    raise exception 'release migrations 112-131 are incomplete';
+      '131_microservice_role_grants.sql',
+      '132_runtime_vector_distance_grant.sql',
+      '133_conversation_turn_exactly_once_v5.sql',
+      '134_graph_bundle_draft_ledger.sql')) < current_setting('brain.expected_migration_count')::int then
+    raise exception 'release migrations 112-134 are incomplete';
   end if;
   if (select count(*) from pg_roles
       where rolname in ('brain_gateway','brain_control_plane','brain_runtime','brain_transport')

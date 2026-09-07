@@ -69,13 +69,10 @@ def validate(path: Path, *, verify_checkout_artifacts: bool = True) -> dict:
         required_schema = item.get("required_schema_version")
         _require(isinstance(required_schema, int) and 131 <= required_schema <= manifest["schema_version"],
                  f"invalid required_schema_version for {name}")
-    _require(services["gateway"]["sha"] == manifest["source_sha"],
-             "gateway SHA must equal source_sha")
-    if monorepo_release:
-        _require(
-            all(item["sha"] == manifest["source_sha"] for item in services.values()),
-            "every monorepo service SHA must equal source_sha",
-        )
+    # An incremental monorepo release intentionally preserves both the digest
+    # and build SHA of an unchanged service. ``source_sha`` identifies the
+    # operational artifact; each service SHA identifies the image behind its
+    # immutable digest.
 
     if verify_checkout_artifacts:
         route_map = ROOT / "ops/microservices/route-map.json"

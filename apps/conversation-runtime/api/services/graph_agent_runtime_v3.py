@@ -2778,6 +2778,19 @@ def build_context(
     if not publication:
         raise RuntimeError("active GraphRAG v3 publication not found")
     document = publication.get("document_json") or {}
+    document_body = dict(document) if isinstance(document, dict) else {}
+    document_checksum = str(document_body.pop("checksum", ""))
+    publication_checksum = str(publication.get("checksum") or "")
+    document_persona = document.get("persona") if isinstance(document, dict) else {}
+    if (
+        document.get("schema_version") != "3.0"
+        or not document_checksum
+        or document_checksum != publication_checksum
+        or graph_compiler_v3.canonical_checksum(document_body) != document_checksum
+        or str((document_persona or {}).get("id") or "") != str(persona["id"])
+        or str((document_persona or {}).get("slug") or "") != persona_slug
+    ):
+        raise RuntimeError("GraphBundle v3 publication checksum or persona is inconsistent")
     messages = batch.get("messages") or supabase_client.get_messages(str(lead_ref), limit=8) or []
     # The buffer can canonically coalesce several physical messages. Use that
     # ordered text for this decision/proof without rewriting persisted history

@@ -460,3 +460,17 @@ def test_every_backend_repair_requirement_reaches_the_model_repair_call():
     condition = _node("Graph proof needs repair")["parameters"]["conditions"]["conditions"][0]["leftValue"]
     assert "proof.repair_required" in condition
     assert "deterministic_branch_match" not in condition
+
+
+def test_committed_decision_emits_post_publication_knowledge_evidence():
+    source = (ROOT / "apps/conversation-runtime/api/services/conversation_runtime.py").read_text(
+        encoding="utf-8"
+    )
+    for field in (
+        '"canonical_inbound_id"', '"publication_id"', '"publication_checksum"',
+        '"decision_id"', '"proof_id"', '"evidence_node_ids"',
+        '"evidence_chunk_ids"', '"outbound_message_id"', '"validator_session_id"',
+    ):
+        assert field in source
+    assert 'validation.get("is_validation") is True' in source
+    assert 'str(validation["session_id"])' in source

@@ -1,0 +1,386 @@
+name: Release main
+
+on:
+  workflow_run:
+    workflows: ["Check Frontend e Backend"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Read-only release classification and audit plan
+        type: choice
+        options: [dry-run]
+        default: dry-run
+      source_sha:
+        description: Exact main SHA (defaults to current main for dry-run)
+        required: false
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+  actions: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/allanvvz/brain
+
+jobs:
+  classify:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+      services: ${{ steps.classify.outputs.services }}
+      deploy_services: ${{ steps.classify.outputs.deploy_services }}
+      build_images: ${{ steps.classify.outputs.build_images }}
+      schema: ${{ steps.classify.outputs.schema }}
+      infrastructure: ${{ steps.classify.outputs.infrastructure }}
+      runtime_approval: ${{ steps.classify.outputs.runtime_approval }}
+      classification: ${{ steps.classify.outputs.classification }}
+    steps:
+      - id: production
+        name: Read installed production baseline
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          capture_stdout: true
+          script: |
+            python3 - <<'PY'
+            import base64, json
+            from pathlib import Path
+            root = Path("/opt/brain-ai")
+            sha = (root / ".deploy/release-source-sha").read_text().strip()
+            manifest = (root / "ops/microservices/release-manifest.json").read_bytes()
+            print(json.dumps({"source_sha": sha, "manifest_b64": base64.b64encode(manifest).decode()}))
+            PY
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.source_sha || github.event.workflow_run.head_sha || 'main' }}
+          fetch-depth: 0
+      - name: Materialize verified production baseline
+        env:
+          PRODUCTION_RELEASE_STATE: ${{ steps.production.outputs.stdout }}
+        run: |
+          python - <<'PY'
+          import base64, json, os, pathlib, re
+          state = json.loads(os.environ["PRODUCTION_RELEASE_STATE"].strip())
+          if not re.fullmatch(r"[0-9a-f]{40}", state["source_sha"]):
+              raise SystemExit("invalid installed source SHA")
+          pathlib.Path("production-base.sha").write_text(state["source_sha"] + "\n")
+          pathlib.Path("active-release-manifest.json").write_bytes(base64.b64decode(state["manifest_b64"], validate=True))
+          PY
+          python ops/microservices/validate-release-manifest.py active-release-manifest.json
+      - id: source
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - id: classify
+        shell: bash
+        run: |
+          base="$(cat production-base.sha)"
+          git cat-file -e "${base}^{commit}"
+          git merge-base --is-ancestor "$base" HEAD
+          mapfile -t files < <(git diff --name-only "$base" HEAD)
+          python ops/release/classify-release.py --github-output "$GITHUB_OUTPUT" "${files[@]}"
+      - run: python -m json.tool ops/release/release-services.json >/dev/null
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-baseline-${{ steps.source.outputs.sha }}
+          path: active-release-manifest.json
+          retention-days: 7
+
+  build:
+    needs: classify
+    if: needs.classify.outputs.build_images == 'true' && github.event_name == 'workflow_run'
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.classify.outputs.services) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: {ref: "${{ needs.classify.outputs.sha }}"}
+      - uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: metadata
+        name: Resolve shared contracts checksum
+        shell: bash
+        run: |
+          checksum="$(python - <<'PY'
+          import hashlib
+          from pathlib import Path
+          digest = hashlib.sha256()
+          for path in sorted(Path('packages/brain-contracts/brain_contracts').glob('*.py')):
+              digest.update(path.read_bytes().replace(b'\r\n', b'\n'))
+          print('sha256:' + digest.hexdigest())
+          PY
+          )"
+          echo "contracts_checksum=$checksum" >> "$GITHUB_OUTPUT"
+      - id: service
+        name: Resolve declarative build configuration
+        env:
+          SERVICE: ${{ matrix.service }}
+        run: |
+          python - <<'PY'
+          import json, os
+          row=json.load(open('ops/release/release-services.json'))['services'][os.environ['SERVICE']]
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f"context={row['build_context']}\n")
+              output.write(f"dockerfile={row['dockerfile']}\n")
+          PY
+      - uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83
+        id: image
+        with:
+          context: ${{ steps.service.outputs.context }}
+          file: ${{ steps.service.outputs.dockerfile }}
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:${{ needs.classify.outputs.sha }}
+          build-args: |
+            SOURCE_SHA=${{ needs.classify.outputs.sha }}
+            BRAIN_CONTRACTS_SHA=${{ steps.metadata.outputs.contracts_checksum }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+      - run: printf '%s' '${{ steps.image.outputs.digest }}' > '${{ matrix.service }}.digest'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.service }}
+          path: ${{ matrix.service }}.digest
+          retention-days: 7
+
+  manifest:
+    needs: [classify, build]
+    if: >-
+      always() && needs.classify.result == 'success' && inputs.action != 'dry-run' &&
+      (needs.classify.outputs.build_images == 'true' || needs.classify.outputs.schema == 'true' || needs.classify.outputs.infrastructure == 'true') &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: {ref: "${{ needs.classify.outputs.sha }}"}
+      - uses: actions/download-artifact@v4
+        if: needs.build.result == 'success'
+        with: {pattern: digest-*, merge-multiple: true, path: .release-digests}
+      - uses: actions/download-artifact@v4
+        with:
+          name: production-baseline-${{ needs.classify.outputs.sha }}
+          path: .production-baseline
+      - name: Render manifest using new digests only for changed services
+        env:
+          CHANGED_SERVICES: ${{ needs.classify.outputs.services }}
+          SOURCE_SHA: ${{ needs.classify.outputs.sha }}
+        run: python ops/release/render-release.py --active .production-baseline/active-release-manifest.json --digests .release-digests --output release-manifest.json
+      - name: Package checksummed operational artifact
+        env:
+          RELEASE_OUT_DIR: .
+        run: |
+          cp release-manifest.json ops/microservices/release-manifest.json
+          bash ops/release/build-artifact.sh "${{ needs.classify.outputs.sha }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ needs.classify.outputs.sha }}
+          path: |
+            release-manifest.json
+            brain-release-${{ needs.classify.outputs.sha }}.tar.gz
+            brain-release-${{ needs.classify.outputs.sha }}.tar.gz.sha256
+          retention-days: 30
+
+  schema-preflight:
+    needs: [classify, manifest]
+    if: needs.classify.outputs.schema == 'true' && inputs.action != 'dry-run'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: {ref: "${{ needs.classify.outputs.sha }}"}
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-${{ needs.classify.outputs.sha }}
+          path: release
+      - run: python ops/microservices/plan-schema-release.py release/release-manifest.json > release/schema-release-plan.json
+      - uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          source: release/brain-release-${{ needs.classify.outputs.sha }}.tar.gz,release/brain-release-${{ needs.classify.outputs.sha }}.tar.gz.sha256,release/schema-release-plan.json
+          target: /tmp/brain-release-${{ needs.classify.outputs.sha }}
+      - name: Install artifact, dry-run schema, backup and validate restore
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        env:
+          RELEASE_SHA: ${{ needs.classify.outputs.sha }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          command_timeout: 40m
+          envs: RELEASE_SHA
+          script: |
+            set -Eeuo pipefail
+            incoming="/tmp/brain-release-${RELEASE_SHA}/release"
+            cd "$incoming"
+            sha256sum -c "brain-release-${RELEASE_SHA}.tar.gz.sha256"
+            install_root="/opt/brain-ai/releases/${RELEASE_SHA}"
+            mkdir -p "$install_root"
+            tar -xzf "brain-release-${RELEASE_SHA}.tar.gz" -C "$install_root"
+            cd "$install_root"
+            sha256sum -c SHA256SUMS
+            bash ops/vps/apply-schema-plan.sh ops/microservices/release-manifest.json "$incoming/schema-release-plan.json" --dry-run
+            cd /opt/brain-ai
+            bash ops/vps/backup.sh
+            backup_dir="$(realpath /var/backups/brain-ai/latest)"
+            restore_db="brain_restore_release_$(date -u +%Y%m%d%H%M%S)"
+            bash ops/vps/restore.sh "$backup_dir" "$restore_db" --confirm-isolated-restore
+            AUDIT_ROOT=/opt/brain-ai ALLOW_PENDING_SCHEMA_VERSION=134 bash "$install_root/ops/vps/validate-production-release.sh"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: schema-release-plan-${{ needs.classify.outputs.sha }}
+          path: release/schema-release-plan.json
+          retention-days: 30
+
+  schema:
+    needs: [classify, manifest, schema-preflight]
+    if: needs.classify.outputs.schema == 'true' && inputs.action != 'dry-run'
+    environment: production-schema
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pause, drain and apply approved schema plan
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        env:
+          RELEASE_SHA: ${{ needs.classify.outputs.sha }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          command_timeout: 20m
+          envs: RELEASE_SHA
+          script: |
+            set -Eeuo pipefail
+            cd /opt/brain-ai
+            bash ops/vps/pause-worker-claims.sh "release-main:${RELEASE_SHA}:schema" --safety-pause
+            bash ops/vps/drain-worker-claims.sh
+            install_root="/opt/brain-ai/releases/${RELEASE_SHA}"
+            incoming="/tmp/brain-release-${RELEASE_SHA}/release"
+            cd "$install_root"
+            bash ops/vps/apply-schema-plan.sh ops/microservices/release-manifest.json "$incoming/schema-release-plan.json" --apply
+
+  runtime-gate:
+    needs: [classify, manifest, schema, schema-preflight]
+    if: always() && needs.manifest.result == 'success' && needs.classify.outputs.runtime_approval == 'true' && inputs.action != 'dry-run'
+    environment: production-runtime
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Runtime cutover approval granted; claims remain paused after cutover."
+
+  deploy:
+    needs: [classify, manifest, schema-preflight, schema, runtime-gate]
+    if: >-
+      always() && needs.manifest.result == 'success' && inputs.action != 'dry-run' &&
+      (needs.classify.outputs.build_images == 'true' || needs.classify.outputs.schema == 'true' || needs.classify.outputs.infrastructure == 'true') &&
+      (needs.schema-preflight.result == 'success' || needs.schema-preflight.result == 'skipped') &&
+      (needs.schema.result == 'success' || needs.schema.result == 'skipped') &&
+      (needs.runtime-gate.result == 'success' || needs.runtime-gate.result == 'skipped')
+    environment: production-code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-${{ needs.classify.outputs.sha }}
+          path: release
+      - name: Transfer immutable checksummed artifact
+        uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          source: release/brain-release-${{ needs.classify.outputs.sha }}.tar.gz,release/brain-release-${{ needs.classify.outputs.sha }}.tar.gz.sha256
+          target: /tmp/brain-release-${{ needs.classify.outputs.sha }}
+      - name: Verify, install, audit, and cut over changed services
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        env:
+          RELEASE_SHA: ${{ needs.classify.outputs.sha }}
+          RELEASE_SERVICES: ${{ needs.classify.outputs.deploy_services }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          command_timeout: 20m
+          envs: RELEASE_SHA,RELEASE_SERVICES
+          script: |
+            set -Eeuo pipefail
+            incoming="/tmp/brain-release-${RELEASE_SHA}/release"
+            cd "$incoming"
+            sha256sum -c "brain-release-${RELEASE_SHA}.tar.gz.sha256"
+            install_root="/opt/brain-ai/releases/${RELEASE_SHA}"
+            mkdir -p "$install_root"
+            tar -xzf "brain-release-${RELEASE_SHA}.tar.gz" -C "$install_root"
+            cd "$install_root"
+            sha256sum -c SHA256SUMS
+            [[ "$(tr -d '\r\n' < SOURCE_SHA)" == "$RELEASE_SHA" ]]
+            AUDIT_ROOT=/opt/brain-ai ALLOW_PENDING_MICROSERVICE_DIGESTS=true bash ops/vps/validate-production-release.sh
+            mapfile -t services < <(python3 -c 'import json,sys; print("\n".join(json.loads(sys.argv[1])))' "$RELEASE_SERVICES")
+            for service in "${services[@]}"; do
+              OPERATION_ROOT=/opt/brain-ai bash ops/vps/deploy-microservice-blue-green.sh \
+                ops/microservices/release-manifest.json "$service" --dry-run
+            done
+            cd /opt/brain-ai
+            bash ops/vps/pause-worker-claims.sh "release-main:${RELEASE_SHA}" --safety-pause
+            bash ops/vps/drain-worker-claims.sh
+            cd "$install_root"
+            completed=()
+            rollback_completed() {
+              local index rollback_failed=0
+              for ((index=${#completed[@]}-1; index>=0; index--)); do
+                OPERATION_ROOT=/opt/brain-ai bash ops/vps/deploy-microservice-blue-green.sh \
+                  ops/microservices/release-manifest.json "${completed[index]}" --rollback || rollback_failed=1
+              done
+              if [[ -s /opt/brain-ai/.deploy/microservices/Caddyfile.previous ]]; then
+                cp /opt/brain-ai/.deploy/microservices/Caddyfile.previous /opt/brain-ai/.deploy/caddy/Caddyfile
+                docker compose -p brain-ai --project-directory /opt/brain-ai --env-file /opt/brain-ai/.env.compose \
+                  -f /opt/brain-ai/docker-compose.yml exec -T caddy caddy validate --config /etc/caddy/Caddyfile || rollback_failed=1
+                docker compose -p brain-ai --project-directory /opt/brain-ai --env-file /opt/brain-ai/.env.compose \
+                  -f /opt/brain-ai/docker-compose.yml exec -T caddy caddy reload --config /etc/caddy/Caddyfile || rollback_failed=1
+              fi
+              AUDIT_ROOT=/opt/brain-ai bash ops/vps/validate-production-release.sh || rollback_failed=1
+              [[ "$rollback_failed" -eq 0 ]] || echo "rollback audit failed; claims remain paused" >&2
+            }
+            for service in "${services[@]}"; do
+              if ! OPERATION_ROOT=/opt/brain-ai bash ops/vps/deploy-microservice-blue-green.sh \
+                ops/microservices/release-manifest.json "$service" --apply; then
+                rollback_completed
+                exit 1
+              fi
+              completed+=("$service")
+            done
+            live_manifest=/opt/brain-ai/ops/microservices/release-manifest.json
+            cp "$live_manifest" /opt/brain-ai/.deploy/microservices/release-manifest.previous.json
+            cp /opt/brain-ai/.deploy/release-source-sha /opt/brain-ai/.deploy/release-source-sha.previous
+            cp /opt/brain-ai/.deploy/release-directory /opt/brain-ai/.deploy/release-directory.previous
+            cp ops/microservices/release-manifest.json "$live_manifest"
+            printf '%s\n' "$RELEASE_SHA" > /opt/brain-ai/.deploy/release-source-sha
+            printf '%s\n' "$install_root" > /opt/brain-ai/.deploy/release-directory
+            if ! AUDIT_ROOT=/opt/brain-ai EXPECTED_RELEASE_SHA="$RELEASE_SHA" bash ops/vps/validate-production-release.sh; then
+              cp /opt/brain-ai/.deploy/microservices/release-manifest.previous.json "$live_manifest"
+              cp /opt/brain-ai/.deploy/release-source-sha.previous /opt/brain-ai/.deploy/release-source-sha
+              cp /opt/brain-ai/.deploy/release-directory.previous /opt/brain-ai/.deploy/release-directory
+              rollback_completed
+              exit 1
+            fi
+            cp -a "$install_root/ops/." /opt/brain-ai/ops/
+            cp -a "$install_root/infra/microservices/." /opt/brain-ai/infra/microservices/
+            cp "$install_root/docker-compose.yml" /opt/brain-ai/docker-compose.yml
+            cp "$install_root/infra/Caddyfile" /opt/brain-ai/infra/Caddyfile
+            AUDIT_ROOT=/opt/brain-ai EXPECTED_RELEASE_SHA="$RELEASE_SHA" bash /opt/brain-ai/ops/vps/validate-production-release.sh
+            echo "release healthy; all transport and AI claims remain paused"

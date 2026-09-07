@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback, useRef, useMemo, memo } from "react";
 import { api, type JourneyEventType } from "@/lib/api";
+import { useGraphBundleDraft } from "@/lib/GraphBundleDraftProvider";
 import {
   isJourneySettled,
   normalizeJourneyOutcome,
@@ -1247,6 +1248,7 @@ function ContextCardModal({
   canEdit,
   personaSlug,
   currentGraphVersion,
+  currentGraphChecksum,
   onClose,
   onPublished,
 }: {
@@ -1255,6 +1257,7 @@ function ContextCardModal({
   canEdit: boolean;
   personaSlug?: string;
   currentGraphVersion?: number;
+  currentGraphChecksum?: string;
   onClose: () => void;
   onPublished: () => void;
 }) {
@@ -1265,23 +1268,20 @@ function ContextCardModal({
   const [reason, setReason] = useState("Atualização pelo card de conhecimento da conversa");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const drafts = useGraphBundleDraft();
 
   const save = async () => {
-    if (!personaSlug || !currentGraphVersion || !content.trim() || !reason.trim()) return;
+    if (!personaSlug || !currentGraphChecksum || !content.trim() || !reason.trim()) return;
     setSaving(true);
     setError(null);
     try {
-      await api.publishContextCard(card.id, {
-        persona_slug: personaSlug,
-        content: content.trim(),
-        expected_version: currentGraphVersion,
-        reason: reason.trim(),
-        idempotency_key: crypto.randomUUID(),
-      });
+      await drafts.ensureDraft(personaSlug, currentGraphChecksum, { surface: "messages", response_message_id: card.id, source_ref: card.id });
+      const contentField = card.node_type === "faq" ? "data.answer" : "data.content";
+      await drafts.mutate([{ op: "update_node", node_id: card.id, patch: { [contentField]: content.trim(), summary: content.trim(), status: "pending_validation" } }], reason.trim(), { surface: "messages", response_message_id: card.id, source_ref: card.id });
       setEditing(false);
       onPublished();
     } catch (err) {
-      setError(getErrorMessage(err, "Falha ao salvar e publicar."));
+      setError(getErrorMessage(err, "Falha ao adicionar ao rascunho."));
       onPublished();
     } finally {
       setSaving(false);
@@ -1311,19 +1311,19 @@ function ContextCardModal({
           </section>
         )}
 
-        {canEdit && personaSlug && currentGraphVersion && (
+        {canEdit && personaSlug && currentGraphChecksum && (
           <section className="mt-4 rounded-lg border border-obs-line p-3">
             {!editing ? (
-              <button type="button" onClick={() => setEditing(true)} className="rounded-md bg-obs-teal px-3 py-1.5 text-xs font-medium text-white">Editar versão atual</button>
+              <button type="button" onClick={() => setEditing(true)} className="rounded-md bg-obs-teal px-3 py-1.5 text-xs font-medium text-white">Corrigir no rascunho</button>
             ) : (
               <div className="space-y-2">
                 <label className="block text-[10px] font-semibold uppercase text-obs-faint">Conteúdo editável</label>
                 <textarea value={content} onChange={(event) => setContent(event.target.value)} rows={8} className="lg-input w-full text-xs" />
-                <label className="block text-[10px] font-semibold uppercase text-obs-faint">Motivo da publicação</label>
+                <label className="block text-[10px] font-semibold uppercase text-obs-faint">Motivo da correção</label>
                 <input value={reason} onChange={(event) => setReason(event.target.value)} className="lg-input w-full text-xs" />
                 {error && <p className="text-xs text-red-500">{error}</p>}
                 <div className="flex gap-2">
-                  <button type="button" onClick={save} disabled={saving || !content.trim() || !reason.trim()} className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50">{saving ? "Publicando…" : "Salvar e publicar"}</button>
+                  <button type="button" onClick={save} disabled={saving || !content.trim() || !reason.trim()} className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50">{saving ? "Salvando…" : "Adicionar ao rascunho"}</button>
                   <button type="button" onClick={() => setEditing(false)} disabled={saving} className="lg-btn lg-btn-secondary text-xs">Cancelar</button>
                 </div>
               </div>
@@ -1478,6 +1478,7 @@ export function KnowledgeSidebar({
           canEdit={canEdit}
           personaSlug={ctx.persona_slug}
           currentGraphVersion={ctx.current_graph_version}
+          currentGraphChecksum={ctx.current_graph_checksum}
           onClose={() => setSelectedCard(null)}
           onPublished={onPublished}
         />

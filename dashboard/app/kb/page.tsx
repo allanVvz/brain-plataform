@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { BookOpen, CheckCircle2, GitBranch, ShieldCheck } from "lucide-react";
+import { BookOpen, CheckCircle2, GitBranch, Pencil, ShieldCheck } from "lucide-react";
 import { api } from "@/lib/api";
+import { useGraphBundleDraft } from "@/lib/GraphBundleDraftProvider";
 import { useGlobalPersona } from "@/lib/useGlobalPersona";
 import {
   PageHeader,
@@ -44,6 +45,11 @@ export default function KbPage() {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [selectedFaqs, setSelectedFaqs] = useState<Set<string>>(new Set());
+  const [faqEdits, setFaqEdits] = useState<Record<string, { question: string; answer: string }>>({});
+  const [newFaqOpen, setNewFaqOpen] = useState(false);
+  const [newFaq, setNewFaq] = useState({ sourceNodeId: "", question: "", answer: "" });
+  const drafts = useGraphBundleDraft();
 
   useEffect(() => {
     let cancelled = false;
@@ -86,18 +92,71 @@ export default function KbPage() {
       item.title, item.markdown, item.source, item.path_label, item.persona.name,
     ].some((value) => String(value || "").toLocaleLowerCase("pt-BR").includes(term)));
   }, [activeCategory, catalogs, query]);
+  const activeCatalog = catalogs.find((item) => item.persona.slug === globalPersona.slug) || catalogs[0];
+  const draftFaqs = useMemo(() => {
+    if (!drafts.draft || drafts.draft.persona_slug !== globalPersona.slug) return [];
+    return (drafts.draft.bundle?.nodes || []).filter((node: any) => node.node_type === "faq" && node.status !== "archived");
+  }, [drafts.draft, globalPersona.slug]);
+
+  const openFaqDraft = async () => {
+    if (!globalPersona.slug || !activeCatalog?.graph.checksum) return;
+    try { await drafts.ensureDraft(globalPersona.slug, activeCatalog.graph.checksum, { surface: "kb" }); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : "Falha ao abrir o rascunho."); }
+  };
+  const editFor = (node: any) => faqEdits[node.id] || { question: String(node.data?.question || node.title || ""), answer: String(node.data?.answer || node.data?.content || node.summary || "") };
+  const saveFaq = async (node: any) => {
+    const edit = editFor(node);
+    await drafts.mutate([{ op: "update_node", node_id: node.id, patch: { title: edit.question.trim(), summary: edit.answer.trim(), "data.question": edit.question.trim(), "data.answer": edit.answer.trim() } }], "FAQ editada no Golden Dataset", { surface: "kb", source_ref: node.id });
+  };
+  const decideSelected = async (decision: "approve_faq" | "reject_faq") => {
+    if (!selectedFaqs.size) return;
+    const operations = [...selectedFaqs].flatMap((node_id) => {
+      const edit = faqEdits[node_id];
+      const save = edit ? [{ op: "update_node", node_id, patch: { title: edit.question.trim(), summary: edit.answer.trim(), "data.question": edit.question.trim(), "data.answer": edit.answer.trim() } } as any] : [];
+      return [...save, { op: decision, node_id } as any];
+    });
+    await drafts.mutate(operations, decision === "approve_faq" ? "FAQs salvas e aprovadas em lote" : "FAQs salvas e rejeitadas em lote", { surface: "kb" });
+    setFaqEdits((current) => Object.fromEntries(Object.entries(current).filter(([nodeId]) => !selectedFaqs.has(nodeId))));
+    setSelectedFaqs(new Set());
+  };
+  const reviewOrPublish = async () => {
+    if (!drafts.review) await drafts.reviewDraft();
+    else await drafts.publishDraft("Publicação confirmada no Golden Dataset");
+  };
+  const faqSources = useMemo(() => (drafts.draft?.bundle?.nodes || []).filter((node: any) => !["persona", "faq", "embedded", "embed", "gallery", "asset"].includes(node.node_type) && node.status !== "archived"), [drafts.draft]);
+  const addFaq = async () => {
+    const sourceNode = faqSources.find((node: any) => node.id === newFaq.sourceNodeId);
+    const personaNode = (drafts.draft?.bundle?.nodes || []).find((node: any) => node.node_type === "persona");
+    if (!sourceNode || !personaNode || !newFaq.question.trim() || !newFaq.answer.trim()) return;
+    const id = `faq:${crypto.randomUUID()}`;
+    const slug = newFaq.question.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || id.slice(4);
+    const source = String(sourceNode.data?.source || sourceNode.source || "pending_source");
+    const branchPath = drafts.draft?.bundle?.coordinates?.[sourceNode.id]?.path_node_ids || [personaNode.id, sourceNode.id];
+    await drafts.mutate([{ op: "add_faq_proposal", node_id: id, slug, question: newFaq.question.trim(), answer: newFaq.answer.trim(), source, source_node_id: sourceNode.id, source_node_type: sourceNode.node_type, branch_path: branchPath, question_aliases: [], generator: "operator-manual-v1", generation_batch_id: crypto.randomUUID() }], "FAQ criada a partir do conhecimento selecionado", { surface: "kb", source_ref: sourceNode.id });
+    setNewFaq({ sourceNodeId: "", question: "", answer: "" }); setNewFaqOpen(false);
+  };
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="Base de conhecimento"
         description="Catálogo canônico publicado pelo grafo. FAQs aparecem primeiro e o seletor global do topo controla o escopo."
-        actions={
-          <a href="/knowledge/upload" className="rounded-lg border border-obs-violet/30 bg-obs-violet/10 px-3 py-2 text-xs font-medium text-obs-violet">
-            Adicionar conhecimento
-          </a>
-        }
+        actions={<div className="flex gap-2"><a href="/knowledge/upload" className="rounded-lg border border-obs-violet/30 bg-obs-violet/10 px-3 py-2 text-xs font-medium text-obs-violet">Adicionar conhecimento</a><button type="button" onClick={openFaqDraft} disabled={!activeCatalog?.graph.checksum || drafts.busy} className="flex items-center gap-2 rounded-lg bg-obs-violet px-3 py-2 text-xs font-medium text-white disabled:opacity-50"><Pencil size={13} />Revisar FAQs</button></div>}
       />
+
+      {draftFaqs.length > 0 && (
+        <section className="space-y-3 rounded-2xl border border-obs-violet/25 bg-obs-violet/5 p-4">
+          <div className="flex flex-wrap items-center gap-2"><div className="mr-auto"><h2 className="text-sm font-semibold text-obs-text">Revisão do mesmo rascunho do Grafo</h2><p className="mt-1 text-xs text-obs-subtle">Edite perguntas e respostas; somente FAQs aprovadas serão projetadas no Embedded.</p></div><button type="button" onClick={() => setNewFaqOpen((value) => !value)} disabled={drafts.busy} className="rounded-lg border border-obs-violet/30 px-3 py-2 text-xs text-obs-violet">Nova FAQ</button><button type="button" disabled={!selectedFaqs.size || drafts.busy} onClick={() => decideSelected("reject_faq")} className="rounded-lg border border-white/10 px-3 py-2 text-xs disabled:opacity-40">Rejeitar</button><button type="button" disabled={!selectedFaqs.size || drafts.busy} onClick={() => decideSelected("approve_faq")} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs text-white disabled:opacity-40">Aprovar selecionadas</button><button type="button" disabled={drafts.busy} onClick={reviewOrPublish} className="rounded-lg bg-obs-violet px-3 py-2 text-xs text-white disabled:opacity-40">{drafts.review ? "Publicar revisão" : "Revisar publicação"}</button></div>
+          {newFaqOpen && <div className="grid gap-2 rounded-xl border border-obs-violet/20 bg-obs-base/50 p-3 md:grid-cols-2"><label className="text-[10px] text-obs-faint md:col-span-2">Conhecimento de origem<select className="lg-input mt-1 w-full text-xs" value={newFaq.sourceNodeId} onChange={(event) => setNewFaq((current) => ({ ...current, sourceNodeId: event.target.value }))}><option value="">Selecione um node</option>{faqSources.map((node: any) => <option key={node.id} value={node.id}>{node.node_type} · {node.title}</option>)}</select></label><label className="text-[10px] text-obs-faint">Pergunta<input className="lg-input mt-1 w-full text-xs" value={newFaq.question} onChange={(event) => setNewFaq((current) => ({ ...current, question: event.target.value }))} /></label><label className="text-[10px] text-obs-faint">Resposta<textarea className="lg-input mt-1 w-full text-xs" rows={3} value={newFaq.answer} onChange={(event) => setNewFaq((current) => ({ ...current, answer: event.target.value }))} /></label><div className="md:col-span-2"><button type="button" onClick={addFaq} disabled={!newFaq.sourceNodeId || !newFaq.question.trim() || !newFaq.answer.trim() || drafts.busy} className="rounded-md bg-obs-violet px-3 py-1.5 text-xs text-white disabled:opacity-40">Criar proposta pendente</button></div></div>}
+          {(drafts.error || drafts.review?.validation_errors.length) ? <p className="rounded-lg border border-red-400/30 bg-red-500/10 p-2 text-xs text-red-200">{drafts.error || drafts.review?.validation_errors.join(" · ")}</p> : null}
+          <div className="grid gap-3 xl:grid-cols-2">
+            {draftFaqs.map((node: any) => {
+              const edit = editFor(node);
+              return <article key={node.id} className="rounded-xl border border-white/10 bg-obs-base/60 p-3"><div className="flex items-start gap-2"><input aria-label={`Selecionar ${node.title}`} type="checkbox" checked={selectedFaqs.has(node.id)} onChange={(event) => setSelectedFaqs((current) => { const next = new Set(current); event.target.checked ? next.add(node.id) : next.delete(node.id); return next; })} /><span className="ml-auto rounded bg-white/5 px-2 py-0.5 text-[10px] text-obs-faint">{node.status}</span></div><label className="mt-2 block text-[10px] text-obs-faint">Pergunta<input className="lg-input mt-1 w-full text-xs" value={edit.question} onChange={(event) => setFaqEdits((current) => ({ ...current, [node.id]: { ...edit, question: event.target.value } }))} /></label><label className="mt-2 block text-[10px] text-obs-faint">Resposta<textarea className="lg-input mt-1 w-full text-xs" rows={4} value={edit.answer} onChange={(event) => setFaqEdits((current) => ({ ...current, [node.id]: { ...edit, answer: event.target.value } }))} /></label><div className="mt-2 flex items-center justify-between"><span className="max-w-[70%] truncate text-[10px] text-obs-faint">{node.data?.source || "pending_source"}</span><button type="button" disabled={drafts.busy || !edit.question.trim() || !edit.answer.trim()} onClick={() => saveFaq(node)} className="rounded-md border border-obs-violet/30 px-2 py-1 text-[10px] text-obs-violet disabled:opacity-40">Salvar</button></div></article>;
+            })}
+          </div>
+        </section>
+      )}
 
       <SearchBar value={query} onChange={setQuery} placeholder="Buscar por título, conteúdo, fonte ou caminho">
         <div className="flex flex-wrap gap-1.5">
