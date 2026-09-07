@@ -46,7 +46,7 @@ jobs:
             [[ "$PERSONA_SLUG" == all || "$PERSONA_SLUG" == tock-fatal ]]
             [[ "$WINDOW_START" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T ]]
             [[ "$WINDOW_END" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T ]]
-            python3 -c 'import json; p=json.load(open(".deploy/control/claims-paused.json",encoding="utf-8")); print("CLAIMS_PAUSE_STATE="+json.dumps({k:p.get(k) for k in ("paused","reason","updated_at","created_at")},sort_keys=True))'
+            python3 -c 'import json,pathlib; f=pathlib.Path(".deploy/control/claims-paused.json"); p=json.load(f.open(encoding="utf-8")) if f.exists() else {"paused":False,"reason":"pause file absent"}; print("CLAIMS_PAUSE_STATE="+json.dumps({k:p.get(k) for k in ("paused","reason","updated_at","created_at")},sort_keys=True))'
             compose=(docker compose --env-file .env.compose -f docker-compose.yml -f infra/microservices/docker-compose.blue-green.yml)
             "${compose[@]}" exec -T \
               -e WINDOW_START="$WINDOW_START" -e WINDOW_END="$WINDOW_END" -e PERSONA_SLUG="$PERSONA_SLUG" \
