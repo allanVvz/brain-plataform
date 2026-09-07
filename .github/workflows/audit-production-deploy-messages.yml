@@ -92,6 +92,21 @@ jobs:
             );
 
             with scope as (select id from public.personas where :'PERSONA_SLUG'='all' or slug=:'PERSONA_SLUG')
+            select 'MESSAGE_WITHOUT_BUFFER_ENVELOPE',count(*)
+            from public.messages m
+            join public.workflow_bindings w on w.id=m.channel_binding_id
+            join scope s on s.id=w.persona_id
+            where m.direction='inbound' and m.channel='whatsapp'
+              and m.created_at>=:'WINDOW_START'::timestamptz and m.created_at<:'WINDOW_END'::timestamptz
+              and coalesce(m.external_message_id,'') not like 'validator:%'
+              and not exists (
+                select 1 from public.lead_buffer b
+                where b.channel_binding_id=m.channel_binding_id and b.direction='inbound'
+                  and ((m.external_message_id is not null and b.external_message_id=m.external_message_id)
+                    or (m.correlation_id is not null and b.correlation_id=m.correlation_id))
+              );
+
+            with scope as (select id from public.personas where :'PERSONA_SLUG'='all' or slug=:'PERSONA_SLUG')
             select 'DUPLICATE_EXTERNAL_INBOUND_IDS',count(*) from (
               select b.persona_id,b.external_message_id
               from public.lead_buffer b join scope s on s.id=b.persona_id
@@ -119,6 +134,15 @@ jobs:
               and coalesce(b.external_message_id,'') not like 'validator:%'
               and coalesce(b.payload->>'source','') <> 'wa_validator'
             group by status order by status;
+
+            with scope as (select id from public.personas where :'PERSONA_SLUG'='all' or slug=:'PERSONA_SLUG')
+            select 'CURRENT_BACKLOG_DETAIL',b.id,p.slug,b.status,b.created_at,b.updated_at,b.attempt_count,
+              coalesce(b.external_message_id,''),left(md5(coalesce(b.lead_ref::text,'')),12)
+            from public.lead_buffer b join scope s on s.id=b.persona_id join public.personas p on p.id=b.persona_id
+            where b.direction='inbound' and b.status in ('received','buffered','retry','processing','awaiting_proof','dead_letter')
+              and coalesce(b.external_message_id,'') not like 'validator:%'
+              and coalesce(b.payload->>'source','') <> 'wa_validator'
+            order by b.created_at;
 
             with scope as (select id from public.personas where :'PERSONA_SLUG'='all' or slug=:'PERSONA_SLUG')
             select 'CURRENT_ORPHANS',
