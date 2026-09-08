@@ -89,6 +89,9 @@ def test_release_validator_gate_counts_every_migration_it_lists():
 
 def test_schema_workflow_applies_the_complete_authorized_release():
     assert "apply-schema-release.sh" in SCHEMA_WORKFLOW
+    assert "Audit current production schema without mutation" in SCHEMA_WORKFLOW
+    assert "CURRENT_SCHEMA" in SCHEMA_WORKFLOW
+    assert "STORAGE_PRIVILEGES" in SCHEMA_WORKFLOW
     for version in range(132, 136):
         assert f"supabase/migrations/{version:03d}_" in SCHEMA_WORKFLOW
     assert "--single-transaction" in SCHEMA_APPLY
