@@ -56,6 +56,10 @@ export RUNTIME_ENV_FILE="${RUNTIME_ENV_FILE:-$OPERATION_ROOT/.env.microservices/
 export TRANSPORT_ENV_FILE="${TRANSPORT_ENV_FILE:-$OPERATION_ROOT/.env.microservices/transport.env}"
 
 compose_service="$(policy_value compose_service)"
+if [[ -z "$compose_service" && "$SERVICE" == "gateway" ]]; then
+  compose_service="gateway"
+fi
+[[ -n "$compose_service" ]] || { echo "missing compose_service inventory for $SERVICE" >&2; exit 1; }
 mapfile -t worker_bases < <(policy_value workers)
 
 read_state() {
