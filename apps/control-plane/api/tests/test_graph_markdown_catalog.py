@@ -9,7 +9,6 @@ if str(API_ROOT) not in sys.path:
 from schemas.graph_json_v2 import GraphJson, Node
 from services import (
     graph_markdown,
-    graph_json_v2_store,
     knowledge_catalog,
     knowledge_graph,
 )
@@ -42,13 +41,31 @@ def test_aurora_markdown_contract_and_catalog():
     assert all(node.data["markdown_document"] is True for node in faq_nodes)
     assert {node.data["question_count"] for node in faq_nodes} == {1, 6}
 
-    catalog = knowledge_catalog.project_graph(
-        normalized,
-        version=10,
-        checksum=graph_json_v2_store.checksum_graph(normalized),
-        persona_id="aurora-id",
-        persona_name="Aurora",
-    )
+    publication = {
+        "id": "publication-aurora", "version": 10,
+        "checksum": "sha256:" + "a" * 64, "status": "active",
+        "document_json": {
+            "schema_version": "3.0",
+            "persona": {"id": "aurora-id", "slug": "aurora"},
+            "nodes": [{
+                "id": node.id, "node_type": node.node_type,
+                "slug": node.slug, "title": node.title,
+                "summary": (node.data or {}).get("markdown") or "",
+                "status": node.lifecycle.status, "data": node.data or {},
+            } for node in normalized.nodes],
+            "edges": [{
+                "id": edge.id, "source": edge.source, "target": edge.target,
+                "relation_type": (
+                    "publishes_to" if edge.target == embedded.id
+                    and edge.source in {node.id for node in faq_nodes}
+                    else edge.relation_type
+                ), "weight": edge.weight,
+                "metadata": {"active": edge.lifecycle.status == "active"},
+            } for edge in normalized.edges],
+            "coordinates": {},
+        },
+    }
+    catalog = knowledge_catalog.project_publication(publication, persona_name="Aurora")
     assert catalog["graph"]["document_count"] == 136
     assert catalog["categories"][0]["key"] == "faqs"
     assert catalog["categories"][0]["count"] == 88

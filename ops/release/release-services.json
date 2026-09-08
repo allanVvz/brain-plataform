@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "services": {
+    "gateway": {
+      "context": "apps/gateway",
+      "build_context": ".",
+      "dockerfile": "apps/gateway/Dockerfile",
+      "compose_service": "gateway",
+      "paths": ["apps/gateway/**", "packages/brain-contracts/**", "ops/microservices/route-map.json"],
+      "health": "/health/ready",
+      "pause_policy": "global"
+    },
+    "control-plane": {
+      "context": "apps/control-plane",
+      "build_context": ".",
+      "dockerfile": "apps/control-plane/Dockerfile",
+      "compose_service": "control-plane",
+      "paths": ["apps/control-plane/**", "packages/brain-contracts/**"],
+      "health": "/health/ready",
+      "pause_policy": "global",
+      "workers": ["control-plane-knowledge", "control-plane-integrations", "control-plane-validator"]
+    },
+    "conversation-runtime": {
+      "context": "apps/conversation-runtime",
+      "build_context": ".",
+      "dockerfile": "apps/conversation-runtime/Dockerfile",
+      "compose_service": "runtime",
+      "paths": ["apps/conversation-runtime/**", "packages/brain-contracts/**"],
+      "health": "/health/ready",
+      "pause_policy": "global",
+      "workers": ["runtime-conversation", "runtime-validator"]
+    },
+    "transport": {
+      "context": "apps/transport",
+      "build_context": ".",
+      "dockerfile": "apps/transport/Dockerfile",
+      "compose_service": "transport",
+      "paths": ["apps/transport/**", "packages/brain-contracts/**"],
+      "health": "/health/ready",
+      "pause_policy": "global",
+      "workers": ["transport-dispatch", "transport-media"]
+    }
+  },
+  "ci_only": ["data/graph_bundles/**", "docs/**", "tests/**", "scripts/**", "api/**", "**/fixtures/**", "**/__fixtures__/**", "AGENTS.md", "README*"],
+  "dashboard": ["dashboard/**"],
+  "schema": ["supabase/migrations/**"],
+  "runtime_approval_paths": ["packages/brain-contracts/**", "apps/conversation-runtime/n8n/persona-conversation-template.json"],
+  "infrastructure": ["infra/**", "ops/vps/**", "ops/microservices/**", "ops/release/**", ".github/workflows/**", "docker-compose.yml"]
+}

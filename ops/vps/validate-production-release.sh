@@ -190,7 +190,12 @@ else
 fi
 
 "${COMPOSE[@]}" ps
-"${COMPOSE[@]}" exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -P pager=off' <<'SQL'
+EXPECTED_MIGRATION_COUNT=24
+if [[ "${ALLOW_PENDING_SCHEMA_VERSION:-}" == "135" ]]; then
+  EXPECTED_MIGRATION_COUNT=23
+fi
+"${COMPOSE[@]}" exec -T -e EXPECTED_MIGRATION_COUNT="$EXPECTED_MIGRATION_COUNT" db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -v expected_migration_count="$EXPECTED_MIGRATION_COUNT" -P pager=off' <<'SQL'
+select set_config('brain.expected_migration_count', :'expected_migration_count', false);
 select 'migration' metric, filename value
 from public._compose_migrations
 where filename in (
@@ -213,7 +218,11 @@ where filename in (
   '128_confirm_branch_offering_within_journey.sql',
   '129_carry_over_facts_by_lead.sql',
   '130_shared_lead_memory_and_journey_commit_v4.sql',
-  '131_microservice_role_grants.sql'
+  '131_microservice_role_grants.sql',
+  '132_runtime_vector_distance_grant.sql',
+  '133_conversation_turn_exactly_once_v5.sql',
+  '134_graph_bundle_draft_ledger.sql',
+  '135_microservice_storage_role_grants.sql'
 ) order by filename;
 
 select 'microservice_role' metric,
@@ -221,6 +230,13 @@ select 'microservice_role' metric,
 from pg_roles
 where rolname in ('brain_gateway','brain_control_plane','brain_runtime','brain_transport')
 order by rolname;
+
+select 'storage_role_grant' metric,
+       grantee || ':' || table_name || ':' || privilege_type value
+from information_schema.role_table_grants
+where table_schema='storage'
+  and grantee in ('brain_gateway','brain_control_plane','brain_runtime','brain_transport')
+order by grantee, table_name, privilege_type;
 
 select 'unsafe_table_grants' metric, count(*)::text value
 from information_schema.role_table_grants
@@ -289,8 +305,12 @@ begin
       '128_confirm_branch_offering_within_journey.sql',
       '129_carry_over_facts_by_lead.sql',
       '130_shared_lead_memory_and_journey_commit_v4.sql',
-      '131_microservice_role_grants.sql')) <> 20 then
-    raise exception 'release migrations 112-131 are incomplete';
+      '131_microservice_role_grants.sql',
+      '132_runtime_vector_distance_grant.sql',
+      '133_conversation_turn_exactly_once_v5.sql',
+      '134_graph_bundle_draft_ledger.sql',
+      '135_microservice_storage_role_grants.sql')) < current_setting('brain.expected_migration_count')::int then
+    raise exception 'release migrations 112-135 are incomplete';
   end if;
   if (select count(*) from pg_roles
       where rolname in ('brain_gateway','brain_control_plane','brain_runtime','brain_transport')
@@ -314,6 +334,26 @@ begin
       and member_role.rolname in ('brain_gateway','brain_control_plane','brain_runtime','brain_transport')
   ) then
     raise exception 'microservice role inherits universal service_role';
+  end if;
+  if not has_schema_privilege('brain_control_plane', 'storage', 'USAGE')
+     or not has_table_privilege('brain_control_plane', 'storage.buckets', 'SELECT')
+     or not has_table_privilege('brain_control_plane', 'storage.objects', 'SELECT,INSERT,UPDATE,DELETE')
+     or has_table_privilege('brain_control_plane', 'storage.buckets', 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+     or has_table_privilege('brain_control_plane', 'storage.objects', 'TRUNCATE,REFERENCES,TRIGGER') then
+    raise exception 'control-plane Storage grants are missing or excessive';
+  end if;
+  if not has_schema_privilege('brain_transport', 'storage', 'USAGE')
+     or not has_table_privilege('brain_transport', 'storage.buckets', 'SELECT')
+     or not has_table_privilege('brain_transport', 'storage.objects', 'SELECT,INSERT,UPDATE')
+     or has_table_privilege('brain_transport', 'storage.buckets', 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+     or has_table_privilege('brain_transport', 'storage.objects', 'DELETE,TRUNCATE,REFERENCES,TRIGGER') then
+    raise exception 'transport Storage grants are missing or excessive';
+  end if;
+  if has_schema_privilege('brain_runtime', 'storage', 'USAGE')
+     or has_schema_privilege('brain_gateway', 'storage', 'USAGE')
+     or has_table_privilege('brain_runtime', 'storage.objects', 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+     or has_table_privilege('brain_gateway', 'storage.objects', 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') then
+    raise exception 'runtime or gateway unexpectedly has Storage access';
   end if;
   if exists (
     select 1 from information_schema.role_table_grants

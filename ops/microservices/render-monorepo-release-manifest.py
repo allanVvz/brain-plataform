@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SERVICES = ("gateway", "control-plane", "conversation-runtime", "transport")
 SHA = re.compile(r"^[0-9a-f]{40}$")
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+MIGRATION = re.compile(r"^(\d{3})_[a-z0-9_]+\.sql$")
 
 
 def checksum(path: Path) -> str:
@@ -27,17 +28,36 @@ def contracts_checksum() -> str:
     return "sha256:" + digest.hexdigest()
 
 
-def render(*, source_sha: str, digests: dict[str, str], schema_version: int) -> dict:
+def latest_schema_version() -> int:
+    """Return the highest unique migration version in this checkout."""
+    versions: dict[int, str] = {}
+    for path in sorted((ROOT / "supabase/migrations").glob("*.sql")):
+        match = MIGRATION.fullmatch(path.name)
+        if not match:
+            raise ValueError(f"invalid migration filename: {path.name}")
+        version = int(match.group(1))
+        if version in versions:
+            raise ValueError(
+                f"duplicate migration version {version}: {versions[version]}, {path.name}"
+            )
+        versions[version] = path.name
+    if not versions:
+        raise ValueError("no migrations found")
+    return max(versions)
+
+
+def render(*, source_sha: str, digests: dict[str, str], schema_version: int | None = None) -> dict:
     if not SHA.fullmatch(source_sha):
         raise ValueError("source_sha must be a 40-character lowercase SHA")
     if set(digests) != set(SERVICES) or not all(DIGEST.fullmatch(value) for value in digests.values()):
         raise ValueError("one sha256 digest is required for each service")
     package_checksum = contracts_checksum()
+    resolved_schema_version = latest_schema_version() if schema_version is None else schema_version
     return {
         "source_sha": source_sha,
         "contracts_version": "3.0.0",
         "contracts_checksum": package_checksum,
-        "schema_version": schema_version,
+        "schema_version": resolved_schema_version,
         "route_map_checksum": checksum(ROOT / "ops/microservices/route-map.json"),
         "n8n_checksum": checksum(ROOT / "apps/conversation-runtime/n8n/persona-conversation-template.json"),
         "services": {
@@ -45,7 +65,7 @@ def render(*, source_sha: str, digests: dict[str, str], schema_version: int) -> 
                 "repository": "allanVvz/brain-plataform",
                 "sha": source_sha,
                 "digest": digests[name],
-                "required_schema_version": 131,
+                "required_schema_version": resolved_schema_version,
                 "build_context": f"apps/{name}",
             }
             for name in SERVICES
@@ -56,7 +76,7 @@ def render(*, source_sha: str, digests: dict[str, str], schema_version: int) -> 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-sha", required=True)
-    parser.add_argument("--schema-version", type=int, default=132)
+    parser.add_argument("--schema-version", type=int)
     parser.add_argument("--output", type=Path, required=True)
     for name in SERVICES:
         parser.add_argument(f"--{name}-digest", required=True)

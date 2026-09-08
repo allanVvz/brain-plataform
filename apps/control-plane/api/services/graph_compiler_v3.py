@@ -12,6 +12,7 @@ import os
 import re
 import unicodedata
 from collections import defaultdict, deque
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -1395,6 +1396,44 @@ def publication_index_node_ids(document: dict[str, Any]) -> list[str]:
     return node_ids
 
 
+def _reuse_or_embed_chunks(
+    client: Any, *, persona_id: str, chunks: list[dict[str, Any]],
+    embedding_model: str, embedding_dimension: int,
+    batch_embed: Callable[[list[str]], list[list[float]]],
+) -> list[list[float]]:
+    """Reuse vectors by semantic checksum and embed only genuinely new chunks."""
+    checksums = [str(chunk["checksum"]) for chunk in chunks]
+    reused: dict[str, list[float]] = {}
+    try:
+        rows = (
+            client.table("knowledge_rag_chunks")
+            .select("chunk_checksum,embedding")
+            .eq("persona_id", persona_id).eq("embedding_model", embedding_model)
+            .in_("chunk_checksum", checksums).not_.is_("embedding", "null")
+            .limit(max(1, len(checksums) * 4)).execute().data or []
+        )
+        for row in rows:
+            checksum = str(row.get("chunk_checksum") or "")
+            vector = row.get("embedding")
+            if (
+                checksum and isinstance(vector, list)
+                and len(vector) == embedding_dimension
+            ):
+                reused.setdefault(checksum, [float(value) for value in vector])
+    except Exception:
+        # Reuse is an optimization; a provider/schema compatibility issue must
+        # never weaken correctness of the immutable staged projection.
+        reused = {}
+    missing = [chunk for chunk in chunks if str(chunk["checksum"]) not in reused]
+    generated = batch_embed([chunk["text"] for chunk in missing])
+    if len(generated) != len(missing):
+        raise RuntimeError("embedding provider returned an invalid batch size")
+    generated_by_checksum = {
+        str(chunk["checksum"]): vector for chunk, vector in zip(missing, generated, strict=True)
+    }
+    return [reused.get(str(chunk["checksum"])) or generated_by_checksum[str(chunk["checksum"])] for chunk in chunks]
+
+
 def compile_persona_publication(
     persona_slug: str,
     *,
@@ -1402,23 +1441,38 @@ def compile_persona_publication(
     embedder: Callable[[list[str]], list[list[float]]] | None = None,
     embedding_profile: dict[str, Any] | None = None,
     source_rows: tuple[list[dict[str, Any]], list[dict[str, Any]]] | None = None,
+    precompiled_document: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compile, persist, embed, and atomically activate one persona snapshot."""
     persona = supabase_client.get_persona(persona_slug)
     if not persona:
         raise LookupError(f"persona not found: {persona_slug}")
-    if source_rows is None:
-        node_rows, edge_rows = supabase_client.list_all_knowledge_graph(
-            persona_id=str(persona["id"]), limit_nodes=10000
-        )
+    if precompiled_document is not None:
+        document = deepcopy(precompiled_document)
+        declared_checksum = str(document.get("checksum") or "")
+        unsigned = deepcopy(document)
+        unsigned.pop("checksum", None)
+        if canonical_checksum(unsigned) != declared_checksum:
+            raise GraphCompilationError(["precompiled_document_checksum_invalid"])
+        document_persona = document.get("persona") or {}
+        if (
+            str(document_persona.get("id") or "") != str(persona["id"])
+            or str(document_persona.get("slug") or "") != persona_slug
+        ):
+            raise GraphCompilationError(["precompiled_document_persona_mismatch"])
     else:
-        node_rows, edge_rows = source_rows
-    document = compile_graph(
-        persona=persona,
-        node_rows=node_rows,
-        edge_rows=edge_rows,
-        embedding_profile=embedding_profile,
-    )
+        if source_rows is None:
+            node_rows, edge_rows = supabase_client.list_all_knowledge_graph(
+                persona_id=str(persona["id"]), limit_nodes=10000
+            )
+        else:
+            node_rows, edge_rows = source_rows
+        document = compile_graph(
+            persona=persona,
+            node_rows=node_rows,
+            edge_rows=edge_rows,
+            embedding_profile=embedding_profile,
+        )
     client = supabase_client.get_client()
     existing_response = (
         client.table("graph_publications").select("*")
@@ -1466,6 +1520,10 @@ def compile_persona_publication(
             document["projection_manifest"].get("embedding_model")
             or embedding_model_name()
         )
+        embedding_dimension = int(
+            document["projection_manifest"].get("embedding_dimension")
+            or EMBEDDING_DIMENSION
+        )
         batch_embed = embedder or (
             (lambda texts: generate_embeddings_for_profile(
                 texts, profile=embedding_profile, input_type="passage"
@@ -1483,7 +1541,12 @@ def compile_persona_publication(
             )
             if not branch_ids:
                 continue
-            vectors = batch_embed([chunk["text"] for chunk in chunks])
+            vectors = _reuse_or_embed_chunks(
+                client, persona_id=str(persona["id"]), chunks=chunks,
+                embedding_model=embedding_model,
+                embedding_dimension=embedding_dimension,
+                batch_embed=batch_embed,
+            )
             if len(vectors) != len(chunks):
                 raise RuntimeError(f"embedding count mismatch for {node_id}")
             entry = (client.table("knowledge_rag_entries").insert({

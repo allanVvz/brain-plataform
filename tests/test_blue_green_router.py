@@ -58,17 +58,21 @@ def test_deployer_installs_private_caddy_listener_before_gateway_readiness():
     install = source.index("install_active_caddy_config\n")
     readiness = source.index("deadline=$((SECONDS + 180))")
     assert install < readiness
-    assert 'local approved="$ROOT_DIR/infra/Caddyfile"' in source
+    assert 'local approved="$RELEASE_ROOT/infra/Caddyfile"' in source
+    assert 'OPERATION_ROOT="${OPERATION_ROOT:-$RELEASE_ROOT}"' in source
     assert 'local active="$CADDY_DIR/Caddyfile"' in source
     assert "public upstream unchanged" in source
     assert 'cp "$previous" "$active"' in source
 
 
 def test_workflow_audits_before_sync_or_mutation():
-    source = (ROOT / ".github/workflows/_deploy-microservice.yml").read_text()
-    preflight, mutate = source.split("  mutate:", 1)
-    assert "validate-production-release.sh" in preflight
-    assert "scp-action" not in preflight
-    assert "environment: production-${{ inputs.service }}" in mutate
-    assert "scp-action" in mutate
-    assert "--apply" in mutate
+    source = (ROOT / ".github/workflows/release-main.yml").read_text()
+    deploy = source.split("  deploy:", 1)[1]
+    assert deploy.index("sha256sum -c SHA256SUMS") < deploy.index(
+        "validate-production-release.sh"
+    )
+    assert deploy.index("validate-production-release.sh") < deploy.index(
+        "pause-worker-claims.sh"
+    )
+    assert deploy.index("--dry-run") < deploy.index("pause-worker-claims.sh")
+    assert deploy.index("pause-worker-claims.sh") < deploy.index("--apply")

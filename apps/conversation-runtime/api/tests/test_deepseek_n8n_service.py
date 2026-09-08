@@ -42,6 +42,9 @@ def test_every_persona_uses_the_same_graph_agentic_template():
 
     assert commerce["meta"]["template"] == "graph_agentic_v3"
     assert appointment["meta"]["template"] == "graph_agentic_v3"
+    assert commerce["meta"]["binding"]["agent_role"] == "sdr"
+    assert commerce["meta"]["binding"]["agent_identity_key"] == "p-commerce:assistant"
+    assert appointment["meta"]["binding"]["agent_identity_key"] == "p-appointment:assistant"
     assert [node["id"] for node in commerce["nodes"]] == [
         node["id"] for node in appointment["nodes"]
     ]
@@ -164,6 +167,10 @@ def test_provision_keeps_key_only_in_n8n_credential(monkeypatch):
     assert calls["workflow"]["active"] is False
     assert result["n8n_workflow_id"] == "workflow-existing"
     assert result["n8n_credential_id"] == "credential-new"
+    assert result["agent_slug"] == "vitoria"
+    assert result["agent_role"] == "sdr"
+    assert result["agent_identity_key"] == "persona-id:vitoria"
+    assert result["credential_ref"] == "credential-new"
     assert key not in str(result)
     assert deleted == ["credential-old"]
 
@@ -189,7 +196,7 @@ def test_provision_rolls_back_only_new_credential_when_workflow_fails(monkeypatc
 
     try:
         deepseek_n8n_service.provision(
-            persona={"slug": "baita-conveniencia", "name": "Baita"},
+            persona={"id": "persona-id", "slug": "baita-conveniencia", "name": "Baita"},
             api_key="sk-test-deepseek-secret",
             previous_config={
                 "n8n_workflow_id": "workflow-existing",
@@ -325,6 +332,21 @@ def test_resync_workflow_requires_prior_provisioning(monkeypatch):
         raise AssertionError("expected RuntimeError")
     except RuntimeError as exc:
         assert "provisionado" in str(exc)
+
+
+def test_workflow_rejects_future_agent_roles_until_an_executor_exists():
+    with pytest.raises(ValueError, match="only the sdr role"):
+        deepseek_n8n_service._workflow_for_persona(
+            {
+                "id": "persona-1",
+                "slug": "persona",
+                "name": "Persona",
+                "config": {"agent_slug": "closer", "agent_role": "closer"},
+            },
+            credential_id="cred-1",
+            credential_name="Credential",
+            model_binding=MODEL_BINDING,
+        )
 
 
 def _live_workflow(credential_id: str) -> dict:

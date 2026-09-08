@@ -17,6 +17,37 @@ jobs:
         run: python ops/microservices/validate-release-manifest.py "${{ inputs.manifest_path }}"
       - name: Build deterministic schema plan
         run: python ops/microservices/plan-schema-release.py "${{ inputs.manifest_path }}" > schema-release-plan.json
+      - name: Audit current production schema without mutation
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        env:
+          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          envs: VPS_APP_DIR
+          command_timeout: 5m
+          script: |
+            set -Eeuo pipefail
+            cd "$VPS_APP_DIR"
+            compose=(docker compose --env-file .env.compose -f docker-compose.yml -f infra/microservices/docker-compose.blue-green.yml)
+            "${compose[@]}" exec -T db sh -c \
+              'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -AtF "|" -v ON_ERROR_STOP=1' <<'SQL'
+            select 'CURRENT_SCHEMA',coalesce(max((substring(filename from '^[0-9]+'))::int),0)
+              from public._compose_migrations;
+            select 'RELEASE_MIGRATION',filename
+              from public._compose_migrations
+             where (substring(filename from '^[0-9]+'))::int between 132 and 135
+             order by filename;
+            select 'STORAGE_PRIVILEGES',
+              has_schema_privilege('brain_control_plane','storage','USAGE')::int,
+              has_table_privilege('brain_control_plane','storage.objects','SELECT,INSERT,UPDATE,DELETE')::int,
+              has_schema_privilege('brain_transport','storage','USAGE')::int,
+              has_table_privilege('brain_transport','storage.objects','SELECT,INSERT,UPDATE')::int,
+              has_table_privilege('brain_runtime','storage.objects','SELECT,INSERT,UPDATE,DELETE')::int,
+              has_table_privilege('brain_gateway','storage.objects','SELECT,INSERT,UPDATE,DELETE')::int;
+            SQL
       - uses: actions/upload-artifact@v4
         with:
           name: schema-release-plan-${{ inputs.manifest_sha }}
@@ -38,10 +69,10 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
-          source: ops/microservices/validate-release-manifest.py,ops/microservices/route-map.json,apps/conversation-runtime/n8n/persona-conversation-template.json,ops/vps/apply-runtime-vector-grant.sh,ops/vps/backup.sh,ops/vps/restore.sh,supabase/migrations/132_runtime_vector_distance_grant.sql,${{ inputs.manifest_path }}
+          source: ops/microservices/validate-release-manifest.py,ops/microservices/route-map.json,apps/conversation-runtime/n8n/persona-conversation-template.json,ops/vps/apply-schema-release.sh,ops/vps/backup.sh,ops/vps/restore.sh,supabase/migrations/132_runtime_vector_distance_grant.sql,supabase/migrations/133_conversation_turn_exactly_once_v5.sql,supabase/migrations/134_graph_bundle_draft_ledger.sql,supabase/migrations/135_microservice_storage_role_grants.sql,${{ inputs.manifest_path }}
           target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           overwrite: true
-      - name: Apply migration 132 with backup and isolated restore
+      - name: Apply authorized schema release with backup and isolated restore
         uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -52,4 +83,4 @@ jobs:
           script: |
             set -Eeuo pipefail
             cd "${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}"
-            bash ops/vps/apply-runtime-vector-grant.sh "${{ inputs.manifest_path }}" --apply
+            bash ops/vps/apply-schema-release.sh "${{ inputs.manifest_path }}" --apply

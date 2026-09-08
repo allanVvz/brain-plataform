@@ -35,7 +35,7 @@ def _build_payload(*, ready: bool, dependencies: dict | None = None) -> dict:
         "build_digest": (os.environ.get("BUILD_DIGEST") or "unknown").strip(),
         "contracts_version": (os.environ.get("BRAIN_CONTRACTS_VERSION") or "3.0.0").strip(),
         "contracts_checksum": (os.environ.get("BRAIN_CONTRACTS_SHA") or "unknown").strip(),
-        "required_schema_version": int(os.environ.get("REQUIRED_SCHEMA_VERSION") or "131"),
+        "required_schema_version": int(os.environ.get("REQUIRED_SCHEMA_VERSION") or "135"),
         "slot": (os.environ.get("BRAIN_SLOT") or "unknown").strip(),
     }
     if dependencies is not None:

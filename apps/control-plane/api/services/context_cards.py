@@ -14,7 +14,6 @@ from schemas.graph_json_v2 import DEFAULT_RELATION_WEIGHTS, GraphJson, Node
 from services import (
     graph_compiler_v3,
     graph_conversation_contract,
-    graph_json_v2_store,
     graph_markdown,
     supabase_client,
 )
@@ -528,23 +527,75 @@ def cards_for_ids(
     return cards
 
 
+def _v3_publication_graph(publication: dict[str, Any]) -> GraphJson:
+    document = publication.get("document_json") or {}
+    if document.get("schema_version") != "3.0":
+        raise LookupError("GraphBundle v3 publication required")
+    coordinates = document.get("coordinates") or {}
+    nodes = []
+    for node in document.get("nodes") or []:
+        node_id = str(node.get("id") or "")
+        path = (coordinates.get(node_id) or {}).get("path_node_ids") or []
+        parent_id = str(path[-2]) if len(path) > 1 else None
+        nodes.append({
+            "id": node_id,
+            "node_type": "embedded" if node.get("node_type") == "embed" else node.get("node_type"),
+            "slug": node.get("slug"), "title": node.get("title"),
+            "label": node.get("title"), "parent_id": parent_id,
+            "lifecycle": {"status": (
+                "active" if str(node.get("status") or "").lower() == "active"
+                else "approved"
+            )},
+            "provenance": {"source": (node.get("data") or {}).get("source")},
+            "data": {**(node.get("data") or {}), "summary": node.get("summary") or ""},
+        })
+    edges = [{
+        "id": edge.get("id"), "source": edge.get("source"), "target": edge.get("target"),
+        "relation_type": edge.get("relation_type"), "weight": edge.get("weight", 1),
+        "primary_tree": edge.get("relation_type") != "publishes_to",
+        "lifecycle": {"status": (
+            "active" if (edge.get("metadata") or {}).get("active", True) is not False
+            else "revoked"
+        )},
+        "metadata": edge.get("metadata") or {},
+    } for edge in document.get("edges") or []]
+    persona = document.get("persona") or {}
+    return GraphJson.model_validate({
+        "schema_version": "2.1", "graph_id": str(publication.get("id")),
+        "tenant": str(persona.get("id") or ""), "persona_slug": persona.get("slug"),
+        "graph_version": int(publication.get("version") or 1), "status": "published",
+        "content_checksum": publication.get("checksum"), "nodes": nodes, "edges": edges,
+    })
+
+
 def current_graph(persona_slug: str) -> tuple[int, str, GraphJson]:
-    current = graph_json_v2_store.load_current(persona_slug)
-    if not current:
-        raise LookupError("Published Graph JSON not found")
-    version, graph = current
-    event = graph_json_v2_store.latest_event(persona_slug) or {}
-    checksum = str((event.get("payload") or {}).get("checksum") or graph_json_v2_store.checksum_graph(graph))
-    return int(version), checksum, graph
+    persona = supabase_client.get_persona(persona_slug)
+    publication = (
+        supabase_client.get_active_graph_publication(str((persona or {}).get("id") or ""))
+        if persona else None
+    )
+    if not publication or publication.get("status") != "active":
+        raise LookupError("Active GraphBundle v3 publication not found")
+    return int(publication["version"]), str(publication["checksum"]), _v3_publication_graph(publication)
 
 
-def load_graph_version(persona_slug: str, version: int | None) -> tuple[int, str, GraphJson] | None:
-    if not version:
+def load_graph_version(
+    persona_slug: str, version: int | None, expected_checksum: str | None,
+) -> tuple[int, str, GraphJson] | None:
+    if not version or not expected_checksum:
         return None
-    graph = graph_json_v2_store.load_activated_version(persona_slug, int(version))
-    if not graph:
+    persona = supabase_client.get_persona(persona_slug)
+    if not persona:
         return None
-    return int(version), str(graph.content_checksum or graph_json_v2_store.checksum_graph(graph)), graph
+    rows = (
+        supabase_client.get_client().table("graph_publications").select("*")
+        .eq("persona_id", persona["id"]).eq("version", int(version))
+        .eq("checksum", expected_checksum).limit(1).execute().data or []
+    )
+    if not rows:
+        return None
+    publication = rows[0]
+    return int(version), str(publication["checksum"]), _v3_publication_graph(publication)
 
 
 def emit_metric(event_type: str, *, persona_id: str | None, lead_ref: int | None, payload: dict[str, Any]) -> None:
@@ -641,6 +692,10 @@ def response_context(
             "decisive_node_ids": [],
             "graph_version": current_version,
             "graph_checksum": current_checksum,
+            "publication_id": None,
+            "current_graph_version": current_version,
+            "current_graph_checksum": current_checksum,
+            "current_publication_id": current.graph_id,
         }
 
     metadata = _message_metadata(selected)
@@ -692,7 +747,12 @@ def response_context(
             graph_version = int(metadata.get("graph_version") or envelope.get("graph_version") or 0)
         except (TypeError, ValueError):
             graph_version = 0
-        historical = load_graph_version(persona_slug, graph_version)
+        expected_historical_checksum = str(
+            metadata.get("graph_checksum") or envelope.get("graph_checksum") or ""
+        )
+        historical = load_graph_version(
+            persona_slug, graph_version, expected_historical_checksum,
+        )
         if historical:
             graph_version, graph_checksum, historical_graph = historical
             exact_cards = cards_for_ids(
@@ -750,6 +810,8 @@ def response_context(
         "decisive_node_ids": decisive_ids,
         "graph_version": graph_version,
         "graph_checksum": graph_checksum,
+        "publication_id": metadata.get("publication_id") or envelope.get("publication_id"),
         "current_graph_version": current_version,
         "current_graph_checksum": current_checksum,
+        "current_publication_id": current.graph_id,
     }

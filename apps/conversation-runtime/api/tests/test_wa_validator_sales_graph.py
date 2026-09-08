@@ -25,6 +25,8 @@ def _publication() -> dict:
     )
     document = graph_bundle.compile_bundle(bundle)
     return {
+        "id": "publication-1",
+        "persona_id": document["persona"]["id"],
         "version": 1,
         "status": "active",
         "checksum": document["checksum"],
@@ -123,11 +125,8 @@ def test_sales_bundle_publishes_a_safe_unknown_commercial_deferral():
     assert policy["question_repetition"] == {"max_attempts": 1}
 
 
-def test_graph_context_falls_back_to_active_v3_without_legacy_v2(monkeypatch):
+def test_graph_context_uses_active_v3(monkeypatch):
     publication = _publication()
-    monkeypatch.setattr(
-        wa_validator_service.graph_json_v2_store, "load_current", lambda _slug: None
-    )
     monkeypatch.setattr(
         wa_validator_service.supabase_client,
         "get_persona",
@@ -149,22 +148,14 @@ def test_graph_context_falls_back_to_active_v3_without_legacy_v2(monkeypatch):
     assert wa_validator_service.conversation_runtime._business_model(graph) == "sales"
 
 
-def test_graph_context_does_not_mask_invalid_legacy_v2(monkeypatch):
-    monkeypatch.setattr(
-        wa_validator_service.graph_json_v2_store,
-        "load_current",
-        lambda _slug: (1, object()),
-    )
-    monkeypatch.setattr(
-        wa_validator_service,
-        "_published_graph",
-        lambda _slug: (_ for _ in ()).throw(ValueError("Graph JSON v2 publicado não está válido")),
-    )
+def test_graph_context_requires_active_v3(monkeypatch):
+    monkeypatch.setattr(wa_validator_service.supabase_client, "get_persona", lambda _slug: {"id": "persona-1"})
+    monkeypatch.setattr(wa_validator_service.supabase_client, "get_active_graph_publication", lambda _persona_id: None)
     try:
         wa_validator_service._build_graph_context("tock-fatal")
-        raise AssertionError("expected invalid v2 rejection")
+        raise AssertionError("expected active v3 rejection")
     except ValueError as exc:
-        assert "não está válido" in str(exc)
+        assert "inconsistente" in str(exc)
 
 
 def test_graph_context_rejects_inconsistent_v3_and_uses_top_level_node_status(monkeypatch):
@@ -176,9 +167,6 @@ def test_graph_context_rejects_inconsistent_v3_and_uses_top_level_node_status(mo
     unsigned.pop("checksum", None)
     document["checksum"] = wa_validator_service.graph_compiler_v3.canonical_checksum(unsigned)
     publication["checksum"] = document["checksum"]
-    monkeypatch.setattr(
-        wa_validator_service.graph_json_v2_store, "load_current", lambda _slug: None
-    )
     monkeypatch.setattr(
         wa_validator_service.supabase_client,
         "get_persona",

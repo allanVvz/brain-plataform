@@ -30,7 +30,6 @@ from services import (
     conversation_runtime,
     graph_agent_runtime_v3,
     graph_compiler_v3,
-    graph_json_v2_store,
     graph_proof_checker_v3,
     n8n_client,
     supabase_client,
@@ -449,83 +448,78 @@ def _extract_json(text: str) -> dict:
     return json.loads(text)
 
 
-def _published_graph(persona_slug: str):
-    current = graph_json_v2_store.load_current(persona_slug)
-    if not current:
-        raise ValueError(
-            f"Nenhum Graph JSON v2 publicado para {persona_slug}"
-        )
-    version, graph = current
-    event = graph_json_v2_store.latest_event(persona_slug) or {}
-    checksum = (
-        (event.get("payload") or {}).get("checksum")
-        or graph_json_v2_store.checksum_graph(graph)
+def _published_graph(
+    persona_slug: str, publication_id: str | None = None
+) -> tuple[int, str, object]:
+    persona = supabase_client.get_persona(persona_slug) or {}
+    publication = (
+        supabase_client.get_graph_publication_by_id(publication_id)
+        if publication_id
+        else supabase_client.get_active_graph_publication(str(persona.get("id") or ""))
     )
-    if graph.status != "published" or not graph.validation.is_valid:
-        raise ValueError("Graph JSON v2 publicado não está válido")
-    return version, checksum, graph
-
-
-def _build_graph_context(persona_slug: str) -> tuple[str, int, str, object]:
-    if graph_json_v2_store.load_current(persona_slug):
-        version, checksum, graph = _published_graph(persona_slug)
-    else:
-        persona = supabase_client.get_persona(persona_slug) or {}
-        publication = supabase_client.get_active_graph_publication(
-            str(persona.get("id") or "")
-        )
-        if not publication:
-            raise ValueError(
-                f"Nenhum Graph JSON v2 ou GraphRAG v3 publicado para {persona_slug}"
+    document = (publication or {}).get("document_json") or {}
+    body = dict(document) if isinstance(document, dict) else {}
+    document_checksum = str(body.pop("checksum", ""))
+    publication_checksum = str((publication or {}).get("checksum") or "")
+    document_persona = document.get("persona") if isinstance(document, dict) else {}
+    allowed_statuses = {"compiled", "active"} if publication_id else {"active"}
+    document_nodes = document.get("nodes") if isinstance(document, dict) else None
+    if (
+        not publication
+        or str(publication.get("status") or "") not in allowed_statuses
+        or document.get("schema_version") != "3.0"
+        or not document_checksum
+        or document_checksum != publication_checksum
+        or graph_compiler_v3.canonical_checksum(body) != document_checksum
+        or str(publication.get("persona_id") or "") != str(persona.get("id") or "")
+        or not isinstance(document_persona, dict)
+        or str(document_persona.get("id") or "") != str(persona.get("id") or "")
+        or str(document_persona.get("slug") or "") != persona_slug
+        or not isinstance(document_nodes, list)
+        or not document_nodes
+    ):
+        raise ValueError("Publicação GraphBundle v3 está ausente ou inconsistente")
+    graph = SimpleNamespace(
+        nodes=[
+            SimpleNamespace(
+                id=str(node.get("id") or ""),
+                node_type=str(node.get("node_type") or "knowledge"),
+                slug=str(node.get("slug") or node.get("id") or ""),
+                label=str(node.get("title") or node.get("slug") or ""),
+                parent_id=(node.get("data") or {}).get("parent_id"),
+                data={**dict(node.get("data") or {}), "status": node.get("status")},
             )
-        document = publication.get("document_json") or {}
-        document_without_checksum = dict(document) if isinstance(document, dict) else {}
-        document_checksum = str(document_without_checksum.pop("checksum", ""))
-        publication_checksum = str(publication.get("checksum") or "")
-        document_persona = document.get("persona") if isinstance(document, dict) else {}
-        document_nodes = document.get("nodes") if isinstance(document, dict) else None
-        if (
-            str(publication.get("status") or "") != "active"
-            or not document_checksum
-            or document_checksum != publication_checksum
-            or graph_compiler_v3.canonical_checksum(document_without_checksum)
-            != document_checksum
-            or not isinstance(document_persona, dict)
-            or str(document_persona.get("id") or "") != str(persona.get("id") or "")
-            or str(document_persona.get("slug") or "") != persona_slug
-            or not isinstance(document_nodes, list)
-            or not document_nodes
-        ):
-            raise ValueError("Publicação GraphRAG v3 ativa está inconsistente")
-        graph = SimpleNamespace(
-            nodes=[
-                SimpleNamespace(
-                    id=str(node.get("id") or ""),
-                    node_type=str(node.get("node_type") or "knowledge"),
-                    slug=str(node.get("slug") or node.get("id") or ""),
-                    label=str(node.get("title") or node.get("slug") or ""),
-                    data={
-                        **dict(node.get("data") or {}),
-                        "status": str(node.get("status") or ""),
-                    },
-                )
-                for node in document_nodes
-            ],
-            status="published",
-            validation=SimpleNamespace(is_valid=True),
-        )
-        version = int(publication["version"])
-        checksum = str(publication["checksum"])
+            for node in document_nodes if isinstance(node, dict)
+        ],
+        edges=[
+            SimpleNamespace(
+                id=str(edge.get("id") or ""),
+                source=str(edge.get("source") or ""),
+                target=str(edge.get("target") or ""),
+                source_id=str(edge.get("source") or ""),
+                target_id=str(edge.get("target") or ""),
+                relation_type=str(edge.get("relation_type") or "related_to"),
+                data=dict(edge.get("metadata") or {}),
+            )
+            for edge in document.get("edges") or [] if isinstance(edge, dict)
+        ],
+        status="published",
+        validation=SimpleNamespace(is_valid=True),
+    )
+    return int(publication["version"]), publication_checksum, graph
+
+
+def _build_graph_context(
+    persona_slug: str, publication_id: str | None = None
+) -> tuple[str, int, str, object]:
+    version, checksum, graph = _published_graph(persona_slug, publication_id)
     lines: list[str] = []
     for node in graph.nodes:
         data = node.data or {}
         if data.get("active", True) is False:
             continue
         if str(data.get("status") or "").lower() not in {
-            "approved",
-            "validated",
-            "active",
-            "ativo",
+            "approved", "validated", "active", "ativo",
         }:
             continue
         lines.append(
@@ -533,7 +527,6 @@ def _build_graph_context(persona_slug: str) -> tuple[str, int, str, object]:
             f"{node.label} {str(data.get('markdown') or '')[:300]}"
         )
     return "\n".join(lines), version, str(checksum), graph
-
 
 def _customer_profile(business_model: str) -> dict:
     try:
@@ -1126,7 +1119,7 @@ def generate_script(
         if v3_publication.get("status") not in {"compiled", "active"}:
             raise ValueError("Publicação staged não está compilada")
     kb_ctx, graph_version, graph_checksum, graph = _build_graph_context(
-        persona_slug
+        persona_slug, publication_id
     )
     # Confirmed live 2026-08-09: for any persona actually running
     # graph_agent_runtime_v3, every real turn reports the v3

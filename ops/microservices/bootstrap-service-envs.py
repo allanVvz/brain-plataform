@@ -16,6 +16,16 @@ ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / ".env.compose"
 TARGET_DIR = ROOT / ".env.microservices"
 
+
+def latest_schema_version() -> str:
+    versions = [
+        int(path.name.split("_", 1)[0])
+        for path in (ROOT / "supabase" / "migrations").glob("[0-9]*_*.sql")
+    ]
+    if not versions:
+        raise SystemExit("no schema migrations found")
+    return str(max(versions))
+
 COMMON = {
     "ENV", "PYTHON_ENV", "ENVIRONMENT", "SUPABASE_URL", "SUPABASE_PUBLIC_URL",
     "SUPABASE_SSL_VERIFY", "SUPABASE_HTTP_TIMEOUT_SECONDS", "SUPABASE_RETRY_ATTEMPTS",
@@ -98,7 +108,7 @@ def write_env(name: str, allowed: set[str], source: dict[str, str], *, role: str
     values = {key: source[key] for key in sorted(allowed) if source.get(key)}
     values.update({
         "ENVIRONMENT": "production",
-        "CURRENT_SCHEMA_VERSION": "131",
+        "CURRENT_SCHEMA_VERSION": latest_schema_version(),
         "BRAIN_INTERNAL_AUTH_SECRET": internal_secret,
     })
     if role:

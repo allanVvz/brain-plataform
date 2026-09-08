@@ -20,12 +20,16 @@ from __future__ import annotations
 
 import logging
 import io
+import hashlib
+import json
 from datetime import datetime, timezone
 from typing import Optional
+from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from schemas.graph_json_v2 import Edge, GraphJson, Node
+from schemas.graph_bundle_drafts import PatchGraphBundleDraftBody
 
 from core.landing_slots import (
     LandingSlot,
@@ -35,7 +39,10 @@ from core.landing_slots import (
     slot_for_metadata,
     slots_for_parent_type,
 )
-from services import auth_service, graph_document_publisher, graph_json_v2_store, knowledge_graph, supabase_client
+from services import (
+    auth_service, graph_bundle_active_adapter, graph_bundle_draft_ops, graph_bundle_draft_store,
+    graph_document_publisher, graph_json_v2_store, knowledge_graph, supabase_client,
+)
 from services.asset_pipeline import AssetPipelineContext, compose_markdown, run_pipeline
 from services.event_emitter import emit
 from services.audit_helpers import current_actor, summarize_diff
@@ -623,6 +630,11 @@ async def upload_asset(
     branch_hint: Optional[str] = Form(None),
     asset_function: Optional[str] = Form(None),
     persona_slug: Optional[str] = Form(None),
+    draft_ref: Optional[str] = Form(None),
+    expected_revision: Optional[int] = Form(None),
+    expected_draft_checksum: Optional[str] = Form(None),
+    shared_branch_hints: Optional[str] = Form(None),
+    idempotency_key: Optional[str] = Form(None),
 ):
     auth_service.assert_persona_access(request, persona_id=persona_id)
     persona_id, persona_slug = _resolve_persona(persona_id, persona_slug)
@@ -635,12 +647,26 @@ async def upload_asset(
             {"error": "branch_required", "needs_parent": True, "message": "Escolha o galho do grafo onde o asset sera conectado."},
         )
 
-    parent_node = _find_parent_node(persona_id, branch_hint)
+    upload_key = idempotency_key or f"asset-upload-{uuid4()}"
+    draft = _resolve_asset_draft(
+        request=request, persona_id=persona_id, persona_slug=persona_slug or "",
+        draft_ref=draft_ref,
+        idempotency_key=f"{upload_key}:draft",
+    )
+    parent_node = _draft_node_by_ref(draft, branch_hint)
     if not parent_node:
         raise HTTPException(404, f"Parent node nao encontrado para slug/id={branch_hint}")
 
     try:
-        return await _upload_asset_impl(file, persona_id, persona_slug, parent_node, asset_function)
+        return await _upload_asset_impl(
+            file, persona_id, persona_slug, parent_node, asset_function,
+            draft=draft,
+            expected_revision=expected_revision,
+            expected_draft_checksum=expected_draft_checksum,
+            shared_branch_hints=shared_branch_hints,
+            actor=current_actor(request),
+            idempotency_key=f"{upload_key}:attach",
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -657,6 +683,184 @@ async def upload_asset(
                 "parent_slug": (parent_node or {}).get("slug"),
             },
         ) from exc
+
+
+def _draft_node_by_ref(draft: dict, node_ref: str) -> Optional[dict]:
+    return next((
+        node for node in (draft.get("bundle") or {}).get("nodes") or []
+        if str(node.get("id") or "") == str(node_ref)
+        or str(node.get("slug") or "") == str(node_ref)
+    ), None)
+
+
+def _resolve_asset_draft(
+    *, request: Request, persona_id: str, persona_slug: str,
+    draft_ref: Optional[str], idempotency_key: str,
+) -> dict:
+    if draft_ref:
+        try:
+            draft = graph_bundle_draft_store.get(draft_ref)
+        except graph_bundle_draft_store.DraftNotFound as exc:
+            raise HTTPException(404, "graph_bundle_draft_not_found") from exc
+        if str(draft.get("persona_id") or "") != str(persona_id):
+            raise HTTPException(403, "graph_bundle_draft_persona_mismatch")
+        auth_service.assert_persona_capability(request, "edit", persona_id=persona_id)
+        return draft
+    active = supabase_client.get_active_graph_publication(persona_id)
+    if not active or active.get("status") != "active":
+        raise HTTPException(409, "active_graph_publication_v3_required")
+    try:
+        bundle = graph_bundle_active_adapter.active_document_to_draft(
+            active.get("document_json") or {}, expected_persona_slug=persona_slug,
+            expected_runtime_checksum=str(active.get("checksum") or ""),
+        )
+        actor = current_actor(request)
+        return graph_bundle_draft_store.create(
+            persona_id=persona_id, persona_slug=persona_slug, bundle=bundle,
+            active_publication_id=str(active.get("id") or ""),
+            active_checksum=str(active.get("checksum") or ""),
+            actor=str(actor.get("user_id") or actor.get("email") or "unknown"),
+            reason="asset upload into unified graph draft",
+            source={"surface": "api", "source_ref": "assets/upload"},
+            idempotency_key=idempotency_key, reuse_open=True,
+        )
+    except graph_bundle_active_adapter.ActivePublicationAdapterError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+def _parse_shared_branch_hints(value: Optional[str]) -> list[str]:
+    if not value:
+        return []
+    try:
+        decoded = json.loads(value)
+        if isinstance(decoded, list):
+            return [str(item) for item in decoded if str(item)]
+    except ValueError:
+        pass
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _compensate_asset_upload(
+    *, asset_id: Optional[str], objects: list[tuple[str, str]], persona_id: str,
+) -> None:
+    """Best-effort rollback before a draft patch has committed."""
+    failures: list[str] = []
+    for bucket, path in reversed(objects):
+        try:
+            supabase_client.remove_from_storage(bucket, path)
+        except Exception as exc:
+            failures.append(f"{bucket}:remove_failed")
+            logger.error(
+                "asset upload compensation object failed bucket=%s path=%s: %s",
+                bucket, path, exc,
+            )
+    if asset_id and not failures:
+        try:
+            supabase_client.delete_asset_registry_row(asset_id)
+        except Exception as exc:
+            failures.append("registry_delete_failed")
+            logger.error("asset upload compensation row failed asset=%s: %s", asset_id, exc)
+    if asset_id and failures:
+        try:
+            current = supabase_client.get_asset(asset_id) or {}
+            metadata = {
+                **(current.get("metadata") or {}),
+                "compensation_required": True,
+                "compensation_failures": failures,
+            }
+            supabase_client.update_asset(asset_id, {"status": "failed", "metadata": metadata})
+        except Exception as exc:
+            logger.critical("asset upload compensation marker failed asset=%s: %s", asset_id, exc)
+    _log_asset_flow(
+        "asset_upload_compensated", asset_id=asset_id,
+        persona_id=persona_id,
+        payload={"object_count": len(objects), "failures": failures}, level="warn",
+    )
+
+
+def _asset_draft_operations(
+    *, draft: dict, parent_node: dict, asset_row: dict, title: str,
+    summary: str, asset_type: str, asset_function: str, sha256: str,
+    storage_bucket: str, storage_path: str, mime: str,
+    shared_branch_hints: Optional[str],
+) -> list[dict]:
+    bundle = draft.get("bundle") or {}
+    nodes = bundle.get("nodes") or []
+    edges = bundle.get("edges") or []
+    asset_id = str(asset_row["id"])
+    node_id = f"asset:{asset_id}"
+    gallery = next((
+        node for node in nodes
+        if str(node.get("node_type") or "").lower() == "gallery"
+        and str(node.get("status") or "").lower() != "archived"
+    ), None)
+    if not gallery:
+        raise HTTPException(422, "draft_gallery_required")
+    parent_id = str(parent_node.get("id") or "")
+    parent_type = str(parent_node.get("node_type") or "").lower()
+    operations: list[dict] = [{
+        "op": "add_node",
+        "node": {
+            "id": node_id, "node_type": "asset",
+            "slug": f"asset-{asset_id}", "title": title, "summary": summary[:2000],
+            "status": "pending_validation", "tags": ["asset", asset_function],
+            "data": {
+                "source": "asset_upload", "validation_status": "pending_validation",
+                "asset_function": asset_function, "asset_type": asset_type,
+                "blob": {
+                    "registry_id": asset_id, "bucket": storage_bucket,
+                    "path": storage_path, "mime": mime or "application/octet-stream",
+                    "sha256": sha256, "status": "pending_validation",
+                },
+            },
+        },
+    }]
+
+    edge_parents = [parent_node]
+    seen: set[str] = set()
+    for edge_parent in edge_parents:
+        source_id = str(edge_parent.get("id") or "")
+        if not source_id or source_id in seen:
+            continue
+        seen.add(source_id)
+        is_group = str(edge_parent.get("node_type") or "").lower() == "product_group"
+        operations.append({
+            "op": "add_edge",
+            "edge": {
+                "id": f"edge:{source_id}:uses_asset:{node_id}",
+                "source": source_id, "target": node_id, "relation_type": "uses_asset",
+                "metadata": {
+                    "active": True, "primary_tree": source_id == parent_id,
+                    "asset_function": asset_function,
+                    **({"page_binding": {"slot_key": "product_group_cover"}} if is_group else {}),
+                },
+            },
+        })
+    for hint in _parse_shared_branch_hints(shared_branch_hints):
+        branch = next((
+            node for node in nodes
+            if str(node.get("id") or "") == hint or str(node.get("slug") or "") == hint
+        ), None)
+        if not branch or str(branch.get("id") or "") in seen:
+            continue
+        source_id = str(branch["id"])
+        seen.add(source_id)
+        operations.append({
+            "op": "add_edge", "edge": {
+                "id": f"edge:{source_id}:uses_asset:{node_id}",
+                "source": source_id, "target": node_id, "relation_type": "uses_asset",
+                "metadata": {"active": True, "primary_tree": False, "asset_function": asset_function},
+            },
+        })
+    operations.append({
+        "op": "add_edge", "edge": {
+            "id": f"edge:{node_id}:gallery_asset:{gallery['id']}",
+            "source": node_id, "target": str(gallery["id"]),
+            "relation_type": "gallery_asset",
+            "metadata": {"active": True, "human_approved": False},
+        },
+    })
+    return operations
 
 
 def _append_image_ref_to_parent_card(parent_node: dict, image_slug: str) -> bool:
@@ -708,11 +912,43 @@ async def _upload_asset_impl(
     persona_slug: Optional[str],
     parent_node: dict,
     asset_function: Optional[str],
+    *,
+    draft: dict,
+    expected_revision: Optional[int],
+    expected_draft_checksum: Optional[str],
+    shared_branch_hints: Optional[str],
+    actor: dict,
+    idempotency_key: str,
 ):
     content = await file.read()
     fname = file.filename or "upload"
     mime = file.content_type or ""
     effective_asset_function = _effective_asset_function(asset_function, parent_node)
+    if effective_asset_function in {None, "", "gallery_reference"}:
+        effective_asset_function = "vitrine"
+    content_sha256 = "sha256:" + hashlib.sha256(content).hexdigest()
+    existing_asset = supabase_client.get_asset_by_upload_idempotency(persona_id, idempotency_key)
+    if existing_asset:
+        existing_metadata = existing_asset.get("metadata") or {}
+        existing_sha = str(existing_metadata.get("sha256") or "")
+        request_changed = (
+            (existing_sha and existing_sha != content_sha256)
+            or str(existing_metadata.get("branch_hint") or "") != str(parent_node.get("slug") or "")
+            or str(existing_metadata.get("asset_function") or "") != str(effective_asset_function)
+        )
+        if request_changed:
+            raise HTTPException(409, "asset_upload_idempotency_key_reused")
+        existing_node_id = f"asset:{existing_asset.get('id')}"
+        if _draft_node_by_ref(draft, existing_node_id):
+            return {
+                "success": True, "idempotent_replay": True,
+                "asset_id": existing_asset.get("id"), "asset": existing_asset,
+                "draft_ref": draft.get("draft_ref"), "draft_revision": draft.get("revision"),
+                "draft_checksum": draft.get("draft_checksum"),
+                "active_publication_changed": False,
+                "evidence": {"asset_id": existing_asset.get("id"), "knowledge_node_id": existing_node_id},
+                "file_url": existing_asset.get("url"),
+            }
 
     # 1) Upload to Supabase Storage.
     # Supabase Storage rejects keys with spaces or non-ASCII characters
@@ -720,31 +956,26 @@ async def _upload_asset_impl(
     # (original_filename / metadata) but slug the storage path so the
     # PUT URL is always valid.
     storage_bucket = "assets-raw"
-    storage_path = f"{persona_id}/{_safe_storage_filename(fname)}"
+    upload_ref = hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()[:20]
+    storage_path = f"{persona_id}/{upload_ref}-{_safe_storage_filename(fname)}"
+    uploaded_objects: list[tuple[str, str]] = []
     try:
         file_url = supabase_client.upload_to_storage(storage_bucket, storage_path, content, mime or "application/octet-stream")
+        uploaded_objects.append((storage_bucket, storage_path))
     except Exception as exc:
         message = str(exc)
+        # The key is scoped by the idempotency token, so an ambiguous failed
+        # PUT can be safely removed without touching another upload.
+        try:
+            supabase_client.remove_from_storage(storage_bucket, storage_path)
+        except Exception:
+            pass
         if "Bucket not found" in message or "bucket_not_found" in message.lower():
-            # Try to self-heal once before failing: maybe migration 033 didn't
-            # land or the project was bootstrapped without storage seeding.
-            healed = supabase_client.ensure_bucket(storage_bucket, public=False)
-            if healed:
-                file_url = supabase_client.upload_to_storage(storage_bucket, storage_path, content, mime or "application/octet-stream")
-            else:
-                logger.error("/assets/upload bucket missing and could not be created: %s", storage_bucket)
-                raise HTTPException(
-                    503,
-                    {
-                        "error": "storage_bucket_missing",
-                        "bucket": storage_bucket,
-                        "message": (
-                            f"O bucket '{storage_bucket}' nao existe no Supabase desta API. "
-                            "Aplicar migration 033_asset_upload_pipeline.sql ou rodar "
-                            "scripts/ensure_qa_buckets.py com a SERVICE_KEY do projeto."
-                        ),
-                    },
-                ) from exc
+            logger.error("/assets/upload required bucket unavailable: %s", storage_bucket)
+            raise HTTPException(503, {
+                "error": "storage_bucket_unavailable", "bucket": storage_bucket,
+                "message": "O Storage obrigatorio nao esta disponivel para o control-plane.",
+            }) from exc
         elif "InvalidKey" in message or "Invalid key" in message:
             logger.error("/assets/upload InvalidKey for path=%s: %s", storage_path, message)
             raise HTTPException(
@@ -760,10 +991,11 @@ async def _upload_asset_impl(
                 },
             ) from exc
         else:
-            logger.warning("assets-raw upload failed, falling back to 'knowledge': %s", exc)
-            storage_bucket = "knowledge"
-            storage_path = f"assets/{persona_id}/{_safe_storage_filename(fname)}"
-            file_url = supabase_client.upload_to_storage(storage_bucket, storage_path, content, mime or "application/octet-stream")
+            logger.error("assets-raw upload failed path=%s: %s", storage_path, exc)
+            raise HTTPException(503, {
+                "error": "storage_upload_failed", "bucket": storage_bucket,
+                "message": "Nao foi possivel persistir o arquivo no Storage obrigatorio.",
+            }) from exc
 
     preview_bucket = None
     preview_path = None
@@ -772,9 +1004,10 @@ async def _upload_asset_impl(
         preview_bytes = _jpeg_preview_from_heic(content)
         if preview_bytes:
             preview_bucket = "assets-derived"
-            preview_path = _preview_path_for(fname, persona_id)
+            preview_path = f"{persona_id}/previews/{upload_ref}-{_safe_storage_filename(fname)}.jpg"
             try:
                 preview_url = supabase_client.upload_to_storage(preview_bucket, preview_path, preview_bytes, "image/jpeg")
+                uploaded_objects.append((preview_bucket, preview_path))
             except Exception as exc:
                 logger.warning("HEIC preview upload failed filename=%s path=%s: %s", fname, preview_path, exc)
                 preview_bucket = None
@@ -793,11 +1026,15 @@ async def _upload_asset_impl(
         branch_label=parent_node.get("title") or parent_node.get("slug"),
         asset_function=effective_asset_function,
     )
-    bundle = run_pipeline(content, ctx)
+    try:
+        bundle = run_pipeline(content, ctx)
+    except Exception:
+        _compensate_asset_upload(asset_id=None, objects=uploaded_objects, persona_id=persona_id)
+        raise
 
     # 3) Persist public.assets.
     asset_type = _bundle_to_asset_type(bundle.classification.kind)
-    asset_row = supabase_client.insert_asset({
+    asset_payload = {
         "persona_id": persona_id,
         "type": asset_type,
         "name": bundle.rename.title or fname,
@@ -819,6 +1056,9 @@ async def _upload_asset_impl(
             "kind": bundle.classification.kind,
             "asset_function": effective_asset_function or bundle.rename.asset_function,
             "branch_hint": parent_node.get("slug"),
+            "sha256": content_sha256,
+            "draft_ref": draft.get("draft_ref"),
+            "upload_idempotency_key": idempotency_key,
         },
         "source": "upload",
         "storage_bucket": storage_bucket,
@@ -828,9 +1068,27 @@ async def _upload_asset_impl(
         "original_filename": fname,
         "status": "ready" if bundle.reading_status in ("completed", "mocked") else "reading",
         "upload_context": "asset_card",
-    })
+    }
+    created_asset = existing_asset is None
+    try:
+        if existing_asset:
+            asset_row = supabase_client.update_asset(str(existing_asset["id"]), asset_payload) or existing_asset
+        else:
+            asset_row = supabase_client.insert_asset(asset_payload)
+    except Exception:
+        # A concurrent retry may have won the unique idempotency insert. Reuse
+        # its registry row and the shared deterministic object key.
+        concurrent_asset = supabase_client.get_asset_by_upload_idempotency(persona_id, idempotency_key)
+        concurrent_sha = str((concurrent_asset or {}).get("metadata", {}).get("sha256") or "")
+        if concurrent_asset and concurrent_sha == content_sha256:
+            asset_row = concurrent_asset
+            created_asset = False
+        else:
+            _compensate_asset_upload(asset_id=None, objects=uploaded_objects, persona_id=persona_id)
+            raise
     asset_id = (asset_row or {}).get("id")
     if not asset_id:
+        _compensate_asset_upload(asset_id=None, objects=uploaded_objects, persona_id=persona_id)
         raise HTTPException(500, "Falha ao registrar asset.")
 
     for row in bundle.rows_to_persist:
@@ -841,102 +1099,115 @@ async def _upload_asset_impl(
         except Exception as exc:
             logger.warning("asset_reading insert failed: %s", exc)
 
-    # 4) Create knowledge_item content_type='asset' pending.
-    file_type = ""
-    if "." in fname:
-        file_type = fname.rsplit(".", 1)[-1].lower()
-    source = supabase_client.get_or_create_manual_source()
-    markdown = compose_markdown(bundle, persona_slug, parent_node.get("title") or parent_node.get("slug"), storage_path)
-    item = supabase_client.insert_knowledge_item({
-        "persona_id": persona_id,
-        "source_id": source["id"],
-        "status": "pending",
-        "content_type": "asset",
-        "title": bundle.rename.title or fname,
-        "content": markdown[:12000],
-        "file_type": file_type,
-        "file_path": f"{storage_bucket}:{storage_path}",
-        "asset_type": asset_type,
-        "asset_function": effective_asset_function or bundle.rename.asset_function,
-        "agent_visibility": ["private"],
-        "tags": bundle.rename.tags,
-        "metadata": {
-            "asset_id": asset_id,
-            "storage_bucket": storage_bucket,
-            "storage_path": storage_path,
-            "original_url": file_url,
-            "preview_bucket": preview_bucket,
-            "preview_path": preview_path,
-            "preview_url": preview_url,
-            "asset_kind": bundle.classification.kind,
-            "asset_type": asset_type,
-            "asset_function": effective_asset_function or bundle.rename.asset_function,
-            "validation_status": "pending_validation",
-            "upload_context": "asset_card",
-            "parent_slug": parent_node.get("slug"),
-            "session_id": None,
-            "created_via": "asset_upload",
-            "engine": (bundle.ocr.engine if bundle.ocr else None),
-        },
-    })
-
-    # 5) Create/verify graph node + branch / gallery edges. This is a hard
-    # contract: an asset-card upload is not successful while detached from Graph.
-    graph = _ensure_asset_graph_contract(
-        asset_id=asset_id,
-        asset_row=asset_row,
-        persona_id=persona_id,
-        parent_node=parent_node,
-        storage_bucket=storage_bucket,
-        storage_path=storage_path,
-        title=bundle.rename.title or fname,
-        summary=bundle.visual_summary or bundle.extracted_text or markdown,
-        slug_seed=bundle.rename.slug or fname,
-        asset_type=asset_type,
-        asset_function=effective_asset_function or bundle.rename.asset_function,
-        tags=bundle.rename.tags,
-        knowledge_item_id=(item or {}).get("id"),
-        created_from="asset_upload",
-    )
-    mirror = graph["asset_node"]
-    parent_edge = graph["parent_edge"]
-    landing_edge = graph.get("landing_edge")
-    gallery_edge = graph["gallery_edge"]
-    asset_row = graph.get("asset") or asset_row
-
-    # 6) Insert `![[slug]]` (Obsidian-style embed) into the parent card's
-    # markdown so the image is anchored inside the card's .md. The parent
-    # card is brand / briefing / product / copy / faq — whichever was
-    # selected as branch_hint at upload time.
-    parent_card_md_appended = False
-    image_slug = (mirror or {}).get("slug") or fname
+    # The binary registry and draft are the only mutation targets in the v3
+    # flow. The active publication remains unchanged until the explicit,
+    # reviewed GraphBundle publish operation.
     try:
-        parent_card_md_appended = _append_image_ref_to_parent_card(parent_node, image_slug)
+        operations = _asset_draft_operations(
+            draft=draft, parent_node=parent_node, asset_row=asset_row,
+            title=bundle.rename.title or fname,
+            summary=bundle.visual_summary or bundle.extracted_text or "",
+            asset_type=asset_type, asset_function=effective_asset_function,
+            sha256=content_sha256, storage_bucket=storage_bucket,
+            storage_path=storage_path, mime=mime,
+            shared_branch_hints=shared_branch_hints,
+        )
+        patch_body = PatchGraphBundleDraftBody.model_validate({
+            "expected_revision": expected_revision or int(draft.get("revision") or 0),
+            "expected_draft_checksum": expected_draft_checksum or draft.get("draft_checksum"),
+            "reason": "attach uploaded asset to unified graph draft",
+            "source": {"surface": "api", "source_ref": f"asset:{asset_id}"},
+            "operations": operations,
+            "idempotency_key": idempotency_key,
+        })
+    except ValidationError as exc:
+        _compensate_asset_upload(
+            asset_id=asset_id if created_asset else None,
+            objects=uploaded_objects if created_asset else [], persona_id=persona_id,
+        )
+        raise HTTPException(422, {"error": "asset_draft_contract_invalid", "asset_id": asset_id}) from exc
+    except HTTPException:
+        _compensate_asset_upload(
+            asset_id=asset_id if created_asset else None,
+            objects=uploaded_objects if created_asset else [], persona_id=persona_id,
+        )
+        raise
+    try:
+        updated_draft = graph_bundle_draft_store.patch(
+            str(draft["draft_ref"]),
+            expected_revision=patch_body.expected_revision,
+            expected_checksum=patch_body.expected_draft_checksum,
+            operations=patch_body.operations,
+            actor=str(actor.get("user_id") or actor.get("email") or "unknown"),
+            reason=patch_body.reason, source=patch_body.source.model_dump(),
+            idempotency_key=patch_body.idempotency_key,
+        )
+    except graph_bundle_draft_store.DraftConflict as exc:
+        _compensate_asset_upload(
+            asset_id=asset_id if created_asset else None,
+            objects=uploaded_objects if created_asset else [], persona_id=persona_id,
+        )
+        raise HTTPException(409, {
+            "error": "draft_cas_conflict", "asset_id": asset_id,
+            "current_revision": (exc.current or {}).get("revision"),
+            "current_draft_checksum": (exc.current or {}).get("draft_checksum"),
+        }) from exc
+    except graph_bundle_draft_ops.GraphBundleDraftOperationError as exc:
+        _compensate_asset_upload(
+            asset_id=asset_id if created_asset else None,
+            objects=uploaded_objects if created_asset else [], persona_id=persona_id,
+        )
+        raise HTTPException(422, {"error": str(exc), "asset_id": asset_id}) from exc
+    except Exception:
+        # A timeout can hide a committed CAS result. Re-read before deleting
+        # its binary; a committed node is authoritative evidence of success.
+        try:
+            latest_draft = graph_bundle_draft_store.get(str(draft["draft_ref"]))
+        except Exception:
+            latest_draft = None
+        if latest_draft and _draft_node_by_ref(latest_draft, f"asset:{asset_id}"):
+            updated_draft = latest_draft
+        else:
+            _compensate_asset_upload(
+                asset_id=asset_id if created_asset else None,
+                objects=uploaded_objects if created_asset else [], persona_id=persona_id,
+            )
+            raise
+    asset_metadata = {
+        **(asset_row.get("metadata") or {}),
+        "draft_ref": updated_draft.get("draft_ref"),
+        "draft_node_id": f"asset:{asset_id}",
+        "sha256": content_sha256,
+    }
+    try:
+        asset_row = supabase_client.update_asset(asset_id, {"metadata": asset_metadata}) or asset_row
     except Exception as exc:
-        logger.warning("parent card .md append skipped parent=%s asset=%s: %s",
-                       parent_node.get("id"), asset_id, exc)
-
-    return {
-        "success": True,
-        "asset_id": asset_id,
-        "asset": asset_row,
-        "evidence": {
-            "asset_id": asset_id,
-            "knowledge_item_id": (item or {}).get("id"),
-            "knowledge_node_id": (mirror or {}).get("id"),
-            "parent_edge_id": (parent_edge or {}).get("id") if isinstance(parent_edge, dict) else None,
-            "landing_edge_id": (landing_edge or {}).get("id") if isinstance(landing_edge, dict) else None,
-            "gallery_edge_id": (gallery_edge or {}).get("id") if isinstance(gallery_edge, dict) else None,
-            "parent_card_node_id": (parent_node or {}).get("id"),
-            "parent_card_md_appended": parent_card_md_appended,
-            "image_ref": f"![[{image_slug}]]",
-            "reading_status": bundle.reading_status,
+        logger.warning("asset draft evidence metadata update failed asset=%s: %s", asset_id, exc)
+    edge_ids = [item["edge"]["id"] for item in operations if item["op"] == "add_edge"]
+    _log_asset_flow(
+        "asset_uploaded_to_graph_bundle_draft", asset_id=asset_id, persona_id=persona_id,
+        payload={
+            "knowledge_node_id": f"asset:{asset_id}", "edge_ids": edge_ids,
+            "draft_ref": updated_draft.get("draft_ref"),
+            "draft_revision": updated_draft.get("revision"),
+            "draft_checksum": updated_draft.get("draft_checksum"), "sha256": content_sha256,
         },
-        "asset_reading": bundle.to_summary(),
-        "file_url": preview_url or file_url,
+    )
+    return {
+        "success": True, "asset_id": asset_id, "asset": asset_row,
+        "draft_ref": updated_draft.get("draft_ref"),
+        "draft_revision": updated_draft.get("revision"),
+        "draft_checksum": updated_draft.get("draft_checksum"),
+        "active_publication_changed": False,
+        "evidence": {
+            "asset_id": asset_id, "knowledge_node_id": f"asset:{asset_id}",
+            "edge_ids": edge_ids,
+            "sha256": content_sha256, "reading_status": bundle.reading_status,
+        },
+        "asset_reading": bundle.to_summary(), "file_url": preview_url or file_url,
     }
 
-
+    # card is brand / briefing / product / copy / faq — whichever was
 # ── GET /assets ───────────────────────────────────────────────────────────
 
 @router.get("")

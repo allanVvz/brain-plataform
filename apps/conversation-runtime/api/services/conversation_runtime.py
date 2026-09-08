@@ -8,6 +8,7 @@ import re
 import time
 import unicodedata
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any, Literal
 
 logger = logging.getLogger("conversation_runtime")
@@ -24,8 +25,8 @@ from services import (
     context_cards as context_cards_service,
     deterministic_composer,
     graph_agent_runtime_v3,
+    graph_compiler_v3,
     graph_conversation_contract,
-    graph_json_v2_store,
     lead_qualification,
     model_pricing,
     supabase_client,
@@ -150,16 +151,16 @@ def _commit_graph_turn_and_outbox_or_raise(
     *, inbound_id: str | None, correlation_id: str, **payload: Any,
 ) -> dict:
     try:
-        return supabase_client.commit_graph_turn_and_outbox_v4(**payload)
+        return supabase_client.commit_graph_turn_and_outbox_v5(**payload)
     except Exception as exc:
         logger.exception(
-            "atomic conversation commit failed step=commit_graph_turn_and_outbox_v4 "
+            "atomic conversation commit failed step=commit_graph_turn_and_outbox_v5 "
             "inbound_id=%s correlation_id=%s",
             inbound_id,
             correlation_id,
         )
         raise ConversationCommitFailed(
-            failed_step="commit_graph_turn_and_outbox_v4",
+            failed_step="commit_graph_turn_and_outbox_v5",
             inbound_id=inbound_id,
             correlation_id=correlation_id,
             cause=exc,
@@ -255,23 +256,54 @@ def _node_path(graph: Any, node_id: str) -> list[str]:
 
 
 def _current_graph(persona_slug: str) -> tuple[int, str, Any]:
-    current = graph_json_v2_store.load_current(persona_slug)
-    if not current:
-        raise PublishedGraphUnavailable(
-            f"No published Graph JSON v2 for {persona_slug}"
-        )
-    version, graph = current
-    graph.graph_version = version
-    event = graph_json_v2_store.latest_event(persona_slug) or {}
-    checksum = str(
-        ((event.get("payload") or {}).get("checksum"))
-        or graph_json_v2_store.checksum_graph(graph)
+    persona = supabase_client.get_persona(persona_slug) or {}
+    publication = supabase_client.get_active_graph_publication(
+        str(persona.get("id") or "")
     )
-    if graph.status != "published" or not graph.validation.is_valid:
+    document = (publication or {}).get("document_json") or {}
+    body = dict(document) if isinstance(document, dict) else {}
+    document_checksum = str(body.pop("checksum", ""))
+    checksum = str((publication or {}).get("checksum") or "")
+    document_persona = document.get("persona") if isinstance(document, dict) else {}
+    if (
+        not publication
+        or publication.get("status") != "active"
+        or document.get("schema_version") != "3.0"
+        or not document_checksum
+        or checksum != document_checksum
+        or graph_compiler_v3.canonical_checksum(body) != checksum
+        or str((document_persona or {}).get("id") or "") != str(persona.get("id") or "")
+        or str((document_persona or {}).get("slug") or "") != persona_slug
+    ):
         raise PublishedGraphUnavailable(
-            f"Published graph is not valid for {persona_slug}"
+            f"Active GraphBundle v3 is unavailable or inconsistent for {persona_slug}"
         )
-    return version, checksum, graph
+    nodes = [node for node in document.get("nodes") or [] if isinstance(node, dict)]
+    edges = [edge for edge in document.get("edges") or [] if isinstance(edge, dict)]
+    graph = SimpleNamespace(
+        graph_version=int(publication["version"]),
+        status="published",
+        validation=SimpleNamespace(is_valid=True),
+        nodes=[SimpleNamespace(
+            id=str(node.get("id") or ""),
+            node_type=str(node.get("node_type") or "knowledge"),
+            slug=str(node.get("slug") or node.get("id") or ""),
+            label=str(node.get("title") or node.get("slug") or ""),
+            parent_id=(node.get("data") or {}).get("parent_id"),
+            data={**dict(node.get("data") or {}), "status": node.get("status")},
+        ) for node in nodes],
+        edges=[SimpleNamespace(
+            id=str(edge.get("id") or ""),
+            source=str(edge.get("source") or ""),
+            target=str(edge.get("target") or ""),
+            source_id=str(edge.get("source") or ""),
+            target_id=str(edge.get("target") or ""),
+            relation_type=str(edge.get("relation_type") or "related_to"),
+            weight=float(edge.get("weight") or 1),
+            data=dict(edge.get("metadata") or {}),
+        ) for edge in edges],
+    )
+    return int(publication["version"]), checksum, graph
 
 
 def _business_model(graph: Any) -> str:
@@ -615,78 +647,39 @@ def build_context(
         lead_binding_probe.get("channel_binding_id")
     )
     binding_probe_metadata = (binding_probe or {}).get("metadata") or {}
-    if not force_deterministic and (
-        not graph_agent_runtime_v3.binding_uses_v3(binding_probe)
-        and binding_probe_metadata.get("shadow_runtime_version")
-        == graph_agent_runtime_v3.RUNTIME_VERSION
-    ):
-        try:
-            shadow = graph_agent_runtime_v3.build_context(
-                persona_slug=persona_slug,
-                lead_ref=lead_ref,
-                message=message,
-                message_id=message_id,
-            )
-            supabase_client.insert_event(
-                {
-                    "event_type": "conversation.graph_v3_shadow_context",
-                    "entity_type": "lead",
-                    "entity_id": str(lead_ref),
-                    "persona_id": lead_binding_probe.get("persona_id"),
-                    "payload": {
-                        "runtime_version": graph_agent_runtime_v3.RUNTIME_VERSION,
-                        "publication_id": shadow.publication_id,
-                        "graph_checksum": shadow.graph_checksum,
-                        "retrieval_trace": shadow.retrieval_trace,
-                        "outbound_suppressed": True,
-                        "trace_id": trace_id,
-                    },
-                },
-                source="conversation_runtime.shadow",
-            )
-        except Exception as exc:  # shadow must never change the live decision
-            supabase_client.insert_event(
-                {
-                    "event_type": "conversation.graph_v3_shadow_failed",
-                    "entity_type": "lead",
-                    "entity_id": str(lead_ref),
-                    "persona_id": lead_binding_probe.get("persona_id"),
-                    "payload": {"error": str(exc)[:1000], "outbound_suppressed": True, "trace_id": trace_id},
-                },
-                level="warning",
-                source="conversation_runtime.shadow",
-            )
-    if not force_deterministic and (
-        graph_agent_runtime_v3.binding_uses_v3(binding_probe) or publication_id
-    ):
-        try:
-            v3_context = graph_agent_runtime_v3.build_context(
-                persona_slug=persona_slug,
-                lead_ref=lead_ref,
-                message=message,
-                message_id=message_id,
-                publication_id=publication_id,
-            )
-        except RuntimeError as exc:
-            raise PublishedGraphUnavailable(str(exc)) from exc
-        emit_turn_event(
-            agent_name="conversation.context_built",
-            trace_id=trace_id,
+    # Engine selection (deterministic, n8n, backend orchestrator) must never
+    # select the knowledge source. Every real decision uses the exact active
+    # GraphBundle v3 publication; ``publication_id`` is reserved for an
+    # explicit internal shadow/validator call.
+    try:
+        v3_context = graph_agent_runtime_v3.build_context(
+            persona_slug=persona_slug,
             lead_ref=lead_ref,
-            persona_id=lead_binding_probe.get("persona_id"),
-            latency_ms=int((time.monotonic() - _turn_started_at) * 1000),
-            output_data={
-                "graph_version": v3_context.graph_version,
-                "graph_checksum": v3_context.graph_checksum,
-                "context_cards": [
-                    {"id": card.id, "node_type": card.node_type, "title": card.title}
-                    for card in v3_context.context_cards
-                ],
-                "runtime_version": v3_context.runtime_version,
-            },
-            metadata={"persona_slug": persona_slug, "message_id": message_id},
+            message=message,
+            message_id=message_id,
+            publication_id=publication_id,
+            trace_id=trace_id,
         )
-        return v3_context
+    except RuntimeError as exc:
+        raise PublishedGraphUnavailable(str(exc)) from exc
+    emit_turn_event(
+        agent_name="conversation.context_built",
+        trace_id=trace_id,
+        lead_ref=lead_ref,
+        persona_id=lead_binding_probe.get("persona_id"),
+        latency_ms=int((time.monotonic() - _turn_started_at) * 1000),
+        output_data={
+            "graph_version": v3_context.graph_version,
+            "graph_checksum": v3_context.graph_checksum,
+            "context_cards": [
+                {"id": card.id, "node_type": card.node_type, "title": card.title}
+                for card in v3_context.context_cards
+            ],
+            "runtime_version": v3_context.runtime_version,
+        },
+        metadata={"persona_slug": persona_slug, "message_id": message_id},
+    )
+    return v3_context
     version, checksum, graph = _current_graph(persona_slug)
     lead = supabase_client.get_lead_by_ref(lead_ref) or {}
     persona = supabase_client.get_persona(persona_slug) or {}
@@ -1969,6 +1962,78 @@ def _is_canonical_validation_lead(lead: dict[str, Any]) -> bool:
     )
 
 
+def _validation_evidence_origin(lead: dict[str, Any]) -> tuple[str, str | None]:
+    if not _is_canonical_validation_lead(lead):
+        return "conversation", None
+    validation = (lead.get("metadata") or {}).get("validation") or {}
+    return "wa_validator", str(validation["session_id"])
+
+
+def _turn_evidence_projection(
+    *,
+    context: ConversationContext,
+    response: AgentResponse,
+    decision: ConversationDecision,
+    graph_turn: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Project evidence categories from the exact envelope stored in the proof.
+
+    ``conversation_turn_proofs`` remains authoritative.  This compact event
+    projection exists for logs/UI filtering and always carries its real proof
+    id; it never manufactures a decision/proof identity from a correlation id.
+    """
+    graph_turn = graph_turn or {}
+    proposal = (
+        response.proposal.model_dump(mode="json")
+        if response.proposal is not None
+        else response.proof.get("model_proposal") or {}
+    )
+    trace = context.retrieval_trace or {}
+    proof = response.proof or {}
+
+    retrieved_node_ids = list(dict.fromkeys(
+        str(value) for value in (
+            trace.get("source_node_ids")
+            or [node.get("id") for node in context.rag_nodes]
+        ) if value
+    ))
+    retrieved_chunk_ids = list(dict.fromkeys(
+        str(value) for value in (
+            trace.get("chunk_ids")
+            or [chunk.get("chunk_id") or chunk.get("id") for chunk in context.rag_chunks]
+        ) if value
+    ))
+    cited_node_ids = list(dict.fromkeys(
+        str(value) for value in proposal.get("cited_node_ids") or [] if value
+    ))
+    cited_chunk_ids = list(dict.fromkeys(
+        str(value) for value in proposal.get("cited_chunk_ids") or [] if value
+    ))
+    delivery_authorized = bool(
+        proof.get("delivery_authorized", proof.get("valid", False))
+    )
+    return {
+        "proof_id": str(graph_turn.get("proof_id") or "") or None,
+        "decision_id": str(graph_turn.get("decision_id") or "") or None,
+        "retrieved": {
+            "node_ids": retrieved_node_ids,
+            "chunk_ids": retrieved_chunk_ids,
+        },
+        "cited": {
+            "node_ids": cited_node_ids,
+            "chunk_ids": cited_chunk_ids,
+        },
+        "proof_authorized": {
+            "delivery": delivery_authorized,
+            "node_ids": cited_node_ids if delivery_authorized else [],
+            "chunk_ids": cited_chunk_ids if delivery_authorized else [],
+            "decisive_node_ids": list(dict.fromkeys(
+                str(value) for value in decision.evidence_node_ids if value
+            )) if delivery_authorized else [],
+        },
+    }
+
+
 def _handoff_branch_reset_facts(
     *,
     handoff_required: bool,
@@ -2192,6 +2257,34 @@ def commit(
     persona = supabase_client.get_persona(context.persona_slug) or {}
     if not persona or persona.get("id") != lead.get("persona_id"):
         raise PermissionError("conversation context does not match lead persona")
+    bound_agent_slug = str(binding_metadata.get("agent_slug") or "").strip()
+    if bound_agent_slug and bound_agent_slug != context.agent_slug:
+        raise PermissionError("conversation context does not match binding agent")
+    persona_config = persona.get("config") or {}
+    agent_id = str(
+        binding_metadata.get("agent_id")
+        or persona_config.get("agent_id")
+        or (persona_config.get("automation") or {}).get("agent_id")
+        or ""
+    ).strip() or None
+    executor = str(
+        binding_metadata.get("decision_owner") or expected_decision_owner or ""
+    ).strip() or None
+    workflow_id = str(binding.get("n8n_workflow_id") or "").strip() or None
+    token_usage = response.token_usage or {}
+    evidence_source, validator_session_id = _validation_evidence_origin(lead)
+    execution_identity = {
+        "agent_id": agent_id,
+        "agent_slug": context.agent_slug,
+        "agent_role": str(binding_metadata.get("agent_role") or "sdr"),
+        "executor": executor,
+        "binding_id": str(channel_binding_id),
+        "workflow_id": workflow_id,
+        "execution_id": n8n_execution_id,
+        "model": token_usage.get("model") or binding_metadata.get("model"),
+        "evidence_source": evidence_source,
+        "validator_session_id": validator_session_id,
+    }
 
     if expected_decision_owner and not inbound_buffer_id:
         raise RuntimeError("inbound buffer id is required for a decision commit")
@@ -2698,6 +2791,7 @@ def commit(
             "retrieval_trace": {
                 **context.retrieval_trace,
                 "token_usage": response.token_usage or {},
+                "execution": execution_identity,
             },
             "model_proposal": (
                 response.proposal.model_dump(mode="json") if response.proposal
@@ -2742,6 +2836,8 @@ def commit(
                 "commit_ms": commit_ms,
             }
         graph_turn = atomic_commit.get("graph_turn") or {}
+        if not graph_turn.get("proof_id") and atomic_commit.get("proof_id"):
+            graph_turn = {**graph_turn, "proof_id": atomic_commit.get("proof_id")}
         if atomic_commit.get("outbound_buffer_id"):
             buffer = {
                 "id": atomic_commit["outbound_buffer_id"],
@@ -2759,6 +2855,12 @@ def commit(
         else:
             supabase_client.update_lead(lead_ref, lead_update)
 
+    evidence_projection = _turn_evidence_projection(
+        context=context,
+        response=response,
+        decision=decision,
+        graph_turn=graph_turn,
+    )
     supabase_client.insert_event(
         {
             "event_type": "conversation.decision_committed",
@@ -2767,14 +2869,38 @@ def commit(
             "persona_id": persona.get("id"),
             "payload": {
                 "correlation_id": correlation_id,
+                "canonical_inbound_id": inbound_buffer_id,
                 "inbound_buffer_id": inbound_buffer_id,
                 "trace_id": inbound_buffer_id,
+                "publication_id": str(context.publication_id or ""),
+                "publication_checksum": context.graph_checksum,
                 "decision": decision.model_dump(mode="json"),
+                "evidence_node_ids": evidence_projection["proof_authorized"]["decisive_node_ids"],
+                "evidence_chunk_ids": evidence_projection["proof_authorized"]["chunk_ids"],
+                **evidence_projection,
+                "evidence_authority": {
+                    "table": "conversation_turn_proofs",
+                    "proof_id": evidence_projection["proof_id"],
+                },
+                "agent": {
+                    "id": agent_id,
+                    "slug": context.agent_slug,
+                    "role": execution_identity["agent_role"],
+                },
+                "execution": {
+                    "executor": executor,
+                    "workflow_id": workflow_id,
+                    "execution_id": n8n_execution_id,
+                    "model": token_usage.get("model") or binding_metadata.get("model"),
+                },
                 "response_role": response.role.value,
                 "handoff": response.handoff_required,
                 "graph_version": context.graph_version,
                 "graph_checksum": context.graph_checksum,
                 "outbound_buffer_id": (buffer or {}).get("id"),
+                "outbound_message_id": message_id if response.reply_text else None,
+                "evidence_source": evidence_source,
+                "validator_session_id": validator_session_id,
                 "qualification": qualification,
             },
         },

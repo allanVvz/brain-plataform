@@ -78,7 +78,7 @@ def test_validator_rejects_unreleasable_manifest(tmp_path, mutation):
     elif mutation == "checksum":
         manifest["route_map_checksum"] = "sha256:" + "0" * 64
     else:
-        manifest["services"]["gateway"]["sha"] = "f" * 40
+        manifest["services"]["gateway"]["sha"] = "not-a-sha"
     path = tmp_path / "release.json"
     path.write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(ValueError):
