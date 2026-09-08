@@ -1,6 +1,7 @@
 import os
 import re
 import time
+import uuid
 
 from brain_shared import verify_principal
 from fastapi import Request
@@ -99,6 +100,20 @@ def is_public_path(path: str) -> bool:
                 return path.removeprefix("/internal/agents/leads/").removesuffix(
                     suffix
                 ).strip("/").isdigit()
+    # Service-to-service media projection is authenticated in-route with the
+    # webhook token. Requiring an operator session here makes the transport's
+    # canonical inbound-media attachment impossible and returns 401 before the
+    # constant-time token check can run.
+    if path.startswith("/internal/v1/control-plane/assets/"):
+        asset_id = path.removeprefix("/internal/v1/control-plane/assets/").removesuffix(
+            "/attach-inbound-graph"
+        ).strip("/")
+        if path.endswith("/attach-inbound-graph"):
+            try:
+                uuid.UUID(asset_id)
+                return True
+            except (ValueError, AttributeError):
+                return False
     # Only the public site contract is anonymous. Nested admin endpoints under
     # the same prefix must still pass through session/persona authorization.
     if path.startswith("/api/menu/"):
