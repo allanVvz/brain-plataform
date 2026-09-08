@@ -56,7 +56,7 @@ export RUNTIME_ENV_FILE="${RUNTIME_ENV_FILE:-$OPERATION_ROOT/.env.microservices/
 export TRANSPORT_ENV_FILE="${TRANSPORT_ENV_FILE:-$OPERATION_ROOT/.env.microservices/transport.env}"
 
 compose_service="$(policy_value compose_service)"
-if [[ -z "$compose_service" && "$SERVICE" == "gateway" ]]; then
+if [[ "$SERVICE" == "gateway" ]]; then
   compose_service="gateway"
 fi
 [[ -n "$compose_service" ]] || { echo "missing compose_service inventory for $SERVICE" >&2; exit 1; }
@@ -81,7 +81,7 @@ for worker in "${worker_bases[@]}"; do
   target_services+=("$worker-$target")
 done
 
-echo "service=$SERVICE action=$ACTION active=${active:-none} target=$target manifest=$(basename "$MANIFEST")"
+echo "service=$SERVICE compose_service=$compose_service action=$ACTION active=${active:-none} target=$target manifest=$(basename "$MANIFEST")"
 if [[ "$ACTION" == "--dry-run" ]]; then
   "${COMPOSE[@]}" config --quiet
   exit 0
