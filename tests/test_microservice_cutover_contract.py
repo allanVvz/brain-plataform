@@ -7,6 +7,11 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_microservice_workflow_syncs_release_service_inventory():
+    workflow = (ROOT / ".github/workflows/_deploy-microservice.yml").read_text(encoding="utf-8")
+    assert "ops/release/release-services.json" in workflow
+
+
 def test_gateway_strips_client_identity_and_blocks_new_internal_api():
     source = (ROOT / "apps/gateway/main.py").read_text(encoding="utf-8")
     assert 'IDENTITY_HEADERS = {"x-brain-principal", "x-brain-principal-signature"}' in source
