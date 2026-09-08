@@ -4252,6 +4252,11 @@ def download_from_storage(bucket: str, path: str) -> bytes:
     return get_client().storage.from_(bucket).download(path)
 
 
+def remove_from_storage(bucket: str, path: str) -> None:
+    """Remove one exact object. Used only as upload compensation."""
+    get_client().storage.from_(bucket).remove([path])
+
+
 def ensure_bucket(name: str, public: bool = False) -> bool:
     """Make sure a Supabase Storage bucket exists. Idempotent.
 
@@ -4374,6 +4379,30 @@ def get_asset(asset_id: str) -> Optional[dict]:
     )
     rows = result.data or []
     return rows[0] if rows else None
+
+
+def get_asset_by_upload_idempotency(persona_id: str, idempotency_key: str) -> Optional[dict]:
+    if not persona_id or not idempotency_key:
+        return None
+    result = (
+        get_client().table("assets")
+        .select("*")
+        .eq("persona_id", persona_id)
+        .contains("metadata", {"upload_idempotency_key": idempotency_key})
+        .limit(1)
+        .execute()
+    )
+    rows = result.data or []
+    return rows[0] if rows else None
+
+
+def delete_asset_registry_row(asset_id: str) -> None:
+    """Delete an uncommitted asset row and its dependent readings."""
+    if not asset_id:
+        return
+    client = get_client()
+    _execute_with_retry(client.table("asset_readings").delete().eq("asset_id", asset_id))
+    _execute_with_retry(client.table("assets").delete().eq("id", asset_id))
 
 
 def list_assets(

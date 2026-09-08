@@ -822,7 +822,17 @@ export const api = {
   // Assets (card upload pipeline)
   assetUpload: (
     file: File,
-    body: { persona_id: string; branch_hint: string; asset_function?: string; persona_slug?: string },
+    body: {
+      persona_id: string;
+      branch_hint: string;
+      asset_function?: string;
+      persona_slug?: string;
+      draft_ref?: string;
+      expected_revision?: number;
+      expected_draft_checksum?: string;
+      shared_branch_hints?: string[];
+      idempotency_key?: string;
+    },
   ) => {
     const form = new FormData();
     form.append("file", file);
@@ -830,6 +840,11 @@ export const api = {
     form.append("branch_hint", body.branch_hint);
     if (body.asset_function) form.append("asset_function", body.asset_function);
     if (body.persona_slug) form.append("persona_slug", body.persona_slug);
+    if (body.draft_ref) form.append("draft_ref", body.draft_ref);
+    if (body.expected_revision) form.append("expected_revision", String(body.expected_revision));
+    if (body.expected_draft_checksum) form.append("expected_draft_checksum", body.expected_draft_checksum);
+    if (body.shared_branch_hints?.length) form.append("shared_branch_hints", JSON.stringify(body.shared_branch_hints));
+    form.append("idempotency_key", body.idempotency_key || crypto.randomUUID());
     return reqForm<any>("/assets/upload", form);
   },
   assetList: (opts?: { persona_id?: string; upload_context?: string; status?: string; limit?: number; offset?: number }) => {

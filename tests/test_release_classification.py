@@ -56,14 +56,14 @@ def test_dashboard_and_migration_are_separate_impacts():
     assert result["services"] == []
 
 
-def test_repository_has_one_migration_per_version_and_latest_is_134():
+def test_repository_has_one_migration_per_version_and_latest_is_135():
     spec = spec_from_file_location(
         "manifest_renderer", ROOT / "ops/microservices/render-monorepo-release-manifest.py"
     )
     renderer = module_from_spec(spec)
     assert spec.loader
     spec.loader.exec_module(renderer)
-    assert renderer.latest_schema_version() == 134
+    assert renderer.latest_schema_version() == 135
 
 
 def test_manifest_preserves_unchanged_service_identity():

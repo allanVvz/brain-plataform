@@ -18,6 +18,12 @@ VALIDATOR = (
 WORKFLOW = (
     ROOT / ".github" / "workflows" / "release-main.yml"
 ).read_text(encoding="utf-8")
+SCHEMA_WORKFLOW = (
+    ROOT / ".github" / "workflows" / "deploy-schema.yml"
+).read_text(encoding="utf-8")
+SCHEMA_APPLY = (
+    ROOT / "ops" / "vps" / "apply-schema-release.sh"
+).read_text(encoding="utf-8")
 PORTAL_LAYOUT = (
     ROOT / "dashboard" / "app" / "clientes" / "[personaSlug]" / "layout.tsx"
 ).read_text(encoding="utf-8")
@@ -60,8 +66,8 @@ def test_release_validator_requires_this_release_migration_and_exact_sha():
     assert "131_microservice_role_grants.sql" in VALIDATOR
     assert "132_runtime_vector_distance_grant.sql" in VALIDATOR
     assert "133_conversation_turn_exactly_once_v5.sql" in VALIDATOR
-    assert "134_graph_bundle_draft_ledger.sql" in VALIDATOR
-    assert "release migrations 112-134 are incomplete" in VALIDATOR
+    assert "135_microservice_storage_role_grants.sql" in VALIDATOR
+    assert "release migrations 112-135 are incomplete" in VALIDATOR
     assert "microservice database roles are missing or unsafe" in VALIDATOR
     assert "authenticator cannot assume every microservice role" in VALIDATOR
     assert "microservice role inherits universal service_role" in VALIDATOR
@@ -77,8 +83,18 @@ def test_release_validator_gate_counts_every_migration_it_lists():
 
     bloco = VALIDATOR[VALIDATOR.index("do $$"):VALIDATOR.index("are incomplete")]
     listadas = len(re.findall(r"'\d{3}_[a-z0-9_]+\.sql'", bloco))
-    esperado = int(re.search(r"\)\) <> (\d+) then", bloco).group(1))
+    esperado = int(re.search(r"EXPECTED_MIGRATION_COUNT=(\d+)", VALIDATOR).group(1))
     assert listadas == esperado, f"{listadas} migrations listadas, gate espera {esperado}"
+
+
+def test_schema_workflow_applies_the_complete_authorized_release():
+    assert "apply-schema-release.sh" in SCHEMA_WORKFLOW
+    for version in range(132, 136):
+        assert f"supabase/migrations/{version:03d}_" in SCHEMA_WORKFLOW
+    assert "--single-transaction" in SCHEMA_APPLY
+    assert "backup.sh" in SCHEMA_APPLY
+    assert "--confirm-isolated-restore" in SCHEMA_APPLY
+    assert "global claims must remain paused" in SCHEMA_APPLY
 
 
 def test_portal_build_does_not_download_google_fonts_during_release():

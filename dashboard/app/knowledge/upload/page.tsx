@@ -149,6 +149,7 @@ function AssetUploadForm({
   const [parents, setParents] = useState<GraphNodeLite[]>([]);
   const [parentsLoading, setParentsLoading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const uploadAttemptRef = useRef<{ fingerprint: string; key: string } | null>(null);
 
   const personaSlug = useMemo(
     () => personas.find((p) => p.id === personaId)?.slug || "",
@@ -206,12 +207,20 @@ function AssetUploadForm({
 
     setSubmitting(true);
     try {
+      const fingerprint = [personaId, parentSlug, assetFunction, file.name, file.size, file.lastModified].join(":");
+      if (uploadAttemptRef.current?.fingerprint !== fingerprint) {
+        uploadAttemptRef.current = { fingerprint, key: crypto.randomUUID() };
+      }
       const result = await api.assetUpload(file, {
         persona_id: personaId,
         branch_hint: parentSlug,
         asset_function: assetFunction || undefined,
         persona_slug: personaSlug || undefined,
+        idempotency_key: uploadAttemptRef.current.key,
       });
+      if (result?.draft_ref && personaSlug) {
+        sessionStorage.setItem(`ai-brain-graph-draft-v3:${personaSlug}`, result.draft_ref);
+      }
       const titleHint = (result?.knowledge_item?.title || result?.asset?.name || file.name);
       const intentLabel = intent === "asset" ? "Asset visual" : "Outro";
       onSuccess(`${intentLabel} "${titleHint}" enviado. Ligado a ${parentSlug} e ao Gallery automaticamente.`);
@@ -220,6 +229,7 @@ function AssetUploadForm({
       setParentSlug("");
       setParentQuery("");
       setAssetFunction("");
+      uploadAttemptRef.current = null;
       if (fileRef.current) fileRef.current.value = "";
     } catch (err: any) {
       onError(err?.message || "Falha no upload.");

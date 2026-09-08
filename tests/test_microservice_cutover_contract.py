@@ -59,7 +59,7 @@ def test_blue_green_has_gateway_and_role_separated_env_files():
         "control-plane-blue", "control-plane-green", "runtime-blue",
         "runtime-green", "transport-blue", "transport-green",
     ):
-        assert services[service]["environment"]["REQUIRED_SCHEMA_VERSION"] == "134"
+        assert services[service]["environment"]["REQUIRED_SCHEMA_VERSION"] == "135"
 
     groups = {
         service["labels"]["brain.worker-group"]

@@ -93,7 +93,9 @@ def _bootstrap_storage_shim(*, port: int, password: str) -> None:
             cur.execute(
                 "create schema if not exists storage;"
                 "create table if not exists storage.buckets ("
-                "id text primary key, name text not null, public boolean default false)"
+                "id text primary key, name text not null, public boolean default false);"
+                "create table if not exists storage.objects ("
+                "id uuid primary key default gen_random_uuid(), bucket_id text, name text)"
             )
         conn.commit()
     finally:

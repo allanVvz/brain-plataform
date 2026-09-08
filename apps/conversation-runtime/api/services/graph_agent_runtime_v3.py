@@ -280,6 +280,143 @@ def _overlay_canonical_inbound(
     return projected
 
 
+_PUBLIC_GROUP_REF = re.compile(r"\[([a-z0-9_-]+):([a-z0-9][a-z0-9_-]*)\]\s*$", re.IGNORECASE)
+
+
+def _public_group_reference(
+    document: dict[str, Any], messages: list[dict[str, Any]],
+    *, message_id: str | None, trace_id: str | None,
+) -> dict[str, Any] | None:
+    """Resolve a public-site group ref only from the canonical inbound.
+
+    The graph must explicitly bind the collection/group to one branch. This
+    makes a removed, forged or cross-branch ref inert instead of turning its
+    slug into an unscoped semantic query.
+    """
+    selected = None
+    wanted = {str(value) for value in (message_id, trace_id) if value}
+    for row in reversed(messages):
+        metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+        identities = {
+            str(row.get("id") or ""), str(row.get("message_id") or ""),
+            str(row.get("external_message_id") or ""), str(metadata.get("trace_id") or ""),
+            str(metadata.get("inbound_buffer_id") or ""),
+        }
+        if wanted and wanted.intersection(identities):
+            selected = row
+            break
+    if selected is None:
+        selected = next((
+            row for row in reversed(messages)
+            if str(row.get("role") or "") == "user"
+            or str(row.get("sender_type") or "") == "lead"
+        ), None)
+    text = str((selected or {}).get("content") or (selected or {}).get("texto") or "")
+    match = _PUBLIC_GROUP_REF.search(text)
+    if not match:
+        return None
+    prefix, group_slug = match.group(1).lower(), match.group(2).lower()
+    node_by_id = document.get("node_by_id") or {}
+    group = next((
+        node for node in node_by_id.values()
+        if str(node.get("node_type") or "").lower() == "product_group"
+        and str(node.get("slug") or "").lower() == group_slug
+    ), None)
+    if not group:
+        return None
+    group_id = str(group.get("id") or "")
+    edges = [
+        edge for edge in document.get("edges") or []
+        if (edge.get("metadata") or {}).get("active", True) is not False
+    ]
+    containers = [
+        node_by_id.get(str(edge.get("source") or ""))
+        for edge in edges
+        if str(edge.get("target") or "") == group_id
+        and str(edge.get("relation_type") or "") == "contains"
+    ]
+    declarations = [
+        (_active.get("public_site") or _active.get("public_reference") or {})
+        for node in [group, *[node for node in containers if node]]
+        for _active in [node.get("data") if isinstance(node.get("data"), dict) else {}]
+    ]
+    binding = next((
+        item for item in declarations
+        if str(item.get("reference_prefix") or "").lower() == prefix
+        and item.get("branch_node_id")
+    ), None)
+    if not binding:
+        return None
+    branch_id = str(binding.get("branch_node_id") or "")
+    contract = (document.get("branch_contracts") or {}).get(branch_id) or {}
+    closure = {str(value) for value in contract.get("closure_node_ids") or []}
+    if branch_id not in set(document.get("branch_anchors") or []) or group_id not in closure:
+        return None
+
+    product_ids = {
+        str(edge.get("target") or "")
+        for edge in edges
+        if str(edge.get("source") or "") == group_id
+        and str(edge.get("relation_type") or "") in {"contains", "product_group_has_product"}
+        and str((node_by_id.get(str(edge.get("target") or "")) or {}).get("node_type") or "").lower() == "product"
+    }
+    related_ids = {group_id, *product_ids}
+    frontier = set(related_ids)
+    for edge in edges:
+        source, target = str(edge.get("source") or ""), str(edge.get("target") or "")
+        if source in frontier:
+            related_id = target
+        elif target in frontier:
+            related_id = source
+        else:
+            continue
+        related_node = node_by_id.get(related_id) or {}
+        related_type = str(related_node.get("node_type") or "").lower()
+        if related_type == "offer" and related_id in closure:
+            related_ids.add(related_id)
+        elif related_type == "asset":
+            data = related_node.get("data") if isinstance(related_node.get("data"), dict) else {}
+            blob = data.get("blob") if isinstance(data.get("blob"), dict) else {}
+            status = str(blob.get("status") or data.get("validation_status") or related_node.get("status") or "").lower()
+            if data.get("asset_function") == "vitrine" and blob.get("registry_id") and status in {"approved", "validated", "active", "ativo"}:
+                related_ids.add(related_id)
+    return {
+        "reference": match.group(0).strip(), "prefix": prefix,
+        "group_slug": group_slug, "group_node_id": group_id,
+        "branch_node_id": branch_id,
+        "product_node_ids": sorted(product_ids),
+        "evidence_node_ids": sorted(related_ids),
+    }
+
+
+def _apply_public_group_branch_resolution(
+    resolution: dict[str, Any], reference: dict[str, Any] | None,
+    document: dict[str, Any], active_branches: list[str],
+) -> dict[str, Any]:
+    if not reference:
+        return resolution
+    anchor = reference["branch_node_id"]
+    before = list(dict.fromkeys(active_branches))
+    action = "keep" if anchor in before else "add"
+    after = list(before) if anchor in before else [*before, anchor]
+    operation = {
+        "action": action, "branch_anchor_node_id": anchor,
+        "branch_path_checksum": str(((document.get("coordinates") or {}).get(anchor) or {}).get("path_checksum") or ""),
+        "evidence_span": reference["reference"], "evidence_type": "public_site_reference",
+        "resolution_method": "public_site_reference",
+    }
+    return {
+        **resolution, "status": "resolved", "resolution_method": "public_site_reference",
+        "operations": [operation], "consumed_spans": [{
+            "text": reference["reference"], "start": 0, "end": len(reference["reference"]),
+            "branch_anchor_node_id": anchor, "evidence_type": "public_site_reference",
+        }],
+        "previous_active_branch_node_ids": before,
+        "next_active_branch_node_ids": after,
+        "focused_branch_node_id": anchor,
+    }
+
+
 def _parse_timestamp(value: Any) -> datetime | None:
     if not value:
         return None
@@ -2746,7 +2883,7 @@ def _journey_has_confirmed_conversion(
 
 def build_context(
     *, persona_slug: str, lead_ref: int, message: str, message_id: str | None,
-    publication_id: str | None = None,
+    publication_id: str | None = None, trace_id: str | None = None,
 ) -> ConversationContext:
     started = time.perf_counter()
     persona = supabase_client.get_persona(persona_slug) or {}
@@ -2796,6 +2933,9 @@ def build_context(
     # ordered text for this decision/proof without rewriting persisted history
     # or changing the canonical inbound identity.
     messages = _overlay_canonical_inbound(messages, message, message_id)
+    public_group_ref = _public_group_reference(
+        document, messages, message_id=message_id, trace_id=trace_id,
+    )
     shared_memory = shared_lead_memory.project_shared_lead_memory(
         batch=batch, document=document, messages=messages,
     )
@@ -2936,6 +3076,10 @@ def build_context(
         contract=active_contract,
         asked_question_node_ids=ledger.get("asked_question_node_ids") or [],
     )
+    service_resolution = _apply_public_group_branch_resolution(
+        service_resolution, public_group_ref, document,
+        [*active_branches, *([active_branch] if active_branch else [])],
+    )
     service_resolution = _reserve_message_for_pending_field(
         service_resolution, pending_field_answer=pending_field_answer,
         message=message, active_branch_node_id=active_branch,
@@ -2948,6 +3092,19 @@ def build_context(
         _deterministic_branch_candidates(document, message),
         pending_field_answer=pending_field_answer,
     )
+    if public_group_ref:
+        anchor = public_group_ref["branch_node_id"]
+        branch_node = (document.get("node_by_id") or {}).get(anchor) or {}
+        deterministic_candidates = [{
+            "branch_anchor_node_id": anchor,
+            "branch_path_checksum": str(
+                ((document.get("coordinates") or {}).get(anchor) or {}).get("path_checksum") or ""
+            ),
+            "title": branch_node.get("title"), "slug": branch_node.get("slug"),
+            "score": 1.0, "snippet": public_group_ref["reference"],
+            "branch_evidence_span": public_group_ref["reference"],
+            "evidence_chunk_ids": [], "public_site_reference_match": True,
+        }]
     # Exact graph routing can skip semantic *branch* ranking, but retrieval
     # still needs the message embedding.  Keeping this unconditional also
     # prevents the agentic /context entrypoint from reaching RAG with an
@@ -3022,6 +3179,10 @@ def build_context(
     required_nodes = _required_retrieval_node_ids(
         document, retrieval_branch, contract, missing,
     )
+    if public_group_ref:
+        required_nodes = list(dict.fromkeys([
+            *required_nodes, *public_group_ref["evidence_node_ids"],
+        ]))
     if brand_scope_withheld:
         required_nodes = [
             node_id for node_id in required_nodes if node_id in neutral_scope
@@ -3093,6 +3254,35 @@ def build_context(
     by_source: dict[str, list[dict[str, Any]]] = {}
     for row in package:
         by_source.setdefault(str(row.get("source_node_id") or row.get("source_graph_node_id") or ""), []).append(row)
+    if public_group_ref:
+        # Product/Offer/Asset nodes are published structural evidence and do
+        # not necessarily own RAG chunks. Add compact, turn-local cards so the
+        # clicked group is still the mandatory retrieval seed without
+        # rebuilding commercial content or changing the published document.
+        for node_id in public_group_ref.get("evidence_node_ids") or []:
+            if node_id in by_source:
+                continue
+            node = (document.get("node_by_id") or {}).get(node_id) or {}
+            data = node.get("data") if isinstance(node.get("data"), dict) else {}
+            compact_data = {
+                key: data[key] for key in (
+                    "price", "price_cents", "currency", "minimum_quantity",
+                    "asset_function", "validation_status",
+                ) if data.get(key) is not None
+            }
+            blob = data.get("blob") if isinstance(data.get("blob"), dict) else {}
+            if blob.get("registry_id"):
+                compact_data["registry_id"] = blob["registry_id"]
+            text = json.dumps({
+                "id": node_id, "type": node.get("node_type"),
+                "slug": node.get("slug"), "title": node.get("title"),
+                "summary": node.get("summary"), "data": compact_data,
+            }, ensure_ascii=False, sort_keys=True)
+            by_source[node_id] = [{
+                "chunk_id": f"public-ref:{node_id}",
+                "source_node_id": node_id, "chunk_kind": "public_site_reference",
+                "chunk_text": text, "hybrid_score": 1.0,
+            }]
     cards = [
         _card(publication, document["node_by_id"][node_id], chunks, index)
         for index, (node_id, chunks) in enumerate(by_source.items())
@@ -3141,6 +3331,7 @@ def build_context(
         "global_branch_search_executed": not suppress_global_branch_search,
         "deterministic_branch_match": bool(deterministic_candidates),
         "service_resolution": service_resolution,
+        "public_group_reference": public_group_ref,
         "deterministic_branch_resolution": (
             next(
                 (
@@ -4219,6 +4410,31 @@ def _decide(
             *discarded_components,
         ])),
     })
+    public_group_ref = context.retrieval_trace.get("public_group_reference") or {}
+    if public_group_ref:
+        available = set(public_group_ref.get("evidence_node_ids") or [])
+        used = sorted(available.intersection(proposal.cited_node_ids))
+        proof["public_group_reference"] = {
+            "reference": public_group_ref.get("reference"),
+            "group_node_id": public_group_ref.get("group_node_id"),
+            "product_node_ids": public_group_ref.get("product_node_ids") or [],
+            "used_evidence_node_ids": used,
+            "asset_node_ids": sorted(
+                node_id for node_id in used
+                if str(((document.get("node_by_id") or {}).get(node_id) or {}).get("node_type") or "").lower() == "asset"
+            ),
+        }
+        group_id = str(public_group_ref.get("group_node_id") or "")
+        if group_id and group_id not in set(proposal.cited_node_ids):
+            proof["errors"] = [*proof.get("errors", []), "public_group_reference_not_cited"]
+            proof["gating_errors"] = [
+                *proof.get("gating_errors", []), "public_group_reference_not_cited",
+            ]
+            proof["valid"] = False
+            proof["repair_required"] = True
+            proof["repair_requirements"] = [
+                *proof.get("repair_requirements", []), {"kind": "node", "id": group_id},
+            ]
     # An explicit switch/add is only a Phase-A decision on the first pass.
     # Force one directed Phase-B retrieval for the selected branch before
     # any reply or fact can be committed, even if an anchor snippet

@@ -658,6 +658,7 @@ def build_context(
             message=message,
             message_id=message_id,
             publication_id=publication_id,
+            trace_id=trace_id,
         )
     except RuntimeError as exc:
         raise PublishedGraphUnavailable(str(exc)) from exc

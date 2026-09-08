@@ -27,10 +27,11 @@ const ASSET_FUNCTIONS = [
   { value: "campaign_footer",    label: "Campanha de rodape" },
   { value: "category_cover",     label: "Capa de grupo de produto" },
   { value: "product_image",      label: "Imagem de produto" },
+  { value: "vitrine",            label: "Imagem de vitrine" },
 ];
 
 const SELECTABLE_PARENT_TYPES = new Set([
-  "brand", "briefing", "campaign", "product_collection", "category", "product", "audience", "copy", "faq", "offer", "rule", "tone",
+  "brand", "briefing", "campaign", "product_collection", "product_group", "category", "product", "audience", "copy", "faq", "offer", "rule", "tone",
 ]);
 
 export default function AssetUploadDialog({ open, onClose, onUploaded, personas, initialPersonaId }: Props) {
@@ -45,6 +46,7 @@ export default function AssetUploadDialog({ open, onClose, onUploaded, personas,
   const [parents, setParents] = useState<GraphNodeLite[]>([]);
   const [parentsLoading, setParentsLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const uploadAttemptRef = useRef<{ fingerprint: string; key: string } | null>(null);
 
   const personaSlug = useMemo(() => personas.find((p) => p.id === personaId)?.slug || "", [personaId, personas]);
 
@@ -94,6 +96,7 @@ export default function AssetUploadDialog({ open, onClose, onUploaded, personas,
   function onPick(f: File) {
     setFile(f);
     setError(null);
+    uploadAttemptRef.current = null;
   }
 
   function onDrop(e: React.DragEvent) {
@@ -109,18 +112,27 @@ export default function AssetUploadDialog({ open, onClose, onUploaded, personas,
     if (!file) { setError("Escolha um arquivo."); return; }
     setSubmitting(true);
     try {
+      const fingerprint = [personaId, parentSlug, assetFunction, file.name, file.size, file.lastModified].join(":");
+      if (uploadAttemptRef.current?.fingerprint !== fingerprint) {
+        uploadAttemptRef.current = { fingerprint, key: crypto.randomUUID() };
+      }
       const result = await api.assetUpload(file, {
         persona_id: personaId,
         branch_hint: parentSlug,
         asset_function: assetFunction || undefined,
         persona_slug: personaSlug || undefined,
+        idempotency_key: uploadAttemptRef.current.key,
       });
+      if (result?.draft_ref && personaSlug) {
+        sessionStorage.setItem(`ai-brain-graph-draft-v3:${personaSlug}`, result.draft_ref);
+      }
       onUploaded(result);
       // Reset and close
       setFile(null);
       setParentSlug("");
       setParentQuery("");
       setAssetFunction("");
+      uploadAttemptRef.current = null;
       onClose();
     } catch (err: any) {
       setError(err?.message || "Falha no upload.");

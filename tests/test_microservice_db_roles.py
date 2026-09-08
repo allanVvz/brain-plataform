@@ -4,6 +4,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SQL = (ROOT / "supabase/migrations/131_microservice_role_grants.sql").read_text(encoding="utf-8")
 VECTOR_SQL = (ROOT / "supabase/migrations/132_runtime_vector_distance_grant.sql").read_text(encoding="utf-8")
+STORAGE_SQL = (ROOT / "supabase/migrations/135_microservice_storage_role_grants.sql").read_text(encoding="utf-8")
 
 
 def test_microservice_roles_are_isolated_and_expand_only():
@@ -46,3 +47,15 @@ def test_runtime_vector_grant_is_minimal_and_does_not_expand_table_ownership():
     assert "GRANT EXECUTE ON FUNCTION public.cosine_distance(vector, vector) TO brain_runtime" in VECTOR_SQL
     assert "lead_buffer" not in VECTOR_SQL
     assert "GRANT ALL" not in VECTOR_SQL
+
+
+def test_storage_grants_are_exact_and_exclude_runtime_and_gateway():
+    assert "GRANT USAGE ON SCHEMA storage TO brain_control_plane, brain_transport" in STORAGE_SQL
+    assert "GRANT SELECT ON TABLE storage.buckets TO brain_control_plane, brain_transport" in STORAGE_SQL
+    assert "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE storage.objects TO brain_control_plane" in STORAGE_SQL
+    assert "GRANT SELECT, INSERT, UPDATE ON TABLE storage.objects TO brain_transport" in STORAGE_SQL
+    assert "GRANT ALL" not in STORAGE_SQL
+    assert "ALTER DEFAULT PRIVILEGES" not in STORAGE_SQL
+    assert "TO brain_runtime" not in STORAGE_SQL
+    assert "TO brain_gateway" not in STORAGE_SQL
+    assert "gateway or runtime unexpectedly has Storage access" in STORAGE_SQL

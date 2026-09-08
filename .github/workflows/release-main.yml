@@ -240,7 +240,7 @@ jobs:
             backup_dir="$(realpath /var/backups/brain-ai/latest)"
             restore_db="brain_restore_release_$(date -u +%Y%m%d%H%M%S)"
             bash ops/vps/restore.sh "$backup_dir" "$restore_db" --confirm-isolated-restore
-            AUDIT_ROOT=/opt/brain-ai ALLOW_PENDING_SCHEMA_VERSION=134 bash "$install_root/ops/vps/validate-production-release.sh"
+            AUDIT_ROOT=/opt/brain-ai ALLOW_PENDING_SCHEMA_VERSION=135 bash "$install_root/ops/vps/validate-production-release.sh"
       - uses: actions/upload-artifact@v4
         with:
           name: schema-release-plan-${{ needs.classify.outputs.sha }}

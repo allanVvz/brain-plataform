@@ -558,16 +558,53 @@ def _active_node_data(node: dict) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def _active_asset_payload(node: dict) -> dict:
+def _active_asset_payload(
+    node: dict,
+    *,
+    persona_id: str,
+    registry_cache: dict[str, Optional[dict]],
+) -> dict:
     data = _active_node_data(node)
     blob = data.get("blob") or {}
+    registry_id = str(blob.get("registry_id") or data.get("registry_id") or "")
+    registry = None
+    if registry_id:
+        if registry_id not in registry_cache:
+            registry_cache[registry_id] = supabase_client.get_asset(registry_id)
+        candidate = registry_cache[registry_id]
+        candidate_meta = (candidate or {}).get("metadata") or {}
+        registry_state = str(
+            candidate_meta.get("validation_status")
+            or (candidate or {}).get("approval_status")
+            or (candidate or {}).get("status")
+            or ""
+        ).lower()
+        node_state = str(
+            node.get("status") or data.get("validation_status") or ""
+        ).lower()
+        has_object = bool(
+            (candidate or {}).get("storage_bucket")
+            and (candidate or {}).get("storage_path")
+        )
+        if (
+            candidate
+            and str(candidate.get("persona_id") or "") == str(persona_id)
+            and node_state in {"approved", "validated", "active", "ativo"}
+            and registry_state not in {"archived", "rejected", "failed"}
+            and has_object
+        ):
+            registry = candidate
+    # A URL inside a GraphBundle is evidence metadata, not proof that the
+    # binary still exists or is approved. Public rendering resolves only the
+    # persona-owned assets registry row and otherwise emits no image.
+    resolved_url = supabase_client.asset_display_url(registry) if registry else ""
     return {
         "id": str(node.get("id") or ""),
-        "asset_id": blob.get("registry_id") or data.get("registry_id") or node.get("id"),
+        "asset_id": registry_id or node.get("id"),
         "knowledge_node_id": node.get("id"),
         "edge_id": None,
         "type": data.get("type") or data.get("asset_type") or "image",
-        "url": blob.get("url") or data.get("url") or data.get("public_url") or "",
+        "url": resolved_url,
         "alt": data.get("alt") or node.get("title") or "",
         "role": data.get("role") or data.get("asset_function"),
         "section": data.get("page_section"),
@@ -575,6 +612,70 @@ def _active_asset_payload(node: dict) -> dict:
         "href": data.get("href") or data.get("cta_url"),
         "markdown": data.get("markdown") or data.get("body"),
     }
+
+
+def _collection_scope(
+    collection: Optional[dict], nodes: list[dict], edges: list[dict]
+) -> tuple[Optional[dict], set[str]]:
+    """Resolve one explicit commercial Brand and its owned descendants."""
+    if not collection:
+        brands = [node for node in nodes if str(node.get("node_type") or "").lower() == "brand"]
+        return (brands[0], set()) if len(brands) == 1 else (None, set())
+    data = _active_node_data(collection)
+    explicit_ids = {
+        str(data.get(key) or "")
+        for key in ("brand_node_id", "branch_node_id", "scope_node_id")
+        if data.get(key)
+    }
+    explicit_slugs = {
+        str(data.get(key) or "")
+        for key in ("brand_slug", "branch_slug", "scope_slug")
+        if data.get(key)
+    }
+    collection_id = str(collection.get("id") or "")
+    connected_ids = {
+        str(edge.get("target") if str(edge.get("source") or "") == collection_id else edge.get("source"))
+        for edge in edges
+        if collection_id in {str(edge.get("source") or ""), str(edge.get("target") or "")}
+    }
+    brands = [
+        node for node in nodes
+        if str(node.get("node_type") or "").lower() == "brand"
+        and (
+            str(node.get("id") or "") in explicit_ids
+            or str(node.get("slug") or "") in explicit_slugs
+            or str(node.get("id") or "") in connected_ids
+        )
+    ]
+    if not brands:
+        all_brands = [node for node in nodes if str(node.get("node_type") or "").lower() == "brand"]
+        brands = all_brands if len(all_brands) == 1 else []
+    if len(brands) != 1:
+        return None, set()
+    brand = brands[0]
+    owned = {
+        str(edge.get("target") or "")
+        for edge in edges
+        if str(edge.get("source") or "") == str(brand.get("id") or "")
+        and str(edge.get("relation_type") or "") == "contains"
+    }
+    return brand, owned
+
+
+def _select_group_cover(explicit_assets: list[dict], products: list[dict]) -> Optional[dict]:
+    direct = next((asset for asset in explicit_assets if asset.get("url")), None)
+    if direct:
+        return direct
+    products_with_media = [
+        product for product in products
+        if any(asset.get("url") for asset in product.get("assets") or [])
+    ]
+    if len(products_with_media) != 1:
+        return None
+    return next(
+        (asset for asset in products_with_media[0].get("assets") or [] if asset.get("url")),
+        None,
+    )
 
 
 def build_menu_payload(persona_slug: str, collection_slug: Optional[str] = None) -> dict:
@@ -622,10 +723,17 @@ def build_menu_payload(persona_slug: str, collection_slug: Optional[str] = None)
     campaigns = typed("campaign")
     collection_node = next(
         (node for node in campaigns if node.get("slug") == effective_collection_slug),
-        campaigns[0] if campaigns else None,
+        None,
     )
-    if collection_slug and collection_node is None:
-        raise HTTPException(404, f"Collection not found: {collection_slug}")
+    if collection_node is None and len(campaigns) == 1 and not collection_slug:
+        collection_node = campaigns[0]
+    if collection_node is None and (campaigns or collection_slug):
+        raise HTTPException(404, f"Collection not found: {effective_collection_slug}")
+
+    scoped_brand, brand_owned_node_ids = _collection_scope(collection_node, public_nodes, edges)
+    if len(typed("brand")) > 1 and scoped_brand is None:
+        raise HTTPException(409, "public_collection_brand_scope_ambiguous")
+    registry_cache: dict[str, Optional[dict]] = {}
 
     products = typed("product")
     groups = typed("product_group")
@@ -654,15 +762,24 @@ def build_menu_payload(persona_slug: str, collection_slug: Optional[str] = None)
 
     def product_payload(product: dict) -> dict:
         data = _active_node_data(product)
-        copies = adjacent(product, "copy")
+        copies = [
+            node for node in adjacent(product, "copy")
+            if not brand_owned_node_ids or str(node.get("id") or "") in brand_owned_node_ids
+        ]
         faqs = adjacent(product, "faq")
         assets = adjacent(product, "asset")
+        offers = [
+            node for node in adjacent(product, "offer")
+            if not brand_owned_node_ids or str(node.get("id") or "") in brand_owned_node_ids
+        ]
+        offer_data = _active_node_data(offers[0]) if offers else {}
         return {
             "id": product.get("id"),
             "slug": product.get("slug") or product.get("id"),
             "name": product.get("title") or product.get("slug") or "Produto",
-            "price_cents": _read_int(data.get("price_cents"), 0),
-            "offer": data.get("price") or None,
+            "price_cents": _read_int(offer_data.get("price_cents") or data.get("price_cents"), 0),
+            "offer": offer_data.get("price") or data.get("price") or None,
+            "offer_id": offers[0].get("id") if offers else None,
             "description": to_clean_markdown(
                 product.get("summary") or data.get("description") or ""
             ),
@@ -689,7 +806,12 @@ def build_menu_payload(persona_slug: str, collection_slug: Optional[str] = None)
                 ),
                 "is_rag_eligible": True,
             } for node in faqs],
-            "assets": [_active_asset_payload(node) for node in assets],
+            "assets": [
+                _active_asset_payload(
+                    node, persona_id=str(persona["id"]), registry_cache=registry_cache,
+                )
+                for node in assets
+            ],
         }
 
     categories = []
@@ -700,15 +822,23 @@ def build_menu_payload(persona_slug: str, collection_slug: Optional[str] = None)
             key=lambda row: row["position"],
         )
         group_assets = adjacent(group, "asset") if str(group.get("id")) in by_id else []
-        cover = next(
-            (asset for asset in (_active_asset_payload(node) for node in group_assets) if asset["url"]),
-            None,
+        # A direct group cover is explicit and always wins. Product media may
+        # cover the group only when exactly one product in it has any approved
+        # image, preventing one product's photo from representing its siblings.
+        explicit_group_assets = [
+            _active_asset_payload(
+                node, persona_id=str(persona["id"]), registry_cache=registry_cache,
+            ) for node in group_assets
+        ]
+        cover = _select_group_cover(explicit_group_assets, group_products)
+        group_slug = group.get("slug") or group.get("id")
+        message_template = str(
+            ((persona.get("config") or {}).get("public_site") or {}).get("whatsapp_message_template")
+            or "Tenho interesse em {group_name}."
         )
-        if cover is None:
-            cover = next(
-                (asset for product in group_products for asset in product["assets"] if asset["url"]),
-                None,
-            )
+        readable_message = message_template.replace("{group_name}", str(group.get("title") or group_slug))
+        readable_message = readable_message.replace("{group_slug}", str(group_slug)).strip()
+        cta_message = f"{readable_message} [vitrine:{group_slug}]"
         categories.append({
             "id": group.get("id"),
             "slug": group.get("slug") or group.get("id"),
@@ -719,6 +849,7 @@ def build_menu_payload(persona_slug: str, collection_slug: Optional[str] = None)
             "cover_asset_id": (cover or {}).get("asset_id"),
             "cover_edge_id": None,
             "cover_slot_key": (cover or {}).get("slot_key"),
+            "cta_message": cta_message,
             "visible": data.get("visible") is not False,
             "position": _read_int(data.get("position") or data.get("sort_order"), 0),
             "products": group_products,
@@ -733,10 +864,9 @@ def build_menu_payload(persona_slug: str, collection_slug: Optional[str] = None)
         if projection.get(key):
             site[key] = projection[key]
 
-    brand_node = typed("brand")
     brand = {}
-    if brand_node:
-        node = brand_node[0]
+    if scoped_brand:
+        node = scoped_brand
         data = _active_node_data(node)
         brand = {
             "slug": node.get("slug"),
@@ -747,8 +877,11 @@ def build_menu_payload(persona_slug: str, collection_slug: Optional[str] = None)
             ) if data.get(key)},
         }
     collection_assets = [
-        _active_asset_payload(node) for node in typed("asset")
+        _active_asset_payload(
+            node, persona_id=str(persona["id"]), registry_cache=registry_cache,
+        ) for node in typed("asset")
         if not any(node in adjacent(product, "asset") for product in products)
+        and (not brand_owned_node_ids or str(node.get("id") or "") in brand_owned_node_ids)
     ]
     collection_data = _active_node_data(collection_node) if collection_node else {}
     payload = {
@@ -791,7 +924,8 @@ def build_menu_payload(persona_slug: str, collection_slug: Optional[str] = None)
         "action_node_id": action.get("id") if action else None,
         "publication_id": publication.get("publication_id"),
     }
-    payload["projection_checksum"] = _canonical_json_checksum(payload)
+    checksum_payload = {key: value for key, value in payload.items() if key != "generated_at"}
+    payload["projection_checksum"] = _canonical_json_checksum(checksum_payload)
     return payload
 
 def _menu_response(persona_slug: str, collection_slug: Optional[str], response: Response, nocache: bool) -> dict:
