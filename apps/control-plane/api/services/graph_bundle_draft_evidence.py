@@ -11,6 +11,12 @@ class DraftEvidenceError(RuntimeError):
     pass
 
 
+def _select_one(query: Any) -> dict[str, Any] | None:
+    response = query.limit(1).execute()
+    rows = list(getattr(response, "data", None) or [])
+    return dict(rows[0]) if rows else None
+
+
 def _ref(kind: str, draft_ref: str, revision: int, checksum: str, key: str) -> str:
     value = uuid5(
         NAMESPACE_URL,
@@ -48,8 +54,9 @@ def record(
     existing = (
         client.table("system_events").select("payload")
         .eq("entity_type", "graph_bundle_draft_evidence")
-        .eq("entity_id", evidence_ref).maybe_single().execute().data
+        .eq("entity_id", evidence_ref)
     )
+    existing = _select_one(existing)
     if existing:
         return dict(existing.get("payload") or {})
     row = {
@@ -69,8 +76,9 @@ def record(
         # the first immutable evidence row instead of creating two proofs.
         existing = (
             client.table("system_events").select("payload")
-            .eq("id", row["id"]).maybe_single().execute().data
+            .eq("id", row["id"])
         )
+        existing = _select_one(existing)
         if existing:
             return dict(existing.get("payload") or {})
         raise
@@ -90,8 +98,9 @@ def require(
         supabase_client.get_client().table("system_events").select("payload,persona_id")
         .eq("entity_type", "graph_bundle_draft_evidence")
         .eq("event_type", f"graph_bundle_draft_{kind}")
-        .eq("entity_id", evidence_ref).maybe_single().execute().data
+        .eq("entity_id", evidence_ref)
     )
+    row = _select_one(row)
     payload = dict((row or {}).get("payload") or {})
     matches = (
         row
