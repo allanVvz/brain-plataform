@@ -1,10 +1,22 @@
 from fastapi import FastAPI, Response
 from fastapi.testclient import TestClient
 
-from middleware.auth import auth_middleware
+from middleware.auth import auth_middleware, is_public_path
 from routes import auth
 from services import auth_service
 from utils.env import validate_backend_env
+
+
+def test_internal_asset_attachment_uses_route_level_service_auth():
+    assert is_public_path(
+        "/internal/v1/control-plane/assets/71b364c4-9875-47c6-b66e-34ecde677922/attach-inbound-graph"
+    )
+    assert not is_public_path(
+        "/internal/v1/control-plane/assets/not-a-uuid/attach-inbound-graph"
+    )
+    assert not is_public_path(
+        "/internal/v1/control-plane/assets/71b364c4-9875-47c6-b66e-34ecde677922/delete"
+    )
 
 
 def test_session_cookie_is_not_persistent_without_remember(monkeypatch):
