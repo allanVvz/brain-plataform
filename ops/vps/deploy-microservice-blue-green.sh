@@ -257,7 +257,10 @@ mv "$candidate" "$STATE_FILE"
 
 if [[ "$active" =~ ^(blue|green)$ && "$active" != "$target" ]]; then
   old_services=("$compose_service-$active")
-  for worker in "${worker_bases[@]}"; do old_services+=("$worker-$active"); done
+  for worker in "${worker_bases[@]}"; do
+    [[ -n "$worker" ]] || continue
+    old_services+=("$worker-$active")
+  done
   "${COMPOSE[@]}" stop -t 120 "${old_services[@]}"
 fi
 cutover_complete=true

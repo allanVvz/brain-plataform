@@ -392,7 +392,7 @@ def test_blue_green_rolls_back_routes_and_slot_after_late_failure():
 
 def test_blue_green_ignores_empty_worker_inventory_rows():
     script = (ROOT / "ops/vps/deploy-microservice-blue-green.sh").read_text()
-    assert '[[ -n "$worker" ]] || continue' in script
+    assert script.count('[[ -n "$worker" ]] || continue') == 2
 
 
 def test_generic_schema_apply_is_plan_backup_restore_and_pause_gated():
