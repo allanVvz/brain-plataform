@@ -78,6 +78,7 @@ fi
 target_service="$compose_service-$target"
 target_services=("$target_service")
 for worker in "${worker_bases[@]}"; do
+  [[ -n "$worker" ]] || continue
   target_services+=("$worker-$target")
 done
 
