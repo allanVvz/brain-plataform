@@ -1,5 +1,5 @@
 {
-  "source_sha": "9df05d9ac510e34c3cf37eb363923cb6b953d575",
+  "source_sha": "d434befe72d575c23bdd7de0e64486b55c1abc8a",
   "contracts_version": "3.0.0",
   "contracts_checksum": "sha256:c2418a764622b7c71fb62fded53669c5292db959a8c9dd5332a8a4a59cc49ec7",
   "schema_version": 135,
@@ -15,8 +15,8 @@
     },
     "control-plane": {
       "repository": "allanVvz/brain-plataform",
-      "sha": "9df05d9ac510e34c3cf37eb363923cb6b953d575",
-      "digest": "sha256:b17311976f3dd15cc48a3cc7dee9022cf2217f72e28dd68cd43901eee226828f",
+      "sha": "d434befe72d575c23bdd7de0e64486b55c1abc8a",
+      "digest": "sha256:1b552c67dea919052304d4ffd075a6856fe5fa1adce4c2079022de236d9e37df",
       "required_schema_version": 135,
       "build_context": "apps/control-plane"
     },
