@@ -20,8 +20,15 @@ jobs:
       - name: Build deterministic schema plan
         run: python ops/microservices/plan-schema-release.py "${{ inputs.manifest_path }}" > schema-release-plan.json
       - name: Export schema target
-        run: echo "schema_version=$(python -c 'import json; print(json.load(open("schema-release-plan.json"))["schema_version"])')" >> "$GITHUB_OUTPUT"
         id: plan_output
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          from pathlib import Path
+
+          plan = json.loads(Path("schema-release-plan.json").read_text(encoding="utf-8"))
+          print(f"schema_version={plan['schema_version']}")
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: schema-release-plan-${{ inputs.manifest_sha }}
