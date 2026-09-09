@@ -27,7 +27,7 @@ o que o GraphBundle ainda não projeta no objeto `site`:
   pacote registrado em `assets/brands/tock-fatal`;
 - contato de Isadora, rótulos, ordem e estado "em breve";
 - capa do Linktree, seu hash esperado e a regra responsiva de recorte;
-- localização da loja, coordenadas provisórias, URL do Google Maps e estilo Stadia;
+- localização da loja, coordenadas validadas, URL do Google Maps e estilo público configurável;
 - audiências informativas e seus IDs:
   - `audience:tock-ctx-conforto` — Conforto e praticidade;
   - `audience:tock-ctx-plus-size` — Moda plus size;
@@ -42,8 +42,9 @@ continuarem verdes.
 
 O endereço foi cruzado com o cadastro público do Waze e a rota do Google Maps;
 o Google resolveu o número 1368 em `-29.927551,-51.193686`. A localização fica
-com `validationStatus="validated"`. A promoção para produção continua bloqueada
-até confirmar a autenticação por domínio de `tockfatal.com` na Stadia Maps.
+com `validationStatus="validated"`. O provedor padrão não depende de chave nem
+de autenticação por domínio; estilos comerciais continuam configuráveis por
+persona no contrato público.
 
 ## Contrato graph-backed alvo
 
@@ -106,6 +107,26 @@ O alias histórico `tock-fatal.vercel.app` pertence ao mesmo projeto Vercel e
 deve responder com redirecionamento permanente para
 `https://tockfatal.com/vitrine`. Ele não pode ficar preso a um deployment
 anterior nem publicar uma segunda versão da landing.
+
+## Template genérico de localização
+
+O frontend consome `site.locations[]` como contrato compartilhado por persona.
+Cada localização validada projeta `node_id`, rótulo, endereço, coordenadas,
+referências Google, tema do marcador e `map.style_url`. O componente não conhece
+nomes de marca, cidade ou loja; localizações `pending` não são renderizadas como
+coordenadas canônicas.
+
+Enquanto a projeção ainda não existe, a Tock usa somente sua compatibilidade
+depreciada. O estilo público padrão é o Liberty do OpenFreeMap, sem chave ou
+autorização de domínio. Uma persona pode substituí-lo por HTTPS em
+`site.locations[].map.style_url` ou, provisoriamente, por
+`VITE_PUBLIC_MAP_STYLE_URL`.
+
+O build precisa publicar `maplibre-gl-worker.mjs` e sua dependência
+`maplibre-gl-shared.mjs` em `/assets`. O E2E não considera a mera existência do
+canvas como sucesso: exige estado `ready`, tile vetorial `.pbf` com resposta 2xx,
+marcador visível, dimensões reais, teardown ao fechar e fallback controlado ao
+interromper o estilo.
 
 ## Deploy e verificação
 
