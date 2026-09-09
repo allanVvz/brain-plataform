@@ -125,6 +125,13 @@ def _lead_buffer_row(cur, buffer_id):
     return cur.fetchone()
 
 
+def _parse_ts(value) -> datetime.datetime:
+    """The RPCs return jsonb, so a timestamptz field comes back as an ISO
+    string, not a native datetime -- unlike a plain table column read
+    through RealDictCursor. Normalize before comparing the two."""
+    return datetime.datetime.fromisoformat(value) if isinstance(value, str) else value
+
+
 # psycopg2 returns timestamptz as an aware datetime in whatever offset the
 # session reports (not necessarily -03:00), so comparisons below use
 # datetime equality (instant-based, tzinfo-representation-agnostic) instead
@@ -368,7 +375,7 @@ class TestSetReleaseItemOverrideV1:
             (item_id, f"k:{uuid.uuid4()}"),
         )
         result = cur.fetchone()["result"]
-        assert result["available_at"] == computed
+        assert _parse_ts(result["available_at"]) == computed
 
         cur.execute("select paused from public.release_batch_items where id = %s", (item_id,))
         assert cur.fetchone()["paused"] is False
@@ -385,7 +392,7 @@ class TestSetReleaseItemOverrideV1:
             (item_id, f"k:{uuid.uuid4()}", target),
         )
         result = cur.fetchone()["result"]
-        assert result["available_at"] == target
+        assert _parse_ts(result["available_at"]) == target
 
         cur.execute("select override_available_at, paused from public.release_batch_items where id = %s", (item_id,))
         item = cur.fetchone()
