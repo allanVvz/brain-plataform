@@ -2,7 +2,7 @@
 
 register_release_batch and set_item_override are thin wrappers over the
 register_release_batch_v1 / set_release_item_override_v1 SQL functions
-(supabase/migrations/134_business_hours_release_queue.sql) -- the scheduling
+(supabase/migrations/136_business_hours_release_queue.sql) -- the scheduling
 arithmetic and the atomic binding-unpause-plus-schedule live in the
 database, not here. This module's job is candidate selection: building the
 pre-vetted lead_buffer id list the safety_paused_binding scope requires

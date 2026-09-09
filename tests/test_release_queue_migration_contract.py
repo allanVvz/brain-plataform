@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = (
-    ROOT / "supabase" / "migrations" / "134_business_hours_release_queue.sql"
+    ROOT / "supabase" / "migrations" / "136_business_hours_release_queue.sql"
 ).read_text(encoding="utf-8").lower()
 
 

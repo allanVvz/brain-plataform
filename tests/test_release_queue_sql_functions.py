@@ -1,4 +1,4 @@
-"""Real-Postgres tests for supabase/migrations/134_business_hours_release_queue.sql.
+"""Real-Postgres tests for supabase/migrations/136_business_hours_release_queue.sql.
 
 Same rationale and fixture shape as tests/test_whatsapp_sql_functions.py (see
 its module docstring): mocking Postgres would hide the exact class of bug
