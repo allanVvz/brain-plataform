@@ -44,6 +44,7 @@ if not TEST_POSTGRES_DSN and not IS_CI:
         "test_graph_agent_v3_sql.py",
         "test_production_privileges_sql.py",
         "test_whatsapp_sql_functions.py",
+        "test_release_queue_sql_functions.py",
     ])
 if (os.environ.get("RUN_MENU_LIVE_E2E") or "").strip().lower() not in {"1", "true", "yes", "on"}:
     collect_ignore.append("e2e_baita_cardapio_menu.py")

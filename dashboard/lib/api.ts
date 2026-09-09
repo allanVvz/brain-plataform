@@ -317,6 +317,18 @@ export const api = {
     req<any[]>(`/messaging/templates?persona_id=${encodeURIComponent(personaId)}&provider=${encodeURIComponent(provider)}`),
   createMessageTemplate: (body: Record<string, unknown>) =>
     req<any>("/messaging/templates", { method: "POST", body: JSON.stringify(body) }),
+  releaseBatches: (personaId?: string) =>
+    req<any[]>(`/messaging/release-queue/batches${personaId ? `?persona_id=${encodeURIComponent(personaId)}` : ""}`),
+  releaseBatch: (batchId: string) =>
+    req<any>(`/messaging/release-queue/batches/${encodeURIComponent(batchId)}`),
+  registerReleaseBatch: (body: Record<string, unknown>) =>
+    req<any>("/messaging/release-queue/batches", { method: "POST", body: JSON.stringify(body) }),
+  pauseReleaseItem: (itemId: string, body: Record<string, unknown>) =>
+    req<any>(`/messaging/release-queue/items/${encodeURIComponent(itemId)}/pause`, { method: "POST", body: JSON.stringify(body) }),
+  resumeReleaseItem: (itemId: string, body: Record<string, unknown>) =>
+    req<any>(`/messaging/release-queue/items/${encodeURIComponent(itemId)}/resume`, { method: "POST", body: JSON.stringify(body) }),
+  rescheduleReleaseItem: (itemId: string, body: Record<string, unknown>) =>
+    req<any>(`/messaging/release-queue/items/${encodeURIComponent(itemId)}/reschedule`, { method: "POST", body: JSON.stringify(body) }),
   updateLeadInfo: (leadRef: number, body: {
     nome?: string;
     interesse_produto?: string;

@@ -55,6 +55,36 @@ def _post(
     return result
 
 
+def _get(path: str) -> dict:
+    base_url, token = _configuration()
+    headers = {"X-Webhook-Token": token}
+    try:
+        with httpx.Client(timeout=15, verify=get_ca_bundle_path()) as client:
+            response = client.get(base_url + path, headers=headers)
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, "Conversation runtime is unavailable.") from exc
+    if response.status_code >= 400:
+        try:
+            detail = response.json().get("detail")
+        except (ValueError, AttributeError):
+            detail = None
+        raise HTTPException(response.status_code, detail or "Conversation runtime rejected the operation.")
+    try:
+        result = response.json()
+    except ValueError as exc:
+        raise HTTPException(502, "Conversation runtime returned an invalid response.") from exc
+    if not isinstance(result, dict):
+        raise HTTPException(502, "Conversation runtime returned an invalid response.")
+    return result
+
+
+def resume_answer_window(lead_ref: int) -> dict:
+    """Pure read: whether conversation-runtime would still answer this
+    lead's backlog right now, per the same per-lead staleness check
+    resume_lead() applies. Never mutates anything."""
+    return _get(f"/internal/v1/runtime/leads/{lead_ref}/resume-answer-window")
+
+
 def record_journey_event(
     lead_ref: int,
     payload: dict[str, Any],
