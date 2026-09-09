@@ -133,6 +133,13 @@ PY
   image_id="$(docker inspect -f '{{.Image}}' "$cid")"
   if docker image inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' "$image_id" | grep -Fq "@$expected"; then
     printf 'PASS\t%s_digest\t%s\n' "$worker" "$expected"
+  elif [[ "$ALLOW_PENDING_MICROSERVICE_DIGESTS" == "true" ]]; then
+    # A deployment preflight audits the currently active worker while the
+    # manifest intentionally points at its replacement. A running worker is
+    # acceptable here; the strict post-deploy audit (flag=false) still
+    # requires every API and worker in the service family to match exactly.
+    printf 'WARN\t%s_digest\tcontainer running; candidate digest pending=%s\n' \
+      "$worker" "$expected"
   else
     printf 'FAIL\t%s_digest\texpected=%s\n' "$worker" "$expected"; failed=1
   fi
