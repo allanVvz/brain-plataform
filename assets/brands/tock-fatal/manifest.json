@@ -1,0 +1,470 @@
+{
+  "source": "operator_supplied_identity_package_2026-09-04",
+  "source_root": "assets/brands/tock-fatal/source",
+  "file_count": 77,
+  "total_bytes": 185163019,
+  "files": [
+    {
+      "path": "Cartão visita/Cópia de Cartãp visita (2).pdf",
+      "repository_path": "assets/brands/tock-fatal/source/Cartão visita/Cópia de Cartãp visita (2).pdf",
+      "sha256": "55012df2149f9dc9ab9bcefd0e671223d472607f6b3e6330797696137b7612fb",
+      "bytes": 104554
+    },
+    {
+      "path": "Criativos/Etiquetas para o video/1.png",
+      "repository_path": "assets/brands/tock-fatal/source/Criativos/Etiquetas para o video/1.png",
+      "sha256": "1df3426e8d6abc2d04798ac964f53c5c9b51a61d01d9752d828a1ee8fc7d5678",
+      "bytes": 17582
+    },
+    {
+      "path": "Criativos/Etiquetas para o video/2.png",
+      "repository_path": "assets/brands/tock-fatal/source/Criativos/Etiquetas para o video/2.png",
+      "sha256": "e3ea016db7ae1b19f138585767f9b7b2a690555f862f9ceaa4ffd3133c81b509",
+      "bytes": 16180
+    },
+    {
+      "path": "Criativos/Etiquetas para o video/3.png",
+      "repository_path": "assets/brands/tock-fatal/source/Criativos/Etiquetas para o video/3.png",
+      "sha256": "c3daed80dc8c64f0f01549ccaa101f73dfcd79b85799a5e09fa73412513be0bf",
+      "bytes": 17120
+    },
+    {
+      "path": "Criativos/Etiquetas para o video/4.png",
+      "repository_path": "assets/brands/tock-fatal/source/Criativos/Etiquetas para o video/4.png",
+      "sha256": "84a361d57f5eeff646cf21b40fdffe34f688fe4e6afdddf713d37168c0324907",
+      "bytes": 17302
+    },
+    {
+      "path": "Criativos/Etiquetas para o video/5.png",
+      "repository_path": "assets/brands/tock-fatal/source/Criativos/Etiquetas para o video/5.png",
+      "sha256": "2d8703e3dc91bd25b2517d7d5b705c8b2d790e10a70b3cb6b0c0b10e6773202c",
+      "bytes": 15370
+    },
+    {
+      "path": "Criativos/Etiquetas para o video/6.png",
+      "repository_path": "assets/brands/tock-fatal/source/Criativos/Etiquetas para o video/6.png",
+      "sha256": "3d7fbdbdc3f5f2654138817e04b5eaa73a1ad0e7fd2a32388851720660cca706",
+      "bytes": 16274
+    },
+    {
+      "path": "Criativos/Prancheta 1  copiar 3.png",
+      "repository_path": "assets/brands/tock-fatal/source/Criativos/Prancheta 1  copiar 3.png",
+      "sha256": "f278383b144929a908ad10a0fc635009271511e3a503c811e70c3de08241fac2",
+      "bytes": 1412259
+    },
+    {
+      "path": "Criativos/Prancheta 1  copiar 4.png",
+      "repository_path": "assets/brands/tock-fatal/source/Criativos/Prancheta 1  copiar 4.png",
+      "sha256": "385679055905ae40c142ef7d1dbf3135efc310acc10f949a2054df4c6732ba4d",
+      "bytes": 1869303
+    },
+    {
+      "path": "Criativos/Prancheta 1  copiar 5.png",
+      "repository_path": "assets/brands/tock-fatal/source/Criativos/Prancheta 1  copiar 5.png",
+      "sha256": "eefbf16fc70661b55e5d7ac14d48c36c17cb785694e2fce5418145f9d06cf1f8",
+      "bytes": 1434204
+    },
+    {
+      "path": "Criativos/Prancheta 1  copiar 6.png",
+      "repository_path": "assets/brands/tock-fatal/source/Criativos/Prancheta 1  copiar 6.png",
+      "sha256": "74c52ac96366dafc8204efe60e52ab5307bcef4cf3606af858cd8dab77f8a2a1",
+      "bytes": 1411391
+    },
+    {
+      "path": "Criativos/Prancheta 1  copiar.png",
+      "repository_path": "assets/brands/tock-fatal/source/Criativos/Prancheta 1  copiar.png",
+      "sha256": "8e1c8a6ce7358ff9d876bbf3fad870afc1aa008b01edbb3927575c78f0743564",
+      "bytes": 1601413
+    },
+    {
+      "path": "Etiqueta/Etiqueta 1/etiqueta 1(1).png",
+      "repository_path": "assets/brands/tock-fatal/source/Etiqueta/Etiqueta 1/etiqueta 1(1).png",
+      "sha256": "2e6b8a0bea6bb51b7a6621e559ee45a108bdfccc9fd19aa36964749eebd2c282",
+      "bytes": 211932
+    },
+    {
+      "path": "Etiqueta/Etiqueta 1/etiqueta 1.png",
+      "repository_path": "assets/brands/tock-fatal/source/Etiqueta/Etiqueta 1/etiqueta 1.png",
+      "sha256": "b0b91add31c8dd0c2f2e70f5c8a9cc065386a1ece445dfc3c337b286216aa4ab",
+      "bytes": 10846804
+    },
+    {
+      "path": "Etiqueta/Etiqueta 2/etiqueta 2.png",
+      "repository_path": "assets/brands/tock-fatal/source/Etiqueta/Etiqueta 2/etiqueta 2.png",
+      "sha256": "fb083d709c2ff63cbfeaedff8754cced9cda11d36e081a5d74b0dc73d2a78025",
+      "bytes": 10020161
+    },
+    {
+      "path": "Etiqueta/Etiqueta 2/etiqueta 22.png",
+      "repository_path": "assets/brands/tock-fatal/source/Etiqueta/Etiqueta 2/etiqueta 22.png",
+      "sha256": "df24d8bb72a7197815327a8a588ee661ca9ddf0145b30e7eaa045dfd327ef68c",
+      "bytes": 70776
+    },
+    {
+      "path": "Fachada/Arte fachada impressão.pdf",
+      "repository_path": "assets/brands/tock-fatal/source/Fachada/Arte fachada impressão.pdf",
+      "sha256": "9a93e63c3c6b621c5616ee53836a9cd48bada8121c5c0ff2055f373e2ea15e96",
+      "bytes": 995943
+    },
+    {
+      "path": "Fachada/fachada.png",
+      "repository_path": "assets/brands/tock-fatal/source/Fachada/fachada.png",
+      "sha256": "133beb7ef4c674f7c68a3cf8828722a2bc7a4b5dbce98b559dc2e1179b019ee7",
+      "bytes": 28729533
+    },
+    {
+      "path": "Fonte/bodrum-sweet-13-light.otf",
+      "repository_path": "assets/brands/tock-fatal/source/Fonte/bodrum-sweet-13-light.otf",
+      "sha256": "add8ed611542d8d3c6c877b5c9449dc154a35b6f86a6a3b040e7d3af199460c5",
+      "bytes": 182048
+    },
+    {
+      "path": "Logo colorida/Redonda/dourada com rosa.png",
+      "repository_path": "assets/brands/tock-fatal/source/Logo colorida/Redonda/dourada com rosa.png",
+      "sha256": "04257d069015d0ca0241d5ab537ea8106dd9be39b80e6cba5031ded270b17cdf",
+      "bytes": 2527993
+    },
+    {
+      "path": "Logo colorida/Redonda/ff.png",
+      "repository_path": "assets/brands/tock-fatal/source/Logo colorida/Redonda/ff.png",
+      "sha256": "52aded2f7d2d69d6802c5c45b0c04ddbb41c862f77a983698e4cd2174d33ac14",
+      "bytes": 2567003
+    },
+    {
+      "path": "Logo colorida/Redonda/Prancheta 2 copiar 10.png",
+      "repository_path": "assets/brands/tock-fatal/source/Logo colorida/Redonda/Prancheta 2 copiar 10.png",
+      "sha256": "d3cf3c43af4efcb884a632eb036d78d897c61f9323aab2053118fa610d9d548a",
+      "bytes": 149636
+    },
+    {
+      "path": "Logo colorida/Redonda/Prancheta 2 copiar 11.png",
+      "repository_path": "assets/brands/tock-fatal/source/Logo colorida/Redonda/Prancheta 2 copiar 11.png",
+      "sha256": "500587e88319f29b052fb84f1d6130115c94b1193fdeb1f6e3281e170ff89c95",
+      "bytes": 84770
+    },
+    {
+      "path": "Logo colorida/Redonda/Prancheta 2 copiar 2.png",
+      "repository_path": "assets/brands/tock-fatal/source/Logo colorida/Redonda/Prancheta 2 copiar 2.png",
+      "sha256": "f70270e68ed3578c4726c81684a053d9a1b1109bbc2c9f866de3a0832e0566d0",
+      "bytes": 2568380
+    },
+    {
+      "path": "Logo colorida/Redonda/Prancheta 2 copiar 3.png",
+      "repository_path": "assets/brands/tock-fatal/source/Logo colorida/Redonda/Prancheta 2 copiar 3.png",
+      "sha256": "8d6110e91243b08442a532f284ffafbe0078d228113fc58bd7759b8ed193c4df",
+      "bytes": 82715
+    },
+    {
+      "path": "Logo colorida/Redonda/Prancheta 2 copiar 4.png",
+      "repository_path": "assets/brands/tock-fatal/source/Logo colorida/Redonda/Prancheta 2 copiar 4.png",
+      "sha256": "47cac589cd3f2ec880ef66f5b79ead1b26ba9013ff0ab21183d99f05858433c3",
+      "bytes": 2567003
+    },
+    {
+      "path": "Logo colorida/Redonda/Prancheta 2 copiar 8.png",
+      "repository_path": "assets/brands/tock-fatal/source/Logo colorida/Redonda/Prancheta 2 copiar 8.png",
+      "sha256": "14a761ea3cac474b544eb07f61da6e21c90ab50f9851f293fd8bb6c1cf698a0e",
+      "bytes": 2568379
+    },
+    {
+      "path": "Logo colorida/Redonda/Prancheta 2 copiar 9.png",
+      "repository_path": "assets/brands/tock-fatal/source/Logo colorida/Redonda/Prancheta 2 copiar 9.png",
+      "sha256": "aa9ca8a3b5449c1e634484cf6a3f48e1eac23435809207921650bc35761af7b1",
+      "bytes": 159521
+    },
+    {
+      "path": "Logo colorida/Redonda/Prancheta 2 copiar.png",
+      "repository_path": "assets/brands/tock-fatal/source/Logo colorida/Redonda/Prancheta 2 copiar.png",
+      "sha256": "cb672199417aec7eaa341fb8a4228e30efae088f957897f0ae6fdcf7b02ebee1",
+      "bytes": 156916
+    },
+    {
+      "path": "Logo colorida/Reta/dourada com rosa 2.png",
+      "repository_path": "assets/brands/tock-fatal/source/Logo colorida/Reta/dourada com rosa 2.png",
+      "sha256": "8f1b29890febd4d0c59a65596296ef7f2039ad6a2a6a18c31e6db5d4ad1b4c27",
+      "bytes": 2520532
+    },
+    {
+      "path": "Logo colorida/Reta/Prancheta 2 copiar 12.png",
+      "repository_path": "assets/brands/tock-fatal/source/Logo colorida/Reta/Prancheta 2 copiar 12.png",
+      "sha256": "01040487dbd8a21ad1548e9538ec61b0691af68850e8807e7c95e9487e4ba3be",
+      "bytes": 61665
+    },
+    {
+      "path": "Logo colorida/Reta/Prancheta 2 copiar 13.png",
+      "repository_path": "assets/brands/tock-fatal/source/Logo colorida/Reta/Prancheta 2 copiar 13.png",
+      "sha256": "678a16a43e85d8814196c849f0d0226398251e64251da8419cc8f8fe08628592",
+      "bytes": 42214
+    },
+    {
+      "path": "Logo colorida/Reta/Prancheta 2 copiar 15.png",
+      "repository_path": "assets/brands/tock-fatal/source/Logo colorida/Reta/Prancheta 2 copiar 15.png",
+      "sha256": "7be58b9b627c62357a090533eb62c30619f937a68586e5e45325d8e890fcf1fa",
+      "bytes": 42122
+    },
+    {
+      "path": "Logo colorida/Reta/Prancheta 2 copiar 5.png",
+      "repository_path": "assets/brands/tock-fatal/source/Logo colorida/Reta/Prancheta 2 copiar 5.png",
+      "sha256": "978e2af459d440a6c54fb486d243799f28f440cdf0fd67a4a5fb493b659f9583",
+      "bytes": 2536966
+    },
+    {
+      "path": "Logo colorida/Reta/Prancheta 2 copiar 6.png",
+      "repository_path": "assets/brands/tock-fatal/source/Logo colorida/Reta/Prancheta 2 copiar 6.png",
+      "sha256": "7552fb0f9f6b5f598adb62c94559edc01399f95173484426dba925463df31018",
+      "bytes": 64494
+    },
+    {
+      "path": "Logo dourada/dourada 3.png",
+      "repository_path": "assets/brands/tock-fatal/source/Logo dourada/dourada 3.png",
+      "sha256": "51b355473cfb7556cddcd2d272f0cc24c2f926384426e5127af761757baa5f68",
+      "bytes": 79181
+    },
+    {
+      "path": "Logo dourada/dourado com branco.png",
+      "repository_path": "assets/brands/tock-fatal/source/Logo dourada/dourado com branco.png",
+      "sha256": "fd96d7a91086af139d7e03282be3db02aa296524f6e441dc2d67b39319a172ef",
+      "bytes": 85452
+    },
+    {
+      "path": "Logo dourada/lodo dourada.png",
+      "repository_path": "assets/brands/tock-fatal/source/Logo dourada/lodo dourada.png",
+      "sha256": "53e21b98335f1a81653e0aad0680b158fedeb8e4c48b31fb80cb13292b17fa0a",
+      "bytes": 37108
+    },
+    {
+      "path": "Logo dourada/Prancheta 2 copiar 14.png",
+      "repository_path": "assets/brands/tock-fatal/source/Logo dourada/Prancheta 2 copiar 14.png",
+      "sha256": "e9efc7525a005217c0aca893700b9f3d8adc0e8c1aac2b0a4f0ca0e0fb8c11c5",
+      "bytes": 54419
+    },
+    {
+      "path": "Logo para impressão/logo impressão tock atualizada.pdf",
+      "repository_path": "assets/brands/tock-fatal/source/Logo para impressão/logo impressão tock atualizada.pdf",
+      "sha256": "b2dc30b64bc342113249b633e426f27f5a7576277fabb0d25e60c6425c2ebc94",
+      "bytes": 2136240
+    },
+    {
+      "path": "Logo para impressão/logo impressão tock.psd",
+      "repository_path": "assets/brands/tock-fatal/source/Logo para impressão/logo impressão tock.psd",
+      "sha256": "dc1c3c7f9d060106a8d750af3a6514b433db4ac9f1465fcc4f29ddbe2b42b1b7",
+      "bytes": 2646596
+    },
+    {
+      "path": "Logo Transparente/branca redonda.png",
+      "repository_path": "assets/brands/tock-fatal/source/Logo Transparente/branca redonda.png",
+      "sha256": "f6b129628d6dc5d809995e97b122dbc09c56904deb17d6047b21051db7d92391",
+      "bytes": 51753
+    },
+    {
+      "path": "Logo Transparente/Branca reta com brilho.png",
+      "repository_path": "assets/brands/tock-fatal/source/Logo Transparente/Branca reta com brilho.png",
+      "sha256": "6048ddc4eec332e70cdc78a32fc0f336db8c57df0e92e9f30ec7cf6835b31457",
+      "bytes": 54797
+    },
+    {
+      "path": "Logo Transparente/branca reta sem brilho.png",
+      "repository_path": "assets/brands/tock-fatal/source/Logo Transparente/branca reta sem brilho.png",
+      "sha256": "e26ce8ece46d5308d745ae7e0794d222c0ebc328bf25d65656d890ea79346a0e",
+      "bytes": 24948
+    },
+    {
+      "path": "Logo Transparente/redonda rosa 1.png",
+      "repository_path": "assets/brands/tock-fatal/source/Logo Transparente/redonda rosa 1.png",
+      "sha256": "20b46fefc167ff17edd6f4a64f2563b50577c79585a5a9083a57a318ec014f32",
+      "bytes": 52459
+    },
+    {
+      "path": "Logo Transparente/redonda rosa 2.png",
+      "repository_path": "assets/brands/tock-fatal/source/Logo Transparente/redonda rosa 2.png",
+      "sha256": "f0a257f1b4c37a2bb910fd234a1de37e910331725911356a469ebd41d08dc470",
+      "bytes": 52422
+    },
+    {
+      "path": "Logo Transparente/redonda rosa 3.png",
+      "repository_path": "assets/brands/tock-fatal/source/Logo Transparente/redonda rosa 3.png",
+      "sha256": "d800c1ef6f959db0ec8550c33b6ee291361969581241a94e04427a25fab18fd8",
+      "bytes": 52482
+    },
+    {
+      "path": "Logo Transparente/Reta rosa.png",
+      "repository_path": "assets/brands/tock-fatal/source/Logo Transparente/Reta rosa.png",
+      "sha256": "132fe1a2406e0cd1479fd817d721cfe8675a5e78bcc34e140d669670b15b81f6",
+      "bytes": 25994
+    },
+    {
+      "path": "Logo Transparente/rosa 2.png",
+      "repository_path": "assets/brands/tock-fatal/source/Logo Transparente/rosa 2.png",
+      "sha256": "15de9862bec93b87c516913c51229b3be4561ba0ba02a762c7628bb8185beff2",
+      "bytes": 24586
+    },
+    {
+      "path": "Manual de marca/Manual de marca atualizado.pdf",
+      "repository_path": "assets/brands/tock-fatal/source/Manual de marca/Manual de marca atualizado.pdf",
+      "sha256": "fe49aac27e18301a011d666a27f0ea3c0aa6580db716fcfe04c9984dabe89474",
+      "bytes": 52798936
+    },
+    {
+      "path": "Manual de marca/manuallll.png",
+      "repository_path": "assets/brands/tock-fatal/source/Manual de marca/manuallll.png",
+      "sha256": "aeefa14ad28a19204813c26ca5a9927243cf821bacd1b3a5af08fda69d040fd6",
+      "bytes": 2393903
+    },
+    {
+      "path": "Paleta de Cores _ MAGENTA/Prancheta 3.png",
+      "repository_path": "assets/brands/tock-fatal/source/Paleta de Cores _ MAGENTA/Prancheta 3.png",
+      "sha256": "d30e163308b86d3ae63b3738ef9f203de71a478ba64c89d21b7245c17860a120",
+      "bytes": 229021
+    },
+    {
+      "path": "Post desques/Prancheta 1 copiar 2.png",
+      "repository_path": "assets/brands/tock-fatal/source/Post desques/Prancheta 1 copiar 2.png",
+      "sha256": "d62b3a8d01a2c9174d384f3b29155b3bffdb4bab0d8a5768e6b4484652998cff",
+      "bytes": 1578580
+    },
+    {
+      "path": "Post desques/Prancheta 1 copiar 3.png",
+      "repository_path": "assets/brands/tock-fatal/source/Post desques/Prancheta 1 copiar 3.png",
+      "sha256": "85e4bc47dd358aee7005a05ef34bb48b1ee376a06dfe811812ff788ef291e456",
+      "bytes": 1587402
+    },
+    {
+      "path": "Post desques/Prancheta 1 copiar 4.png",
+      "repository_path": "assets/brands/tock-fatal/source/Post desques/Prancheta 1 copiar 4.png",
+      "sha256": "a4ac65c3cd134595320fe74dbd467fbc0ffcd5617ad2464cb02e99b550c6667d",
+      "bytes": 1608250
+    },
+    {
+      "path": "Post desques/Prancheta 1 copiar 5.png",
+      "repository_path": "assets/brands/tock-fatal/source/Post desques/Prancheta 1 copiar 5.png",
+      "sha256": "529c706db6f526feea3fe93701873aec7de2d6f235205d3299d0d67cdd68355f",
+      "bytes": 1635652
+    },
+    {
+      "path": "Post desques/Prancheta 1 copiar 6.png",
+      "repository_path": "assets/brands/tock-fatal/source/Post desques/Prancheta 1 copiar 6.png",
+      "sha256": "4964ce69dbe8a6cc9eb7cb252f6bad586a9a6dbf9ff8ffd862806f1e8ff0a2d7",
+      "bytes": 1569798
+    },
+    {
+      "path": "Post desques/Prancheta 1 copiar 7.png",
+      "repository_path": "assets/brands/tock-fatal/source/Post desques/Prancheta 1 copiar 7.png",
+      "sha256": "f17818396ebeb2de5b43334864d91308138454dbc929535efd92f970c4f91044",
+      "bytes": 1575314
+    },
+    {
+      "path": "Post desques/Prancheta 1 copiar 8.png",
+      "repository_path": "assets/brands/tock-fatal/source/Post desques/Prancheta 1 copiar 8.png",
+      "sha256": "7d890dd51bb3f6a818e82400ccefada650bacd9434558f5a38742d47b665669e",
+      "bytes": 1735333
+    },
+    {
+      "path": "Post desques/Prancheta 1 copiar 9.png",
+      "repository_path": "assets/brands/tock-fatal/source/Post desques/Prancheta 1 copiar 9.png",
+      "sha256": "7a61079b725ee870bb356c6c8d27e40fee9d0327e29633dfb5158270b2ac7e7e",
+      "bytes": 1132898
+    },
+    {
+      "path": "Post desques/Prancheta 1 copiar.png",
+      "repository_path": "assets/brands/tock-fatal/source/Post desques/Prancheta 1 copiar.png",
+      "sha256": "ec10245b691da23b779cca926dd7d81120820e9e787159bd37fa53504418f43c",
+      "bytes": 1613064
+    },
+    {
+      "path": "Post desques/Prancheta 1.png",
+      "repository_path": "assets/brands/tock-fatal/source/Post desques/Prancheta 1.png",
+      "sha256": "a3ff51255e599395d2434035165540880de370daaf28a811f7be244a4be70661",
+      "bytes": 1583476
+    },
+    {
+      "path": "Sacola/arte sacolaaa.png",
+      "repository_path": "assets/brands/tock-fatal/source/Sacola/arte sacolaaa.png",
+      "sha256": "525a46e8209ed1a08f96cb70faf5b28c7b9774ef9ea338149e093e71dd680a9d",
+      "bytes": 898109
+    },
+    {
+      "path": "Sacola/arte sacolaaaaaa.png",
+      "repository_path": "assets/brands/tock-fatal/source/Sacola/arte sacolaaaaaa.png",
+      "sha256": "865c58db2f672cce046c28fed915cf3a422a89adf46655dfe17c26ba97e3e346",
+      "bytes": 13723384
+    },
+    {
+      "path": "Tok fit/Catalogo tockfit/1.png",
+      "repository_path": "assets/brands/tock-fatal/source/Tok fit/Catalogo tockfit/1.png",
+      "sha256": "1bfdc50132acd8d6936b90885590d10c8afa8acb54fa989f9b7d8ac6da6e8435",
+      "bytes": 795292
+    },
+    {
+      "path": "Tok fit/Catalogo tockfit/Prancheta 1 copiar 2.png",
+      "repository_path": "assets/brands/tock-fatal/source/Tok fit/Catalogo tockfit/Prancheta 1 copiar 2.png",
+      "sha256": "d96e8945f80effe5782e0ca35df0f48fb13414440f9ae424d008a65b484735c2",
+      "bytes": 688613
+    },
+    {
+      "path": "Tok fit/Catalogo tockfit/Prancheta 1 copiar 4.png",
+      "repository_path": "assets/brands/tock-fatal/source/Tok fit/Catalogo tockfit/Prancheta 1 copiar 4.png",
+      "sha256": "c8cd9d1bfca3455ee70c9d4764a50fe29ba1f13c86279feec531a0218f5790be",
+      "bytes": 1008208
+    },
+    {
+      "path": "Tok fit/Catalogo tockfit/Prancheta 1 copiar 8.png",
+      "repository_path": "assets/brands/tock-fatal/source/Tok fit/Catalogo tockfit/Prancheta 1 copiar 8.png",
+      "sha256": "ec63b3a76b93608faba77a01ec1edc83544daedae3a7c30f91e6646b0539911e",
+      "bytes": 1027696
+    },
+    {
+      "path": "Tok fit/Catalogo tockfit/Prancheta 1 copiar 9.png",
+      "repository_path": "assets/brands/tock-fatal/source/Tok fit/Catalogo tockfit/Prancheta 1 copiar 9.png",
+      "sha256": "ffd2536dc006b6d5b3ebac2fa2936af8cb98b5397b19e8fb65c17b98039216a3",
+      "bytes": 851665
+    },
+    {
+      "path": "Tok fit/Catalogo tockfit/Prancheta 1.png",
+      "repository_path": "assets/brands/tock-fatal/source/Tok fit/Catalogo tockfit/Prancheta 1.png",
+      "sha256": "6a1d001fbe80865f67e2536ff93db76ad568b2d6da64dc017f42dc107fc69a8a",
+      "bytes": 1524393
+    },
+    {
+      "path": "Tok fit/Modelo 2/Prancheta 1  copiar 2.png",
+      "repository_path": "assets/brands/tock-fatal/source/Tok fit/Modelo 2/Prancheta 1  copiar 2.png",
+      "sha256": "d14e8717952559600fe19238a519efd08fa671949069cf06baf510004eec5c31",
+      "bytes": 1376836
+    },
+    {
+      "path": "Tok fit/Modelo 2/Prancheta 1  copiar 3.png",
+      "repository_path": "assets/brands/tock-fatal/source/Tok fit/Modelo 2/Prancheta 1  copiar 3.png",
+      "sha256": "727fecf35b5fae7787875186c91d4cd2d2729197bc53fda2485b7643bfc14efe",
+      "bytes": 1271288
+    },
+    {
+      "path": "Tok fit/Modelo 2/Prancheta 1  copiar 4.png",
+      "repository_path": "assets/brands/tock-fatal/source/Tok fit/Modelo 2/Prancheta 1  copiar 4.png",
+      "sha256": "80763204fc677f96eeafaeac0e7dba3d102bed0bd044335f49efb171f002d4b0",
+      "bytes": 1431132
+    },
+    {
+      "path": "Tok fit/Modelo 2/Prancheta 1  copiar 5.png",
+      "repository_path": "assets/brands/tock-fatal/source/Tok fit/Modelo 2/Prancheta 1  copiar 5.png",
+      "sha256": "3b0afdd7e65db8101e2d379a01dc4f02669523e0a6c1e56ffa5e2de8317f850d",
+      "bytes": 1816374
+    },
+    {
+      "path": "Tok fit/Modelo 2/Prancheta 1  copiar 6.png",
+      "repository_path": "assets/brands/tock-fatal/source/Tok fit/Modelo 2/Prancheta 1  copiar 6.png",
+      "sha256": "47d570e76aa0632a7f7adff03b58021fe906c7d7361347b00bbadbaa389e115a",
+      "bytes": 1563048
+    },
+    {
+      "path": "Tok fit/Modelo 2/Prancheta 1  copiar 7.png",
+      "repository_path": "assets/brands/tock-fatal/source/Tok fit/Modelo 2/Prancheta 1  copiar 7.png",
+      "sha256": "5fcc4c45e2c652e426065e268faace5b2419c26b1950e594a47b2738bdca989a",
+      "bytes": 1361543
+    },
+    {
+      "path": "Tok fit/Modelo 2/Prancheta 1  copiar.png",
+      "repository_path": "assets/brands/tock-fatal/source/Tok fit/Modelo 2/Prancheta 1  copiar.png",
+      "sha256": "28158986f75e3a28f8e4ba63c3844ef1731a30b498baf416354431dddf99c9f9",
+      "bytes": 1714916
+    }
+  ]
+}

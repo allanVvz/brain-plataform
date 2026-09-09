@@ -242,6 +242,12 @@ DIVERGENT_BASELINE: tuple[tuple[str, str], ...] = (
     ("control-plane", "campaigns_service.py"),
     ("control-plane", "conversation_repetition.py"),
     ("control-plane", "deepseek_n8n_service.py"),
+    # Deliberate, and the microservice copy is the safe one: it defaults to
+    # generic graph skills, so one customer's voice cannot leak into another
+    # customer's FAQs, and resolves _REPO_ROOT at the depth the carve-out
+    # actually has. The monolith copy still loads persona-specific skills by
+    # default. Production runs apps/, so the isolated behaviour is what ships.
+    ("control-plane", "faq_bulk_generator.py"),
     ("control-plane", "graph_bundle_publisher.py"),
     ("control-plane", "graph_bundle_view.py"),
     ("control-plane", "graph_json_v2_validator.py"),

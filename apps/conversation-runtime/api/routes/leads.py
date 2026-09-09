@@ -1211,6 +1211,22 @@ def resume_ai_internal(
     }
 
 
+@internal_router.get("/{lead_ref}/resume-answer-window")
+def resume_answer_window_internal(
+    lead_ref: int,
+    x_webhook_token: str | None = Header(None, alias="X-Webhook-Token"),
+):
+    """Pure read: whether resume_lead() would still answer this lead's
+    backlog right now. Used by the release-queue candidate builder to skip
+    conversations the per-lead staleness check would leave silent -- never
+    mutates anything, unlike /resume."""
+    _authorize_internal_lead_action(x_webhook_token)
+    lead = supabase_client.get_lead_by_ref(lead_ref)
+    if not lead:
+        raise HTTPException(404, "Lead nao encontrado")
+    return {"lead_ref": lead_ref, **agents_service.resume_answer_window(lead)}
+
+
 @internal_router.post("/{lead_ref}/acknowledge-handoff")
 def acknowledge_handoff_internal(
     lead_ref: int,

@@ -44,9 +44,15 @@ if not TEST_POSTGRES_DSN and not IS_CI:
         "test_graph_agent_v3_sql.py",
         "test_production_privileges_sql.py",
         "test_whatsapp_sql_functions.py",
+        "test_release_queue_sql_functions.py",
     ])
 if (os.environ.get("RUN_MENU_LIVE_E2E") or "").strip().lower() not in {"1", "true", "yes", "on"}:
     collect_ignore.append("e2e_baita_cardapio_menu.py")
+# The 177 MB Tock Fatal operator identity archive is not vendored; its
+# manifest (committed) pins every original's sha256, and these tests verify
+# the real bytes only where someone actually has the package.
+if not (ROOT / "assets/brands/tock-fatal/source").is_dir():
+    collect_ignore.append("test_tock_fatal_identity_archive.py")
 if (os.environ.get("QA_REAL_GRAPH_INSERTION_TEST") or "").strip() != "1":
     collect_ignore.append("test_qa_real_graph_insertion.py")
 if (os.environ.get("RUN_BRA91_LIVE_E2E") or "").strip().lower() not in {"1", "true", "yes", "on"}:

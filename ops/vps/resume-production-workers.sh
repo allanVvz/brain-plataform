@@ -178,6 +178,34 @@ if [[ "$resume_already_released" == "false" ]]; then
     --gate "resume_cas_conflicts=$cas_conflicts" >/dev/null
 fi
 
+# A multi-hour deploy pause means every row in $eligible_file already has an
+# available_at in the past -- claim_whatsapp_buffer would burst-claim all of
+# them the instant `workers` restarts, answering real customers at whatever
+# hour the deploy happened to run. Reschedule everything except the first
+# eligible row (ordered by created_at,id, same order the observation loop
+# below reads) into the business-hours release queue -- that first row is
+# left untouched so the exactly-once verification a few lines down still has
+# something to claim immediately, exactly as before this change.
+if [[ "$resume_already_released" == "false" && "$eligible_count" -gt 1 ]]; then
+  release_eligible_ids=()
+  while IFS= read -r inbound_id; do
+    [[ -n "$inbound_id" ]] && release_eligible_ids+=("$inbound_id")
+  done < <(tail -n +2 "$eligible_file")
+  if (( ${#release_eligible_ids[@]} > 0 )); then
+    release_ids_sql="$(printf "'%s'::uuid," "${release_eligible_ids[@]}")"
+    release_ids_sql="ARRAY[${release_ids_sql%,}]"
+    release_batch_json="$(psql_scalar "
+select public.register_release_batch_v1(
+  p_persona_id => NULL,
+  p_scope => 'deploy_pause',
+  p_lead_buffer_ids => ${release_ids_sql},
+  p_reason => 'deploy resume ${TARGET_SHA}',
+  p_idempotency_key => 'deploy-resume:${TARGET_SHA}'
+)::text;")"
+    echo "release queue: scheduled ${#release_eligible_ids[@]} backlog row(s) for business-hours release: $release_batch_json" >&2
+  fi
+fi
+
 mkdir -p .deploy/control
 if [[ "$resume_already_released" == "false" ]]; then
   "${COMPOSE[@]}" up -d --no-deps workers
