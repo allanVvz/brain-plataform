@@ -93,6 +93,20 @@ interesses para o ledger/fatos da conversa. A Vitória não deverá perguntar de
 novo um interesse já identificado. Padrões novos e recorrentes poderão criar
 somente propostas `pending_validation`, nunca audiências ativas automaticamente.
 
+## Consolidação de apresentação e alias
+
+O frontend aceita progressivamente `site.identity`, `site.hero` e
+`site.audiences` por schema tipado. A resolução acontece uma única vez na
+fronteira de apresentação: quando os três blocos estão completos, a página
+marca `data-projection-source="graph"`; enquanto qualquer bloco ainda não é
+projetado, usa a compatibilidade versionada e marca `compatibility`. Não existe
+mistura silenciosa dentro dos componentes nem uma segunda implementação da LP.
+
+O alias histórico `tock-fatal.vercel.app` pertence ao mesmo projeto Vercel e
+deve responder com redirecionamento permanente para
+`https://tockfatal.com/vitrine`. Ele não pode ficar preso a um deployment
+anterior nem publicar uma segunda versão da landing.
+
 ## Deploy e verificação
 
 1. executar `npm run lint` e `npm run build` em `Card-pio`, sem Docker local;
