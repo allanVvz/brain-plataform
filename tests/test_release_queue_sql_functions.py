@@ -135,8 +135,21 @@ def _parse_ts(value) -> datetime.datetime:
 # psycopg2 returns timestamptz as an aware datetime in whatever offset the
 # session reports (not necessarily -03:00), so comparisons below use
 # datetime equality (instant-based, tzinfo-representation-agnostic) instead
-# of string/isoformat matching.
+# of string/isoformat matching. Brazil has had no DST since 2019, so a fixed
+# -03:00 is exact for America/Sao_Paulo and avoids a tzdata dependency.
 BRT = datetime.timezone(datetime.timedelta(hours=-3))
+
+
+def _assert_inside_business_window(ts: datetime.datetime) -> None:
+    """The contract is window containment, not "in the future".
+
+    Registering inside business hours legitimately schedules the first item
+    at the current second (the slot function works in whole seconds), so it
+    is immediately claimable -- that is the point. Asserting `> now()` would
+    only hold when CI happens to run outside 08:00-20:00.
+    """
+    local = ts.astimezone(BRT)
+    assert datetime.time(8, 0) <= local.time() < datetime.time(20, 0), local
 
 
 @pytest.fixture()
@@ -238,10 +251,10 @@ class TestRegisterReleaseBatchV1:
         row2 = _lead_buffer_row(cur, second)
         assert row1["status"] == "retry"
         assert row2["status"] == "retry"
-        assert row1["available_at"] > datetime.datetime.now(datetime.timezone.utc)
-        assert row2["available_at"] > datetime.datetime.now(datetime.timezone.utc)
-        # Staggered by created_at,id ordering -- not simultaneous.
-        assert row1["available_at"] != row2["available_at"]
+        _assert_inside_business_window(row1["available_at"])
+        _assert_inside_business_window(row2["available_at"])
+        # Staggered by created_at,id ordering -- never released simultaneously.
+        assert row2["available_at"] > row1["available_at"]
 
         cur.execute("select * from public.release_batches where binding_id = %s", (scenario["binding_id"],))
         batch = cur.fetchone()
@@ -254,7 +267,12 @@ class TestRegisterReleaseBatchV1:
 
     def test_deploy_pause_scope_reschedules_without_changing_status_or_persona(self, cur, scenario):
         first = _enqueue(cur, persona_id=scenario["persona_id"], lead_ref=scenario["lead_ref"], binding_id=scenario["binding_id"])
-        _set_status(cur, first, status="buffered", created_at_offset_seconds=7200)
+        # A two-hour-old row whose available_at is already due: exactly the
+        # shape a multi-hour deploy pause leaves behind, and what would burst
+        # the instant `workers` restarts.
+        stale = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)
+        _set_status(cur, first, status="buffered", available_at=stale, created_at_offset_seconds=7200)
+        captured_available_at = _lead_buffer_row(cur, first)["available_at"]
 
         cur.execute(
             "select public.register_release_batch_v1("
@@ -268,7 +286,9 @@ class TestRegisterReleaseBatchV1:
 
         row = _lead_buffer_row(cur, first)
         assert row["status"] == "buffered"
-        assert row["available_at"] > datetime.datetime.now(datetime.timezone.utc)
+        _assert_inside_business_window(row["available_at"])
+        # The stale pre-pause available_at must have been rewritten forward.
+        assert row["available_at"] > captured_available_at
 
         cur.execute("select persona_id, binding_id, scope from public.release_batches where id = %s", (result["batch_id"],))
         batch = cur.fetchone()
