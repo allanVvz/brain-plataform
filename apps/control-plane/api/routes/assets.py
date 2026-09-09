@@ -62,6 +62,21 @@ def _publish_asset_path_to_canonical_graph(
 ) -> dict:
     persona = supabase_client.get_persona_by_id(asset.get("persona_id")) or {}
     persona_slug = persona.get("slug")
+    active_publication = supabase_client.get_active_graph_publication(
+        str(asset.get("persona_id") or "")
+    )
+    if active_publication:
+        # GraphBundle v3 is the immutable public authority. The operational
+        # slot edge is already persisted; publishing a parallel Graph JSON v2
+        # snapshot here would discard part of that slot contract.
+        return {
+            "source": "graph_publication_v3",
+            "publication_id": active_publication.get("id"),
+            "version": active_publication.get("version"),
+            "checksum": active_publication.get("checksum"),
+            "activation_required": True,
+            "slot_preserved": True,
+        }
     current = graph_json_v2_store.load_current(persona_slug) if persona_slug else None
     if current is None:
         raise RuntimeError("Asset mutation requires a published canonical Graph JSON")
@@ -622,7 +637,7 @@ async def upload_asset(
     asset_function: Optional[str] = Form(None),
     persona_slug: Optional[str] = Form(None),
 ):
-    auth_service.assert_persona_access(request, persona_id=persona_id)
+    auth_service.assert_persona_capability(request, "edit", persona_id=persona_id)
     persona_id, persona_slug = _resolve_persona(persona_id, persona_slug)
     if not persona_id:
         raise HTTPException(400, "persona invalida")
@@ -1425,7 +1440,7 @@ def ensure_gallery_for_asset(asset_id: str, request: Request):
         raise HTTPException(404, "Asset nao encontrado")
     persona_id = asset.get("persona_id")
     if persona_id:
-        auth_service.assert_persona_access(request, persona_id=persona_id)
+        auth_service.assert_persona_capability(request, "edit", persona_id=persona_id)
     if not persona_id:
         raise HTTPException(
             422,
@@ -1535,7 +1550,7 @@ def connect_asset(asset_id: str, body: ConnectBody, request: Request):
     if not asset:
         raise HTTPException(404, "Asset nao encontrado")
     if asset.get("persona_id"):
-        auth_service.assert_persona_access(request, persona_id=asset["persona_id"])
+        auth_service.assert_persona_capability(request, "edit", persona_id=asset["persona_id"])
     _log_asset_flow(
         "asset_legacy_route_used",
         asset_id=asset_id,
@@ -2060,7 +2075,7 @@ def bind_asset_to_slot(asset_id: str, body: BindSlotBody, request: Request):
     persona_id = asset.get("persona_id")
     if not persona_id:
         raise HTTPException(422, "Asset sem persona nao pode ser conectado a um slot.")
-    auth_service.assert_persona_access(request, persona_id=persona_id)
+    auth_service.assert_persona_capability(request, "edit", persona_id=persona_id)
     _log_asset_flow(
         "asset_legacy_route_used",
         asset_id=asset_id,
@@ -2190,7 +2205,7 @@ def rebind_asset_path(asset_id: str, body: RebindPathBody, request: Request):
     persona_id = asset.get("persona_id")
     if not persona_id:
         raise HTTPException(422, "Asset sem persona nao pode ser conectado a um caminho.")
-    auth_service.assert_persona_access(request, persona_id=persona_id)
+    auth_service.assert_persona_capability(request, "edit", persona_id=persona_id)
 
     knowledge_node_id = _asset_graph_ref(asset, "knowledge_node_id")
     if not knowledge_node_id:
@@ -2343,7 +2358,7 @@ def unbind_asset_slot(asset_id: str, slot_key: str, request: Request, target_slu
         raise HTTPException(404, "Asset nao encontrado")
     persona_id = asset.get("persona_id")
     if persona_id:
-        auth_service.assert_persona_access(request, persona_id=persona_id)
+        auth_service.assert_persona_capability(request, "edit", persona_id=persona_id)
 
     knowledge_node_id = _asset_graph_ref(asset, "knowledge_node_id")
     if not knowledge_node_id:
@@ -2477,8 +2492,18 @@ def _validate_asset_approval(asset: dict) -> dict:
         errors.append("Asset sem arquivo ou referencia de storage.")
     item_id = metadata.get("knowledge_item_id")
     sidecar = supabase_client.get_knowledge_item(item_id) if item_id else None
-    sidecar_path = (sidecar or {}).get("file_path") or metadata.get("sidecar_markdown_path")
-    if not sidecar or not sidecar_path or not str(sidecar_path).lower().endswith(".md"):
+    sidecar_content = str((sidecar or {}).get("content") or "").strip()
+    sidecar_path = metadata.get("sidecar_markdown_path") or (sidecar or {}).get("file_path")
+    sidecar_metadata = (sidecar or {}).get("metadata") or {}
+    inline_upload_sidecar = bool(sidecar_content) and all(
+        (
+            (sidecar or {}).get("content_type") == "asset",
+            str((sidecar or {}).get("persona_id") or "") == str(asset.get("persona_id") or ""),
+            str(sidecar_metadata.get("asset_id") or "") == str(asset.get("id") or ""),
+        )
+    )
+    markdown_file_sidecar = bool(sidecar_path) and str(sidecar_path).lower().endswith(".md")
+    if not sidecar or not (inline_upload_sidecar or markdown_file_sidecar):
         errors.append("Asset sem sidecar Markdown materializado.")
     return {**validation, "ok": not errors, "errors": errors}
 
@@ -2490,7 +2515,7 @@ def update_asset_route(asset_id: str, body: AssetUpdateBody, request: Request):
         raise HTTPException(404, "Asset nao encontrado")
     persona_id = asset.get("persona_id")
     if persona_id:
-        auth_service.assert_persona_access(request, persona_id=persona_id)
+        auth_service.assert_persona_capability(request, "edit", persona_id=persona_id)
 
     before_metadata = dict(asset.get("metadata") or {})
     before_view = {
@@ -2572,7 +2597,7 @@ def approve_asset_route(asset_id: str, request: Request):
         raise HTTPException(404, "Asset nao encontrado")
     persona_id = asset.get("persona_id")
     if persona_id:
-        auth_service.assert_persona_access(request, persona_id=persona_id)
+        auth_service.assert_persona_capability(request, "edit", persona_id=persona_id)
     validation = _validate_asset_approval(asset)
     if not validation["ok"]:
         raise HTTPException(422, {"error": "invalid_asset_path", "errors": validation["errors"]})
@@ -2672,7 +2697,7 @@ def reject_asset_route(asset_id: str, request: Request):
         raise HTTPException(404, "Asset nao encontrado")
     persona_id = asset.get("persona_id")
     if persona_id:
-        auth_service.assert_persona_access(request, persona_id=persona_id)
+        auth_service.assert_persona_capability(request, "edit", persona_id=persona_id)
 
     user = auth_service.current_user(request)
     metadata = {
@@ -2733,7 +2758,7 @@ def delete_asset_route(asset_id: str, request: Request):
         raise HTTPException(404, "Asset nao encontrado")
     persona_id = asset.get("persona_id")
     if persona_id:
-        auth_service.assert_persona_access(request, persona_id=persona_id)
+        auth_service.assert_persona_capability(request, "edit", persona_id=persona_id)
 
     client = supabase_client.get_client()
     knowledge_node_id = _asset_graph_ref(asset, "knowledge_node_id")

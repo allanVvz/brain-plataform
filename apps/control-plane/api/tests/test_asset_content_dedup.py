@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import inspect
 from types import SimpleNamespace
 
 from repositories import control_plane
@@ -188,7 +189,12 @@ def test_approve_writes_canonical_top_level_status(monkeypatch):
     }
     updates: list[dict] = []
     monkeypatch.setattr(assets.supabase_client, "get_asset", lambda _id: asset)
-    monkeypatch.setattr(assets.auth_service, "assert_persona_access", lambda *_args, **_kwargs: None)
+    checked_capabilities: list[str] = []
+    monkeypatch.setattr(
+        assets.auth_service,
+        "assert_persona_capability",
+        lambda _request, capability, **_kwargs: checked_capabilities.append(capability),
+    )
     monkeypatch.setattr(assets.auth_service, "current_user", lambda _request: {"id": "operator-1"})
     monkeypatch.setattr(
         assets,
@@ -212,6 +218,140 @@ def test_approve_writes_canonical_top_level_status(monkeypatch):
     assert updates[0]["approval_status"] == "approved"
     assert "validation_status" not in updates[0]["metadata"]
     assert result["asset"]["approval_status"] == "approved"
+    assert checked_capabilities == ["edit"]
+
+
+def test_binary_upload_markdown_content_satisfies_approval_sidecar(monkeypatch):
+    asset = {
+        "id": "asset-1",
+        "persona_id": "persona-1",
+        "type": "image",
+        "storage_path": "persona-1/sha256/digest.jpeg",
+        "metadata": {"knowledge_item_id": "item-1"},
+    }
+    monkeypatch.setattr(
+        assets,
+        "_validate_asset_path",
+        lambda _asset: {"ok": True, "errors": [], "connections": [{}]},
+    )
+    monkeypatch.setattr(
+        assets.supabase_client,
+        "get_knowledge_item",
+        lambda _id: {
+            "id": "item-1",
+            "persona_id": "persona-1",
+            "content_type": "asset",
+            "file_path": "assets-raw:persona-1/sha256/digest.jpeg",
+            "content": "# Asset\n\n## Leitura visual\nProduto fotografado.",
+            "metadata": {"asset_id": "asset-1", "created_via": "asset_upload"},
+        },
+    )
+
+    result = assets._validate_asset_approval(asset)
+
+    assert result["ok"] is True
+    assert result["errors"] == []
+
+
+def test_binary_upload_rejects_markdown_from_an_unrelated_knowledge_item(monkeypatch):
+    asset = {
+        "id": "asset-1",
+        "persona_id": "persona-1",
+        "type": "image",
+        "storage_path": "persona-1/sha256/digest.jpeg",
+        "metadata": {"knowledge_item_id": "item-foreign"},
+    }
+    monkeypatch.setattr(
+        assets,
+        "_validate_asset_path",
+        lambda _asset: {"ok": True, "errors": [], "connections": [{}]},
+    )
+    monkeypatch.setattr(
+        assets.supabase_client,
+        "get_knowledge_item",
+        lambda _id: {
+            "id": "item-foreign",
+            "persona_id": "persona-2",
+            "content_type": "asset",
+            "file_path": "assets-raw:persona-2/sha256/digest.jpeg",
+            "content": "# Outro asset",
+            "metadata": {"asset_id": "asset-foreign"},
+        },
+    )
+
+    result = assets._validate_asset_approval(asset)
+
+    assert result["ok"] is False
+    assert "Asset sem sidecar Markdown materializado." in result["errors"]
+
+
+def test_active_graphbundle_prevents_parallel_graph_json_publication(monkeypatch):
+    monkeypatch.setattr(
+        assets.supabase_client,
+        "get_persona_by_id",
+        lambda _id: {"id": "persona-1", "slug": "brand"},
+    )
+    monkeypatch.setattr(
+        assets.supabase_client,
+        "get_active_graph_publication",
+        lambda _id: {
+            "id": "publication-1",
+            "version": 28,
+            "checksum": "sha256:" + "a" * 64,
+        },
+    )
+    monkeypatch.setattr(
+        assets.graph_json_v2_store,
+        "load_current",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("must not publish Graph JSON v2")),
+    )
+
+    result = assets._publish_asset_path_to_canonical_graph(
+        asset={"id": "asset-1", "persona_id": "persona-1"},
+        parent={"id": "product-1"},
+        status="approved",
+        actor_id="operator-1",
+        source="assets.approve",
+    )
+
+    assert result == {
+        "source": "graph_publication_v3",
+        "publication_id": "publication-1",
+        "version": 28,
+        "checksum": "sha256:" + "a" * 64,
+        "activation_required": True,
+        "slot_preserved": True,
+    }
+
+
+def test_asset_mutations_require_edit_while_reads_keep_view_access():
+    mutation_handlers = (
+        assets.upload_asset,
+        assets.ensure_gallery_for_asset,
+        assets.connect_asset,
+        assets.bind_asset_to_slot,
+        assets.rebind_asset_path,
+        assets.unbind_asset_slot,
+        assets.update_asset_route,
+        assets.approve_asset_route,
+        assets.reject_asset_route,
+        assets.delete_asset_route,
+    )
+    read_handlers = (
+        assets.list_assets_route,
+        assets.get_asset_route,
+        assets.get_asset_media,
+        assets.list_asset_connections,
+        assets.list_asset_landing_targets,
+        assets.validate_asset_path_route,
+    )
+
+    for handler in mutation_handlers:
+        source = inspect.getsource(handler)
+        assert 'assert_persona_capability(request, "edit"' in source, handler.__name__
+    for handler in read_handlers:
+        source = inspect.getsource(handler)
+        assert "assert_persona_access(request" in source, handler.__name__
 
 
 def test_sofia_upload_reuses_same_canonical_asset(monkeypatch):
