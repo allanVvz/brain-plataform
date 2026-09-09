@@ -283,6 +283,11 @@ def test_release_audit_allows_only_healthy_digest_drift_during_preflight():
     script = (ROOT / "ops" / "vps" / "validate-production-release.sh").read_text()
     assert 'ALLOW_PENDING_MICROSERVICE_DIGESTS="${ALLOW_PENDING_MICROSERVICE_DIGESTS:-false}"' in script
     assert '"$health" == "healthy" && "$ALLOW_PENDING_MICROSERVICE_DIGESTS" == "true"' in script
+    worker_check = script[
+        script.index("check_microservice_worker_digest()") : script.index("microservice_state=")
+    ]
+    assert '[[ "$ALLOW_PENDING_MICROSERVICE_DIGESTS" == "true" ]]' in worker_check
+    assert "container running; candidate digest pending" in worker_check
     assert "candidate digest pending" in script
 
 
