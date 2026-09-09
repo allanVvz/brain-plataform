@@ -141,6 +141,9 @@ def _items(slug, groups, n=2):
 @pytest.fixture()
 def store(monkeypatch) -> _Store:
     s = _Store()
+    # CI defines an internal HTTP SUPABASE_URL. Public asset projection must
+    # remain deterministic and use the explicit browser-facing origin.
+    monkeypatch.setenv("SUPABASE_PUBLIC_URL", "https://storage.local")
     # import side
     monkeypatch.setattr(pis.supabase_client, "upsert_knowledge_node", s.upsert_knowledge_node)
     monkeypatch.setattr(pis.supabase_client, "upsert_knowledge_edge", s.upsert_knowledge_edge)
