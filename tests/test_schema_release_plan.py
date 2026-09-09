@@ -14,6 +14,14 @@ MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader
 SPEC.loader.exec_module(MODULE)
 
+ATOMIC_SPEC = importlib.util.spec_from_file_location(
+    "atomic_migrations",
+    ROOT / "ops/microservices/validate-atomic-migrations.py",
+)
+ATOMIC = importlib.util.module_from_spec(ATOMIC_SPEC)
+assert ATOMIC_SPEC.loader
+ATOMIC_SPEC.loader.exec_module(ATOMIC)
+
 
 def _checksum(path: Path) -> str:
     return "sha256:" + hashlib.sha256(
@@ -61,3 +69,38 @@ def test_schema_plan_rejects_manifest_behind_checkout(tmp_path):
     path.write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(ValueError):
         MODULE.build_plan(path)
+
+
+def test_current_pending_migrations_are_atomic_compatible():
+    ATOMIC.validate_filenames(
+        [
+            "132_runtime_vector_distance_grant.sql",
+            "133_conversation_turn_exactly_once_v5.sql",
+            "136_business_hours_release_queue.sql",
+            "137_canonical_asset_content_dedup.sql",
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "BEGIN;\nselect 1;\nCOMMIT;",
+        "VACUUM public.assets;",
+        "CREATE INDEX CONCURRENTLY idx_x ON x(id);",
+    ],
+)
+def test_atomic_validator_rejects_top_level_transaction_escape(sql):
+    assert ATOMIC.UNSAFE_STATEMENT.search(ATOMIC.executable_sql(sql))
+
+
+def test_atomic_validator_ignores_plpgsql_body_and_comments():
+    sql = """
+    -- BEGIN is prose here
+    CREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$
+    BEGIN
+      PERFORM 1;
+    END;
+    $$;
+    """
+    assert not ATOMIC.UNSAFE_STATEMENT.search(ATOMIC.executable_sql(sql))

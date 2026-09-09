@@ -9,6 +9,8 @@ permissions:
   contents: read
 jobs:
   dry-run:
+    outputs:
+      schema_version: ${{ steps.plan_output.outputs.schema_version }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,31 +19,68 @@ jobs:
         run: python ops/microservices/validate-release-manifest.py "${{ inputs.manifest_path }}"
       - name: Build deterministic schema plan
         run: python ops/microservices/plan-schema-release.py "${{ inputs.manifest_path }}" > schema-release-plan.json
+      - name: Export schema target
+        run: echo "schema_version=$(python -c 'import json; print(json.load(open("schema-release-plan.json"))["schema_version"])')" >> "$GITHUB_OUTPUT"
+        id: plan_output
       - uses: actions/upload-artifact@v4
         with:
           name: schema-release-plan-${{ inputs.manifest_sha }}
           path: schema-release-plan.json
           if-no-files-found: error
           retention-days: 30
-  apply:
+  production-preflight:
     needs: dry-run
+    runs-on: ubuntu-latest
+    steps:
+      - name: Audit production migration ledger without mutation
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        env:
+          TARGET_SCHEMA: ${{ needs.dry-run.outputs.schema_version }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          envs: TARGET_SCHEMA
+          script: |
+            set -Eeuo pipefail
+            [[ "$TARGET_SCHEMA" =~ ^[0-9]+$ ]]
+            cd "${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}"
+            docker compose --env-file .env.compose exec -T db sh -c \
+              'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atq -v ON_ERROR_STOP=1' <<SQL
+            select 'schema_preflight current=' || coalesce(max((substring(filename from '^[0-9]+'))::int), 0)
+              || ' target=' || '${TARGET_SCHEMA}'
+            from public._compose_migrations;
+            select 'schema_ledger migration=' || filename
+            from public._compose_migrations
+            order by filename;
+            SQL
+  apply:
+    needs: [dry-run, production-preflight]
     if: inputs.action == 'apply'
     environment: production
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with: {ref: "${{ inputs.manifest_sha }}"}
-      - name: Synchronize authorized schema controls
+      - uses: actions/download-artifact@v4
+        with:
+          name: schema-release-plan-${{ inputs.manifest_sha }}
+      - name: Revalidate downloaded schema plan
+        run: |
+          python ops/microservices/plan-schema-release.py "${{ inputs.manifest_path }}" > schema-release-plan.checkout.json
+          cmp schema-release-plan.checkout.json schema-release-plan.json
+      - name: Synchronize authorized schema plan and controls
         uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
-          source: ops/microservices/validate-release-manifest.py,ops/microservices/route-map.json,apps/conversation-runtime/n8n/persona-conversation-template.json,ops/vps/apply-runtime-vector-grant.sh,ops/vps/backup.sh,ops/vps/restore.sh,supabase/migrations/132_runtime_vector_distance_grant.sql,${{ inputs.manifest_path }}
+          source: schema-release-plan.json,ops/microservices/validate-release-manifest.py,ops/microservices/validate-atomic-migrations.py,ops/microservices/route-map.json,apps/conversation-runtime/n8n/persona-conversation-template.json,ops/vps/apply-schema-release.sh,ops/vps/backup.sh,ops/vps/restore.sh,supabase/migrations,${{ inputs.manifest_path }}
           target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           overwrite: true
-      - name: Apply migration 132 with backup and isolated restore
+      - name: Apply exact pending schema plan with backup and isolated restore
         uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -52,4 +91,4 @@ jobs:
           script: |
             set -Eeuo pipefail
             cd "${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}"
-            bash ops/vps/apply-runtime-vector-grant.sh "${{ inputs.manifest_path }}" --apply
+            bash ops/vps/apply-schema-release.sh "${{ inputs.manifest_path }}" schema-release-plan.json --apply

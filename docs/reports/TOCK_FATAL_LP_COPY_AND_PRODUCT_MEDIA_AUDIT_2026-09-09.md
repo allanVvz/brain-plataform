@@ -123,6 +123,35 @@ consome exclusivamente essas URLs e, somente então, remover os PNGs duplicados
 dos dois artefatos. Removê-los antes desse encadeamento quebraria a produção
 ativa; removê-los sem autorização específica violaria o gate de limpeza.
 
+### 11. O workflow de schema aplicava apenas uma migration do plano
+
+O plano determinístico identifica quatro migrations posteriores à produção
+atual: 132, 133, 136 e 137. O workflow anterior, porém, sincronizava e aplicava
+somente a 132. A execução poderia, portanto, terminar sem levar o banco até a
+versão declarada pelo manifesto.
+
+O caminho local foi consolidado em um aplicador genérico: ele recebe o plano
+imutável gerado no dry-run, verifica o inventário e o SHA-256 de cada migration,
+compara o ledger produtivo, exige pausa global já registrada, cria novo backup,
+prova restore isolado e só então aplica exatamente as migrations pendentes em
+uma transação. Ele também falha se produção estiver à frente do alvo ou se uma
+migration exigir execução fora da transação. Nenhuma migration foi aplicada
+nesta auditoria.
+
+### 12. O backup autorizado é válido, mas cobre apenas PostgreSQL
+
+O backup data-only autorizado foi concluído em
+`/var/backups/brain-ai/20260909T195549Z`: dump de dados com 225.817.120 bytes,
+dump de schema com 736.002 bytes, 77 entradas `TABLE DATA` e todos os checksums
+válidos. O restore isolado mais recente já registrado continua dentro da janela
+de 30 dias.
+
+A auditoria também corrigiu uma expectativa incorreta do runbook: `backup.sh`
+não contém Storage, arquivos locais nem vault e não executa retenção. O gate de
+release agora aceita como recente somente um conjunto completo com marker
+`BACKUP_KIND=data-only`, schema, lista de restore, `TABLE DATA` e checksums
+válidos. Snapshot dos volumes e cópia externa permanecem controles separados.
+
 ## Contrato recomendado para a próxima publicação de conteúdo
 
 Sem criar tabela nova:

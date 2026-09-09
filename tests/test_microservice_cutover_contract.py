@@ -404,3 +404,56 @@ def test_schema_workflow_syncs_manifest_checksum_inputs():
     workflow = (ROOT / ".github/workflows/deploy-schema.yml").read_text(encoding="utf-8")
     assert "ops/microservices/route-map.json" in workflow
     assert "apps/conversation-runtime/n8n/persona-conversation-template.json" in workflow
+    assert "schema-release-plan.json" in workflow
+    assert "supabase/migrations" in workflow
+    assert "apply-schema-release.sh" in workflow
+    assert "apply-runtime-vector-grant.sh" not in workflow
+    assert "production-preflight:" in workflow
+    assert "Audit production migration ledger without mutation" in workflow
+    assert "schema_preflight current=" in workflow
+    assert "needs: [dry-run, production-preflight]" in workflow
+    preflight = workflow.split("  production-preflight:", 1)[1].split("  apply:", 1)[0]
+    assert "scp-action" not in preflight
+    assert "insert " not in preflight.lower()
+    assert "update " not in preflight.lower()
+    assert "delete " not in preflight.lower()
+
+
+def test_generic_schema_apply_consumes_checksums_and_is_restore_pause_gated():
+    script = (ROOT / "ops/vps/apply-schema-release.sh").read_text(encoding="utf-8")
+    for evidence in (
+        "inventory checksum mismatch",
+        "migration checksum mismatch",
+        "claims-paused.json",
+        "backup.sh",
+        "restore.sh",
+        "--confirm-isolated-restore",
+        "--single-transaction",
+        "_compose_migrations",
+        "production schema is ahead of authorized target",
+        "validate-atomic-migrations.py",
+    ):
+        assert evidence in script
+    assert "MIGRATION_NAME=" not in script
+
+    atomic_validator = (
+        ROOT / "ops/microservices/validate-atomic-migrations.py"
+    ).read_text(encoding="utf-8")
+    assert "migration is incompatible with atomic schema apply" in atomic_validator
+
+
+def test_backup_gate_requires_complete_checksum_verified_data_only_set():
+    backup = (ROOT / "ops/vps/backup.sh").read_text(encoding="utf-8")
+    validator = (ROOT / "ops/vps/validate-production-release.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "umask 077" in backup
+    for evidence in (
+        "postgres-schema.dump",
+        "postgres-data.restore-list.txt",
+        "BACKUP_KIND",
+        "TABLE DATA",
+        "sha256sum --check --quiet SHA256SUMS",
+        "checksum=verified kind=data-only",
+    ):
+        assert evidence in validator

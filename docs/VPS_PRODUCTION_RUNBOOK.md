@@ -214,7 +214,14 @@ Agende como root (ajuste caminhos):
 */5 * * * * cd /opt/brain-ai && bash ops/vps/monitor.sh || /usr/local/bin/notify-brain-ops
 ```
 
-O backup mantem 7 diarios e 4 semanais (hard links no mesmo filesystem) e inclui Postgres, Storage, arquivos locais e vault. Configure tambem snapshot da VPS e copie backups para outro host/bucket. O monitor falha para containers parados/unhealthy, disco >=85%, memoria >=90% ou backup com mais de 26 horas.
+`backup.sh` gera um backup **data-only do PostgreSQL**, acompanhado do schema,
+lista de restore, marcador `BACKUP_KIND` e checksums. Ele nao inclui Storage,
+arquivos locais, vault nem aplica retencao automaticamente. A retencao fica em
+dry-run ate aprovacao especifica; consulte
+`docs/runbooks/release-backup-retention.md`. Proteja os volumes por snapshot
+separado da VPS e mantenha uma copia fora do host. O monitor falha para
+containers parados/unhealthy, disco >=85%, memoria >=90% ou quando nao existe
+um conjunto de backup PostgreSQL completo, recente e com checksum valido.
 
 Teste a restauracao regularmente; backup sem restore comprovado nao atende o gate de liberacao.
 
