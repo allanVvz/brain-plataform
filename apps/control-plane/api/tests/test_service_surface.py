@@ -136,7 +136,7 @@ def test_control_plane_repository_has_only_the_reachable_domain_surface():
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
 
-    assert len(functions) == 199
+    assert len(functions) == 202
     assert functions.isdisjoint({
         "claim_conversation_commit",
         "claim_pending_media_assets",

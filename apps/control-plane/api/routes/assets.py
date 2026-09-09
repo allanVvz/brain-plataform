@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from schemas.graph_json_v2 import Edge, GraphJson, Node
 
@@ -37,6 +38,12 @@ from core.landing_slots import (
 )
 from services import auth_service, graph_document_publisher, graph_json_v2_store, knowledge_graph, supabase_client
 from services.asset_pipeline import AssetPipelineContext, compose_markdown, run_pipeline
+from services.asset_identity import (
+    content_addressed_path as _content_addressed_path,
+    content_digest as _content_digest,
+    image_dimensions as _image_dimensions,
+    provisional_asset_type as _provisional_asset_type,
+)
 from services.event_emitter import emit
 from services.audit_helpers import current_actor, summarize_diff
 
@@ -201,30 +208,6 @@ def _jpeg_preview_from_heic(content: bytes) -> Optional[bytes]:
         return None
 
 
-def _preview_path_for(filename: str, persona_id: str) -> str:
-    stem = (filename or "asset").rsplit("/", 1)[-1].rsplit("\\", 1)[-1].rsplit(".", 1)[0]
-    safe = knowledge_graph._slugify(stem)[:80] or "asset"
-    return f"{persona_id}/previews/{safe}.jpg"
-
-
-def _safe_storage_filename(filename: Optional[str]) -> str:
-    """Slugify a filename so Supabase Storage accepts it as an object key.
-
-    Storage rejects spaces, accents and most punctuation with `400 InvalidKey`.
-    We keep the extension as-is (lowercased) and slugify the stem. The original
-    filename is still preserved in `assets.original_filename` for display.
-    """
-    name = (filename or "upload").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
-    if "." in name:
-        stem, _, ext = name.rpartition(".")
-        ext = ext.lower()
-    else:
-        stem, ext = name, ""
-    safe_stem = knowledge_graph._slugify(stem)[:120] or "asset"
-    safe_ext = knowledge_graph._slugify(ext) if ext else ""
-    return f"{safe_stem}.{safe_ext}" if safe_ext else safe_stem
-
-
 def _ensure_heic_preview(asset: dict) -> dict:
     if not asset:
         return asset
@@ -245,8 +228,20 @@ def _ensure_heic_preview(asset: dict) -> dict:
         if not preview_bytes:
             return asset
         preview_bucket = "assets-derived"
-        preview_path = _preview_path_for(filename, asset.get("persona_id") or "unassigned")
-        preview_url = supabase_client.upload_to_storage(preview_bucket, preview_path, preview_bytes, "image/jpeg")
+        preview_path = _content_addressed_path(
+            asset.get("persona_id") or "unassigned",
+            _content_digest(preview_bytes),
+            "preview.jpg",
+            "image/jpeg",
+        )
+        preview_url = supabase_client.upload_to_storage(
+            preview_bucket,
+            preview_path,
+            preview_bytes,
+            "image/jpeg",
+            upsert=False,
+            reuse_existing=True,
+        )
         updated_meta = {
             **metadata,
             "original_url": metadata.get("original_url") or asset.get("url"),
@@ -450,6 +445,8 @@ def _ensure_asset_graph_contract(
         existing_node = supabase_client.get_knowledge_node_for_source("assets", asset_id, persona_id=persona_id)
 
     base_slug = knowledge_graph._slugify(slug_seed or title or asset_id)[:60] or "asset"
+    approval_status = str((asset_row or {}).get("approval_status") or "pending").lower()
+    node_status = "active" if approval_status == "approved" else "archived" if approval_status == "rejected" else "pending"
     node_payload = {
         "persona_id": persona_id,
         "source_table": "assets",
@@ -468,12 +465,13 @@ def _ensure_asset_graph_contract(
             "file_path": f"{storage_bucket}:{storage_path}" if storage_bucket and storage_path else None,
             "asset_type": asset_type,
             "asset_function": asset_function,
+            "approval_status": approval_status,
             "parent_node_id": parent_node.get("id"),
             "parent_slug": parent_node.get("slug"),
             "parent_type": parent_node.get("node_type"),
             "open_url": "/marketing/assets",
         },
-        "status": "active",
+        "status": node_status,
         "level": 108,
         "importance": 0.64,
         "confidence": 1.0,
@@ -640,7 +638,10 @@ async def upload_asset(
         raise HTTPException(404, f"Parent node nao encontrado para slug/id={branch_hint}")
 
     try:
-        return await _upload_asset_impl(file, persona_id, persona_slug, parent_node, asset_function)
+        result = await _upload_asset_impl(file, persona_id, persona_slug, parent_node, asset_function)
+        if result.get("upload_in_progress"):
+            return JSONResponse(result, status_code=202)
+        return result
     except HTTPException:
         raise
     except Exception as exc:
@@ -702,6 +703,80 @@ def _append_image_ref_to_parent_card(parent_node: dict, image_slug: str) -> bool
         return False
 
 
+def _deduplicated_upload_response(
+    asset: dict,
+    *,
+    parent_node: dict,
+    asset_function: Optional[str],
+    in_progress: bool = False,
+) -> dict:
+    """Reuse a canonical asset without duplicating its readings or KB item."""
+    metadata = asset.get("metadata") or {}
+    graph = None
+    approval_status = str(asset.get("approval_status") or "pending").lower()
+    workflow_status = str(asset.get("status") or "pending").lower()
+    if not in_progress and approval_status != "rejected" and workflow_status != "archived":
+        graph = _ensure_asset_graph_contract(
+            asset_id=asset["id"],
+            asset_row=asset,
+            persona_id=asset["persona_id"],
+            parent_node=parent_node,
+            storage_bucket=asset.get("storage_bucket") or metadata.get("storage_bucket"),
+            storage_path=asset.get("storage_path") or metadata.get("storage_path"),
+            title=_asset_title(asset),
+            summary=metadata.get("visual_summary") or metadata.get("extracted_text") or "",
+            slug_seed=metadata.get("slug") or asset.get("original_filename") or asset["id"],
+            asset_type=asset.get("type") or metadata.get("kind"),
+            asset_function=asset_function or metadata.get("asset_function"),
+            tags=metadata.get("tags") if isinstance(metadata.get("tags"), list) else ["asset"],
+            knowledge_item_id=metadata.get("knowledge_item_id"),
+            created_from="asset_upload_deduplicated",
+        )
+        asset = graph.get("asset") or asset
+    node = (graph or {}).get("asset_node") or {}
+    parent_edge = (graph or {}).get("parent_edge") or {}
+    landing_edge = (graph or {}).get("landing_edge") or {}
+    gallery_edge = (graph or {}).get("gallery_edge") or {}
+    return {
+        "success": True,
+        "deduplicated": True,
+        "upload_in_progress": in_progress,
+        "asset_id": asset.get("id"),
+        "content_sha256": asset.get("content_sha256"),
+        "asset": asset,
+        "evidence": {
+            "asset_id": asset.get("id"),
+            "knowledge_item_id": metadata.get("knowledge_item_id"),
+            "knowledge_node_id": node.get("id") or _asset_graph_ref(asset, "knowledge_node_id"),
+            "parent_edge_id": parent_edge.get("id"),
+            "landing_edge_id": landing_edge.get("id"),
+            "gallery_edge_id": gallery_edge.get("id") or _asset_graph_ref(asset, "gallery_edge_id"),
+            "parent_card_node_id": parent_node.get("id"),
+            "reading_status": metadata.get("reading_status"),
+        },
+        "asset_reading": None,
+        "file_url": supabase_client.asset_display_url(asset),
+    }
+
+
+def _mark_asset_upload_failed(asset_id: str, metadata: dict, stage: str, exc: Exception) -> None:
+    try:
+        supabase_client.update_asset(
+            asset_id,
+            {
+                "status": "failed",
+                "metadata": {
+                    **metadata,
+                    "failure_stage": stage,
+                    "failure_at": datetime.now(timezone.utc).isoformat(),
+                    "failure_type": type(exc).__name__,
+                },
+            },
+        )
+    except Exception as update_exc:
+        logger.error("could not mark asset upload failed asset=%s: %s", asset_id, update_exc)
+
+
 async def _upload_asset_impl(
     file: UploadFile,
     persona_id: str,
@@ -713,16 +788,80 @@ async def _upload_asset_impl(
     fname = file.filename or "upload"
     mime = file.content_type or ""
     effective_asset_function = _effective_asset_function(asset_function, parent_node)
+    content_sha256 = _content_digest(content)
+    dimensions = _image_dimensions(content, mime)
+
+    # Reserve the database identity before touching Storage. The unique index
+    # makes concurrent uploads of the same bytes converge on this UUID.
+    storage_bucket = "assets-raw"
+    storage_path = _content_addressed_path(
+        persona_id,
+        content_sha256,
+        fname,
+        mime,
+    )
+    reservation_metadata = {
+        "session_id": None,
+        "persona_slug": persona_slug,
+        "original_filename": fname,
+        "upload_context": "asset_card",
+        "asset_function": effective_asset_function,
+        "branch_hint": parent_node.get("slug"),
+        "width": dimensions[0] if dimensions else None,
+        "height": dimensions[1] if dimensions else None,
+    }
+    reservation_metadata = {key: value for key, value in reservation_metadata.items() if value is not None}
+    asset_row, reserved = supabase_client.reserve_asset_by_content_sha256({
+        "persona_id": persona_id,
+        "content_sha256": content_sha256,
+        "type": _provisional_asset_type(fname, mime),
+        "name": fname,
+        "url": None,
+        "metadata": reservation_metadata,
+        "source": "upload",
+        "storage_bucket": storage_bucket,
+        "storage_path": storage_path,
+        "mime_type": mime,
+        "file_size": len(content),
+        "original_filename": fname,
+        "status": "pending",
+        "approval_status": "pending",
+        "upload_context": "asset_card",
+    })
+    asset_id = (asset_row or {}).get("id")
+    if not asset_id:
+        raise HTTPException(500, "Falha ao reservar asset canonico.")
+
+    if not reserved:
+        if str(asset_row.get("status") or "").lower() == "failed":
+            claimed = supabase_client.claim_failed_asset_upload(asset_id)
+            if claimed:
+                asset_row = {**asset_row, **claimed}
+                reserved = True
+            else:
+                asset_row = supabase_client.get_asset(asset_id) or asset_row
+        if not reserved:
+            in_progress = str(asset_row.get("status") or "pending").lower() in {"pending", "reading"}
+            return _deduplicated_upload_response(
+                asset_row,
+                parent_node=parent_node,
+                asset_function=effective_asset_function,
+                in_progress=in_progress,
+            )
 
     # 1) Upload to Supabase Storage.
-    # Supabase Storage rejects keys with spaces or non-ASCII characters
-    # (400 InvalidKey). Keep the original filename in the assets row
-    # (original_filename / metadata) but slug the storage path so the
-    # PUT URL is always valid.
-    storage_bucket = "assets-raw"
-    storage_path = f"{persona_id}/{_safe_storage_filename(fname)}"
+    # The SHA-256 key is immutable. ``reuse_existing`` only tolerates a prior
+    # object at the same digest path (for example, retry after a DB failure);
+    # it never overwrites bytes or creates a filename-keyed duplicate.
     try:
-        file_url = supabase_client.upload_to_storage(storage_bucket, storage_path, content, mime or "application/octet-stream")
+        file_url = supabase_client.upload_to_storage(
+            storage_bucket,
+            storage_path,
+            content,
+            mime or "application/octet-stream",
+            upsert=False,
+            reuse_existing=True,
+        )
     except Exception as exc:
         message = str(exc)
         if "Bucket not found" in message or "bucket_not_found" in message.lower():
@@ -730,9 +869,17 @@ async def _upload_asset_impl(
             # land or the project was bootstrapped without storage seeding.
             healed = supabase_client.ensure_bucket(storage_bucket, public=False)
             if healed:
-                file_url = supabase_client.upload_to_storage(storage_bucket, storage_path, content, mime or "application/octet-stream")
+                file_url = supabase_client.upload_to_storage(
+                    storage_bucket,
+                    storage_path,
+                    content,
+                    mime or "application/octet-stream",
+                    upsert=False,
+                    reuse_existing=True,
+                )
             else:
                 logger.error("/assets/upload bucket missing and could not be created: %s", storage_bucket)
+                _mark_asset_upload_failed(asset_id, reservation_metadata, "storage", exc)
                 raise HTTPException(
                     503,
                     {
@@ -747,6 +894,7 @@ async def _upload_asset_impl(
                 ) from exc
         elif "InvalidKey" in message or "Invalid key" in message:
             logger.error("/assets/upload InvalidKey for path=%s: %s", storage_path, message)
+            _mark_asset_upload_failed(asset_id, reservation_metadata, "storage", exc)
             raise HTTPException(
                 422,
                 {
@@ -762,8 +910,25 @@ async def _upload_asset_impl(
         else:
             logger.warning("assets-raw upload failed, falling back to 'knowledge': %s", exc)
             storage_bucket = "knowledge"
-            storage_path = f"assets/{persona_id}/{_safe_storage_filename(fname)}"
-            file_url = supabase_client.upload_to_storage(storage_bucket, storage_path, content, mime or "application/octet-stream")
+            storage_path = _content_addressed_path(
+                persona_id,
+                content_sha256,
+                fname,
+                mime,
+                prefix="assets",
+            )
+            try:
+                file_url = supabase_client.upload_to_storage(
+                    storage_bucket,
+                    storage_path,
+                    content,
+                    mime or "application/octet-stream",
+                    upsert=False,
+                    reuse_existing=True,
+                )
+            except Exception as fallback_exc:
+                _mark_asset_upload_failed(asset_id, reservation_metadata, "storage", fallback_exc)
+                raise
 
     preview_bucket = None
     preview_path = None
@@ -772,9 +937,21 @@ async def _upload_asset_impl(
         preview_bytes = _jpeg_preview_from_heic(content)
         if preview_bytes:
             preview_bucket = "assets-derived"
-            preview_path = _preview_path_for(fname, persona_id)
+            preview_path = _content_addressed_path(
+                persona_id,
+                _content_digest(preview_bytes),
+                "preview.jpg",
+                "image/jpeg",
+            )
             try:
-                preview_url = supabase_client.upload_to_storage(preview_bucket, preview_path, preview_bytes, "image/jpeg")
+                preview_url = supabase_client.upload_to_storage(
+                    preview_bucket,
+                    preview_path,
+                    preview_bytes,
+                    "image/jpeg",
+                    upsert=False,
+                    reuse_existing=True,
+                )
             except Exception as exc:
                 logger.warning("HEIC preview upload failed filename=%s path=%s: %s", fname, preview_path, exc)
                 preview_bucket = None
@@ -793,12 +970,15 @@ async def _upload_asset_impl(
         branch_label=parent_node.get("title") or parent_node.get("slug"),
         asset_function=effective_asset_function,
     )
-    bundle = run_pipeline(content, ctx)
+    try:
+        bundle = run_pipeline(content, ctx)
+    except Exception as exc:
+        _mark_asset_upload_failed(asset_id, reservation_metadata, "pipeline", exc)
+        raise
 
-    # 3) Persist public.assets.
+    # 3) Complete the previously reserved public.assets row.
     asset_type = _bundle_to_asset_type(bundle.classification.kind)
-    asset_row = supabase_client.insert_asset({
-        "persona_id": persona_id,
+    asset_row = supabase_client.update_asset(asset_id, {
         "type": asset_type,
         "name": bundle.rename.title or fname,
         "url": preview_url or file_url,
@@ -815,10 +995,11 @@ async def _upload_asset_impl(
             "visual_summary": bundle.visual_summary or "",
             "video_reading_mocked": bool(bundle.video_mock),
             "upload_context": "asset_card",
-            "validation_status": "pending_validation",
             "kind": bundle.classification.kind,
             "asset_function": effective_asset_function or bundle.rename.asset_function,
             "branch_hint": parent_node.get("slug"),
+            "width": dimensions[0] if dimensions else None,
+            "height": dimensions[1] if dimensions else None,
         },
         "source": "upload",
         "storage_bucket": storage_bucket,
@@ -827,11 +1008,11 @@ async def _upload_asset_impl(
         "file_size": len(content),
         "original_filename": fname,
         "status": "ready" if bundle.reading_status in ("completed", "mocked") else "reading",
+        "approval_status": "pending",
         "upload_context": "asset_card",
     })
-    asset_id = (asset_row or {}).get("id")
-    if not asset_id:
-        raise HTTPException(500, "Falha ao registrar asset.")
+    if not (asset_row or {}).get("id"):
+        raise HTTPException(500, "Falha ao concluir asset reservado.")
 
     for row in bundle.rows_to_persist:
         payload = dict(row)
@@ -871,7 +1052,7 @@ async def _upload_asset_impl(
             "asset_kind": bundle.classification.kind,
             "asset_type": asset_type,
             "asset_function": effective_asset_function or bundle.rename.asset_function,
-            "validation_status": "pending_validation",
+            "approval_status": "pending",
             "upload_context": "asset_card",
             "parent_slug": parent_node.get("slug"),
             "session_id": None,
@@ -918,7 +1099,10 @@ async def _upload_asset_impl(
 
     return {
         "success": True,
+        "deduplicated": False,
+        "upload_in_progress": False,
         "asset_id": asset_id,
+        "content_sha256": content_sha256,
         "asset": asset_row,
         "evidence": {
             "asset_id": asset_id,
@@ -976,7 +1160,7 @@ def _asset_list_payload(row: dict) -> dict:
         **row,
         "url": display_url,
         "display_url": display_url,
-        "approval_status": (row.get("metadata") or {}).get("validation_status") or row.get("approval_status"),
+        "approval_status": row.get("approval_status") or "pending",
         "workflow_status": row.get("status"),
     }
 
@@ -1018,7 +1202,7 @@ def _compose_markdown_from_asset(asset: dict, readings: list[dict]) -> str:
     visual = (metadata.get("visual_summary") or "").strip()
     asset_function = metadata.get("asset_function") or "(definir)"
     branch_hint = metadata.get("branch_hint") or metadata.get("parent_slug") or "(definir)"
-    status = metadata.get("validation_status") or asset.get("status") or "ready"
+    status = asset.get("approval_status") or "pending"
 
     # Prefer richer readings when present (full OCR text instead of the 8k slice
     # we keep in metadata).
@@ -2396,13 +2580,15 @@ def approve_asset_route(asset_id: str, request: Request):
     user = auth_service.current_user(request)
     metadata = {
         **(asset.get("metadata") or {}),
-        "validation_status": "approved",
         "approved_at": datetime.now(timezone.utc).isoformat(),
         "approved_by": user.get("id"),
     }
-    patch = {"metadata": metadata}
-    # Live DB status CHECK may not include "approved"; keep the durable approval
-    # status in metadata and leave status as ready for older schemas.
+    metadata.pop("validation_status", None)
+    metadata.pop("approval_status", None)
+    projected_metadata = {**metadata, "approval_status": "approved"}
+    patch = {"metadata": metadata, "approval_status": "approved"}
+    # Ingestion status remains "ready"; review state is canonical in the
+    # dedicated approval_status column.
     if (asset.get("status") or "") in {"pending", "reading", "failed", ""}:
         patch["status"] = "ready"
     updated = supabase_client.update_asset(asset_id, patch)
@@ -2410,14 +2596,14 @@ def approve_asset_route(asset_id: str, request: Request):
     item_id = metadata.get("knowledge_item_id")
     if item_id:
         try:
-            supabase_client.update_knowledge_item(item_id, {"status": "approved", "metadata": metadata})
+            supabase_client.update_knowledge_item(item_id, {"status": "approved", "metadata": projected_metadata})
         except Exception as exc:
             logger.warning("approve asset knowledge_item update failed asset=%s item=%s: %s", asset_id, item_id, exc)
 
     node_id = _asset_graph_ref(updated or asset, "knowledge_node_id")
     if node_id:
         try:
-            supabase_client.update_knowledge_node(node_id, {"status": "active", "metadata": metadata})
+            supabase_client.update_knowledge_node(node_id, {"status": "active", "metadata": projected_metadata})
         except Exception as exc:
             logger.warning("approve asset node update failed asset=%s node=%s: %s", asset_id, node_id, exc)
 
@@ -2437,7 +2623,11 @@ def approve_asset_route(asset_id: str, request: Request):
         try:
             supabase_client.update_asset(
                 asset_id,
-                {"status": asset.get("status"), "metadata": asset.get("metadata") or {}},
+                {
+                    "status": asset.get("status"),
+                    "approval_status": asset.get("approval_status") or "pending",
+                    "metadata": asset.get("metadata") or {},
+                },
             )
             if item_id:
                 supabase_client.update_knowledge_item(item_id, {"status": "pending"})
@@ -2469,7 +2659,7 @@ def approve_asset_route(asset_id: str, request: Request):
 
     return {
         "success": True,
-        "asset": updated or {**asset, "metadata": metadata},
+        "asset": updated or {**asset, "approval_status": "approved", "metadata": metadata},
         "validation": validation,
         "canonical_publication": canonical_publication,
     }
@@ -2487,23 +2677,28 @@ def reject_asset_route(asset_id: str, request: Request):
     user = auth_service.current_user(request)
     metadata = {
         **(asset.get("metadata") or {}),
-        "validation_status": "rejected",
         "rejected_at": datetime.now(timezone.utc).isoformat(),
         "rejected_by": user.get("id"),
     }
-    updated = supabase_client.update_asset(asset_id, {"status": "archived", "metadata": metadata})
+    metadata.pop("validation_status", None)
+    metadata.pop("approval_status", None)
+    projected_metadata = {**metadata, "approval_status": "rejected"}
+    updated = supabase_client.update_asset(
+        asset_id,
+        {"status": "archived", "approval_status": "rejected", "metadata": metadata},
+    )
 
     item_id = metadata.get("knowledge_item_id")
     if item_id:
         try:
-            supabase_client.update_knowledge_item(item_id, {"status": "rejected", "metadata": metadata})
+            supabase_client.update_knowledge_item(item_id, {"status": "rejected", "metadata": projected_metadata})
         except Exception as exc:
             logger.warning("reject asset knowledge_item update failed asset=%s item=%s: %s", asset_id, item_id, exc)
 
     node_id = _asset_graph_ref(updated or asset, "knowledge_node_id")
     if node_id:
         try:
-            supabase_client.update_knowledge_node(node_id, {"status": "archived", "metadata": metadata})
+            supabase_client.update_knowledge_node(node_id, {"status": "archived", "metadata": projected_metadata})
         except Exception as exc:
             logger.warning("reject asset node update failed asset=%s node=%s: %s", asset_id, node_id, exc)
 
@@ -2520,7 +2715,15 @@ def reject_asset_route(asset_id: str, request: Request):
         },
     )
 
-    return {"success": True, "asset": updated or {**asset, "status": "archived", "metadata": metadata}}
+    return {
+        "success": True,
+        "asset": updated or {
+            **asset,
+            "status": "archived",
+            "approval_status": "rejected",
+            "metadata": metadata,
+        },
+    }
 
 
 @router.delete("/{asset_id}")

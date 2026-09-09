@@ -2091,7 +2091,14 @@ def sync_gallery_asset_node(node: dict, edge: dict) -> Optional[dict]:
         "tags": node.get("tags") or [],
         "description": node.get("summary"),
         "embedding_status": "none",
-        "approval_status": "approved",
+        "approval_status": (
+            "approved"
+            if str(metadata.get("approval_status") or metadata.get("validation_status") or "").lower()
+            in {"approved", "validated", "embedded"}
+            else "rejected"
+            if str(metadata.get("approval_status") or metadata.get("validation_status") or "").lower() == "rejected"
+            else "pending"
+        ),
         "knowledge_node_id": node.get("id"),
         "gallery_edge_id": edge.get("id"),
     }
@@ -2267,7 +2274,7 @@ def list_gallery_assets(persona_id: Optional[str] = None, limit: int = 250) -> l
             continue
 
         asset_meta = asset_row.get("metadata") or {}
-        effective_status = asset_meta.get("validation_status") or asset_row.get("status") or node.get("status") or "ready"
+        effective_status = asset_row.get("approval_status") or "pending"
         original = asset_row.get("original_filename") or asset_meta.get("original_filename") or asset_row.get("name") or ""
         ext = original.rsplit(".", 1)[-1].lower() if "." in original else ""
         if not ext:
@@ -4240,11 +4247,36 @@ def get_pipeline_metrics(persona_id: Optional[str] = None) -> dict:
 
 # â”€â”€ Storage â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-def upload_to_storage(bucket: str, path: str, data: bytes, content_type: str = "application/octet-stream") -> str:
-    """Upload bytes to Supabase Storage; returns the public URL."""
+def upload_to_storage(
+    bucket: str,
+    path: str,
+    data: bytes,
+    content_type: str = "application/octet-stream",
+    *,
+    upsert: bool = True,
+    reuse_existing: bool = False,
+) -> str:
+    """Upload bytes to Supabase Storage and return its public URL.
+
+    Existing callers retain the legacy overwrite behavior. Content-addressed
+    callers explicitly pass ``upsert=False`` so an object is immutable once
+    its SHA-256 path exists. A duplicate at such a path is safe to reuse: the
+    path itself proves that both requests address the same content digest.
+    """
     client = get_client()
-    client.storage.from_(bucket).upload(path, data, {"content-type": content_type, "upsert": "true"})
-    return client.storage.from_(bucket).get_public_url(path)
+    storage = client.storage.from_(bucket)
+    try:
+        storage.upload(
+            path,
+            data,
+            {"content-type": content_type, "upsert": "true" if upsert else "false"},
+        )
+    except Exception as exc:
+        message = str(exc).lower()
+        duplicate = "already exists" in message or "duplicate" in message or "409" in message
+        if not (reuse_existing and not upsert and duplicate):
+            raise
+    return storage.get_public_url(path)
 
 
 def download_from_storage(bucket: str, path: str) -> bytes:
@@ -4293,6 +4325,62 @@ def ensure_bucket(name: str, public: bool = False) -> bool:
 def insert_asset(data: dict) -> dict:
     result = get_client().table("assets").insert(data).execute()
     return (result.data or [{}])[0]
+
+
+def get_asset_by_content_sha256(persona_id: str, content_sha256: str) -> Optional[dict]:
+    """Return the one canonical asset row for these bytes in a persona."""
+    if not persona_id or not content_sha256:
+        return None
+    result = (
+        get_client().table("assets")
+        .select("*")
+        .eq("persona_id", persona_id)
+        .eq("content_sha256", content_sha256.lower())
+        .limit(1)
+        .execute()
+    )
+    rows = result.data or []
+    return rows[0] if rows else None
+
+
+def reserve_asset_by_content_sha256(data: dict) -> tuple[dict, bool]:
+    """Atomically acquire the canonical row for a content-addressed upload.
+
+    The unique database index resolves concurrent first uploads. The loser of
+    that race reads and reuses the winner instead of creating another row.
+    """
+    persona_id = str(data.get("persona_id") or "")
+    content_sha256 = str(data.get("content_sha256") or "").lower()
+    if not persona_id or len(content_sha256) != 64:
+        raise ValueError("persona_id and a lowercase SHA-256 digest are required")
+    payload = {**data, "content_sha256": content_sha256}
+    existing = get_asset_by_content_sha256(persona_id, content_sha256)
+    if existing:
+        return existing, False
+    try:
+        return insert_asset(payload), True
+    except Exception as exc:
+        if not _unique_violation(exc):
+            raise
+        existing = get_asset_by_content_sha256(persona_id, content_sha256)
+        if not existing:
+            raise
+        return existing, False
+
+
+def claim_failed_asset_upload(asset_id: str) -> Optional[dict]:
+    """Claim a failed upload for one retry without allowing parallel writers."""
+    if not asset_id:
+        return None
+    result = (
+        get_client().table("assets")
+        .update({"status": "pending"})
+        .eq("id", asset_id)
+        .eq("status", "failed")
+        .execute()
+    )
+    rows = result.data or []
+    return rows[0] if rows else None
 
 
 def update_asset(asset_id: str, patch: dict) -> dict:

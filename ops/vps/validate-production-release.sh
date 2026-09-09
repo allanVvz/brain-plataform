@@ -372,13 +372,30 @@ else
   failed=1
 fi
 
-latest_backup="$(find "$BACKUP_ROOT" -mindepth 2 -maxdepth 2 -name postgres-data.dump -mmin -1560 -print -quit 2>/dev/null || true)"
-if [[ -n "$latest_backup" ]]; then printf 'PASS\tbackup_age\t%s\n' "$latest_backup"
+latest_backup=""
+while IFS= read -r candidate; do
+  candidate_dir="$(dirname "$candidate")"
+  if [[ -s "$candidate_dir/postgres-data.dump" \
+     && -s "$candidate_dir/postgres-schema.dump" \
+     && -s "$candidate_dir/postgres-data.restore-list.txt" \
+     && -s "$candidate_dir/SHA256SUMS" \
+     && "$(tr -d '\r\n' < "$candidate_dir/BACKUP_KIND" 2>/dev/null || true)" == "data-only" ]] \
+     && grep -q 'TABLE DATA' "$candidate_dir/postgres-data.restore-list.txt" \
+     && (cd "$candidate_dir" && sha256sum --check --quiet SHA256SUMS); then
+    latest_backup="$candidate"
+    break
+  fi
+done < <(
+  find "$BACKUP_ROOT" -mindepth 2 -maxdepth 2 -type f -name postgres-data.dump \
+    -mmin -1560 -printf '%T@ %p\n' 2>/dev/null \
+    | sort -nr | cut -d' ' -f2-
+)
+if [[ -n "$latest_backup" ]]; then printf 'PASS\tbackup_age\t%s checksum=verified kind=data-only\n' "$latest_backup"
 elif [[ "$require_fresh_backup" == "true" ]]; then
-  printf 'FAIL\tbackup_age\tno data-only backup within 26h impact=%s\n' "${impact_class:-unknown}"
+  printf 'FAIL\tbackup_age\tno complete checksum-verified data-only backup within 26h impact=%s\n' "${impact_class:-unknown}"
   failed=1
 else
-  printf 'WARN\tbackup_age\tno data-only backup within 26h; not required for impact=%s\n' "$impact_class"
+  printf 'WARN\tbackup_age\tno complete checksum-verified data-only backup within 26h; not required for impact=%s\n' "$impact_class"
 fi
 
 if [[ -f "$RESTORE_MARKER" && -n "$(find "$RESTORE_MARKER" -mmin -43200 -print -quit 2>/dev/null)" ]]; then
