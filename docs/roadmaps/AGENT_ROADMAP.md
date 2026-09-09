@@ -768,9 +768,46 @@ Entregue em 2026-09-04: `api/services/site_blocks.py`,
 `api/scripts/build_tock_lp_payload.py`, `tests/test_site_blocks_scope.py`, e a
 LP de varejo em `/lp/:personaSlug` no repositório renderizador.
 
-Falta: expor blocos por `/api/menu`, mover `structure` para
-`public_site_formats` no banco, auditoria de cobertura dos `requires`, e ligar a
-Sofia.
+Próxima evolução graph-backed da saída pública:
+
+1. representar cada página como node `campaign`, com subtipo/template em
+   `metadata`, sem tabela nem `node_type` novos;
+2. modelar `vitrine` como campanha com slug público configurável e assets
+   conectados por edges reais;
+3. modelar contatos adicionais como `knowledge_item`, com nome da atendente,
+   telefone público, rótulo, ordem e relação com a página;
+4. projetar páginas, contatos, audiências e capas em `site` dentro do contrato
+   existente `/api/menu/{persona_slug}`; não criar `/blocks`;
+5. adicionar o slot de capa do linktree com posições `0..2`, edge real e a
+   mesma função disponível no dropdown de Assets;
+6. registrar `linktree` em `public_site_formats`, sem tabela nova;
+7. migrar a Tock Fatal para esse payload e apagar integralmente a configuração
+   de compatibilidade depreciada no frontend;
+8. expandir o renderer para outros domínios/personas e para o template completo
+   de e-commerce: Home, Sobre nós, Fale com a gente, menu e atendimento de IA
+   embutido.
+
+### Estoque público e quantidade
+
+A contagem de produtos ligados a um grupo, o número de imagens e a presença no
+payload nunca representam estoque. Até existir inventário validado, o site e o
+runtime omitem quantidade e não inferem indisponibilidade de produto sem imagem
+ou oculto da página.
+
+A primeira implementação usa `product.metadata`, sem tabela nova:
+
+- `inventory.status`: `in_stock`, `low_stock`, `out_of_stock` ou `unknown`;
+- `inventory.available_quantity`: inteiro opcional;
+- `inventory.as_of`: instante da verificação;
+- `inventory.source`: origem auditável;
+- `inventory.validation_status`: estado de validação.
+
+Quantidade pública só pode vir de `available_quantity` validada e não expirada.
+Uma quantidade agregada de grupo só aparece quando todos os produtos incluídos
+têm inventário válido; caso contrário, o número é omitido. O runtime continua
+proibido de prometer estoque sem fonte publicada. Depois, integrar uma fonte
+real de estoque, histórico de atualização, variantes e alertas para dado
+desatualizado.
 
 ### Dívida aberta — nós órfãos por renomeação de agente
 
@@ -832,12 +869,11 @@ O que isso implica, em ordem de dependência:
 3. **A tela de FAQ elege FAQ de site.** A projeção em FAQ continua sendo o
    embedding (invariante 2); o que muda é poder marcar uma FAQ autoral como
    conteúdo público. Sem eleição, o bloco resolve vazio e a seção some.
-4. **Trackeamento com chave de grafo.** Não existe hoje: nenhuma rota pública
-   aceita evento e `whatsapp_href` não anexa parâmetro. A fundação obrigatória é
-   que clique no site e mensagem na conversa gravem o **mesmo `node_id`** do
-   grafo. A LP já emite `data-node-id`/`data-block-id` e um `ref` no `wa.me`
-   por isso. Se cada lado inventar id próprio, costurar "viu no catálogo →
-   perguntou no WhatsApp" depois exige tabela de conciliação.
+4. **Trackeamento com chave de grafo.** A página emite impressão e clique com
+   `node_id`, persona e rota, sem PII. IDs técnicos não entram na mensagem
+   pública do `wa.me`; a futura rota pública correlaciona o evento técnico com
+   a conversa por um contrato próprio. Se cada lado inventar id próprio,
+   costurar "viu no catálogo → perguntou no WhatsApp" depois exige conciliação.
 5. **Atribuição no lead.** `leads.metadata` (migração 060) é o único campo livre
    já migrado; `leads.canal`/`origem` hoje só carregam constantes grosseiras
    (`whatsapp`, `bulk_import`). Atenção ao guard-rail: `_execute_lead_write`
