@@ -8,6 +8,7 @@ import time
 from services import auth_service, integration_service
 from services import supabase_client
 from services import graph_bundle_publisher
+from services.asset_identity import content_addressed_path, content_digest, image_dimensions, provisional_asset_type
 from schemas.agent_harness import MessageCreate
 from services.agent_harness import SofiaAgentHarness
 from services.agent_harness_repository import AgentHarnessRepository
@@ -323,6 +324,9 @@ async def upload_file(
     file_url: Optional[str] = None
     asset_id: Optional[str] = None
     asset_reading_summary: Optional[dict] = None
+    asset_row: Optional[dict] = None
+    reserved_asset = False
+    deduplicated = False
 
     # Resolve persona from the session for asset row tagging.
     session_persona_id: Optional[str] = None
@@ -336,7 +340,6 @@ async def upload_file(
             if not session_persona_slug:
                 session_persona_slug = (sess.get("classification") or {}).get("persona_slug")
         if session_persona_slug and not session_persona_id:
-            from services import supabase_client
             persona = supabase_client.get_persona(session_persona_slug) or {}
             session_persona_id = persona.get("id")
             session_persona_slug = persona.get("slug") or session_persona_slug
@@ -357,20 +360,69 @@ async def upload_file(
             "reset_session": True,
         }
 
-    # 1) Upload to Storage. If this fails, do not attach the reading to Sofia:
-    # local-only readings make the session remember files that do not exist in
-    # the assets system.
+    # 1) Reserve the canonical DB row, then write its immutable SHA-256 path.
+    # This is the same identity contract used by the standalone Assets card.
     try:
-        from services.supabase_client import upload_to_storage, insert_kb_intake
+        from services.supabase_client import insert_kb_intake
         storage_bucket = "assets-raw"
-        storage_owner = session_persona_id or session_id
-        storage_path = f"{storage_owner}/{fname}"
-        file_url = upload_to_storage(
-            storage_bucket,
-            storage_path,
-            content,
-            file.content_type or "application/octet-stream",
+        mime = file.content_type or ""
+        content_sha256 = content_digest(content)
+        dimensions = image_dimensions(content, mime)
+        storage_path = content_addressed_path(
+            session_persona_id,
+            content_sha256,
+            fname,
+            mime,
         )
+        reservation_metadata = {
+            "session_id": session_id,
+            "persona_slug": session_persona_slug,
+            "original_filename": fname,
+            "upload_context": "sofia_chat",
+            "width": dimensions[0] if dimensions else None,
+            "height": dimensions[1] if dimensions else None,
+        }
+        asset_row, reserved_asset = supabase_client.reserve_asset_by_content_sha256({
+            "persona_id": session_persona_id,
+            "content_sha256": content_sha256,
+            "type": provisional_asset_type(fname, mime),
+            "name": fname,
+            "url": None,
+            "metadata": reservation_metadata,
+            "source": "upload",
+            "storage_bucket": storage_bucket,
+            "storage_path": storage_path,
+            "mime_type": mime,
+            "file_size": len(content),
+            "original_filename": fname,
+            "status": "pending",
+            "approval_status": "pending",
+            "upload_context": "sofia_chat",
+        })
+        asset_id = (asset_row or {}).get("id")
+        if not asset_id:
+            raise RuntimeError("canonical asset reservation returned no id")
+        if not reserved_asset and str((asset_row or {}).get("status") or "").lower() == "failed":
+            approval_status = str((asset_row or {}).get("approval_status") or "pending").lower()
+            if approval_status == "pending":
+                claimed = supabase_client.claim_failed_asset_upload(asset_id)
+                if claimed:
+                    asset_row = {**(asset_row or {}), **claimed}
+                    reserved_asset = True
+        deduplicated = not reserved_asset
+        if reserved_asset:
+            file_url = supabase_client.upload_to_storage(
+                storage_bucket,
+                storage_path,
+                content,
+                mime or "application/octet-stream",
+                upsert=False,
+                reuse_existing=True,
+            )
+        else:
+            storage_bucket = (asset_row or {}).get("storage_bucket") or storage_bucket
+            storage_path = (asset_row or {}).get("storage_path") or storage_path
+            file_url = supabase_client.asset_display_url(asset_row or {})
         insert_kb_intake({
             "filename": fname,
             "file_path": f"{storage_bucket}:{storage_path}",
@@ -381,6 +433,21 @@ async def upload_file(
     except Exception as exc:
         from services import sre_logger
         sre_logger.error("kb_intake_upload", f"storage/db write failed: {exc}", exc)
+        if asset_id and reserved_asset:
+            try:
+                supabase_client.update_asset(
+                    asset_id,
+                    {
+                        "status": "failed",
+                        "metadata": {
+                            **((asset_row or {}).get("metadata") or {}),
+                            "failure_stage": "storage",
+                            "failure_type": type(exc).__name__,
+                        },
+                    },
+                )
+            except Exception:
+                pass
         prune_unpersisted_asset_readings(get_session(session_id) or {})
         return {
             "ok": False,
@@ -410,6 +477,21 @@ async def upload_file(
     except Exception as exc:
         from services import sre_logger
         sre_logger.warn("kb_intake_upload", f"asset pipeline skipped: {exc}", exc)
+        if asset_id and reserved_asset:
+            try:
+                supabase_client.update_asset(
+                    asset_id,
+                    {
+                        "status": "failed",
+                        "metadata": {
+                            **((asset_row or {}).get("metadata") or {}),
+                            "failure_stage": "pipeline",
+                            "failure_type": type(exc).__name__,
+                        },
+                    },
+                )
+            except Exception:
+                pass
         prune_unpersisted_asset_readings(get_session(session_id) or {})
         return {
             "ok": False,
@@ -422,10 +504,8 @@ async def upload_file(
     # 3) Persist public.assets + asset_readings for the chat upload too.
     if bundle is not None:
         try:
-            from services import supabase_client
             asset_type = _bundle_to_asset_type(bundle.classification.kind)
-            asset_row = supabase_client.insert_asset({
-                "persona_id": session_persona_id,
+            completed_payload = {
                 "type": asset_type,
                 "name": bundle.rename.title or fname,
                 "url": file_url,
@@ -439,9 +519,10 @@ async def upload_file(
                     "visual_summary": bundle.visual_summary or "",
                     "video_reading_mocked": bool(bundle.video_mock),
                     "upload_context": "sofia_chat",
-                    "validation_status": "context_only",
                     "kind": bundle.classification.kind,
                     "engine": (bundle.ocr.engine if bundle.ocr else None),
+                    "width": dimensions[0] if dimensions else None,
+                    "height": dimensions[1] if dimensions else None,
                     "ai_fallback_used": bundle.ai_fallback is not None and not (bundle.ai_fallback.error or ""),
                 },
                 "source": "upload",
@@ -451,10 +532,12 @@ async def upload_file(
                 "file_size": len(content),
                 "original_filename": fname,
                 "status": "ready" if bundle.reading_status in ("completed", "mocked") else "reading",
+                "approval_status": "pending",
                 "upload_context": "sofia_chat",
-            })
-            asset_id = (asset_row or {}).get("id")
-            if asset_id:
+            }
+            if reserved_asset:
+                asset_row = supabase_client.update_asset(asset_id, completed_payload)
+            if asset_id and reserved_asset:
                 for row in bundle.rows_to_persist:
                     payload = dict(row)
                     payload["asset_id"] = asset_id
@@ -542,6 +625,8 @@ async def upload_file(
         result["storage_path"] = storage_path
     if asset_id:
         result["asset_id"] = asset_id
+        result["content_sha256"] = content_sha256
+        result["deduplicated"] = deduplicated
     if asset_reading_summary:
         result["asset_reading"] = asset_reading_summary
     timings_ms["total"] = int((time.perf_counter() - upload_started) * 1000)

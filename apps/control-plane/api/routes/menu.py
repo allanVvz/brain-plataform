@@ -2,8 +2,11 @@
 
 import hashlib
 import json
+import os
+import re
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
+from urllib.parse import quote, urlsplit
 
 from fastapi import APIRouter, HTTPException, Query, Response
 
@@ -14,6 +17,8 @@ from utils.rich_text import to_clean_markdown
 router = APIRouter(tags=["menu"])
 
 _MENU_CACHE_CONTROL = "public, max-age=30, s-maxage=300, stale-while-revalidate=600"
+_DEFAULT_PUBLIC_ASSET_BUCKETS = frozenset({"assets-raw", "assets-derived"})
+_TECHNICAL_ID_PATTERN = re.compile(r"\b(?:asset|product|product_group|group|audience|campaign|copy|persona):[a-z0-9]", re.I)
 
 
 def _canonical_json_checksum(value: dict) -> str:
@@ -21,8 +26,109 @@ def _canonical_json_checksum(value: dict) -> str:
     return "sha256:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def _public_graph_context(persona_slug: str) -> Optional[dict]:
-    """Return Gallery grants for an activated 2.1 graph; legacy stays untouched."""
+def _asset_registry_id(node: dict) -> Optional[str]:
+    data = node.get("data") or node.get("spec") or {}
+    blob = data.get("blob") if isinstance(data.get("blob"), dict) else {}
+    media = data.get("media") if isinstance(data.get("media"), dict) else {}
+    value = (
+        data.get("registry_id")
+        or data.get("asset_id")
+        or blob.get("registry_id")
+        or media.get("registry_id")
+    )
+    return str(value) if value else None
+
+
+def _active_publication_context(persona_id: str, persona_slug: Optional[str] = None) -> Optional[dict]:
+    """Resolve public grants from the immutable active GraphBundle v3 output.
+
+    Raw knowledge rows are authoring state and may contain a staged bundle.  The
+    active graph publication is the only safe authority for deciding what may
+    be projected publicly.
+    """
+    try:
+        publication = supabase_client.get_active_graph_publication(persona_id)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail={
+            "code": "graph_publication_lookup_failed",
+            "persona_id": persona_id,
+        }) from exc
+    if not publication:
+        return None
+
+    document = publication.get("document_json") or {}
+    document_persona = document.get("persona") if isinstance(document.get("persona"), dict) else {}
+    identity_errors = []
+    if str(publication.get("persona_id") or "") != persona_id:
+        identity_errors.append("publication.persona_id:mismatch")
+    if str(document_persona.get("id") or "") != persona_id:
+        identity_errors.append("document.persona.id:mismatch")
+    if persona_slug and str(document_persona.get("slug") or "") != persona_slug:
+        identity_errors.append("document.persona.slug:mismatch")
+    if document.get("schema_version") != "3.0":
+        identity_errors.append("document.schema_version:v3_required")
+    if not publication.get("id"):
+        identity_errors.append("publication.id:required")
+    if not isinstance(publication.get("version"), int):
+        identity_errors.append("publication.version:integer_required")
+    checksum = str(publication.get("checksum") or document.get("checksum") or "")
+    if not checksum.startswith("sha256:"):
+        identity_errors.append("publication.checksum:invalid")
+    if publication.get("checksum") and document.get("checksum") and publication["checksum"] != document["checksum"]:
+        identity_errors.append("publication.checksum:document_mismatch")
+    if identity_errors:
+        raise HTTPException(status_code=503, detail={
+            "code": "graph_publication_identity_invalid",
+            "persona_id": persona_id,
+            "errors": identity_errors,
+        })
+    nodes = document.get("nodes") or list((document.get("node_by_id") or {}).values())
+    edges = document.get("edges") or []
+    by_id = {str(node.get("id")): node for node in nodes if node.get("id")}
+    gallery_ids = {
+        node_id for node_id, node in by_id.items()
+        if str(node.get("node_type") or "").lower() == "gallery"
+    }
+    granted = {
+        str(edge.get("source"))
+        for edge in edges
+        if edge.get("relation_type") == "publishes_to"
+        and str(edge.get("target")) in gallery_ids
+        and edge.get("source") in by_id
+    }
+    allowed: dict[str, set[str]] = {}
+    asset_registry_ids: set[str] = set()
+    for node_id in granted:
+        node = by_id[node_id]
+        allowed.setdefault(str(node.get("node_type") or ""), set()).add(str(node.get("slug") or ""))
+        if node.get("node_type") == "asset":
+            registry_id = _asset_registry_id(node)
+            if registry_id:
+                asset_registry_ids.add(registry_id)
+
+    # An active but malformed publication must fail closed.  Falling back to a
+    # Graph JSON snapshot here would combine two independently versioned
+    # authorities and could expose staged content.
+    return {
+        "publication_id": str(publication.get("id") or ""),
+        "version": publication.get("version"),
+        "checksum": publication.get("checksum") or document.get("checksum"),
+        "action": None,
+        "action_node_id": sorted(gallery_ids)[0] if gallery_ids else None,
+        "allowed": allowed,
+        "asset_registry_ids": asset_registry_ids,
+        "granted_node_ids": granted,
+        "source": "graph_publication_v3",
+        "document": document,
+    }
+
+
+def _public_graph_context(persona_slug: str, persona_id: Optional[str] = None) -> Optional[dict]:
+    """Return active v3 Gallery grants, with 2.1 only as a legacy fallback."""
+    if persona_id:
+        active = _active_publication_context(persona_id, persona_slug)
+        if active is not None:
+            return active
     try:
         current = graph_json_v2_store.load_current(persona_slug)
     except Exception:
@@ -61,11 +167,14 @@ def _public_graph_context(persona_slug: str) -> Optional[dict]:
             if registry_id:
                 asset_registry_ids.add(str(registry_id))
     return {
+        "publication_id": None,
         "version": version,
         "checksum": graph.content_checksum or graph_json_v2_store.checksum_graph(graph),
         "action": action,
         "allowed": allowed,
         "asset_registry_ids": asset_registry_ids,
+        "action_node_id": action.id if action else None,
+        "source": "graph_json_v21_legacy",
     }
 
 
@@ -80,6 +189,122 @@ def _read_int(value, fallback: int = 0) -> int:
         return int(value)
     except Exception:
         return fallback
+
+
+def _configured_public_asset_buckets() -> frozenset[str]:
+    configured = os.environ.get("BRAIN_PUBLIC_ASSET_BUCKETS")
+    if not configured:
+        return _DEFAULT_PUBLIC_ASSET_BUCKETS
+    return frozenset(value.strip() for value in configured.split(",") if value.strip())
+
+
+def _storage_location(asset: dict) -> tuple[Optional[str], Optional[str]]:
+    meta = asset.get("metadata") or {}
+    bucket = asset.get("storage_bucket") or meta.get("storage_bucket")
+    path = asset.get("storage_path") or meta.get("storage_path")
+    file_path = asset.get("file_path") or meta.get("file_path")
+    if (
+        (not bucket or not path)
+        and isinstance(file_path, str)
+        and ":" in file_path
+        and not file_path.startswith(("http://", "https://"))
+    ):
+        file_bucket, file_storage_path = file_path.split(":", 1)
+        bucket = bucket or file_bucket
+        path = path or file_storage_path
+    return (str(bucket) if bucket else None, str(path) if path else None)
+
+
+def _asset_url(asset: dict) -> str:
+    """Use a stable URL for known-public buckets; preserve private signed URLs."""
+    meta = asset.get("metadata") or {}
+    fallback = asset.get("url") or meta.get("public_url") or meta.get("url") or ""
+    bucket, path = _storage_location(asset)
+    if not bucket or not path or bucket not in _configured_public_asset_buckets():
+        return str(fallback or "")
+
+    base = (os.environ.get("SUPABASE_PUBLIC_URL") or "").rstrip("/")
+    if not base and fallback:
+        parsed = urlsplit(str(fallback))
+        if parsed.scheme and parsed.netloc and "/storage/v1/object/" in parsed.path:
+            base = f"{parsed.scheme}://{parsed.netloc}"
+    if not base:
+        base = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
+    if not base:
+        return str(fallback or "")
+    return (
+        f"{base}/storage/v1/object/public/{quote(bucket, safe='')}/"
+        f"{quote(path.lstrip('/'), safe='/%')}"
+    )
+
+
+def _stable_public_asset_url(asset: dict) -> str:
+    """Return only durable HTTPS object URLs from explicitly public buckets."""
+    bucket, path = _storage_location(asset)
+    if not bucket or not path or bucket not in _configured_public_asset_buckets():
+        return ""
+    value = _asset_url(asset)
+    parsed = urlsplit(value)
+    if (
+        parsed.scheme != "https"
+        or not parsed.netloc
+        or "/storage/v1/object/public/" not in parsed.path
+        or parsed.query
+        or parsed.fragment
+    ):
+        return ""
+    return value
+
+
+def _published_assets_by_registry(
+    persona_id: str,
+    asset_registry_ids: set[str],
+    cache: Optional[dict] = None,
+) -> dict[str, dict]:
+    """Resolve published blobs directly from assets, never from live graph rows."""
+    cache_key = f"published_assets:{persona_id}"
+    if cache is not None and cache_key in cache:
+        return cache[cache_key]
+    rows = supabase_client.list_assets(persona_id=persona_id, limit=5000)
+    result: dict[str, dict] = {}
+    for row in rows:
+        asset_id = str(row.get("id") or "")
+        approval_status = str(row.get("approval_status") or "").lower()
+        operational_status = str(row.get("status") or "").lower()
+        if (
+            not asset_id
+            or asset_id not in asset_registry_ids
+            or str(row.get("persona_id") or "") != persona_id
+            or approval_status != "approved"
+            or operational_status in {"archived", "rejected", "failed"}
+        ):
+            continue
+        result[asset_id] = row
+    if cache is not None:
+        cache[cache_key] = result
+    return result
+
+
+def _positive_int(value: Any) -> Optional[int]:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _number(value: Any, fallback: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _is_public_url(value: Any) -> bool:
+    if not isinstance(value, str) or not value.strip():
+        return False
+    parsed = urlsplit(value.strip())
+    return parsed.scheme == "https" and bool(parsed.netloc)
 
 
 def _asset_payload(
@@ -99,7 +324,7 @@ def _asset_payload(
         "knowledge_node_id": asset.get("knowledge_node_id"),
         "edge_id": (edge or {}).get("id"),
         "type": asset_type,
-        "url": asset.get("url") or asset.get("file_path") or meta.get("public_url") or meta.get("url") or "",
+        "url": _asset_url(asset),
         "alt": alt or asset.get("title") or asset.get("name") or "",
         "role": edge_meta.get("role") or meta.get("asset_function") or meta.get("role"),
         "section": (
@@ -110,13 +335,779 @@ def _asset_payload(
         "slot_key": page_binding.get("slot_key") or (slot.value if slot else None),
         "href": meta.get("href") or meta.get("cta_url"),
         "markdown": meta.get("markdown") or meta.get("body"),
+        "content_sha256": asset.get("content_sha256") or meta.get("content_sha256") or meta.get("sha256"),
+        "width": _positive_int(asset.get("width") or meta.get("width")),
+        "height": _positive_int(asset.get("height") or meta.get("height")),
+    }
+
+
+def _site_node_spec(node: dict, kind: str) -> dict:
+    data = node.get("data") or {}
+    public = data.get("public_site") if isinstance(data.get("public_site"), dict) else {}
+    site = data.get("site") if isinstance(data.get("site"), dict) else {}
+    specific = data.get(f"public_site_{kind}") or data.get(kind)
+    return {
+        **public,
+        **site,
+        **(specific if isinstance(specific, dict) else {}),
+    }
+
+
+def _site_ref_spec(raw: Any, nodes: dict[str, dict], kind: str, errors: list[str]) -> tuple[Optional[dict], dict]:
+    ref = raw if isinstance(raw, str) else (raw or {}).get("node_id")
+    node = nodes.get(str(ref or ""))
+    if not node:
+        errors.append(f"{kind}_node_missing:{ref or 'empty'}")
+        return None, {}
+    inline = raw if isinstance(raw, dict) else {}
+    return node, {**inline, **_site_node_spec(node, kind)}
+
+
+def _required_text(spec: dict, key: str, path: str, errors: list[str]) -> str:
+    value = str(spec.get(key) or "").strip()
+    if not value:
+        errors.append(f"{path}.{key}:required")
+    return value
+
+
+def _required_natural_message(spec: dict, key: str, path: str, errors: list[str]) -> str:
+    value = _required_text(spec, key, path, errors)
+    if _TECHNICAL_ID_PATTERN.search(value):
+        errors.append(f"{path}.{key}:technical_id_forbidden")
+    return value
+
+
+def _site_asset(
+    raw: Any,
+    *,
+    nodes: dict[str, dict],
+    gallery_by_node: dict[str, dict],
+    granted_asset_ids: set[str],
+    path: str,
+    errors: list[str],
+) -> Optional[dict]:
+    node, spec = _site_ref_spec(raw, nodes, "asset", errors)
+    if not node:
+        return None
+    if node.get("node_type") != "asset":
+        errors.append(f"{path}.node_type:asset_required")
+        return None
+    node_id = str(node.get("id") or "")
+    registry_id = _asset_registry_id(node)
+    by_registry = {
+        str(row.get("id")): row
+        for row in gallery_by_node.values()
+        if row.get("id")
+    }
+    asset = gallery_by_node.get(str(node.get("projection_node_id") or ""))
+    asset = asset or (by_registry.get(registry_id) if registry_id else None)
+    if not registry_id or not asset or str(asset.get("id") or "") != registry_id:
+        errors.append(f"{path}.asset_registry:approved_gallery_asset_required")
+        return None
+    if registry_id not in granted_asset_ids:
+        errors.append(f"{path}.publishes_to:required")
+    data = node.get("data") or {}
+    media = data.get("media") if isinstance(data.get("media"), dict) else {}
+    meta = asset.get("metadata") or {}
+    content_sha256 = str(
+        asset.get("content_sha256")
+        or meta.get("content_sha256")
+        or data.get("content_sha256")
+        or media.get("sha256")
+        or ""
+    ).lower()
+    url = _stable_public_asset_url(asset)
+    if len(content_sha256) != 64 or any(ch not in "0123456789abcdef" for ch in content_sha256):
+        errors.append(f"{path}.content_sha256:invalid")
+    if not url:
+        errors.append(f"{path}.url:stable_public_https_required")
+    return {
+        "node_id": node_id,
+        "asset_id": registry_id,
+        "url": url,
+        "alt": str(spec.get("alt") or node.get("title") or ""),
+        "content_sha256": content_sha256,
+        "width": _positive_int(asset.get("width") or meta.get("width") or media.get("width")),
+        "height": _positive_int(asset.get("height") or meta.get("height") or media.get("height")),
+    }
+
+
+def _site_cta(node: dict) -> Optional[dict]:
+    data = node.get("data") or {}
+    public = data.get("public_site") if isinstance(data.get("public_site"), dict) else {}
+    raw = public.get("cta") or data.get("cta")
+    if not isinstance(raw, dict):
+        return None
+    label = str(raw.get("label") or "").strip()
+    message = str(raw.get("message_template") or "").strip()
+    if not label or not message or _TECHNICAL_ID_PATTERN.search(message):
+        return None
+    return {
+        # A CTA belongs to the compiled node that owns it.  Do not accept a
+        # second, free-form node reference that could point outside the active
+        # immutable document.
+        "node_id": str(node.get("id") or "") or None,
+        "label": label,
+        "message_template": message,
+    }
+
+
+def _catalog_cta_errors(categories: list[dict]) -> list[str]:
+    errors: list[str] = []
+    for category in categories:
+        if not category.get("cta"):
+            errors.append(f"{category.get('id')}:cta_required")
+        for product in category.get("products") or []:
+            if product.get("assets") and not product.get("cta"):
+                errors.append(f"{product.get('id')}:cta_required")
+    return sorted(errors)
+
+
+def _publication_grants(publication: dict, nodes: dict[str, dict], edges: list[dict]) -> set[str]:
+    explicit = publication.get("granted_node_ids")
+    if explicit is not None:
+        return {str(value) for value in explicit}
+    galleries = {
+        node_id for node_id, node in nodes.items()
+        if node.get("node_type") == "gallery"
+    }
+    return {
+        str(edge.get("source"))
+        for edge in edges
+        if edge.get("relation_type") == "publishes_to"
+        and str(edge.get("target")) in galleries
+        and str(edge.get("source")) in nodes
+    }
+
+
+def _compiled_offer(node: dict) -> Optional[dict]:
+    data = node.get("data") or {}
+    raw = data.get("offer") or data.get("price")
+    if isinstance(raw, dict) and isinstance(raw.get("unit"), dict):
+        raw = raw["unit"]
+    if isinstance(raw, dict) and raw.get("amount") is not None:
+        try:
+            return {
+                "amount": float(raw["amount"]),
+                "currency": str(raw.get("currency") or "BRL"),
+            }
+        except (TypeError, ValueError):
+            return None
+    if data.get("price_cents") is not None:
+        try:
+            return {"amount": int(data["price_cents"]) / 100, "currency": "BRL"}
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _compiled_asset_payload(
+    node: dict,
+    edge: dict,
+    *,
+    gallery_by_node: dict[str, dict],
+    granted_node_ids: set[str],
+    granted_asset_ids: set[str],
+    alt: str,
+    path: str,
+    errors: list[str],
+) -> Optional[dict]:
+    node_id = str(node.get("id") or "")
+    registry_id = _asset_registry_id(node)
+    by_registry = {
+        str(row.get("id")): row for row in gallery_by_node.values() if row.get("id")
+    }
+    row = gallery_by_node.get(str(node.get("projection_node_id") or ""))
+    row = row or (by_registry.get(registry_id) if registry_id else None)
+    if node_id not in granted_node_ids or not registry_id or registry_id not in granted_asset_ids:
+        errors.append(f"{path}:asset_not_published")
+        return None
+    if not row or str(row.get("id") or "") != registry_id:
+        errors.append(f"{path}:approved_gallery_asset_required")
+        return None
+    url = _stable_public_asset_url(row)
+    if not url:
+        errors.append(f"{path}:stable_public_https_required")
+        return None
+    data = node.get("data") or {}
+    media = data.get("media") if isinstance(data.get("media"), dict) else {}
+    metadata = row.get("metadata") or {}
+    content_sha256 = (
+        row.get("content_sha256") or metadata.get("content_sha256")
+        or data.get("content_sha256") or media.get("sha256")
+    )
+    payload = _asset_payload({**row, "url": url}, alt=alt, edge=edge)
+    payload.update({
+        "url": url,
+        "content_sha256": content_sha256,
+        "width": _positive_int(row.get("width") or metadata.get("width") or media.get("width")),
+        "height": _positive_int(row.get("height") or metadata.get("height") or media.get("height")),
+    })
+    return payload
+
+
+def _compiled_catalog_payload(
+    publication: dict,
+    *,
+    site: dict,
+    persona: dict,
+    persona_slug: str,
+    cache: dict,
+) -> dict:
+    """Project the v3 catalog exclusively from the immutable publication."""
+    document = publication.get("document") or {}
+    nodes = {
+        str(node.get("id")): node
+        for node in (document.get("nodes") or list((document.get("node_by_id") or {}).values()))
+        if node.get("id")
+    }
+    edges = [edge for edge in document.get("edges") or [] if isinstance(edge, dict)]
+    granted_node_ids = _publication_grants(publication, nodes, edges)
+    granted_asset_ids = {str(value) for value in publication.get("asset_registry_ids") or set()}
+    gallery_by_node = _published_assets_by_registry(
+        str(persona["id"]), granted_asset_ids, cache=cache,
+    )
+    errors: list[str] = []
+
+    persona_node = next((node for node in nodes.values() if node.get("node_type") == "persona"), None)
+    brands = [
+        node for node_id, node in nodes.items()
+        if node.get("node_type") == "brand" and node_id in granted_node_ids
+    ]
+    if len(brands) != 1:
+        errors.append(f"site.catalog.brand_node_count:{len(brands)}")
+        brand_node = {}
+    else:
+        brand_node = brands[0]
+    brand_data = brand_node.get("data") or {}
+    brand = {
+        "id": str(brand_node.get("id") or ""),
+        "slug": str(brand_node.get("slug") or ""),
+        "name": str(brand_node.get("title") or brand_node.get("slug") or ""),
+        "description": brand_node.get("summary") or None,
+        "short_name": brand_data.get("short_name"),
+        "wordmark": brand_data.get("wordmark"),
+        "accent_color": brand_data.get("accent_color"),
+        "node_id": brand_node.get("id"),
+    }
+
+    product_nodes = {
+        node_id: node for node_id, node in nodes.items()
+        if node.get("node_type") == "product" and node_id in granted_node_ids
+    }
+    group_nodes = {
+        node_id: node for node_id, node in nodes.items()
+        if node.get("node_type") == "product_group" and node_id in granted_node_ids
+    }
+    asset_nodes = {
+        node_id: node for node_id, node in nodes.items() if node.get("node_type") == "asset"
+    }
+    copy_nodes = {
+        node_id: node for node_id, node in nodes.items()
+        if node.get("node_type") == "copy" and node_id in granted_node_ids
+    }
+    faq_nodes = {
+        node_id: node for node_id, node in nodes.items()
+        if node.get("node_type") == "faq" and node_id in granted_node_ids
+    }
+
+    products_by_group: dict[str, list[str]] = {}
+    related_by_product: dict[str, list[str]] = {}
+    asset_edges_by_owner: dict[str, list[dict]] = {}
+    group_relations = {"product_group_has_product", "in_category", "category_has_product", "contains"}
+    copy_relations = {"product_has_copy", "supports_copy", "offer_has_copy"}
+    faq_relations = {"product_has_faq", "answers_question"}
+    for edge in edges:
+        source = str(edge.get("source") or "")
+        target = str(edge.get("target") or "")
+        relation = str(edge.get("relation_type") or "")
+        if source in group_nodes and target in product_nodes and relation in group_relations:
+            products_by_group.setdefault(source, []).append(target)
+        elif target in group_nodes and source in product_nodes and relation in group_relations:
+            products_by_group.setdefault(target, []).append(source)
+        if relation in copy_relations | faq_relations:
+            product_id = source if source in product_nodes else target if target in product_nodes else None
+            related_id = target if product_id == source else source
+            if product_id and related_id in nodes:
+                related_by_product.setdefault(product_id, []).append(related_id)
+        if relation in {"uses_asset", "brand_has_asset", "category_has_asset", "campaign_has_asset"}:
+            if source in nodes and target in asset_nodes:
+                asset_edges_by_owner.setdefault(source, []).append(edge)
+
+    seen_brand_assets: set[str] = set()
+    for edge in asset_edges_by_owner.get(str(brand_node.get("id") or ""), []):
+        slot = slot_for_metadata(edge.get("metadata") or {})
+        if slot not in {LandingSlot.BRAND_LOGO, LandingSlot.BRAND_COVER, LandingSlot.BRAND_SECONDARY}:
+            continue
+        asset_node = asset_nodes.get(str(edge.get("target") or ""))
+        registry_id = _asset_registry_id(asset_node or {})
+        if not asset_node or not registry_id or registry_id in seen_brand_assets:
+            continue
+        payload = _compiled_asset_payload(
+            asset_node, edge, gallery_by_node=gallery_by_node,
+            granted_node_ids=granted_node_ids, granted_asset_ids=granted_asset_ids,
+            alt=str(brand_node.get("title") or "Logo"), path=f"{brand_node.get('id')}.assets.{registry_id}",
+            errors=errors,
+        )
+        if not payload:
+            continue
+        seen_brand_assets.add(registry_id)
+        if slot == LandingSlot.BRAND_LOGO:
+            brand["logo"] = {**payload, "type": "logo"}
+        elif slot == LandingSlot.BRAND_COVER:
+            brand["cover"] = {**payload, "type": "cover"}
+        else:
+            brand.setdefault("secondary_assets", []).append(payload)
+
+    linked_products = {product_id for values in products_by_group.values() for product_id in values}
+    for product_id in sorted(set(product_nodes) - linked_products):
+        errors.append(f"{product_id}:published_group_relation_required")
+
+    eligible_faq_ids = {str(value) for value in document.get("eligible_faq_node_ids") or []}
+    compiled_products: dict[str, dict] = {}
+    for product_id, node in product_nodes.items():
+        data = node.get("data") or {}
+        assets: list[dict] = []
+        seen_assets: set[str] = set()
+        for edge in asset_edges_by_owner.get(product_id, []):
+            if edge.get("relation_type") != "uses_asset" or slot_for_metadata(edge.get("metadata") or {}) != LandingSlot.PRODUCT_IMAGE:
+                continue
+            asset_node = asset_nodes.get(str(edge.get("target") or ""))
+            registry_id = _asset_registry_id(asset_node or {})
+            if not asset_node or not registry_id or registry_id in seen_assets:
+                continue
+            payload = _compiled_asset_payload(
+                asset_node, edge, gallery_by_node=gallery_by_node,
+                granted_node_ids=granted_node_ids, granted_asset_ids=granted_asset_ids,
+                alt=str(node.get("title") or ""), path=f"{product_id}.assets.{registry_id}", errors=errors,
+            )
+            if payload:
+                assets.append(payload)
+                seen_assets.add(registry_id)
+        related = related_by_product.get(product_id, [])
+        compiled_products[product_id] = {
+            "id": product_id,
+            "slug": str(node.get("slug") or product_id),
+            "name": str(node.get("title") or node.get("slug") or "Produto"),
+            "description": to_clean_markdown(node.get("summary") or data.get("description") or ""),
+            "offer": _compiled_offer(node),
+            "visible": data.get("visible") is not False,
+            "position": _read_int(data.get("position") or data.get("sort_order"), 0),
+            "cta": _site_cta(node),
+            "copies": [_copy_payload(copy_nodes[value]) for value in related if value in copy_nodes],
+            "faqs": [
+                {**_faq_payload(faq_nodes[value]), "is_rag_eligible": value in eligible_faq_ids}
+                for value in related if value in faq_nodes
+            ],
+            "assets": assets,
+        }
+
+    categories: list[dict] = []
+    for group_id, node in group_nodes.items():
+        data = node.get("data") or {}
+        cover_payload = None
+        for edge in sorted(
+            asset_edges_by_owner.get(group_id, []),
+            key=lambda item: _read_int(((item.get("metadata") or {}).get("page_binding") or {}).get("position"), 0),
+        ):
+            if slot_for_metadata(edge.get("metadata") or {}) != LandingSlot.PRODUCT_GROUP_COVER:
+                continue
+            asset_node = asset_nodes.get(str(edge.get("target") or ""))
+            if not asset_node:
+                continue
+            cover_payload = _compiled_asset_payload(
+                asset_node, edge, gallery_by_node=gallery_by_node,
+                granted_node_ids=granted_node_ids, granted_asset_ids=granted_asset_ids,
+                alt=str(node.get("title") or ""), path=f"{group_id}.cover", errors=errors,
+            )
+            if cover_payload:
+                break
+        products = sorted(
+            [compiled_products[value] for value in products_by_group.get(group_id, []) if value in compiled_products],
+            key=lambda item: item["position"],
+        )
+        if cover_payload is None:
+            cover_payload = next((asset for product in products for asset in product["assets"]), None)
+        categories.append({
+            "id": group_id,
+            "slug": str(node.get("slug") or group_id),
+            "title": str(node.get("title") or node.get("slug") or group_id),
+            "eyebrow": data.get("eyebrow") or data.get("category_eyebrow") or "",
+            "cover": (cover_payload or {}).get("url") or "",
+            "cover_alt": (cover_payload or {}).get("alt") or node.get("title") or "",
+            "cover_asset_id": (cover_payload or {}).get("asset_id"),
+            "cover_edge_id": (cover_payload or {}).get("edge_id"),
+            "cover_slot_key": (cover_payload or {}).get("slot_key"),
+            "cover_width": (cover_payload or {}).get("width"),
+            "cover_height": (cover_payload or {}).get("height"),
+            "visible": data.get("visible") is not False,
+            "position": _read_int(data.get("position") or data.get("sort_order"), 0),
+            "cta": _site_cta(node),
+            "assets": [cover_payload] if cover_payload else [],
+            "products": products,
+        })
+    categories.sort(key=lambda item: item["position"])
+
+    collection_slug = str(site["default_collection_slug"])
+    collection_assets: list[dict] = []
+    seen_collection_assets: set[str] = set()
+    for campaign_id, campaign in nodes.items():
+        campaign_data = campaign.get("data") or {}
+        if (
+            campaign.get("node_type") != "campaign"
+            or campaign_id not in granted_node_ids
+            or (
+                campaign.get("slug") != collection_slug
+                and campaign_data.get("collection_slug") != collection_slug
+            )
+        ):
+            continue
+        for edge in asset_edges_by_owner.get(campaign_id, []):
+            slot = slot_for_metadata(edge.get("metadata") or {})
+            if slot not in {LandingSlot.HERO, LandingSlot.CAMPAIGN_FOOTER}:
+                continue
+            asset_node = asset_nodes.get(str(edge.get("target") or ""))
+            registry_id = _asset_registry_id(asset_node or {})
+            if not asset_node or not registry_id or registry_id in seen_collection_assets:
+                continue
+            payload = _compiled_asset_payload(
+                asset_node, edge, gallery_by_node=gallery_by_node,
+                granted_node_ids=granted_node_ids, granted_asset_ids=granted_asset_ids,
+                alt=str(campaign.get("title") or site["name"]),
+                path=f"{campaign_id}.assets.{registry_id}", errors=errors,
+            )
+            if payload:
+                collection_assets.append({**payload, "type": "banner"})
+                seen_collection_assets.add(registry_id)
+
+    cta_errors = _catalog_cta_errors(categories)
+    errors.extend(cta_errors)
+    if errors:
+        raise HTTPException(status_code=503, detail={
+            "code": "public_site_contract_incomplete",
+            "publication_id": publication.get("publication_id"),
+            "graph_checksum": publication.get("checksum"),
+            "errors": sorted(set(errors)),
+        })
+
+    collection_node = next(
+        (
+            node for node in nodes.values()
+            if node.get("slug") == collection_slug
+            and node.get("node_type") in {"product_collection", "campaign"}
+        ),
+        None,
+    )
+    collection_id = str((collection_node or {}).get("id") or f"collection:{collection_slug}")
+    collection_title = str((collection_node or {}).get("title") or site["name"])
+    collection = {
+        "id": collection_id,
+        "slug": collection_slug,
+        "type": "catalog",
+        "display_name": collection_title,
+        "cover": next((item["cover"] for item in categories if item.get("cover")), ""),
+        "assets": collection_assets,
+        "briefing": None,
+        "categories": categories,
+    }
+    return {
+        "active_collection_id": collection_id,
+        "persona": {
+            "id": str(persona["id"]),
+            "slug": persona_slug,
+            "name": str((persona_node or {}).get("title") or site["name"]),
+            "brand": brand,
+            "collections": [collection],
+        },
+    }
+
+
+def _canonical_site_from_publication(publication: dict, cache: dict) -> dict:
+    document = publication.get("document") or {}
+    nodes = {
+        str(node.get("id")): node
+        for node in (document.get("nodes") or list((document.get("node_by_id") or {}).values()))
+        if node.get("id")
+    }
+    persona_nodes = [node for node in nodes.values() if node.get("node_type") == "persona"]
+    errors: list[str] = []
+    if len(persona_nodes) != 1:
+        errors.append(f"persona_node_count:{len(persona_nodes)}")
+        persona_node = {}
+    else:
+        persona_node = persona_nodes[0]
+    root = (persona_node.get("data") or {}).get("public_site")
+    if not isinstance(root, dict):
+        root = {}
+        errors.append("persona.data.public_site:required")
+
+    persona_id = str((document.get("persona") or {}).get("id") or "")
+    granted_asset_ids = set(publication.get("asset_registry_ids") or set())
+    gallery_by_node = _published_assets_by_registry(persona_id, granted_asset_ids, cache=cache)
+    slug = _required_text(root, "slug", "site", errors)
+    name = _required_text(root, "name", "site", errors)
+    format_key = _required_text(root, "format_key", "site", errors)
+    default_collection_slug = _required_text(root, "default_collection_slug", "site", errors)
+    brand_family = _required_text(root, "brand_family", "site", errors)
+    brand_channel = _required_text(root, "brand_channel", "site", errors)
+
+    whatsapp_raw = root.get("whatsapp") if isinstance(root.get("whatsapp"), dict) else {}
+    phone = public_site.normalize_whatsapp_phone(whatsapp_raw.get("phone"))
+    message_template = _required_natural_message(whatsapp_raw, "message_template", "site.whatsapp", errors)
+    if len(phone) < 8:
+        errors.append("site.whatsapp.phone:invalid")
+
+    identity_raw = root.get("identity") if isinstance(root.get("identity"), dict) else {}
+    identity: dict[str, dict] = {}
+    for key in ("logo_round", "logo_wordmark", "logo_reverse"):
+        asset = _site_asset(
+            identity_raw.get(key), nodes=nodes, gallery_by_node=gallery_by_node,
+            granted_asset_ids=granted_asset_ids,
+            path=f"site.identity.{key}", errors=errors,
+        )
+        if asset:
+            asset.pop("width", None)
+            asset.pop("height", None)
+            identity[key] = asset
+
+    pages = []
+    for index, raw in enumerate(root.get("pages") or []):
+        node, spec = _site_ref_spec(raw, nodes, "page", errors)
+        if not node:
+            continue
+        if node.get("node_type") != "campaign":
+            errors.append(f"site.pages[{index}].node_type:campaign_required")
+        route = _required_text(spec, "route", f"site.pages[{index}]", errors)
+        kind = str(spec.get("kind") or "")
+        if not route.startswith("/"):
+            errors.append(f"site.pages[{index}].route:invalid")
+        if kind not in {"linktree", "showcase"}:
+            errors.append(f"site.pages[{index}].kind:invalid")
+        actions = []
+        for action_index, action in enumerate(spec.get("actions") or []):
+            action = action if isinstance(action, dict) else {}
+            action_kind = str(action.get("kind") or "")
+            if action_kind not in {"internal", "whatsapp", "location", "disabled"}:
+                errors.append(f"site.pages[{index}].actions[{action_index}].kind:invalid")
+            action_node_id = action.get("node_id")
+            if action_node_id and str(action_node_id) not in nodes:
+                errors.append(f"site.pages[{index}].actions[{action_index}].node_id:missing")
+            if action.get("message_template") and _TECHNICAL_ID_PATTERN.search(str(action["message_template"])):
+                errors.append(f"site.pages[{index}].actions[{action_index}].message_template:technical_id_forbidden")
+            actions.append({
+                "id": _required_text(action, "id", f"site.pages[{index}].actions[{action_index}]", errors),
+                "node_id": str(action_node_id) if action_node_id else None,
+                "label": _required_text(action, "label", f"site.pages[{index}].actions[{action_index}]", errors),
+                "kind": action_kind,
+                "href": action.get("href"),
+                "contact_key": action.get("contact_key"),
+                "message_template": action.get("message_template"),
+                "position": _read_int(action.get("position"), 0),
+                "disabled": bool(action.get("disabled", False)),
+            })
+        sections = spec.get("sections") if isinstance(spec.get("sections"), dict) else None
+        if kind == "showcase" or sections is not None:
+            section_fields = {
+                "audiences": ("eyebrow", "title"),
+                "groups": ("eyebrow", "title", "item_eyebrow", "item_description"),
+                "final_cta": ("title", "description", "action_label"),
+            }
+            if sections is None:
+                errors.append(f"site.pages[{index}].sections:required")
+            else:
+                normalized_sections = {}
+                for section, fields in section_fields.items():
+                    block = sections.get(section) if isinstance(sections.get(section), dict) else {}
+                    normalized_sections[section] = {
+                        field: _required_text(
+                            block, field, f"site.pages[{index}].sections.{section}", errors
+                        )
+                        for field in fields
+                    }
+                sections = normalized_sections
+        pages.append({
+            "node_id": str(node["id"]),
+            "route": route,
+            "kind": kind,
+            "eyebrow": spec.get("eyebrow"),
+            "title": _required_text(spec, "title", f"site.pages[{index}]", errors),
+            "description": _required_text(spec, "description", f"site.pages[{index}]", errors),
+            "cta_label": spec.get("cta_label"),
+            "ribbon_terms": [str(value) for value in spec.get("ribbon_terms") or [] if str(value).strip()],
+            "actions": sorted(actions, key=lambda row: row["position"]),
+            "sections": sections,
+        })
+    if len(pages) < 2:
+        errors.append("site.pages:min_2")
+
+    contacts = []
+    for index, raw in enumerate(root.get("contacts") or []):
+        node, spec = _site_ref_spec(raw, nodes, "contact", errors)
+        if not node:
+            continue
+        if node.get("node_type") != "copy":
+            errors.append(f"site.contacts[{index}].node_type:copy_required")
+        contact_phone = public_site.normalize_whatsapp_phone(spec.get("phone"))
+        if len(contact_phone) < 8:
+            errors.append(f"site.contacts[{index}].phone:invalid")
+        contacts.append({
+            "key": _required_text(spec, "key", f"site.contacts[{index}]", errors),
+            "node_id": str(node["id"]),
+            "label": _required_text(spec, "label", f"site.contacts[{index}]", errors),
+            "phone": contact_phone,
+            "message_template": _required_natural_message(spec, "message_template", f"site.contacts[{index}]", errors),
+            "position": _read_int(spec.get("position"), 0),
+        })
+    if not contacts:
+        errors.append("site.contacts:min_1")
+
+    covers = []
+    for index, raw in enumerate(root.get("covers") or []):
+        asset = _site_asset(
+            raw, nodes=nodes, gallery_by_node=gallery_by_node,
+            granted_asset_ids=granted_asset_ids,
+            path=f"site.covers[{index}]", errors=errors,
+        )
+        if not asset:
+            continue
+        spec = raw if isinstance(raw, dict) else {}
+        position = _read_int(spec.get("position"), 0)
+        if position < 0 or position > 2:
+            errors.append(f"site.covers[{index}].position:invalid")
+        asset.pop("width", None)
+        asset.pop("height", None)
+        focal_point = spec.get("focal_point") if isinstance(spec.get("focal_point"), dict) else {}
+        if focal_point.get("desktop") != "full" or focal_point.get("mobile") != "split-halves":
+            errors.append(f"site.covers[{index}].focal_point:invalid")
+        asset.update({
+            "position": position,
+            "focal_point": focal_point,
+        })
+        covers.append(asset)
+    if not covers:
+        errors.append("site.covers:min_1")
+
+    audiences = []
+    for index, raw in enumerate(root.get("audiences") or []):
+        node, spec = _site_ref_spec(raw, nodes, "audience", errors)
+        if not node:
+            continue
+        if node.get("node_type") != "audience":
+            errors.append(f"site.audiences[{index}].node_type:audience_required")
+        audiences.append({
+            "node_id": str(node["id"]),
+            "label": _required_text(spec, "label", f"site.audiences[{index}]", errors),
+            "message_template": _required_natural_message(spec, "message_template", f"site.audiences[{index}]", errors),
+            "position": _read_int(spec.get("position"), 0),
+        })
+    if not audiences:
+        errors.append("site.audiences:min_1")
+
+    locations = []
+    for index, raw in enumerate(root.get("locations") or []):
+        node, spec = _site_ref_spec(raw, nodes, "location", errors)
+        if not node:
+            continue
+        node_data = node.get("data") or {}
+        node_metadata = node_data.get("metadata") if isinstance(node_data.get("metadata"), dict) else {}
+        if (
+            node.get("node_type") != "campaign"
+            or str(node_data.get("campaign_subtype") or node_metadata.get("campaign_subtype") or "") != "physical_store"
+        ):
+            errors.append(f"site.locations[{index}].node_type:physical_store_campaign_required")
+        coords = spec.get("coordinates") if isinstance(spec.get("coordinates"), dict) else {}
+        try:
+            latitude = float(coords.get("latitude"))
+            longitude = float(coords.get("longitude"))
+        except (TypeError, ValueError):
+            latitude = longitude = 999.0
+        if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+            errors.append(f"site.locations[{index}].coordinates:invalid")
+        validation_status = str(spec.get("validation_status") or "pending")
+        if validation_status not in {"pending", "validated"}:
+            errors.append(f"site.locations[{index}].validation_status:invalid")
+        map_spec = spec.get("map") if isinstance(spec.get("map"), dict) else {}
+        for field in ("zoom", "min_zoom", "max_zoom"):
+            if field in map_spec:
+                try:
+                    float(map_spec[field])
+                except (TypeError, ValueError):
+                    errors.append(f"site.locations[{index}].map.{field}:invalid")
+        map_payload = {
+            "style_url": map_spec.get("style_url"),
+            "zoom": _number(map_spec.get("zoom"), 15.5),
+            "min_zoom": _number(map_spec.get("min_zoom"), 11),
+            "max_zoom": _number(map_spec.get("max_zoom"), 18),
+        }
+        if not all(0 <= map_payload[key] <= 24 for key in ("zoom", "min_zoom", "max_zoom")):
+            errors.append(f"site.locations[{index}].map:zoom_invalid")
+        if map_payload["min_zoom"] > map_payload["max_zoom"]:
+            errors.append(f"site.locations[{index}].map:zoom_range_invalid")
+        google_maps_url = _required_text(spec, "google_maps_url", f"site.locations[{index}]", errors)
+        google_business_url = spec.get("google_business_url")
+        style_url = map_payload.get("style_url")
+        if google_maps_url and not _is_public_url(google_maps_url):
+            errors.append(f"site.locations[{index}].google_maps_url:invalid")
+        if google_business_url and not _is_public_url(google_business_url):
+            errors.append(f"site.locations[{index}].google_business_url:invalid")
+        if style_url and not _is_public_url(style_url):
+            errors.append(f"site.locations[{index}].map.style_url:invalid")
+        ui_theme = spec.get("ui_theme") if isinstance(spec.get("ui_theme"), dict) else {}
+        marker_color = ui_theme.get("marker_color")
+        if marker_color and (
+            not isinstance(marker_color, str)
+            or len(marker_color) != 7
+            or not marker_color.startswith("#")
+            or any(char.lower() not in "0123456789abcdef" for char in marker_color[1:])
+        ):
+            errors.append(f"site.locations[{index}].ui_theme.marker_color:invalid")
+        locations.append({
+            "node_id": str(node["id"]),
+            "label": _required_text(spec, "label", f"site.locations[{index}]", errors),
+            "address": _required_text(spec, "address", f"site.locations[{index}]", errors),
+            "coordinates": {"latitude": latitude, "longitude": longitude},
+            "validation_status": validation_status,
+            "google_maps_url": google_maps_url,
+            "google_business_url": google_business_url,
+            "ui_theme": ui_theme,
+            "map": map_payload,
+        })
+    if not locations:
+        errors.append("site.locations:min_1")
+
+    if errors:
+        raise HTTPException(status_code=503, detail={
+            "code": "public_site_contract_incomplete",
+            "publication_id": publication.get("publication_id"),
+            "graph_checksum": publication.get("checksum"),
+            "errors": sorted(set(errors)),
+        })
+    return {
+        "slug": slug,
+        "name": name,
+        "format_key": format_key,
+        "default_collection_slug": default_collection_slug,
+        "brand_family": brand_family,
+        "brand_channel": brand_channel,
+        "whatsapp": {
+            "phone": phone,
+            "message_template": message_template,
+            "href": public_site.whatsapp_href(phone, message_template),
+        },
+        "identity": identity,
+        "pages": pages,
+        "contacts": sorted(contacts, key=lambda row: row["position"]),
+        "covers": sorted(covers, key=lambda row: row["position"]),
+        "audiences": sorted(audiences, key=lambda row: row["position"]),
+        "locations": locations,
     }
 
 
 def _copy_payload(node: dict) -> dict:
-    meta = _meta(node)
+    meta = node.get("data") if isinstance(node.get("data"), dict) else _meta(node)
     return {
         "id": node.get("id") or node.get("slug") or "",
+        "slug": node.get("slug") or node.get("id") or "",
         "slot": meta.get("slot") or "body",
         # Copy bodies frequently arrive as HTML (Shopify/CMS). Clean to markdown
         # so no raw tags ever reach the cardapio, agents, or RAG.
@@ -125,9 +1116,10 @@ def _copy_payload(node: dict) -> dict:
 
 
 def _faq_payload(node: dict) -> dict:
-    meta = _meta(node)
+    meta = node.get("data") if isinstance(node.get("data"), dict) else _meta(node)
     return {
         "id": node.get("id") or node.get("slug") or "",
+        "slug": node.get("slug") or node.get("id") or "",
         "question": meta.get("question") or node.get("title") or "",
         "answer": meta.get("answer") or node.get("summary") or "",
         "is_rag_eligible": bool(meta.get("is_rag_eligible") or meta.get("rag_status") == "embedded"),
@@ -190,10 +1182,10 @@ def _product_assets(products: list[dict], persona_id: str, cache: Optional[dict]
     gallery_by_node = _gallery_assets_by_node(persona_id, cache=cache)
     edges = supabase_client.list_edges_for_nodes(
         product_ids,
-        relation_types=["product_image", "product_has_asset"],
+        relation_types=["uses_asset", "product_image", "product_has_asset"],
         limit=5000,
     )
-    out: dict[str, list[dict]] = {}
+    candidates: dict[tuple[str, str], tuple[tuple[int, int, str], dict]] = {}
     for edge in edges:
         source_id = edge.get("source_node_id")
         target_id = edge.get("target_node_id")
@@ -202,12 +1194,36 @@ def _product_assets(products: list[dict], persona_id: str, cache: Optional[dict]
         meta = edge.get("metadata") or {}
         if meta.get("active") is False:
             continue
+        relation_type = edge.get("relation_type")
+        if relation_type == "uses_asset":
+            # uses_asset is generic (campaigns, brands and products all use
+            # it).  It represents a product image only with an explicit slot,
+            # and the canonical direction is product -> asset.
+            if source_id != product_id or slot_for_metadata(meta) != LandingSlot.PRODUCT_IMAGE:
+                continue
         # A public product image is valid only while it remains connected both
         # to the product and to the Gallery terminal.  This makes graph edits
         # immediately authoritative for the landing-page projection.
         asset = gallery_by_node.get(str(asset_node_id))
         if product_id and asset:
-            out.setdefault(product_id, []).append({**asset, "_edge": edge})
+            asset_id = str(asset.get("id") or asset.get("knowledge_node_id") or asset_node_id)
+            precedence = (
+                0 if relation_type == "uses_asset"
+                else 1 if relation_type == "product_image"
+                else 2
+            )
+            binding = meta.get("page_binding") or {}
+            rank = (precedence, _read_int(binding.get("position"), 0), str(edge.get("id") or ""))
+            key = (str(product_id), asset_id)
+            previous = candidates.get(key)
+            if previous is None or rank < previous[0]:
+                candidates[key] = (rank, {**asset, "_edge": edge})
+    out: dict[str, list[dict]] = {}
+    for (product_id, _asset_id), (rank, asset) in sorted(
+        candidates.items(), key=lambda item: (item[0][0], item[1][0])
+    ):
+        asset["_rank"] = rank
+        out.setdefault(product_id, []).append(asset)
     return out
 
 
@@ -328,10 +1344,13 @@ def _collection_campaign_assets(collection: dict, persona_id: str, cache: Option
         target_id = edge.get("target_node_id")
         campaign_id = source_id if source_id in campaign_ids else target_id if target_id in campaign_ids else None
         asset_node_id = target_id if campaign_id == source_id else source_id
-        if not campaign_id or not asset_node_id or asset_node_id in seen:
+        if not campaign_id or not asset_node_id:
             continue
         asset = gallery_by_node.get(str(asset_node_id))
         if not asset:
+            continue
+        asset_identity = str(asset.get("id") or asset.get("knowledge_node_id") or asset_node_id)
+        if asset_identity in seen:
             continue
         campaign_meta = _meta(campaign_by_id.get(campaign_id))
         campaign_binding = campaign_meta.get("page_binding") or {}
@@ -351,7 +1370,7 @@ def _collection_campaign_assets(collection: dict, persona_id: str, cache: Option
             edge=edge,
         )
         out.append(payload)
-        seen.add(str(asset_node_id))
+        seen.add(asset_identity)
     return out
 
 
@@ -535,6 +1554,40 @@ def _products_by_group(products: list[dict], group_ids: list[str]) -> dict[str, 
 def build_menu_payload(persona_slug: str, collection_slug: Optional[str] = None) -> dict:
     persona = _resolve_persona(persona_slug)
     persona_id = persona["id"]
+    cache: dict = {}
+    publication = _public_graph_context(persona_slug, persona_id)
+    if publication and publication.get("source") == "graph_publication_v3":
+        document_persona = ((publication.get("document") or {}).get("persona") or {})
+        identity_errors = []
+        if str(document_persona.get("id") or "") != str(persona_id):
+            identity_errors.append("document.persona.id:mismatch")
+        if str(document_persona.get("slug") or "") != persona_slug:
+            identity_errors.append("document.persona.slug:mismatch")
+        if identity_errors:
+            raise HTTPException(status_code=503, detail={
+                "code": "graph_publication_identity_invalid",
+                "persona_id": persona_id,
+                "errors": identity_errors,
+            })
+        canonical_site = _canonical_site_from_publication(publication, cache)
+        if collection_slug is not None and collection_slug != canonical_site["default_collection_slug"]:
+            raise HTTPException(404, f"Collection not found in active publication: {collection_slug}")
+        catalog = _compiled_catalog_payload(
+            publication, site=canonical_site, persona=persona,
+            persona_slug=persona_slug, cache=cache,
+        )
+        payload = {
+            "ok": True,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "site": canonical_site,
+            **catalog,
+            "publication_id": publication.get("publication_id"),
+            "graph_version": publication.get("version"),
+            "graph_checksum": publication.get("checksum"),
+            "action_node_id": publication.get("action_node_id"),
+        }
+        payload["projection_checksum"] = _canonical_json_checksum(payload)
+        return payload
     effective_collection_slug = collection_slug or _default_collection_slug(persona, persona_slug)
 
     # Try to find an explicit collection node. Migration 039 canonicalized
@@ -567,8 +1620,6 @@ def build_menu_payload(persona_slug: str, collection_slug: Optional[str] = None)
                 "synthesized": True,
             },
         }
-
-    cache: dict = {}
 
     # Categories = canonical product_group nodes for this persona. When a
     # collection_slug filter is provided AND any group carries that slug in
@@ -671,7 +1722,7 @@ def build_menu_payload(persona_slug: str, collection_slug: Optional[str] = None)
                 if product_cover:
                     cover_url = product_cover
                     break
-        category_payloads.append({
+        category_payload = {
             "id": category["id"],
             "slug": category_slug,
             "title": category.get("title") or category_slug,
@@ -681,10 +1732,13 @@ def build_menu_payload(persona_slug: str, collection_slug: Optional[str] = None)
             "cover_asset_id": (cover_asset or {}).get("id") if cover_asset else None,
             "cover_edge_id": (cover_edge or {}).get("id") if cover_edge else None,
             "cover_slot_key": LandingSlot.PRODUCT_GROUP_COVER.value if cover_asset else None,
+            "cover_width": _positive_int((cover_asset or {}).get("width") or _meta(cover_asset).get("width")),
+            "cover_height": _positive_int((cover_asset or {}).get("height") or _meta(cover_asset).get("height")),
             "visible": metadata.get("visible") is not False and category.get("status") != "archived",
             "position": _read_int(metadata.get("position") or metadata.get("sort_order"), 0),
             "products": sorted(products_by_category.get(str(category_slug), []), key=lambda row: row.get("position", 0)),
-        })
+        }
+        category_payloads.append(category_payload)
 
     collection_meta = _meta(collection)
     collection_cover = ""
@@ -703,6 +1757,8 @@ def build_menu_payload(persona_slug: str, collection_slug: Optional[str] = None)
     persona_display_name = persona.get("name") or persona_slug
 
     brand = _brand_payload(persona, persona_slug, cache=cache)
+    # GraphBundle v3 owns the complete public-site contract.  The format
+    # registry/persona config belongs only to the legacy path.
     formats = supabase_client.list_public_site_formats(enabled_only=True)
 
     payload = {
@@ -710,9 +1766,7 @@ def build_menu_payload(persona_slug: str, collection_slug: Optional[str] = None)
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "active_collection_id": collection["id"],
         "site": public_site.public_site_payload(
-            persona,
-            formats,
-            catalog_url=persona.get("catalog_url"),
+            persona, formats, catalog_url=persona.get("catalog_url"),
         ),
         "persona": {
             "id": persona_id,
@@ -731,7 +1785,6 @@ def build_menu_payload(persona_slug: str, collection_slug: Optional[str] = None)
             }],
         },
     }
-    publication = _public_graph_context(persona_slug)
     if publication is not None:
         action = publication.get("action")
         allowed = publication.get("allowed") or {}
@@ -739,6 +1792,18 @@ def build_menu_payload(persona_slug: str, collection_slug: Optional[str] = None)
         collection_payload = payload["persona"]["collections"][0]
         filtered_categories = []
         for category in collection_payload.get("categories") or []:
+            if (
+                category.get("cover_asset_id")
+                and str(category.get("cover_asset_id")) not in asset_ids
+            ):
+                category.update({
+                    "cover": "",
+                    "cover_asset_id": None,
+                    "cover_edge_id": None,
+                    "cover_slot_key": None,
+                    "cover_width": None,
+                    "cover_height": None,
+                })
             products = []
             for product in category.get("products") or []:
                 if product.get("slug") not in allowed.get("product", set()):
@@ -774,9 +1839,10 @@ def build_menu_payload(persona_slug: str, collection_slug: Optional[str] = None)
                     site[key] = projection[key]
             payload["site"] = site
         payload.update({
+            "publication_id": publication.get("publication_id"),
             "graph_version": publication.get("version"),
             "graph_checksum": publication.get("checksum"),
-            "action_node_id": action.id if action else None,
+            "action_node_id": publication.get("action_node_id") or (action.id if action else None),
         })
         payload["projection_checksum"] = _canonical_json_checksum(payload)
     return payload

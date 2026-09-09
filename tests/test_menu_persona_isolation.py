@@ -224,9 +224,21 @@ def test_menu_payload_exposes_public_site_contract(store: _Store, monkeypatch) -
         },
     }
     monkeypatch.setattr(menu_route.supabase_client, "get_persona", lambda slug: persona if slug == "vz-lupas" else None)
+    monkeypatch.setattr(menu_route, "_public_graph_context", lambda *_args: {
+        "publication_id": "publication-v3",
+        "version": 28,
+        "checksum": "sha256:active",
+        "action": None,
+        "action_node_id": "gallery:vz",
+        "allowed": {},
+        "asset_registry_ids": set(),
+    })
 
     payload = menu_route.build_menu_payload("vz-lupas")
 
+    assert payload["publication_id"] == "publication-v3"
+    assert payload["graph_version"] == 28
+    assert payload["graph_checksum"] == "sha256:active"
     assert payload["site"]["slug"] == "vitrine-vz"
     assert payload["site"]["name"] == "Vitrine VZ"
     assert payload["site"]["format_key"] == "landing_page"

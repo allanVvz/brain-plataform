@@ -1,0 +1,79 @@
+{
+  "manifest_version": "1.0",
+  "persona_slug": "tock-fatal",
+  "source": "operator_supplied_product_media_2026-09-09",
+  "source_directory": "C:/Users/allan/Downloads/4 produtos - tock - lp/part  2",
+  "repository_binaries_present": false,
+  "baseline_publication": {
+    "publication_id": "44701b61-b09b-4f5f-b218-c19dc973a551",
+    "version": 27,
+    "checksum": "sha256:172c7e53efaf2ffe5b3035ac82cbe3f490615b6f8408a38045dee2a1b20199b3"
+  },
+  "publication_allowed": false,
+  "reason": "Evidence manifest only. Binary copies are not kept in Git; upload must read the operator source files and activation requires a checksum-reviewed PublicationPlan built from the active publication.",
+  "assets": [
+    {
+      "file": "body-estampado.jpeg",
+      "original_filename": "body Estampado 39,90.jpeg",
+      "mime_type": "image/jpeg",
+      "width": 591,
+      "height": 788,
+      "bytes": 70961,
+      "sha256": "45168735fe1c325b78fdb613825e2c5ecb426782f60cfde250f8fdffefadf95f",
+      "product_node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-body-estampado",
+      "product_title": "Body estampado",
+      "mapping_status": "validated"
+    },
+    {
+      "file": "bota-vizzano.jpeg",
+      "original_filename": "Bota Vizzano 210,90.jpeg",
+      "mime_type": "image/jpeg",
+      "width": 591,
+      "height": 788,
+      "bytes": 73820,
+      "sha256": "bfb269bb5e6a429fe8b830e57c2cc324fce6c155cc5ca8a11f4d98b1300e401b",
+      "product_node_id": "product:tock-calcados-bota-vizzano",
+      "product_title": "Bota Vizzano",
+      "mapping_status": "validated"
+    },
+    {
+      "file": "calca-cargo-com-bolso.jpeg",
+      "original_filename": "Calca cargo com bolso 129,90.jpeg",
+      "mime_type": "image/jpeg",
+      "width": 591,
+      "height": 788,
+      "bytes": 144422,
+      "sha256": "f2e0b54dad212264c46d3d4e70f1644f5b41d7a055c542b403980b3159d2a6be",
+      "product_node_id": "product:tock-calcas-leggings-shorts-e-partes-de-baixo-calca-cargo-com-bolso",
+      "product_title": "Calça cargo com bolso",
+      "mapping_status": "validated"
+    },
+    {
+      "file": "conjunto-em-mousse-189-90.jpeg",
+      "original_filename": "Conjunto Mousse 189,90.jpeg",
+      "mime_type": "image/jpeg",
+      "width": 591,
+      "height": 788,
+      "bytes": 68219,
+      "sha256": "3708591c8dc542af21e312b780de9a54b102c264534c5be260d09a4b8026d8ee",
+      "product_node_id": "product:tock-conjuntos-conjunto-em-mousse-1",
+      "product_title": "Conjunto em mousse — R$ 189,90",
+      "mapping_status": "validated",
+      "mapping_note": "Mapped to the R$ 189,90 variant, not the separate R$ 169,90 product."
+    },
+    {
+      "file": "vestido-drapeado.jpeg",
+      "original_filename": "Vestido Drapeado 89,90.jpeg",
+      "mime_type": "image/jpeg",
+      "width": 548,
+      "height": 731,
+      "bytes": 45398,
+      "sha256": "0bce78232cbaaf03e0448b638766707457e9c7ffe6868cba1642c52ef4580eac",
+      "product_node_id": "product:tock-vestidos-vestido-drapeado",
+      "product_title": "Vestido drapeado",
+      "mapping_status": "validated",
+      "validated_description": "Vestido feminino curto, de gola alta, com painel rendado e efeito drapeado.",
+      "mapping_note": "The operator filename and R$ 89,90 price match the existing product. Visual review confirms a high neckline, lace panel and draped construction."
+    }
+  ]
+}
