@@ -98,6 +98,10 @@ def test_public_site_preflight_requires_all_groups_and_only_imaged_products() ->
     ])
     bundle["edges"].extend([
         {"source": "asset:dress", "target": "gallery:default", "relation_type": "publishes_to", "metadata": {"active": True}},
+        # Asset publicado precisa da ligacao canonica com a Gallery; sem ela a
+        # invariante de gallery_asset dispara antes e o teste nunca chegaria a
+        # exercitar as checagens de ProductGroup/produto sem imagem.
+        {"source": "asset:dress", "target": "gallery:default", "relation_type": "gallery_asset", "metadata": {"active": True}},
         {"source": "product:dress", "target": "asset:dress", "relation_type": "uses_asset", "metadata": {"role": "product_image"}},
     ])
     with pytest.raises(ValueError, match="must publish every ProductGroup"):

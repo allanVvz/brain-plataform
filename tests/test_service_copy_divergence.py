@@ -239,6 +239,12 @@ DUPLICATED_BASELINE: tuple[tuple[str, str], ...] = (
 # blast radius made visible: graph_compiler_v3.py itself is on this list for
 # both control-plane and conversation-runtime, still uncorrected.
 DIVERGENT_BASELINE: tuple[tuple[str, str], ...] = (
+    # A ferramenta de correlacao Produto -> Asset da Sofia foi adicionada so
+    # ao servico deployado, junto de asset_product_correlation.py, que nao
+    # existe no monolito. Portar para api/services/ nao mudaria producao e so
+    # criaria uma segunda copia para divergir depois.
+    ("control-plane", "agent_harness.py"),
+    ("control-plane", "agent_harness_tools.py"),
     ("control-plane", "campaigns_service.py"),
     ("control-plane", "conversation_repetition.py"),
     ("control-plane", "deepseek_n8n_service.py"),
