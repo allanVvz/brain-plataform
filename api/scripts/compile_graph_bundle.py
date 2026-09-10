@@ -27,6 +27,12 @@ def _json_file(value: str) -> dict:
 
 
 def main() -> int:
+    # Mesmo motivo da copia do control-plane: no Windows o stdout assume cp1252
+    # e os acentos do portugues saem como bytes invalidos, corrompendo o arquivo
+    # que vira baseline do proximo `--against` (aparecia como
+    # `baseline_checksum_invalid`, culpando o bundle).
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(
         description="Compile a GraphBundle without publishing or writing production state."
     )
