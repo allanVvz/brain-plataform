@@ -127,6 +127,38 @@ def register_release_batch(
     }).execute().data
 
 
+def resume_safety_paused_binding_without_backlog(
+    *,
+    persona_id: str,
+    binding_id: str,
+    reason: str,
+    idempotency_key: str,
+    release_sha: str | None = None,
+    actor_user_id: str | None = None,
+) -> dict[str, Any]:
+    """Clear a persona binding pause after candidate selection returns empty.
+
+    The database operation records a zero-item release batch and its system
+    event in the same transaction as the binding update.  Stale conversations
+    remain parked in waiting_human and can never become outbound work here.
+    """
+    if not persona_id or not binding_id:
+        raise HTTPException(422, "persona_id e binding_id sao obrigatorios.")
+    if not idempotency_key or not reason:
+        raise HTTPException(422, "idempotency_key e reason sao obrigatorios.")
+    return supabase_client.get_client().rpc(
+        "resume_safety_paused_binding_v1",
+        {
+            "p_persona_id": persona_id,
+            "p_binding_id": binding_id,
+            "p_reason": reason,
+            "p_idempotency_key": idempotency_key,
+            "p_release_sha": release_sha,
+            "p_actor_user_id": _uuid_or_none(actor_user_id),
+        },
+    ).execute().data
+
+
 def list_release_batches(persona_id: str | None = None) -> list[dict]:
     query = supabase_client.get_client().table("release_batches").select("*").order(
         "created_at", desc=True
