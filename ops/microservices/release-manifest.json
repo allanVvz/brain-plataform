@@ -1,5 +1,5 @@
 {
-  "source_sha": "930fda22ca4e75c040f7de31a5efc436e6b9875c",
+  "source_sha": "082c7be02dae6166193a2f2a53844ee7b071e4c9",
   "contracts_version": "3.0.0",
   "contracts_checksum": "sha256:c2418a764622b7c71fb62fded53669c5292db959a8c9dd5332a8a4a59cc49ec7",
   "schema_version": 139,
@@ -8,28 +8,28 @@
   "services": {
     "gateway": {
       "repository": "allanVvz/brain-plataform",
-      "sha": "930fda22ca4e75c040f7de31a5efc436e6b9875c",
+      "sha": "082c7be02dae6166193a2f2a53844ee7b071e4c9",
       "digest": "sha256:dcdadd274e0a7e11179dd445808cfc74060a8973191f63bb35164f6826917bfb",
       "required_schema_version": 135,
       "build_context": "apps/gateway"
     },
     "control-plane": {
       "repository": "allanVvz/brain-plataform",
-      "sha": "930fda22ca4e75c040f7de31a5efc436e6b9875c",
-      "digest": "sha256:aa51e1d826dc867b9cd1fd5750c517cafbd9f4dcf08b63e0dcee2ac97185d37f",
-      "required_schema_version": 137,
+      "sha": "082c7be02dae6166193a2f2a53844ee7b071e4c9",
+      "digest": "sha256:add6eaa806ec6e09e68678e2ac761ca5f814f88b61e7f4cabb63abc40f48cfff",
+      "required_schema_version": 139,
       "build_context": "apps/control-plane"
     },
     "conversation-runtime": {
       "repository": "allanVvz/brain-plataform",
-      "sha": "930fda22ca4e75c040f7de31a5efc436e6b9875c",
-      "digest": "sha256:7716ab34d0835837bf091d9c66da13b1abfbf237552f922cb045aa9a93907516",
-      "required_schema_version": 136,
+      "sha": "082c7be02dae6166193a2f2a53844ee7b071e4c9",
+      "digest": "sha256:79e7776943c60ed230a5e21663219b695ffbcba8567e2a24f0a12b331da4ce93",
+      "required_schema_version": 139,
       "build_context": "apps/conversation-runtime"
     },
     "transport": {
       "repository": "allanVvz/brain-plataform",
-      "sha": "930fda22ca4e75c040f7de31a5efc436e6b9875c",
+      "sha": "082c7be02dae6166193a2f2a53844ee7b071e4c9",
       "digest": "sha256:a91c0f7514ad2e744619eaf1f7035db64303661e0b49681e7ce3e51a6b910a91",
       "required_schema_version": 135,
       "build_context": "apps/transport"
