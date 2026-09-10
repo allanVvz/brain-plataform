@@ -64,3 +64,26 @@ def test_source_scope_still_rejects_an_unplanned_projection() -> None:
         assert str(exc) == "source_graph_has_unplanned_nodes:asset:unexpected"
     else:
         raise AssertionError("unplanned projection must remain blocked")
+
+
+def test_source_scope_compares_edges_by_projection_ids_not_graph_aliases() -> None:
+    persona_id = "00000000-0000-0000-0000-000000000001"
+    asset_id = "39129cc8-9a94-4824-8306-989ffc81eabe"
+    normalized = {
+        "nodes": [
+            {"id": "persona:target", "projection_node_id": persona_id, "node_type": "persona", "slug": "target"},
+            {"id": "asset:canonical", "projection_node_id": asset_id, "node_type": "asset", "slug": "registry-slug"},
+        ],
+        "edges": [
+            {"source": "persona:target", "target": "asset:canonical", "relation_type": "uses_asset"}
+        ],
+    }
+    source_rows = [
+        {"id": persona_id, "node_type": "persona", "slug": "target", "status": "validated"},
+        {"id": asset_id, "node_type": "asset", "slug": "historical-slug", "status": "validated", "metadata": {"graph_json_node_id": "node:asset:old-alias"}},
+    ]
+    source_edges = [
+        {"source_node_id": persona_id, "target_node_id": asset_id, "relation_type": "uses_asset", "metadata": {"active": True}}
+    ]
+
+    graph_bundle_publisher._preflight_source_scope(normalized, source_rows, source_edges)

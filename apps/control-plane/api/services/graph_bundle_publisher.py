@@ -53,18 +53,22 @@ def _preflight_source_scope(
             )
         )
 
-    stable_by_projection = {
-        str(row.get("id")): graph_compiler_v3._stable_node_id(row)
-        for row in node_rows
+    projection_by_stable = {
+        node["id"]: str(node.get("projection_node_id") or "")
+        for node in normalized["nodes"]
     }
     desired_edges = {
-        (edge["source"], edge["target"], edge["relation_type"])
+        (
+            projection_by_stable.get(edge["source"], ""),
+            projection_by_stable.get(edge["target"], ""),
+            edge["relation_type"],
+        )
         for edge in normalized["edges"]
     }
     existing_edges = {
         (
-            stable_by_projection.get(str(row.get("source_node_id")), ""),
-            stable_by_projection.get(str(row.get("target_node_id")), ""),
+            str(row.get("source_node_id") or ""),
+            str(row.get("target_node_id") or ""),
             str(row.get("relation_type") or ""),
         )
         for row in edge_rows if _active_edge(row)
