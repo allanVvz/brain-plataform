@@ -54167,6 +54167,126 @@
         },
         "graph_json_node_id": "tone:tock-vitoria-voice"
       }
+    },
+    {
+      "id": "asset:tock-blusas-bodies-camisas-e-partes-de-cima-blusa-em-poa-primary-image",
+      "node_type": "asset",
+      "slug": "blusas-bodies-camisas-e-partes-de-cima-blusa-em-poa-primary-image",
+      "title": "Imagem principal - Blusa em POÁ — R$ 39,90",
+      "summary": "Imagem aprovada do produto Blusa em POÁ — R$ 39,90.",
+      "tags": [
+        "catalogo",
+        "imagem-aprovada",
+        "produto"
+      ],
+      "status": "validated",
+      "projection_node_id": "90361cd1-a70f-5080-a2a0-6ef188a9be5b",
+      "data": {
+        "media": {
+          "kind": "image",
+          "mime": "image/jpeg",
+          "path": "tock-fatal/product-media/blusa-em-poa.jpeg",
+          "bucket": "assets-raw",
+          "sha256": "0917ac0c53bb5a0c0026de6243ca4b5039b348b9ffbebcfb279f3eb367caebdb",
+          "filename": "blusa-em-poa.jpeg"
+        },
+        "source": "operator_approved_tock_product_media_2026-08-26",
+        "status": "validated",
+        "asset_role": "primary_product_media",
+        "product_node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-blusa-em-poa",
+        "graph_json_node_id": "asset:tock-blusas-bodies-camisas-e-partes-de-cima-blusa-em-poa-primary-image",
+        "local_evidence_path": "docs/sdr/tock-fatal/product-media/blusa-em-poa.jpeg"
+      }
+    },
+    {
+      "id": "asset:tock-blusas-bodies-camisas-e-partes-de-cima-blusa-tule-texturizado-primary-image",
+      "node_type": "asset",
+      "slug": "blusas-bodies-camisas-e-partes-de-cima-blusa-tule-texturizado-primary-image",
+      "title": "Imagem principal - Blusa tule texturizado",
+      "summary": "Imagem aprovada do produto Blusa tule texturizado.",
+      "tags": [
+        "catalogo",
+        "imagem-aprovada",
+        "produto"
+      ],
+      "status": "validated",
+      "projection_node_id": "b8d33cb2-00c8-577f-94a8-20a0b2f584ac",
+      "data": {
+        "media": {
+          "kind": "image",
+          "mime": "image/jpeg",
+          "path": "tock-fatal/product-media/blusa-tule-texturizado.jpeg",
+          "bucket": "assets-raw",
+          "sha256": "1689b51c577293d7f1b6f9cdd3a5a5e942db6d93f445d6c0f957f81a3fbc6817",
+          "filename": "blusa-tule-texturizado.jpeg"
+        },
+        "source": "operator_approved_tock_product_media_2026-08-26",
+        "status": "validated",
+        "asset_role": "primary_product_media",
+        "product_node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-blusa-tule-texturizado",
+        "graph_json_node_id": "asset:tock-blusas-bodies-camisas-e-partes-de-cima-blusa-tule-texturizado-primary-image",
+        "local_evidence_path": "docs/sdr/tock-fatal/product-media/blusa-tule-texturizado.jpeg"
+      }
+    },
+    {
+      "id": "asset:tock-blusas-bodies-camisas-e-partes-de-cima-body-mula-manca-primary-image",
+      "node_type": "asset",
+      "slug": "blusas-bodies-camisas-e-partes-de-cima-body-mula-manca-primary-image",
+      "title": "Imagem principal - Body mula manca",
+      "summary": "Imagem aprovada do produto Body mula manca.",
+      "tags": [
+        "catalogo",
+        "imagem-aprovada",
+        "produto"
+      ],
+      "status": "validated",
+      "projection_node_id": "9c6489f1-9671-5c3c-bea1-02f6aed54e3b",
+      "data": {
+        "media": {
+          "kind": "image",
+          "mime": "image/jpeg",
+          "path": "tock-fatal/product-media/body-mula-manca.jpeg",
+          "bucket": "assets-raw",
+          "sha256": "b303cc2339a540e2cd0eb85b671c0110ef77e6d76f503a3c870eb9758130778e",
+          "filename": "body-mula-manca.jpeg"
+        },
+        "source": "operator_approved_tock_product_media_2026-08-26",
+        "status": "validated",
+        "asset_role": "primary_product_media",
+        "product_node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-body-mula-manca",
+        "graph_json_node_id": "asset:tock-blusas-bodies-camisas-e-partes-de-cima-body-mula-manca-primary-image",
+        "local_evidence_path": "docs/sdr/tock-fatal/product-media/body-mula-manca.jpeg"
+      }
+    },
+    {
+      "id": "asset:tock-blusas-bodies-camisas-e-partes-de-cima-body-rendado-primary-image",
+      "node_type": "asset",
+      "slug": "blusas-bodies-camisas-e-partes-de-cima-body-rendado-primary-image",
+      "title": "Imagem principal - Body rendado",
+      "summary": "Imagem aprovada do produto Body rendado.",
+      "tags": [
+        "catalogo",
+        "imagem-aprovada",
+        "produto"
+      ],
+      "status": "validated",
+      "projection_node_id": "44eafe49-9b25-51ff-af91-6375cff13d1d",
+      "data": {
+        "media": {
+          "kind": "image",
+          "mime": "image/jpeg",
+          "path": "tock-fatal/product-media/body-rendado.jpeg",
+          "bucket": "assets-raw",
+          "sha256": "74ece5d0aeb7457ddd4bcb21882038519af9829e80cd504aa400e2b7924c7768",
+          "filename": "body-rendado.jpeg"
+        },
+        "source": "operator_approved_tock_product_media_2026-08-26",
+        "status": "validated",
+        "asset_role": "primary_product_media",
+        "product_node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-body-rendado",
+        "graph_json_node_id": "asset:tock-blusas-bodies-camisas-e-partes-de-cima-body-rendado-primary-image",
+        "local_evidence_path": "docs/sdr/tock-fatal/product-media/body-rendado.jpeg"
+      }
     }
   ],
   "edges": [
@@ -78460,6 +78580,94 @@
       "metadata": {
         "active": true,
         "source": "operator_requested_product_asset_correlation_2026-09-10"
+      }
+    },
+    {
+      "id": "edge:tock-asset-gallery-blusas-bodies-camisas-e-partes-de-cima-blusa-em-poa",
+      "source": "asset:tock-blusas-bodies-camisas-e-partes-de-cima-blusa-em-poa-primary-image",
+      "target": "gallery:tock-default",
+      "relation_type": "gallery_asset",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:tock-asset-gallery-blusas-bodies-camisas-e-partes-de-cima-blusa-em-poa"
+      }
+    },
+    {
+      "id": "edge:tock-asset-gallery-blusas-bodies-camisas-e-partes-de-cima-blusa-tule-texturizado",
+      "source": "asset:tock-blusas-bodies-camisas-e-partes-de-cima-blusa-tule-texturizado-primary-image",
+      "target": "gallery:tock-default",
+      "relation_type": "gallery_asset",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:tock-asset-gallery-blusas-bodies-camisas-e-partes-de-cima-blusa-tule-texturizado"
+      }
+    },
+    {
+      "id": "edge:tock-asset-gallery-blusas-bodies-camisas-e-partes-de-cima-body-mula-manca",
+      "source": "asset:tock-blusas-bodies-camisas-e-partes-de-cima-body-mula-manca-primary-image",
+      "target": "gallery:tock-default",
+      "relation_type": "gallery_asset",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:tock-asset-gallery-blusas-bodies-camisas-e-partes-de-cima-body-mula-manca"
+      }
+    },
+    {
+      "id": "edge:tock-asset-gallery-blusas-bodies-camisas-e-partes-de-cima-body-rendado",
+      "source": "asset:tock-blusas-bodies-camisas-e-partes-de-cima-body-rendado-primary-image",
+      "target": "gallery:tock-default",
+      "relation_type": "gallery_asset",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:tock-asset-gallery-blusas-bodies-camisas-e-partes-de-cima-body-rendado"
+      }
+    },
+    {
+      "id": "edge:tock-product-asset-blusas-bodies-camisas-e-partes-de-cima-blusa-em-poa",
+      "source": "product:tock-blusas-bodies-camisas-e-partes-de-cima-blusa-em-poa",
+      "target": "asset:tock-blusas-bodies-camisas-e-partes-de-cima-blusa-em-poa-primary-image",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:tock-product-asset-blusas-bodies-camisas-e-partes-de-cima-blusa-em-poa"
+      }
+    },
+    {
+      "id": "edge:tock-product-asset-blusas-bodies-camisas-e-partes-de-cima-blusa-tule-texturizado",
+      "source": "product:tock-blusas-bodies-camisas-e-partes-de-cima-blusa-tule-texturizado",
+      "target": "asset:tock-blusas-bodies-camisas-e-partes-de-cima-blusa-tule-texturizado-primary-image",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:tock-product-asset-blusas-bodies-camisas-e-partes-de-cima-blusa-tule-texturizado"
+      }
+    },
+    {
+      "id": "edge:tock-product-asset-blusas-bodies-camisas-e-partes-de-cima-body-mula-manca",
+      "source": "product:tock-blusas-bodies-camisas-e-partes-de-cima-body-mula-manca",
+      "target": "asset:tock-blusas-bodies-camisas-e-partes-de-cima-body-mula-manca-primary-image",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:tock-product-asset-blusas-bodies-camisas-e-partes-de-cima-body-mula-manca"
+      }
+    },
+    {
+      "id": "edge:tock-product-asset-blusas-bodies-camisas-e-partes-de-cima-body-rendado",
+      "source": "product:tock-blusas-bodies-camisas-e-partes-de-cima-body-rendado",
+      "target": "asset:tock-blusas-bodies-camisas-e-partes-de-cima-body-rendado-primary-image",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:tock-product-asset-blusas-bodies-camisas-e-partes-de-cima-body-rendado"
       }
     }
   ]
