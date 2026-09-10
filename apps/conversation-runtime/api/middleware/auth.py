@@ -98,7 +98,15 @@ def is_public_path(path: str) -> bool:
     if path in PUBLIC_EXACT_PATHS:
         return True
     if path.startswith("/internal/v1/runtime/leads/"):
-        for suffix in ("/pause", "/resume", "/acknowledge-handoff", "/handoff"):
+        # `/resume-answer-window` e leitura pura e passa pela mesma checagem de
+        # webhook token na rota. Sem estar aqui, o middleware devolvia 401 antes
+        # de chegar na rota -- e o release_queue trata falha de chamada como
+        # "lead inelegivel", entao a liberacao em lote pulava todas as leads em
+        # silencio, sem erro visivel.
+        for suffix in (
+            "/pause", "/resume", "/resume-answer-window",
+            "/acknowledge-handoff", "/handoff",
+        ):
             if path.endswith(suffix):
                 return path.removeprefix("/internal/v1/runtime/leads/").removesuffix(
                     suffix
