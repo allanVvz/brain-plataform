@@ -16,7 +16,7 @@ from services import graph_compiler_v3
 
 BUNDLE_VERSION = "1.0"
 PUBLISHABLE_STATUSES = set(graph_compiler_v3.PUBLISHED_STATUSES)
-DETACHED_TERMINAL_TYPES = {"embed", "embedded", "gallery"}
+DETACHED_TERMINAL_TYPES = {"embed", "embedded", "gallery", "conversation"}
 SALES_QUALIFICATION_COPY_KEYS = (
     "summary_template",
     "confirmation_question",
@@ -210,7 +210,7 @@ def normalize_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
                     errors.append(f"bundle_primary_cycle:{node_id}:{current}")
                     break
                 visited.add(current)
-            if current != root_id:
+            if current != root_id and type_by_id.get(current) not in DETACHED_TERMINAL_TYPES:
                 errors.append(f"bundle_path_not_rooted_in_persona:{node_id}:{current}")
 
     metadata = (

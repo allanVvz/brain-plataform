@@ -6467,6 +6467,7 @@ def update_asset_graph_refs(
     asset_id: str,
     *,
     knowledge_node_id: Optional[str] = None,
+    knowledge_item_id: Optional[str] = None,
     gallery_edge_id: Optional[str] = None,
     parent_node_id: Optional[str] = None,
     parent_edge_id: Optional[str] = None,
@@ -6485,6 +6486,8 @@ def update_asset_graph_refs(
     if knowledge_node_id:
         metadata["knowledge_node_id"] = knowledge_node_id
         graph_meta["knowledge_node_id"] = knowledge_node_id
+    if knowledge_item_id:
+        metadata["knowledge_item_id"] = knowledge_item_id
     if gallery_edge_id:
         metadata["gallery_edge_id"] = gallery_edge_id
         graph_meta["gallery_edge_id"] = gallery_edge_id

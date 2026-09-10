@@ -8,20 +8,20 @@ from services import knowledge_graph, supabase_client
 logger = logging.getLogger("services.inbound_media_graph")
 
 
-def _audience_node(persona_id: str, recipient_id: str | None) -> dict | None:
-    if not recipient_id:
-        return None
+def _audience_node(persona_id: str, recipient_id: str | None, lead_id: int | str | None = None) -> dict | None:
     client = supabase_client.get_client()
     try:
         recipients = client.table("campaign_recipients").select(
             "campaign_revision_id"
-        ).eq("id", recipient_id).limit(1).execute().data or []
-        if not recipients:
-            return None
+        ).eq("id", recipient_id).limit(1).execute().data or [] if recipient_id else []
         revisions = client.table("campaign_revisions").select("audience_id").eq(
             "id", recipients[0].get("campaign_revision_id")
-        ).limit(1).execute().data or []
+        ).limit(1).execute().data or [] if recipients else []
         audience_id = (revisions[0] if revisions else {}).get("audience_id")
+        if not audience_id and lead_id is not None:
+            memberships = supabase_client.get_lead_memberships(int(lead_id))
+            matching = [row for row in memberships if str(((row.get("audience") or {}).get("persona_id") or "")) == str(persona_id)]
+            audience_id = (matching[-1] if matching else {}).get("audience_id")
         if not audience_id:
             return None
     except Exception as exc:
@@ -36,7 +36,7 @@ def _audience_node(persona_id: str, recipient_id: str | None) -> dict | None:
     return supabase_client.sync_audience_node(audience) if audience else None
 
 
-def _conversation_node(persona_id: str, lead: dict, audience: dict | None) -> dict | None:
+def _conversation_node(persona_id: str, lead: dict, audience: dict | None, tracking: dict | None = None) -> dict | None:
     lead_id = lead.get("id")
     if not lead_id:
         return None
@@ -45,7 +45,7 @@ def _conversation_node(persona_id: str, lead: dict, audience: dict | None) -> di
         "persona_id": persona_id, "source_table": "leads", "node_type": "conversation",
         "slug": f"conversa-{lead_id}", "title": f"Conversa — {display}",
         "summary": f"Thread de WhatsApp com {display}.", "tags": ["conversa", "whatsapp"],
-        "metadata": {"lead_id": lead_id, "audience_node_id": (audience or {}).get("id"), "open_url": "/messages", "rag_eligible": False},
+        "metadata": {"lead_id": lead_id, "audience_node_id": (audience or {}).get("id"), "tracking_refs": {k: v for k, v in (tracking or {}).items() if v}, "open_url": "/messages", "rag_eligible": False, "public_site_eligible": False},
         "status": "active", "level": 106, "importance": 0.5, "confidence": 1.0,
     })
     if node and node.get("id") and audience and audience.get("id"):
@@ -63,13 +63,20 @@ def attach(asset_id: str) -> dict:
     persona_id, lead_id = asset.get("persona_id"), asset.get("lead_id")
     if not persona_id or not lead_id:
         return {"attached": False, "reason": "missing_persona_or_lead"}
-    audience = _audience_node(str(persona_id), asset.get("campaign_recipient_id"))
+    metadata = asset.get("metadata") or {}
+    audience = _audience_node(str(persona_id), asset.get("campaign_recipient_id"), lead_id)
     conversation = _conversation_node(
-        str(persona_id), supabase_client.get_lead(str(lead_id)) or {"id": lead_id}, audience
+        str(persona_id), supabase_client.get_lead(str(lead_id)) or {"id": lead_id}, audience,
+        {
+            "campaign_recipient_id": asset.get("campaign_recipient_id"),
+            "message_id": asset.get("message_id") or metadata.get("message_id"),
+            "external_message_id": metadata.get("external_message_id"),
+            "pixel_event_id": metadata.get("pixel_event_id"),
+            "origin_ref": metadata.get("origin_ref"),
+        },
     )
     if not conversation or not conversation.get("id"):
         return {"attached": False, "reason": "conversation_node_failed"}
-    metadata = asset.get("metadata") or {}
     existing = supabase_client.get_knowledge_node_for_source("assets", asset_id, persona_id=str(persona_id))
     asset_node = existing or supabase_client.upsert_knowledge_node({
         "persona_id": str(persona_id), "source_table": "assets", "source_id": asset_id,
