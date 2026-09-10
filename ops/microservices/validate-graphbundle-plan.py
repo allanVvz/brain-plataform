@@ -72,6 +72,19 @@ def _validate_public_site_projection(bundle: dict) -> None:
         node_id for node_id in published
         if (nodes.get(node_id) or {}).get("node_type") == "asset"
     }
+    gallery_assets = {
+        str(edge.get("source"))
+        for edge in bundle.get("edges") or []
+        if isinstance(edge, dict)
+        and edge.get("relation_type") == "gallery_asset"
+        and str(edge.get("target")) in galleries
+        and (edge.get("metadata") or {}).get("active", True) is not False
+    }
+    _require(
+        published_assets <= gallery_assets,
+        "published Assets must also use canonical gallery_asset edges; missing "
+        + ",".join(sorted(published_assets - gallery_assets)),
+    )
     image_products = {
         str(edge.get("source"))
         for edge in bundle.get("edges") or []
@@ -94,6 +107,22 @@ def _validate_public_site_projection(bundle: dict) -> None:
         f"missing={','.join(sorted(image_products - published_products))};"
         f"without_image={','.join(sorted(published_products - image_products))}",
     )
+    minimums = ((bundle.get("metadata") or {}).get("public_site_invariants") or {}).get("product_carousel_minimums") or {}
+    for group_id, minimum in minimums.items():
+        _require(group_id in all_groups, f"carousel invariant references unknown ProductGroup: {group_id}")
+        group_products = {
+            str(edge.get("target"))
+            for edge in bundle.get("edges") or []
+            if isinstance(edge, dict)
+            and edge.get("source") == group_id
+            and edge.get("relation_type") == "contains"
+            and (nodes.get(str(edge.get("target"))) or {}).get("node_type") == "product"
+        }
+        visible = group_products & image_products
+        _require(
+            len(visible) >= int(minimum),
+            f"ProductGroup {group_id} requires at least {minimum} product slides; found {len(visible)}",
+        )
 
 
 def validate(

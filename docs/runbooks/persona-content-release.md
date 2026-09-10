@@ -40,7 +40,14 @@ PublicationPlan. Para sites publicos, o gate tambem exige:
 - uma unica Brand publicada na Gallery;
 - todos os ProductGroups publicados;
 - exatamente os Products que possuem `uses_asset` para imagem publica;
+- todo Asset publicado ligado a Gallery por `gallery_asset`;
 - nenhum produto sem imagem no output.
+
+Quando o bundle declara
+`metadata.public_site_invariants.product_carousel_minimums`, o gate tambem
+confere a quantidade minima de produtos distintos por grupo. Cada item contado
+precisa de `Product -> Asset (uses_asset)` e slot `product_image` no mesmo edge;
+relacoes por Copy/FAQ, capa de grupo ou `contains` nao contam.
 
 Falha em qualquer gate encerra a operacao sem pausar a persona.
 
