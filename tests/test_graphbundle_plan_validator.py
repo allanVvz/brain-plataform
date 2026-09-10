@@ -55,3 +55,29 @@ def test_graphbundle_plan_validator_rejects_nonpublishable_or_drifted_plan(tmp_p
         MODULE.validate(bundle, plan, persona_slug="test-persona",
                         approved_draft_checksum=draft, approved_runtime_checksum=runtime,
                         bundle_root=bundle.parent)
+
+
+def _public_site_bundle(*, publish_brand: bool) -> dict:
+    edges = []
+    if publish_brand:
+        edges.append({
+            "source": "brand:retail", "target": "gallery:default",
+            "relation_type": "publishes_to", "metadata": {"active": True},
+        })
+    return {
+        "nodes": [
+            {"id": "campaign:page", "node_type": "campaign", "data": {"campaign_subtype": "public_site_page"}},
+            {"id": "brand:retail", "node_type": "brand", "data": {}},
+            {"id": "gallery:default", "node_type": "gallery", "data": {}},
+        ],
+        "edges": edges,
+    }
+
+
+def test_public_site_preflight_requires_one_published_brand() -> None:
+    with pytest.raises(ValueError, match="exactly one published Brand; found 0"):
+        MODULE._validate_public_site_projection(_public_site_bundle(publish_brand=False))
+
+
+def test_public_site_preflight_accepts_one_published_brand() -> None:
+    MODULE._validate_public_site_projection(_public_site_bundle(publish_brand=True))

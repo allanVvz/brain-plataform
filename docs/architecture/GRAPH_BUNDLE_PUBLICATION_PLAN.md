@@ -106,6 +106,28 @@ o gate de checksum deve bloquear esse caso antes de staging/ativação.
 
 ## Publicação aprovada
 
+### Preflight antes de qualquer pausa
+
+O `PublicationPlan` e `validate-graphbundle-plan.py` rodam antes da janela
+produtiva. Quando o bundle contém uma campanha
+`campaign_subtype="public_site_page"`, o preflight exige exatamente uma
+`Gallery` e exatamente um node `Brand` explicitamente ligado a ela por
+`publishes_to`. A presença do Brand no grafo, sem essa concessão pública, não é
+suficiente e deve falhar localmente.
+
+A ordem operacional é fixa: compilar e validar contrato público sem pausa;
+registrar o diff e os checksums; pausar somente a persona no instante do apply;
+materializar, recompilar e ativar; provar `/api/menu/{persona_slug}`; retomar a
+persona. Falha antes do apply não autoriza nem requer pausa. Falha após o apply
+mantém somente a persona alvo pausada; não promove deploy de código nem pausa
+global por consequência.
+
+Incidente de 2026-09-10: a v28 continha dois Brands, mas nenhum deles possuía
+grant `publishes_to` para a Gallery. O compilador conversacional aceitou o grafo
+e o contrato público detectou `site.catalog.brand_node_count:0` somente depois
+da ativação. A validação acima foi incorporada ao workflow para impedir nova
+ocorrência antes da pausa.
+
 O workflow `.github/workflows/publish-content.yml` pertence ao pipeline de
 Markdown/Graph JSON v2 e chama `publish_persona_documents.py`. Ele não publica
 GraphBundle e não aceita o par de checksums draft/runtime.
