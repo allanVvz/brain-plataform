@@ -26,6 +26,11 @@ Deploy de codigo, migration e limpeza continuam operacoes diferentes e exigem
 autorizacao explicita propria. Elas nao devem ser introduzidas silenciosamente
 numa publicacao de conteudo.
 
+Toda migration posterior a `131_microservice_role_grants.sql` que exponha RPC
+publica deve declarar `GRANT EXECUTE` para a role `brain_*` proprietaria e
+executar `NOTIFY pgrst, 'reload schema'`. O workflow valida isso antes do plano;
+um grant apenas para `service_role` nao atende os microsservicos isolados.
+
 ## Gates antes da pausa
 
 Execute `ops/microservices/validate-graphbundle-plan.py` sobre o bundle e o

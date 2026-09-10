@@ -17,6 +17,8 @@ jobs:
         with: {ref: "${{ inputs.manifest_sha }}"}
       - name: Validate immutable release manifest
         run: python ops/microservices/validate-release-manifest.py "${{ inputs.manifest_path }}"
+      - name: Validate isolated microservice RPC grants
+        run: python ops/microservices/validate-migration-service-grants.py supabase/migrations
       - name: Build deterministic schema plan
         run: python ops/microservices/plan-schema-release.py "${{ inputs.manifest_path }}" > schema-release-plan.json
       - name: Export schema target
