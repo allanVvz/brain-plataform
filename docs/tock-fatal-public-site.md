@@ -66,10 +66,24 @@ payload produtivo e o E2E de `/` e `/vitrine` sem importar
 
 ## Renderização e telemetria
 
-Cada grupo permanece visível mesmo sem imagem. Uma capa explícita do grupo tem
-precedência; sem capa, a última roupa associada vira a primeira imagem. Produtos
-com imagem formam os destaques, e setas/teclado/arraste só aparecem com mais de
-uma imagem. Nenhuma contagem de produto é mostrada como estoque.
+Cada grupo permanece visível mesmo sem imagem. Capa de grupo e foto de produto
+são contratos diferentes: `ProductGroup -> Asset` usa o slot
+`product_group_cover`; cada slide usa `Product -> Asset (uses_asset)` e o mesmo
+edge deve conter `role=product_image` ou
+`page_binding.slot_key=product_image:<product_slug>`. O asset precisa de
+`Asset -> Gallery (gallery_asset)` e de registro público aprovado. Associação
+indireta `Copy/FAQ -> Asset`, filename parecido ou um edge `contains` não torna
+a imagem um slide.
+
+O carrossel é sempre derivado de `group.products[]`: foto, nome e `Eu quero!`
+pertencem ao produto daquele slide e emitem `ProductInterest` com seu
+`product_node_id`; o `group_node_id` é somente contexto. Apenas o CTA separado
+`Quero conhecer este estilo` emite `GroupInterest`. Para
+`Blusas, bodies, camisas e partes de cima`, o gate editorial exige no mínimo
+quatro produtos distintos com asset canônico; o candidato v31 projeta cinco:
+Body estampado, Blusa em POÁ, Blusa tule texturizado, Body mula manca e Body
+rendado. Setas, teclado e arraste aparecem com mais de uma imagem. Nenhuma
+contagem de produto é mostrada como estoque.
 
 As páginas emitem `CoverSlideViewed`, `AudienceInterest`, `GroupInterest`,
 `ProductInterest`, `LocationOpened`, `LocationAddressCopied` e

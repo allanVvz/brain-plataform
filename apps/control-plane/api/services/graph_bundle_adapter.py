@@ -233,7 +233,7 @@ def normalized_plan_to_graph_bundle(
     return {"bundle": bundle, "held_back": held_back}
 
 
-_DETACHED_TERMINAL_TYPES = {"embed", "embedded", "gallery"}
+_DETACHED_TERMINAL_TYPES = {"embed", "embedded", "gallery", "conversation"}
 
 
 def ensure_branch_reachability(bundle: dict[str, Any]) -> dict[str, Any]:

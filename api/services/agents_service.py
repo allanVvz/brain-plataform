@@ -315,6 +315,12 @@ _LAST_REQUEUED: dict[int, int] = {}
 # does not have to reload the published graph to reach the same conclusion.
 _LAST_RESUME_WINDOW: dict[int, dict] = {}
 
+# The provider's customer-service window: past it, only an approved template
+# may open a conversation, so free-text reengagement is refused rather than
+# enqueued to be rejected by the Graph API. Mirrors the same 24h proxy the
+# campaign path applies before admitting a plain-text send.
+SESSION_WINDOW_SECONDS = 24 * 60 * 60
+
 
 def _seconds_since_unanswered_customer_message(lead: dict) -> float | None:
     """Age of the customer's last message, or None if it was already answered.
@@ -444,14 +450,15 @@ def reactivation_notice(lead_ref: int, *, reason: str) -> dict:
     # second outbound before the canonical inbound decision exists.
     if window.get("reason") == "unanswered_customer_message_within_window":
         return {"sent": False, "skipped": "pending_inbound_will_be_answered"}
-    if not window.get("may_speak"):
-        return {
-            "sent": False,
-            "skipped": str(window.get("reason") or "resume_window_expired"),
-        }
+    window_reason = str(window.get("reason") or "")
+    if window_reason == "resume_window_expired" and _session_window_closed(lead, window):
+        # Past the provider's customer-service window a plain-text send is
+        # rejected outright. Reopening that conversation is the approved
+        # template path (campaigns), not a courtesy notice from here.
+        return {"sent": False, "skipped": "session_window_closed"}
 
     try:
-        text = _reactivation_text(lead, reason=reason)
+        text = _reactivation_text(lead, reason=reason, window_reason=window_reason)
     except Exception as exc:
         logger.warning("reactivation_notice copy lookup failed: %s", exc)
         return {"sent": False, "skipped": "copy_lookup_failed"}
@@ -475,23 +482,58 @@ def reactivation_notice(lead_ref: int, *, reason: str) -> dict:
     return {"sent": not result.get("deduplicated"), "message_id": message_id}
 
 
-def _reactivation_text(lead: dict, *, reason: str) -> str:
+def _session_window_closed(lead: dict, window: dict) -> bool:
+    """Whether the provider's customer-service window has already closed.
+
+    `resume_answer_window` already measured the age of the unanswered customer
+    message, so this only compares it to the published cap. A persona may
+    shorten the cap, never lengthen it past what the provider allows.
+    """
+    published = _reactivation_policy(lead)
+    try:
+        cap = int(
+            published.get("reengage_pending_inbound_within_seconds")
+            or SESSION_WINDOW_SECONDS
+        )
+    except (TypeError, ValueError):
+        cap = SESSION_WINDOW_SECONDS
+    cap = min(cap, SESSION_WINDOW_SECONDS)
+    try:
+        age = int(window.get("age_seconds") or 0)
+    except (TypeError, ValueError):
+        return True
+    return age > cap
+
+
+def _reactivation_text(lead: dict, *, reason: str, window_reason: str = "") -> str:
     """Pick the published opening that matches why the AI came back."""
     from services import graph_agent_runtime_v3
 
     published = _reactivation_policy(lead)
-    variants = published.get(_reactivation_key(lead, reason=reason)) or []
+    key = _reactivation_key(lead, reason=reason, window_reason=window_reason)
+    variants = published.get(key) or []
     return graph_agent_runtime_v3._unrepeated_variant(
         [str(value) for value in variants], _recent_agent_texts(lead)
     )
 
 
-def _reactivation_key(lead: dict, *, reason: str) -> str:
+def _reactivation_key(lead: dict, *, reason: str, window_reason: str = "") -> str:
+    """Which published block of copy answers *why* the agent is speaking now.
+
+    A resume outside the answer window is not the same conversation picking up
+    where it left off: the customer's message is old enough that replying to it
+    directly reads as the agent talking to itself, so the persona publishes
+    separate copy that reopens the conversation instead of answering it. A
+    persona that publishes none of these keys stays silent, exactly as before.
+    """
     if reason != "journey_closed":
+        if window_reason == "resume_window_expired":
+            return "stale_reengagement"
+        if window_reason == "no_unanswered_customer_message":
+            return "idle_return"
         return "manual"
     outcome = str((lead.get("metadata") or {}).get("journey_outcome") or "")
     return "journey_cancelled" if "cancel" in outcome else "journey_completed"
-
 
 def _recent_agent_texts(lead: dict) -> list[str]:
     """So a second resume does not replay the first notice word for word."""

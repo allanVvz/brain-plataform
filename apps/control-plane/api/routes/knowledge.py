@@ -21,6 +21,7 @@ from services.vault_sync import run_sync, scan_vault
 from services.event_emitter import emit
 from services.audit_helpers import current_actor, summarize_diff
 from services import knowledge_taxonomy
+from services.asset_product_correlation import propose_asset_product_correlations
 from core.landing_slots import LandingSlot, edge_metadata_for_slot, slot_config
 
 VAULT_SOURCE_MODE = os.environ.get("VAULT_SOURCE_MODE")
@@ -151,7 +152,7 @@ class ProductPatchBody(BaseModel):
 class LinkAssetBody(BaseModel):
     asset_id: Optional[str] = None
     asset_node_id: Optional[str] = None
-    relation_type: str = "product_image"
+    relation_type: str = "uses_asset"
     metadata: dict = {}
 
 
@@ -1471,28 +1472,41 @@ def link_product_asset(slug: str, body: LinkAssetBody, request: Request, persona
 
 @router.post("/products/{slug}/sofia-suggest-images")
 def sofia_suggest_product_images(slug: str, body: SofiaSuggestBody, request: Request, persona_slug: Optional[str] = Query(None), persona_id: Optional[str] = Query(None)):
-    resolved_persona_id, _ = _resolve_persona_scope(request, persona_id=persona_id, persona_slug=persona_slug)
+    resolved_persona_id, persona = _resolve_persona_scope(request, persona_id=persona_id, persona_slug=persona_slug)
     product = supabase_client.get_knowledge_node_by_slug(slug, persona_id=resolved_persona_id, node_type="product")
     if not product:
         raise HTTPException(404, "Product not found")
     auth_service.assert_persona_access(request, persona_id=product.get("persona_id"))
     assets = supabase_client.list_product_collection_nodes(persona_id=product.get("persona_id"), node_type="asset", limit=500)
-    existing_edges = supabase_client.list_edges_for_nodes([product["id"]], relation_types=["product_image", "product_has_asset"], limit=1000)
-    linked_asset_ids = {edge.get("source_node_id") if edge.get("target_node_id") == product["id"] else edge.get("target_node_id") for edge in existing_edges}
     product_terms = {str(term).lower() for term in [product.get("slug"), product.get("title"), *(product.get("tags") or [])] if term}
-    suggestions = []
+    candidate_asset_ids = []
     for asset in assets:
-        if asset.get("id") in linked_asset_ids:
-            continue
         haystack = " ".join([str(asset.get("slug") or ""), str(asset.get("title") or ""), " ".join(asset.get("tags") or []), str((asset.get("metadata") or {}).get("original_filename") or ""), str((asset.get("metadata") or {}).get("visual_summary") or "")]).lower()
         score = sum(1 for term in product_terms if term and term in haystack) / max(1, len(product_terms))
         if score < body.min_score:
             continue
-        edge = supabase_client.upsert_knowledge_edge(asset["id"], product["id"], "product_image", persona_id=product.get("persona_id"), weight=max(0.4, min(0.95, score)), metadata={"status": "pending_validation", "proposed_by": "sofia", "created_from": "sofia_suggest_images", "score": score, "primary_tree": False})
-        suggestions.append({"asset": asset, "edge": edge, "score": score})
-        if len(suggestions) >= body.limit:
+        registry_id = str((asset.get("metadata") or {}).get("asset_id") or asset.get("source_id") or "")
+        if registry_id:
+            candidate_asset_ids.append(registry_id)
+        if len(candidate_asset_ids) >= body.limit:
             break
-    return {"ok": True, "suggestions": suggestions}
+    loaded = graph_json_v2_store.load_current(str((persona or {}).get("slug") or persona_slug or ""))
+    if not loaded:
+        raise HTTPException(404, "Graph publicado nao encontrado para a persona.")
+    version, graph = loaded
+    result = propose_asset_product_correlations(
+        {"source": "legacy_sofia_suggest_images"},
+        persona_id=resolved_persona_id,
+        persona_slug=str((persona or {}).get("slug") or persona_slug),
+        asset_ids=candidate_asset_ids,
+        content_sha256=[],
+        correlations=[],
+        expected_graph_version=version,
+        graph_hash=graph_json_v2_store.checksum_graph(graph),
+        idempotency_key=f"sofia-image-preview:{product['id']}:{version}",
+        reason=f"Preview de imagens para {product.get('title') or product.get('slug')}",
+    )
+    return {**result, "suggestions": result.get("candidates") or [], "deprecated_endpoint": True}
 
 
 # ── Knowledge Graph rebuild (admin) ──────────────────────────

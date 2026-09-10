@@ -85,7 +85,6 @@ jobs:
             [[ "$GRAPH_ACTION" == stage || "$GRAPH_ACTION" == activate ]]
             [[ "$BUNDLE_PATH" == data/graph_bundles/* && "$BUNDLE_PATH" != *..* ]]
             [[ -s "$BUNDLE_PATH" ]]
-            python3 -c 'import json; value=json.load(open(".deploy/control/claims-paused.json", encoding="utf-8")); assert value.get("paused") is True, "claims are not paused"'
             state_file=.deploy/microservices/slots.json
             control_slot="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["control-plane"]["active"])' "$state_file")"
             [[ "$control_slot" == blue || "$control_slot" == green ]]
@@ -93,6 +92,7 @@ jobs:
             control_container="brain-ai-control-plane-$control_slot-1"
             [[ "$(docker inspect -f '{{.State.Health.Status}}' "$control_container")" == healthy ]]
             compose=(docker compose --env-file .env.compose -f docker-compose.yml -f infra/microservices/docker-compose.blue-green.yml)
+            "${compose[@]}" exec -T "$control_service" python -c 'import sys; from services import supabase_client as s; p=s.get_persona(sys.argv[1]); assert p, "persona not found"; b=s.get_active_whatsapp_binding(str(p["id"])); m=(b or {}).get("metadata") or {}; assert not b or m.get("safety_paused") is True or b.get("connection_status") == "safety_paused", "target persona binding is not safety paused"' "$PERSONA_SLUG"
             docker cp "$BUNDLE_PATH" "$control_container:/tmp/approved-graphbundle.json"
             args=(
               python scripts/publish_graph_bundle.py /tmp/approved-graphbundle.json

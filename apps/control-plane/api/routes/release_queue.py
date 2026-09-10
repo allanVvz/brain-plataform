@@ -46,6 +46,15 @@ def register_batch(body: RegisterBatchBody, request: Request):
         candidates = release_queue_service.build_safety_paused_batch_candidates(body.binding_id)
         lead_buffer_ids = candidates["eligible_ids"]
         persona_id = body.persona_id or (candidates["binding"] or {}).get("persona_id")
+        if not lead_buffer_ids:
+            return release_queue_service.resume_safety_paused_binding_without_backlog(
+                persona_id=persona_id,
+                binding_id=body.binding_id,
+                reason=body.reason,
+                idempotency_key=body.idempotency_key,
+                release_sha=body.release_sha,
+                actor_user_id=user.get("id"),
+            )
     else:
         # deploy_pause spans every persona sharing the paused worker; only an
         # admin (not a persona-scoped operator) registers it, normally from

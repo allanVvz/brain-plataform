@@ -23,6 +23,14 @@ def _json_file(value: str) -> dict:
 
 
 def main() -> int:
+    # O plano sai em JSON com acento (os cards sao em portugues) e vira arquivo
+    # de baseline para o proximo `--against`. No Windows o stdout assume cp1252,
+    # entao cada `ç` saia como byte invalido em UTF-8: quem lesse o arquivo
+    # recebia um documento diferente do compilado e o checksum nunca podia
+    # bater -- aparecia como `baseline_checksum_invalid`, culpando o bundle por
+    # um defeito de codificacao.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(
         description="Compile a GraphBundle without publishing or writing production state."
     )

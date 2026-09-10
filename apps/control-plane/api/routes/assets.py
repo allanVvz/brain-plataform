@@ -545,6 +545,7 @@ def _ensure_asset_graph_contract(
     updated_asset = supabase_client.update_asset_graph_refs(
         asset_id,
         knowledge_node_id=asset_node["id"],
+        knowledge_item_id=knowledge_item_id,
         gallery_edge_id=gallery_edge["id"],
         parent_node_id=parent_node["id"],
         parent_edge_id=(landing_edge or parent_edge)["id"],

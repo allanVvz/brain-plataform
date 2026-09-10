@@ -38,6 +38,9 @@ def validate_delegation(path: list[str], next_agent: str) -> list[str]:
 
 def classify_intent(message: str) -> tuple[str, str]:
     text = (message or "").lower()
+    asset_terms = ("correlacion", "associar imagem", "ligar imagem", "imagem do produto", "foto do produto")
+    if any(term in text for term in asset_terms):
+        return "asset.correlation", GRAPH_AGENT
     phones = re.findall(r"\+?\d[\d\s().-]{6,}\d", message or "")
     campaign_terms = ("campanha", "contato", "telefone", "whatsapp", "import", "disparo", "consent")
     if phones or any(term in text for term in campaign_terms):
@@ -247,6 +250,8 @@ class SofiaAgentHarness:
         try:
             if agent == CAMPAIGN_AGENT:
                 run = self._plan_campaign_message(run, session, body, user_id=user_id)
+            elif intent == "asset.correlation":
+                run = self._plan_asset_correlation(run, session, body)
             else:
                 run = self.repository.update_run(
                     str(run["id"]), expected_revision=int(run["revision"]), changes={
@@ -284,6 +289,36 @@ class SofiaAgentHarness:
                     },
                 )
             raise
+
+    def _plan_asset_correlation(self, run: dict[str, Any], session: dict[str, Any], body: MessageCreate) -> dict[str, Any]:
+        manifest = HARNESS_TOOL_REGISTRY.get("graph.propose_asset_product_correlations")
+        selected = session.get("selected_context") or {}
+        arguments = {
+            "persona_id": session["persona_id"],
+            "persona_slug": body.context.get("persona_slug") or selected.get("persona_slug"),
+            "asset_ids": body.context.get("asset_ids") or [],
+            "content_sha256": body.context.get("content_sha256") or [],
+            "correlations": body.context.get("correlations") or [],
+            "expected_graph_version": session.get("graph_version"),
+            "graph_hash": session.get("graph_hash"),
+            "idempotency_key": body.idempotency_key,
+            "reason": body.reason,
+        }
+        result = manifest.handler({"session_id": session["id"]}, **arguments)
+        step = self.repository.create_step(_step_payload(
+            run_id=str(run["id"]), order=1, manifest=manifest, arguments=arguments,
+            idempotency_key=body.idempotency_key, status="completed",
+        ))
+        self.repository.update_step(str(step["id"]), changes={"output_payload": result, "status": "completed"})
+        return self.repository.update_run(
+            str(run["id"]), expected_revision=int(run["revision"]), changes={
+                "status": RunStatus.COMPLETED.value,
+                "response_payload": result,
+                "plan": {"delegation_path": [COORDINATOR_KEY, GRAPH_AGENT], "steps": [manifest.name], "publication_allowed": False},
+                "artifacts": [{"kind": "card_patch_preview", "payload": result.get("patch")}],
+                "completed_at": now_iso(),
+            },
+        )
 
     def _plan_campaign_message(self, run: dict[str, Any], session: dict[str, Any], body: MessageCreate, *, user_id: str) -> dict[str, Any]:
         action = str(body.context.get("action") or "").strip().lower()

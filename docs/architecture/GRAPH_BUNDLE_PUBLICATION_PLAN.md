@@ -73,7 +73,73 @@ Consequências operacionais:
 Pausa global é gate de release de código/infra que altera o runtime
 compartilhado, não de publicação isolada de conteúdo.
 
+O workflow produtivo atual ainda verifica `claims-paused.json` e, portanto,
+exige uma janela global curta para materializar o bundle. Isso é uma limitação
+operacional do workflow, não uma ampliação do escopo da publicação: a mutação
+continua restrita à persona. A pausa individual dela deve permanecer depois do
+cutover quando o WA Validator ainda não estiver aprovado.
+
+## Exportação canônica do grafo operacional
+
+Um snapshot compilado não pode ser convertido de volta em GraphBundle apenas
+copiando o campo visual `id`. O exportador deve preservar, para cada node, o
+mesmo trio usado pelo banco e pelo publisher:
+
+- `projection_node_id`: UUID imutável de `knowledge_nodes.id`;
+- `node_type` + `slug`: identidade lógica usada como fallback pelo preflight;
+- `id`: ID estável retornado por `graph_compiler_v3._stable_node_id` e usado
+  nas extremidades das edges.
+
+O preflight considera primeiro o `projection_node_id`; assim, rename ou slug
+histórico não transforma o mesmo registro em node não planejado. Aliases de
+projeção como `node:asset:*` não podem substituir o ID estável `asset:*` nas
+edges. O mesmo vale para `embed`/`embedded`. Antes de gerar o
+PublicationPlan, o export deve falhar se houver `projection_node_id` duplicado,
+edge apontando para alias, ou divergência entre `node_type/slug` e o grafo fonte.
+O preflight de fonte deve ocorrer antes da solicitação de aprovação humana.
+
+Na materialização, esse UUID também é a chave primária do upsert. O publisher
+deve substituir o `slug` persistido pelo `slug` aprovado no bundle, além de
+title, summary, tags, status e metadata. Atualizar somente os demais campos
+preserva um slug de importação e muda o runtime recompilado depois da aprovação;
+o gate de checksum deve bloquear esse caso antes de staging/ativação.
+
 ## Publicação aprovada
+
+### Preflight antes de qualquer pausa
+
+O `PublicationPlan` e `validate-graphbundle-plan.py` rodam antes da janela
+produtiva. Quando o bundle contém uma campanha
+`campaign_subtype="public_site_page"`, o preflight exige exatamente uma
+`Gallery` e exatamente um node `Brand` explicitamente ligado a ela por
+`publishes_to`. A presença do Brand no grafo, sem essa concessão pública, não é
+suficiente e deve falhar localmente.
+
+A ordem operacional é fixa: compilar e validar contrato público sem pausa;
+registrar o diff e os checksums; pausar somente a persona no instante do apply;
+materializar, recompilar e ativar; provar `/api/menu/{persona_slug}`; retomar a
+persona. Falha antes do apply não autoriza nem requer pausa. Falha após o apply
+mantém somente a persona alvo pausada; não promove deploy de código nem pausa
+global por consequência.
+
+O workflow verifica diretamente o binding WhatsApp ativo da persona: se ele
+existir, `metadata.safety_paused=true` ou
+`connection_status="safety_paused"` é obrigatório. O marker global de claims
+pertence somente a release compartilhada de código/infra e não é gate de
+publicação de conteúdo isolado.
+
+Incidente de 2026-09-10: a v28 continha dois Brands, mas nenhum deles possuía
+grant `publishes_to` para a Gallery. O compilador conversacional aceitou o grafo
+e o contrato público detectou `site.catalog.brand_node_count:0` somente depois
+da ativação. A validação acima foi incorporada ao workflow para impedir nova
+ocorrência antes da pausa.
+
+A primeira correção expôs uma segunda lacuna do mesmo tipo: os sete
+ProductGroups e os Products com imagens públicas também estavam presentes, mas
+sem grant. O preflight agora exige todos os ProductGroups do catálogo e mantém
+uma igualdade estrita entre Products publicados e Products que possuem
+`uses_asset` para uma imagem já publicada. Assim grupos continuam visíveis sem
+mídia, enquanto nenhum produto sem imagem pública entra na vitrine.
 
 O workflow `.github/workflows/publish-content.yml` pertence ao pipeline de
 Markdown/Graph JSON v2 e chama `publish_persona_documents.py`. Ele não publica
@@ -96,6 +162,16 @@ não corrigir nem apagar automaticamente. Até existir workflow dedicado para
 GraphBundle no environment `production-content`, o relatório da operação deve
 registrar a autorização explícita, os dois checksums, persona UUID/slug,
 publication ID e versão.
+
+A aprovação humana é uma única autorização de conteúdo para o bundle
+normalizado, identificada por `persona_slug + draft_checksum +
+runtime_checksum`. Ela cobre staging e ativação quando a ação proposta informa
+explicitamente `activate`. Retry por timeout, falha de rede ou outro erro
+técnico ocorrido antes de qualquer escrita reutiliza a mesma aprovação, desde
+que os bytes normalizados e os dois checksums permaneçam idênticos. Nova
+aprovação é obrigatória somente quando o conteúdo normalizado ou qualquer um
+dos checksums mudar. Deploy, migration, limpeza e retomada de uma IA continuam
+autorizações separadas.
 
 ## Gates ainda abertos
 

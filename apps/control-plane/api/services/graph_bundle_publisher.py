@@ -27,6 +27,9 @@ def _preflight_source_scope(
     desired_nodes = {
         (node["node_type"], node["slug"]) for node in normalized["nodes"]
     }
+    desired_projection_ids = {
+        str(node.get("projection_node_id") or "") for node in normalized["nodes"]
+    }
     has_authored_persona = any(
         node_type == "persona" and slug != "self"
         for node_type, slug in desired_nodes
@@ -35,6 +38,7 @@ def _preflight_source_scope(
         (str(row.get("node_type") or ""), str(row.get("slug") or ""))
         for row in node_rows
         if str(row.get("status") or "").lower() in graph_compiler_v3.PUBLISHED_STATUSES
+        and str(row.get("id") or "") not in desired_projection_ids
         and not (
             has_authored_persona
             and str(row.get("node_type") or "").lower() == "persona"
@@ -49,21 +53,35 @@ def _preflight_source_scope(
             )
         )
 
-    stable_by_projection = {
-        str(row.get("id")): graph_compiler_v3._stable_node_id(row)
+    projection_by_stable = {
+        node["id"]: str(node.get("projection_node_id") or "")
+        for node in normalized["nodes"]
+    }
+    ignored_legacy_persona_projection_ids = {
+        str(row.get("id"))
         for row in node_rows
+        if has_authored_persona
+        and str(row.get("node_type") or "").lower() == "persona"
+        and str(row.get("slug") or "").lower() == "self"
     }
     desired_edges = {
-        (edge["source"], edge["target"], edge["relation_type"])
+        (
+            projection_by_stable.get(edge["source"], ""),
+            projection_by_stable.get(edge["target"], ""),
+            edge["relation_type"],
+        )
         for edge in normalized["edges"]
     }
     existing_edges = {
         (
-            stable_by_projection.get(str(row.get("source_node_id")), ""),
-            stable_by_projection.get(str(row.get("target_node_id")), ""),
+            str(row.get("source_node_id") or ""),
+            str(row.get("target_node_id") or ""),
             str(row.get("relation_type") or ""),
         )
-        for row in edge_rows if _active_edge(row)
+        for row in edge_rows
+        if _active_edge(row)
+        and str(row.get("source_node_id")) not in ignored_legacy_persona_projection_ids
+        and str(row.get("target_node_id")) not in ignored_legacy_persona_projection_ids
     }
     unexpected_edges = sorted(existing_edges - desired_edges)
     if unexpected_edges:
@@ -134,6 +152,7 @@ def stage_bundle(
         row = supabase_client.update_knowledge_node(
             str(row["id"]),
             {
+                "slug": node["slug"],
                 "title": node["title"],
                 "summary": node["summary"],
                 "tags": node["tags"],

@@ -14,6 +14,7 @@ from schemas.agent_harness import CardDraft, CardPatch, ToolEffect, ToolResult, 
 from schemas.graph_json_v2 import GraphJson
 from services import campaigns_service, graph_document_publisher, graph_json_v2_store, supabase_client
 from services.agent_tool_registry import ToolManifest, ToolRegistry
+from services.asset_product_correlation import propose_asset_product_correlations
 
 
 class EmptyInput(BaseModel):
@@ -86,6 +87,25 @@ class AttachAssetDraftInput(EditCardDraftInput):
 
 class GenerateFaqDraftInput(EditCardDraftInput):
     max_questions: int = Field(8, ge=1, le=20)
+
+
+class AssetProductCorrelation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    asset_id: str
+    product_node_id: str
+
+
+class ProposeAssetProductCorrelationsInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    persona_id: str
+    persona_slug: str
+    asset_ids: list[str] = Field(default_factory=list, max_length=100)
+    content_sha256: list[str] = Field(default_factory=list, max_length=100)
+    correlations: list[AssetProductCorrelation] = Field(default_factory=list, max_length=100)
+    expected_graph_version: int = Field(ge=0)
+    graph_hash: str = Field(min_length=8)
+    idempotency_key: str = Field(min_length=8, max_length=200)
+    reason: str = Field(min_length=3, max_length=500)
 
 
 class PhoneContact(BaseModel):
@@ -631,6 +651,7 @@ HARNESS_TOOL_REGISTRY = ToolRegistry([
     _manifest("graph.connect_cards", "graph_card_specialist", ConnectCardsInput, connect_cards_draft, effect=ToolEffect.DRAFT, risk=ToolRisk.MEDIUM, permission="edit", description="Prepara edge semantica sem publicar."),
     _manifest("graph.revoke_edge", "graph_card_specialist", RevokeEdgeInput, revoke_edge_draft, effect=ToolEffect.DRAFT, risk=ToolRisk.MEDIUM, permission="edit", description="Revoga edge sem deletar node."),
     _manifest("graph.attach_session_asset", "graph_card_specialist", AttachAssetDraftInput, attach_asset_draft, effect=ToolEffect.DRAFT, risk=ToolRisk.MEDIUM, permission="edit", description="Anexa asset persistido ao draft."),
+    _manifest("graph.propose_asset_product_correlations", "graph_card_specialist", ProposeAssetProductCorrelationsInput, propose_asset_product_correlations, effect=ToolEffect.DRAFT, risk=ToolRisk.MEDIUM, permission="edit", description="Propoe correlacoes Produto -> Asset por checksum e evidencia canonica, sem escrever ou publicar."),
     _manifest("graph.generate_faq_from_branch", "graph_card_specialist", GenerateFaqDraftInput, generate_faq_draft, effect=ToolEffect.DRAFT, risk=ToolRisk.MEDIUM, permission="edit", description="Gera FAQ draft a partir do galho."),
     _manifest("graph.validate_patch", "qa_validator", PatchInput, validate_patch, effect=ToolEffect.READ, risk=ToolRisk.LOW, permission="view", description="Valida patch, nodes protegidos e versao do Graph."),
     _manifest("graph.publish_patch", "graph_card_specialist", PatchInput, publish_patch, effect=ToolEffect.WRITE, risk=ToolRisk.HIGH, permission="edit", description="Publica patch pelo publisher canonico, apos QA."),

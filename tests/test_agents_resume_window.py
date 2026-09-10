@@ -127,12 +127,15 @@ def test_sem_mensagem_pendente_o_agente_nao_abre_conversa(monkeypatch):
 
 
 def test_aviso_de_reativacao_respeita_a_mesma_janela(monkeypatch):
+    # Passada a janela, o inbound antigo continua sem ser respondido. O que
+    # pode falar agora e a copy de reabertura, publicada sob outra chave --
+    # e esta persona publica so `manual`, entao ela segue muda.
     _install(monkeypatch, [_message("inbound", minutes_ago=15 * 60)])
     agents_service.resume_lead(LEAD_REF)
 
     result = agents_service.reactivation_notice(LEAD_REF, reason="manual")
 
-    assert result == {"sent": False, "skipped": "resume_window_expired"}
+    assert result == {"sent": False, "skipped": "no_published_copy"}
 
 
 def test_a_janela_vem_do_grafo_e_nao_do_codigo(monkeypatch):
