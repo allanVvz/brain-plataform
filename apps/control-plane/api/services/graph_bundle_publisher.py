@@ -27,6 +27,9 @@ def _preflight_source_scope(
     desired_nodes = {
         (node["node_type"], node["slug"]) for node in normalized["nodes"]
     }
+    desired_projection_ids = {
+        str(node.get("projection_node_id") or "") for node in normalized["nodes"]
+    }
     has_authored_persona = any(
         node_type == "persona" and slug != "self"
         for node_type, slug in desired_nodes
@@ -35,6 +38,7 @@ def _preflight_source_scope(
         (str(row.get("node_type") or ""), str(row.get("slug") or ""))
         for row in node_rows
         if str(row.get("status") or "").lower() in graph_compiler_v3.PUBLISHED_STATUSES
+        and str(row.get("id") or "") not in desired_projection_ids
         and not (
             has_authored_persona
             and str(row.get("node_type") or "").lower() == "persona"

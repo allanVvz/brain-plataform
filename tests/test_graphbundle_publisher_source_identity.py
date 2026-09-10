@@ -1,0 +1,66 @@
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+CONTROL_API = ROOT / "apps" / "control-plane" / "api"
+sys.path.insert(0, str(CONTROL_API))
+
+from services import graph_bundle_publisher  # noqa: E402
+
+
+def test_source_scope_prefers_immutable_projection_id_over_historical_slug() -> None:
+    projection_id = "39129cc8-9a94-4824-8306-989ffc81eabe"
+    normalized = {
+        "nodes": [
+            {
+                "id": "asset:tock-fatal-body-estampado",
+                "projection_node_id": projection_id,
+                "node_type": "asset",
+                "slug": "asset-registry-historical-slug",
+            }
+        ],
+        "edges": [],
+    }
+    source_rows = [
+        {
+            "id": projection_id,
+            "node_type": "asset",
+            "slug": "tock-fatal-body-estampado",
+            "status": "validated",
+            "metadata": {"graph_json_node_id": "asset:tock-fatal-body-estampado"},
+        }
+    ]
+
+    graph_bundle_publisher._preflight_source_scope(normalized, source_rows, [])
+
+
+def test_source_scope_still_rejects_an_unplanned_projection() -> None:
+    normalized = {
+        "nodes": [
+            {
+                "id": "persona:target",
+                "projection_node_id": "00000000-0000-0000-0000-000000000001",
+                "node_type": "persona",
+                "slug": "target",
+            }
+        ],
+        "edges": [],
+    }
+    source_rows = [
+        {
+            "id": "00000000-0000-0000-0000-000000000002",
+            "node_type": "asset",
+            "slug": "unexpected",
+            "status": "validated",
+        }
+    ]
+
+    try:
+        graph_bundle_publisher._preflight_source_scope(normalized, source_rows, [])
+    except graph_bundle_publisher.GraphBundlePublishError as exc:
+        assert str(exc) == "source_graph_has_unplanned_nodes:asset:unexpected"
+    else:
+        raise AssertionError("unplanned projection must remain blocked")

@@ -86,12 +86,14 @@ copiando o campo visual `id`. O exportador deve preservar, para cada node, o
 mesmo trio usado pelo banco e pelo publisher:
 
 - `projection_node_id`: UUID imutável de `knowledge_nodes.id`;
-- `node_type` + `slug`: identidade lógica comparada pelo preflight;
+- `node_type` + `slug`: identidade lógica usada como fallback pelo preflight;
 - `id`: ID estável retornado por `graph_compiler_v3._stable_node_id` e usado
   nas extremidades das edges.
 
-Aliases de projeção como `node:asset:*` não podem substituir o ID estável
-`asset:*`. O mesmo vale para `embed`/`embedded`. Antes de gerar o
+O preflight considera primeiro o `projection_node_id`; assim, rename ou slug
+histórico não transforma o mesmo registro em node não planejado. Aliases de
+projeção como `node:asset:*` não podem substituir o ID estável `asset:*` nas
+edges. O mesmo vale para `embed`/`embedded`. Antes de gerar o
 PublicationPlan, o export deve falhar se houver `projection_node_id` duplicado,
 edge apontando para alias, ou divergência entre `node_type/slug` e o grafo fonte.
 O preflight de fonte deve ocorrer antes da solicitação de aprovação humana.
