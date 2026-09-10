@@ -57,6 +57,43 @@ def _validate_public_site_projection(bundle: dict) -> None:
         len(published_brands) == 1,
         f"public site requires exactly one published Brand; found {len(published_brands)}",
     )
+    all_groups = {
+        node_id for node_id, node in nodes.items()
+        if node.get("node_type") == "product_group"
+    }
+    published_groups = all_groups & published
+    if all_groups:
+        _require(
+            published_groups == all_groups,
+            "public site must publish every ProductGroup; missing "
+            + ",".join(sorted(all_groups - published_groups)),
+        )
+    published_assets = {
+        node_id for node_id in published
+        if (nodes.get(node_id) or {}).get("node_type") == "asset"
+    }
+    image_products = {
+        str(edge.get("source"))
+        for edge in bundle.get("edges") or []
+        if isinstance(edge, dict)
+        and edge.get("relation_type") == "uses_asset"
+        and (nodes.get(str(edge.get("source"))) or {}).get("node_type") == "product"
+        and str(edge.get("target")) in published_assets
+        and (
+            (edge.get("metadata") or {}).get("role") == "product_image"
+            or str(((edge.get("metadata") or {}).get("page_binding") or {}).get("slot_key") or "").startswith("product_image")
+        )
+    }
+    published_products = {
+        node_id for node_id in published
+        if (nodes.get(node_id) or {}).get("node_type") == "product"
+    }
+    _require(
+        published_products == image_products,
+        "public site Product grants must equal products with published images; "
+        f"missing={','.join(sorted(image_products - published_products))};"
+        f"without_image={','.join(sorted(published_products - image_products))}",
+    )
 
 
 def validate(

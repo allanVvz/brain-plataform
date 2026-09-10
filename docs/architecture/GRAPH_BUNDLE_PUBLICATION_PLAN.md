@@ -134,6 +134,13 @@ e o contrato público detectou `site.catalog.brand_node_count:0` somente depois
 da ativação. A validação acima foi incorporada ao workflow para impedir nova
 ocorrência antes da pausa.
 
+A primeira correção expôs uma segunda lacuna do mesmo tipo: os sete
+ProductGroups e os Products com imagens públicas também estavam presentes, mas
+sem grant. O preflight agora exige todos os ProductGroups do catálogo e mantém
+uma igualdade estrita entre Products publicados e Products que possuem
+`uses_asset` para uma imagem já publicada. Assim grupos continuam visíveis sem
+mídia, enquanto nenhum produto sem imagem pública entra na vitrine.
+
 O workflow `.github/workflows/publish-content.yml` pertence ao pipeline de
 Markdown/Graph JSON v2 e chama `publish_persona_documents.py`. Ele não publica
 GraphBundle e não aceita o par de checksums draft/runtime.

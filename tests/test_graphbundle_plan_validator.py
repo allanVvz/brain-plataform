@@ -87,3 +87,27 @@ def test_graphbundle_workflow_pauses_only_the_target_persona() -> None:
     workflow = (ROOT / ".github/workflows/publish-graphbundle.yml").read_text(encoding="utf-8")
     assert "target persona binding is not safety paused" in workflow
     assert ".deploy/control/claims-paused.json" not in workflow
+
+
+def test_public_site_preflight_requires_all_groups_and_only_imaged_products() -> None:
+    bundle = _public_site_bundle(publish_brand=True)
+    bundle["nodes"].extend([
+        {"id": "group:dresses", "node_type": "product_group", "data": {}},
+        {"id": "product:dress", "node_type": "product", "data": {}},
+        {"id": "asset:dress", "node_type": "asset", "data": {}},
+    ])
+    bundle["edges"].extend([
+        {"source": "asset:dress", "target": "gallery:default", "relation_type": "publishes_to", "metadata": {"active": True}},
+        {"source": "product:dress", "target": "asset:dress", "relation_type": "uses_asset", "metadata": {"role": "product_image"}},
+    ])
+    with pytest.raises(ValueError, match="must publish every ProductGroup"):
+        MODULE._validate_public_site_projection(bundle)
+    bundle["edges"].append(
+        {"source": "group:dresses", "target": "gallery:default", "relation_type": "publishes_to", "metadata": {"active": True}}
+    )
+    with pytest.raises(ValueError, match="missing=product:dress"):
+        MODULE._validate_public_site_projection(bundle)
+    bundle["edges"].append(
+        {"source": "product:dress", "target": "gallery:default", "relation_type": "publishes_to", "metadata": {"active": True}}
+    )
+    MODULE._validate_public_site_projection(bundle)
