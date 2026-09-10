@@ -57,6 +57,13 @@ def _preflight_source_scope(
         node["id"]: str(node.get("projection_node_id") or "")
         for node in normalized["nodes"]
     }
+    ignored_legacy_persona_projection_ids = {
+        str(row.get("id"))
+        for row in node_rows
+        if has_authored_persona
+        and str(row.get("node_type") or "").lower() == "persona"
+        and str(row.get("slug") or "").lower() == "self"
+    }
     desired_edges = {
         (
             projection_by_stable.get(edge["source"], ""),
@@ -71,7 +78,10 @@ def _preflight_source_scope(
             str(row.get("target_node_id") or ""),
             str(row.get("relation_type") or ""),
         )
-        for row in edge_rows if _active_edge(row)
+        for row in edge_rows
+        if _active_edge(row)
+        and str(row.get("source_node_id")) not in ignored_legacy_persona_projection_ids
+        and str(row.get("target_node_id")) not in ignored_legacy_persona_projection_ids
     }
     unexpected_edges = sorted(existing_edges - desired_edges)
     if unexpected_edges:
