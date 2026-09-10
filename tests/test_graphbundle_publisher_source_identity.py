@@ -11,6 +11,14 @@ sys.path.insert(0, str(CONTROL_API))
 from services import graph_bundle_publisher  # noqa: E402
 
 
+def test_materialization_replaces_historical_slug_on_an_immutable_projection() -> None:
+    """The approved bundle's semantic slug, not an import fallback, reaches runtime."""
+    source = (CONTROL_API / "services" / "graph_bundle_publisher.py").read_text(
+        encoding="utf-8"
+    )
+    assert '"slug": node["slug"]' in source
+
+
 def test_source_scope_prefers_immutable_projection_id_over_historical_slug() -> None:
     projection_id = "39129cc8-9a94-4824-8306-989ffc81eabe"
     normalized = {

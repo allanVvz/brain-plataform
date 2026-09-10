@@ -98,6 +98,12 @@ PublicationPlan, o export deve falhar se houver `projection_node_id` duplicado,
 edge apontando para alias, ou divergência entre `node_type/slug` e o grafo fonte.
 O preflight de fonte deve ocorrer antes da solicitação de aprovação humana.
 
+Na materialização, esse UUID também é a chave primária do upsert. O publisher
+deve substituir o `slug` persistido pelo `slug` aprovado no bundle, além de
+title, summary, tags, status e metadata. Atualizar somente os demais campos
+preserva um slug de importação e muda o runtime recompilado depois da aprovação;
+o gate de checksum deve bloquear esse caso antes de staging/ativação.
+
 ## Publicação aprovada
 
 O workflow `.github/workflows/publish-content.yml` pertence ao pipeline de

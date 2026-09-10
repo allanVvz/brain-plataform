@@ -152,6 +152,7 @@ def stage_bundle(
         row = supabase_client.update_knowledge_node(
             str(row["id"]),
             {
+                "slug": node["slug"],
                 "title": node["title"],
                 "summary": node["summary"],
                 "tags": node["tags"],
