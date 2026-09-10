@@ -51168,6 +51168,27 @@
             "handoff_pre_notice_required": true,
             "when_customer_confirms_summary": "Reconheca a confirmacao e avise claramente, antes de encaminhar, que uma pessoa da equipe continuara o atendimento. Nao repita a resposta anterior nem faca outra pergunta de qualificacao.",
             "when_required_fields_become_complete": "Na mesma resposta, resuma naturalmente os dados coletados e pergunte se estao corretos. Nao encerre apenas dizendo que registrou."
+          },
+          "reactivation": {
+            "answer_pending_inbound_within_seconds": 36000,
+            "reengage_pending_inbound_within_seconds": 86400,
+            "manual": [
+              "Oi! Aqui é a Vitória, assistente virtual com inteligência artificial da Tock Fatal. Voltei ao atendimento e sigo com você por aqui."
+            ],
+            "stale_reengagement": [
+              "Oi! Aqui é a Vitória, assistente virtual com inteligência artificial da Tock Fatal. Sua mensagem ficou sem retorno e eu peço desculpas por isso. Se ainda quiser ver as peças, me conta o que você procura que eu te ajudo agora.",
+              "Oi! Sou a Vitória, assistente virtual com inteligência artificial da Tock Fatal. Demorei para te responder e sinto muito. Seu interesse continua valendo — quer que eu te mostre as opções?",
+              "Oi! Aqui é a Vitória, assistente virtual com inteligência artificial da Tock Fatal. Vi que você nos chamou e ficou sem resposta. Posso retomar seu atendimento a partir de agora?"
+            ],
+            "idle_return": [
+              "Oi! Aqui é a Vitória, assistente virtual com inteligência artificial da Tock Fatal. Estou de volta ao atendimento. Quando quiser seguir, é só me chamar."
+            ],
+            "journey_completed": [
+              "Oi! Aqui é a Vitória, da Tock Fatal. Seu atendimento anterior foi concluído. Se quiser ver novas peças, é só me chamar."
+            ],
+            "journey_cancelled": [
+              "Oi! Aqui é a Vitória, da Tock Fatal. Estou por aqui se você quiser retomar quando fizer sentido."
+            ]
           }
         },
         "public_site": {
