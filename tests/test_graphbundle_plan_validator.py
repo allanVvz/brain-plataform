@@ -81,3 +81,9 @@ def test_public_site_preflight_requires_one_published_brand() -> None:
 
 def test_public_site_preflight_accepts_one_published_brand() -> None:
     MODULE._validate_public_site_projection(_public_site_bundle(publish_brand=True))
+
+
+def test_graphbundle_workflow_pauses_only_the_target_persona() -> None:
+    workflow = (ROOT / ".github/workflows/publish-graphbundle.yml").read_text(encoding="utf-8")
+    assert "target persona binding is not safety paused" in workflow
+    assert ".deploy/control/claims-paused.json" not in workflow

@@ -122,6 +122,12 @@ persona. Falha antes do apply não autoriza nem requer pausa. Falha após o appl
 mantém somente a persona alvo pausada; não promove deploy de código nem pausa
 global por consequência.
 
+O workflow verifica diretamente o binding WhatsApp ativo da persona: se ele
+existir, `metadata.safety_paused=true` ou
+`connection_status="safety_paused"` é obrigatório. O marker global de claims
+pertence somente a release compartilhada de código/infra e não é gate de
+publicação de conteúdo isolado.
+
 Incidente de 2026-09-10: a v28 continha dois Brands, mas nenhum deles possuía
 grant `publishes_to` para a Gallery. O compilador conversacional aceitou o grafo
 e o contrato público detectou `site.catalog.brand_node_count:0` somente depois
