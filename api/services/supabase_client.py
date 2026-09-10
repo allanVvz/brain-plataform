@@ -1158,7 +1158,7 @@ def _unique_violation(exc: Exception) -> bool:
 
 
 def upsert_knowledge_node(data: dict) -> Optional[dict]:
-    """Idempotent upsert of a knowledge node, keyed by (persona_id, node_type, slug).
+    """Idempotent upsert of a knowledge node, keyed by immutable id when given.
 
     `data` should at minimum contain node_type, slug, title.
     Returns the inserted/updated row, or None if the table is missing.
@@ -1175,13 +1175,12 @@ def upsert_knowledge_node(data: dict) -> Optional[dict]:
     client = get_client()
     persona_id = data.get("persona_id")
     try:
-        q = (
-            client.table("knowledge_nodes")
-            .select("id,metadata,tags,summary,title,status")
-            .eq("node_type", data["node_type"])
-            .eq("slug", data["slug"])
-        )
-        q = q.eq("persona_id", persona_id) if persona_id else q.is_("persona_id", "null")
+        q = client.table("knowledge_nodes").select("id,metadata,tags,summary,title,status")
+        if data.get("id"):
+            q = q.eq("id", data["id"])
+        else:
+            q = q.eq("node_type", data["node_type"]).eq("slug", data["slug"])
+            q = q.eq("persona_id", persona_id) if persona_id else q.is_("persona_id", "null")
         existing = (q.limit(1).execute().data or [None])[0]
     except Exception as exc:
         if _kg_unavailable(exc):
@@ -1190,13 +1189,12 @@ def upsert_knowledge_node(data: dict) -> Optional[dict]:
         if _unique_violation(exc):
             # Parallel approvals can race between the select and insert.
             # Treat the duplicate as a successful idempotent upsert.
-            q = (
-                client.table("knowledge_nodes")
-                .select("*")
-                .eq("node_type", data["node_type"])
-                .eq("slug", data["slug"])
-            )
-            q = q.eq("persona_id", persona_id) if persona_id else q.is_("persona_id", "null")
+            q = client.table("knowledge_nodes").select("*")
+            if data.get("id"):
+                q = q.eq("id", data["id"])
+            else:
+                q = q.eq("node_type", data["node_type"]).eq("slug", data["slug"])
+                q = q.eq("persona_id", persona_id) if persona_id else q.is_("persona_id", "null")
             existing = (q.limit(1).execute().data or [None])[0]
             if existing:
                 return existing
@@ -1245,13 +1243,12 @@ def upsert_knowledge_node(data: dict) -> Optional[dict]:
             _KG_TABLES_MISSING = True
             return None
         if _unique_violation(exc):
-            q = (
-                client.table("knowledge_nodes")
-                .select("*")
-                .eq("node_type", data["node_type"])
-                .eq("slug", data["slug"])
-            )
-            q = q.eq("persona_id", persona_id) if persona_id else q.is_("persona_id", "null")
+            q = client.table("knowledge_nodes").select("*")
+            if data.get("id"):
+                q = q.eq("id", data["id"])
+            else:
+                q = q.eq("node_type", data["node_type"]).eq("slug", data["slug"])
+                q = q.eq("persona_id", persona_id) if persona_id else q.is_("persona_id", "null")
             existing = (q.limit(1).execute().data or [None])[0]
             if existing:
                 return existing
