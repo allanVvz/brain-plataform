@@ -1,6 +1,12 @@
 -r requirements.txt
 pytest==9.1.1
 radon==6.0.1
+# apps/control-plane/api/services/site_blocks.py imports brain_contracts at
+# module load time; the Docker image installs it from packages/ (see
+# apps/control-plane/Dockerfile), but the root-level test suite runs outside
+# that image and needs the same packages on the path.
+-e ./packages/brain-contracts
+-e ./packages/brain-shared
 # Real-Postgres test fixtures (tests/conftest.py) — same driver used by
 # infra/migrate.Dockerfile's scripts/apply_migrations.py, so the migration
 # path exercised in tests matches the one exercised in the compose stack.

@@ -160,6 +160,7 @@ DUPLICATED_BASELINE: tuple[tuple[str, str], ...] = (
     ("control-plane", "public_site.py"),
     ("control-plane", "sdr_documents.py"),
     ("control-plane", "secret_store.py"),
+    ("control-plane", "site_blocks.py"),
     ("control-plane", "sofia_faq_tool.py"),
     ("control-plane", "sofia_orchestrator.py"),
     ("control-plane", "sofia_tools.py"),
@@ -246,6 +247,12 @@ DIVERGENT_BASELINE: tuple[tuple[str, str], ...] = (
     ("control-plane", "agent_harness.py"),
     ("control-plane", "agent_harness_tools.py"),
     ("control-plane", "campaigns_service.py"),
+    # 2026-09-11: added a graph_publications fallback to current_graph() so
+    # /knowledge/chat-context stops 404ing for GraphBundle-published personas
+    # (Tock Fatal never emits a legacy graph_document event, only Aurora
+    # does). The monolith is frozen and Aurora doesn't need this path, so
+    # porting it there would only be a second copy to let drift later.
+    ("control-plane", "context_cards.py"),
     ("control-plane", "conversation_repetition.py"),
     ("control-plane", "deepseek_n8n_service.py"),
     # Deliberate, and the microservice copy is the safe one: it defaults to
@@ -256,9 +263,18 @@ DIVERGENT_BASELINE: tuple[tuple[str, str], ...] = (
     ("control-plane", "faq_bulk_generator.py"),
     ("control-plane", "graph_bundle_publisher.py"),
     ("control-plane", "graph_bundle_view.py"),
+    # Same 2026-09-11 chat-context fallback as context_cards.py above --
+    # load_active_publication() is the new function context_cards.py calls.
+    ("control-plane", "graph_json_v2_store.py"),
     ("control-plane", "graph_json_v2_validator.py"),
     ("control-plane", "integration_service.py"),
     ("control-plane", "kb_intake_service.py"),
+    # Ported from the monolith with a real implementation change (uses
+    # brain_contracts.catalog_media for group/offer/asset resolution instead
+    # of the monolith's inline edge walk) as part of the graph-backed catalog
+    # media work merged 2026-09-11. Production runs this copy; the monolith
+    # one is reference-only and was not updated to match.
+    ("control-plane", "site_blocks.py"),
     ("control-plane", "sofia_orchestrator.py"),
     ("control-plane", "supabase_client.py"),
     ("conversation-runtime", "agents_service.py"),
