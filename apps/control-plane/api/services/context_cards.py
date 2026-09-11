@@ -348,7 +348,15 @@ def resolve_cards(
     max_cards: int = 12, max_tokens: int = 8000, max_distance: int = 3,
 ) -> list[ContextCard]:
     """Resolve exactly the package that both model and UI consume."""
-    graph = graph_markdown.canonicalize_graph(graph, reject_markdown_drift=False)
+    # GraphBundle publications are immutable projection documents, not Aurora
+    # authoring documents.  Their factual FAQ nodes legitimately carry the
+    # structured question/answer fields rather than legacy Markdown bodies.
+    # Markdown normalization is useful when available, but must never turn a
+    # valid published graph into a 500 for chat-context.
+    try:
+        graph = graph_markdown.canonicalize_graph(graph, reject_markdown_drift=False)
+    except graph_markdown.GraphMarkdownError:
+        pass
     by_id = {node.id: node for node in graph.nodes}
     stable_to_uuid, _ = _projection_maps(projection_nodes)
     chunk_refs = _chunk_map(rag_chunks)
