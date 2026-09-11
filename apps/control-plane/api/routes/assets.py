@@ -1999,13 +1999,23 @@ def _list_landing_targets(persona_id: str) -> list[dict]:
     return targets
 
 
-def _delete_asset_parent_edges(asset_id: str, knowledge_node_id: str) -> list[str]:
+def _delete_asset_parent_edges(asset_id: str, knowledge_node_id: str, *, slot: "LandingSlot | None" = None) -> list[str]:
+    """Clear the asset's other placements in the SAME slot family.
+
+    An asset legitimately occupies more than one slot at once (e.g. a
+    product's own photo doubling as its group's cover when no dedicated cover
+    exists) -- those are different slots on different parent nodes and must
+    coexist. Only a stale binding of the *same* slot kind is what "one
+    canonical path" is meant to replace.
+    """
     removed_ids: list[str] = []
     edges = supabase_client.list_edges_for_nodes([knowledge_node_id], limit=1000)
     for edge in edges:
         if edge.get("target_node_id") != knowledge_node_id:
             continue
         if edge.get("relation_type") in {"gallery_asset", "belongs_to_persona"}:
+            continue
+        if slot is not None and slot_for_metadata(edge.get("metadata") or {}) != slot:
             continue
         if supabase_client.delete_knowledge_edge(edge.get("id")):
             removed_ids.append(edge["id"])
@@ -2220,7 +2230,7 @@ def rebind_asset_path(asset_id: str, body: RebindPathBody, request: Request):
         label=body.label,
     )
     cfg = slot_config(slot)
-    removed_existing = _delete_asset_parent_edges(asset_id, knowledge_node_id) if body.remove_existing else []
+    removed_existing = _delete_asset_parent_edges(asset_id, knowledge_node_id, slot=slot) if body.remove_existing else []
     removed_previous = _remove_existing_slot_edges(
         parent=parent,
         asset_node_id=knowledge_node_id,

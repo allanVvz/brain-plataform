@@ -289,6 +289,45 @@ def save_version(
     return checksum
 
 
+def load_active_publication(persona_slug: str) -> "tuple[int, str, dict[str, Any]] | None":
+    """Fallback for personas that publish through the GraphBundle pipeline.
+
+    GraphBundle activation (``graph_bundle_publisher.activate_staged_bundle``)
+    writes into ``graph_publications`` instead of emitting the legacy
+    ``graph_document`` event trail ``load_current`` reads above. Callers get
+    back the raw compiled document (``graph_compiler_v3.compile_graph``
+    output); ``context_cards._graph_json_from_publication`` adapts it into a
+    ``GraphJson`` instance.
+    """
+    try:
+        persona = supabase_client.get_persona(persona_slug) or {}
+        persona_id = persona.get("id")
+        if not persona_id:
+            return None
+        row = supabase_client.get_active_graph_publication(persona_id)
+    except (KeyError, RuntimeError):
+        # Same defensive posture as ``_events``: offline/plan-only tooling
+        # runs without Supabase credentials and simply has no publication.
+        return None
+    if not row:
+        return None
+    document = row.get("document_json")
+    if isinstance(document, str):
+        try:
+            document = json.loads(document)
+        except ValueError:
+            document = None
+    if not isinstance(document, dict) or not document:
+        return None
+    try:
+        version = int(row.get("version") or 0)
+    except (TypeError, ValueError):
+        version = 0
+    if version < 1:
+        return None
+    return version, str(row.get("checksum") or ""), document
+
+
 def storage_root() -> Path:
     """Return the legacy file location for explicit migration tooling only."""
     return _LEGACY_DATA_ROOT

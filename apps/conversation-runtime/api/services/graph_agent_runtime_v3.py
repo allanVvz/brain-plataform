@@ -749,6 +749,135 @@ def branch_selection_field_key(document: dict[str, Any]) -> str:
     return str(field.get("key")) if field else "servico"
 
 
+# ── Lead -> audience segmentation from graph taxonomy edges (Bug 5) ──────
+# `audience_has_product_group` (audience -> product_group) and
+# `offers_product` (audience -> product) are declared in
+# knowledge_taxonomy.PRIMARY_CHAIN as validation rules only; nothing read
+# them live before this. Both relations point *from* the audience, so
+# resolving "which audience does this product/branch belong to" means
+# scanning edges for a matching target, not walking a parent pointer.
+AUDIENCE_HAS_PRODUCT_GROUP_RELATION = "audience_has_product_group"
+AUDIENCE_OFFERS_PRODUCT_RELATION = "offers_product"
+PRODUCT_GROUP_HAS_PRODUCT_RELATION = "product_group_has_product"
+
+
+def _audience_slug(value: str) -> str:
+    """Mirror repositories.runtime._slugify so the lookup and the row this
+    step may create land on the same `audiences.slug` control-plane's
+    materialize_graph_audiences_for_persona() would have produced."""
+    text = unicodedata.normalize("NFKD", str(value or "")).encode("ascii", "ignore").decode("ascii")
+    text = re.sub(r"[^a-zA-Z0-9]+", "-", text.strip().lower())
+    return text.strip("-") or "item"
+
+
+def resolve_audience_node_ids(
+    document: dict[str, Any], candidate_node_ids: Sequence[str],
+) -> list[str]:
+    """Audience graph node ids linked to any of `candidate_node_ids` via the
+    `audience_has_product_group` / `offers_product` taxonomy edges.
+
+    `candidate_node_ids` is meant to be the turn's active branch/product
+    focus (active_branch_node_id, active_branch_node_ids) plus whatever the
+    model cited (cited_node_ids). Anything that isn't a `product` or
+    `product_group` node in this document -- including ids the document
+    simply doesn't have -- resolves to nothing. Pure function, no I/O, so it
+    is safe and cheap to unit test with a synthetic document.
+    """
+    node_by_id = document.get("node_by_id") or {}
+    group_to_audiences: dict[str, set[str]] = {}
+    product_to_audiences: dict[str, set[str]] = {}
+    product_to_group: dict[str, str] = {}
+    for edge in document.get("edges") or []:
+        relation = edge.get("relation_type")
+        source = str(edge.get("source") or "")
+        target = str(edge.get("target") or "")
+        if not source or not target:
+            continue
+        if relation == AUDIENCE_HAS_PRODUCT_GROUP_RELATION:
+            group_to_audiences.setdefault(target, set()).add(source)
+        elif relation == AUDIENCE_OFFERS_PRODUCT_RELATION:
+            product_to_audiences.setdefault(target, set()).add(source)
+        elif relation == PRODUCT_GROUP_HAS_PRODUCT_RELATION:
+            product_to_group[target] = source
+    resolved: set[str] = set()
+    for raw_node_id in candidate_node_ids or []:
+        node_id = str(raw_node_id or "").strip()
+        if not node_id:
+            continue
+        node = node_by_id.get(node_id)
+        if not node:
+            continue
+        node_type = str(node.get("node_type") or "")
+        if node_type == "product":
+            resolved.update(product_to_audiences.get(node_id, ()))
+            group_id = product_to_group.get(node_id)
+            if group_id:
+                resolved.update(group_to_audiences.get(group_id, ()))
+        elif node_type == "product_group":
+            resolved.update(group_to_audiences.get(node_id, ()))
+    return sorted(resolved)
+
+
+def sync_lead_audience_memberships(
+    *,
+    persona_id: str,
+    lead_id: int,
+    document: dict[str, Any],
+    candidate_node_ids: Sequence[str],
+) -> list[str]:
+    """Make `lead_id` a 'shared' member of every audience this turn's
+    product/branch focus resolves to via the graph taxonomy.
+
+    Best-effort and side-effect-only: reuses the same `audiences` row a
+    control-plane `materialize_graph_audiences_for_persona()` pass would
+    produce (matched/created by slug, `source_type='graph'`) so the Leads
+    audience filter and this membership always point at the same row.
+    `membership_type` is always 'shared' -- 'primary' is reserved for
+    manual/import/CRM joins and `ensure_shared_lead_membership` never
+    touches a row that already exists. Any failure is logged and swallowed;
+    callers must be able to call this unconditionally right after a turn
+    commits without risking the commit's own success.
+    """
+    joined: list[str] = []
+    if not persona_id or not lead_id or not document:
+        return joined
+    try:
+        audience_node_ids = resolve_audience_node_ids(document, candidate_node_ids)
+    except Exception:
+        logger.exception(
+            "lead_audience_membership_resolve_failed persona_id=%s lead_id=%s",
+            persona_id, lead_id,
+        )
+        return joined
+    node_by_id = document.get("node_by_id") or {}
+    for audience_node_id in audience_node_ids:
+        try:
+            node = node_by_id.get(audience_node_id) or {}
+            slug = _audience_slug(node.get("slug") or node.get("title") or audience_node_id)
+            audience_row = supabase_client.get_audience_by_slug(persona_id, slug)
+            if not audience_row:
+                audience_row = supabase_client.create_audience({
+                    "persona_id": persona_id,
+                    "slug": slug,
+                    "name": node.get("title") or slug,
+                    "description": node.get("summary"),
+                    "source_type": "graph",
+                })
+            audience_id = (audience_row or {}).get("id")
+            if not audience_id:
+                continue
+            supabase_client.ensure_shared_lead_membership(lead_id, audience_id)
+            joined.append(audience_id)
+        except Exception:
+            logger.exception(
+                "lead_audience_membership_join_failed persona_id=%s lead_id=%s "
+                "audience_node_id=%s",
+                persona_id, lead_id, audience_node_id,
+            )
+            continue
+    return joined
+
+
 def _is_direct_answer_to_service_question(
     contract: dict[str, Any], asked_question_node_ids: list[str], message: str,
 ) -> bool:

@@ -528,13 +528,89 @@ def cards_for_ids(
     return cards
 
 
+def _graph_json_from_publication(document: dict[str, Any], *, persona_slug: str) -> GraphJson:
+    """Adapt a GraphBundle compiled document into the Graph JSON v2 contract.
+
+    ``graph_compiler_v3.compile_graph`` already restricts ``document["nodes"]``
+    to published/approved rows and never emits ``publishes_to`` grants -- it
+    is a different publication model than the v2.1 authoring pipeline.
+    ``schema_version="2.0"`` reproduces that here: ``_published_ids`` treats
+    every ``node_class == "knowledge"`` node as published without requiring
+    grant edges, exactly like the legacy documents this store otherwise
+    reads. Hierarchy comes from ``parent_id`` (from the compiled
+    ``document["parents"]`` map), which ``graph_conversation_contract.
+    hierarchy`` already falls back to when no ``contains`` edge exists.
+
+    Only the fields ``_rendered``/``_card``/``_relations``/
+    ``coordinate_for_node`` actually read are populated; everything else is
+    left at the ``Node``/``Edge`` schema defaults.
+    """
+    parents: dict[str, Any] = document.get("parents") or {}
+    persona = document.get("persona") or {}
+
+    raw_nodes: list[dict[str, Any]] = []
+    for node in document.get("nodes") or []:
+        node_id = str(node.get("id") or "")
+        if not node_id:
+            continue
+        data = dict(node.get("data") or {})
+        data.setdefault("status", node.get("status"))
+        data.setdefault("summary", node.get("summary"))
+        data.setdefault("tags", node.get("tags") or [])
+        raw_nodes.append({
+            "id": node_id,
+            "node_type": str(node.get("node_type") or "knowledge"),
+            "slug": str(node.get("slug") or node_id),
+            "title": node.get("title"),
+            "parent_id": parents.get(node_id),
+            "data": data,
+        })
+
+    raw_edges: list[dict[str, Any]] = []
+    for edge in document.get("edges") or []:
+        edge_id = str(edge.get("id") or "")
+        source = str(edge.get("source") or "")
+        target = str(edge.get("target") or "")
+        if not edge_id or not source or not target:
+            continue
+        raw_edges.append({
+            "id": edge_id,
+            "source": source,
+            "target": target,
+            "relation_type": str(edge.get("relation_type") or "references"),
+            "weight": edge.get("weight"),
+            # Only "contains" edges are the compiled primary tree
+            # (graph_compiler_v3.STRUCTURAL_RELATIONS); every other relation
+            # must stay out of the hierarchy walk under schema_version "2.0",
+            # where _active_primary_edges no longer restricts by relation.
+            "primary_tree": bool(edge.get("primary")),
+            "metadata": dict(edge.get("metadata") or {}),
+        })
+
+    return GraphJson(
+        schema_version="2.0",
+        graph_id=f"{persona_slug}-graph-publications",
+        tenant="production",
+        persona_slug=str(persona.get("slug") or persona_slug),
+        status="published",
+        nodes=raw_nodes,
+        edges=raw_edges,
+    )
+
+
 def current_graph(persona_slug: str) -> tuple[int, str, GraphJson]:
     current = graph_json_v2_store.load_current(persona_slug)
-    if not current:
+    if current:
+        version, graph = current
+        event = graph_json_v2_store.latest_event(persona_slug) or {}
+        checksum = str((event.get("payload") or {}).get("checksum") or graph_json_v2_store.checksum_graph(graph))
+        return int(version), checksum, graph
+    publication = graph_json_v2_store.load_active_publication(persona_slug)
+    if not publication:
         raise LookupError("Published Graph JSON not found")
-    version, graph = current
-    event = graph_json_v2_store.latest_event(persona_slug) or {}
-    checksum = str((event.get("payload") or {}).get("checksum") or graph_json_v2_store.checksum_graph(graph))
+    version, checksum, document = publication
+    graph = _graph_json_from_publication(document, persona_slug=persona_slug)
+    checksum = str(checksum or graph_json_v2_store.checksum_graph(graph))
     return int(version), checksum, graph
 
 

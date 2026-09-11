@@ -324,6 +324,46 @@ def test_active_graphbundle_prevents_parallel_graph_json_publication(monkeypatch
     }
 
 
+def test_delete_asset_parent_edges_keeps_other_slot_families(monkeypatch):
+    """An asset can legitimately be a product's own photo AND its group's
+    fallback cover at once -- those are different slots on different parent
+    nodes. Rebinding one slot must not silently strip the other, or the
+    product disappears from the storefront carousel it still belongs to."""
+    node_id = "node-asset-1"
+    product_image_edge = {
+        "id": "edge-product-image",
+        "target_node_id": node_id,
+        "relation_type": "uses_asset",
+        "metadata": {"page_binding": {"slot_key": "product_image:blusa-poa"}},
+    }
+    group_cover_edge = {
+        "id": "edge-group-cover",
+        "target_node_id": node_id,
+        "relation_type": "uses_asset",
+        "metadata": {"page_binding": {"slot_key": "product_group_cover:blusas"}},
+    }
+    monkeypatch.setattr(
+        assets.supabase_client,
+        "list_edges_for_nodes",
+        lambda *_args, **_kwargs: [product_image_edge, group_cover_edge],
+    )
+    deleted_ids: list[str] = []
+    monkeypatch.setattr(
+        assets.supabase_client,
+        "delete_knowledge_edge",
+        lambda edge_id: deleted_ids.append(edge_id) or True,
+    )
+    monkeypatch.setattr(assets.supabase_client, "get_asset", lambda _id: {"metadata": {}})
+    monkeypatch.setattr(assets.supabase_client, "update_asset", lambda *_args, **_kwargs: None)
+
+    removed = assets._delete_asset_parent_edges(
+        "asset-1", node_id, slot=assets.LandingSlot.PRODUCT_GROUP_COVER,
+    )
+
+    assert removed == ["edge-group-cover"]
+    assert deleted_ids == ["edge-group-cover"]
+
+
 def test_asset_mutations_require_edit_while_reads_keep_view_access():
     mutation_handlers = (
         assets.upload_asset,

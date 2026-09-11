@@ -18,7 +18,14 @@ router = APIRouter(tags=["menu"])
 
 _MENU_CACHE_CONTROL = "public, max-age=30, s-maxage=300, stale-while-revalidate=600"
 _DEFAULT_PUBLIC_ASSET_BUCKETS = frozenset({"assets-raw", "assets-derived"})
-_TECHNICAL_ID_PATTERN = re.compile(r"\b(?:asset|product|product_group|group|audience|campaign|copy|persona):[a-z0-9]", re.I)
+# Bilingual on purpose: authored CTA copy is Portuguese, so a bracketed
+# technical ref leaks exactly like `[grupo:conjuntos]` did in production
+# (2026-09-05) if only the English node-type word is banned.
+_TECHNICAL_ID_PATTERN = re.compile(
+    r"\b(?:asset|ativo|product_group|grupo_de_produto|product|produto|group|grupo"
+    r"|audience|audiencia|campaign|campanha|copy|persona):[a-z0-9]",
+    re.I,
+)
 
 
 def _canonical_json_checksum(value: dict) -> str:
@@ -432,24 +439,55 @@ def _site_asset(
     }
 
 
-def _site_cta(node: dict) -> Optional[dict]:
-    data = node.get("data") or {}
-    public = data.get("public_site") if isinstance(data.get("public_site"), dict) else {}
-    raw = public.get("cta") or data.get("cta")
+def _site_cta_variant(raw: Any) -> Optional[dict]:
+    """Validate one {label, message_template} pair through the same guard.
+
+    Shared by the default CTA and each `by_audience` override so a technical
+    id can never leak through either path -- it is the same bracketed-ref
+    risk either way, just keyed by audience instead of by node.
+    """
     if not isinstance(raw, dict):
         return None
     label = str(raw.get("label") or "").strip()
     message = str(raw.get("message_template") or "").strip()
     if not label or not message or _TECHNICAL_ID_PATTERN.search(message):
         return None
-    return {
+    return {"label": label, "message_template": message}
+
+
+def _site_cta(node: dict) -> Optional[dict]:
+    data = node.get("data") or {}
+    public = data.get("public_site") if isinstance(data.get("public_site"), dict) else {}
+    raw = public.get("cta") or data.get("cta")
+    if not isinstance(raw, dict):
+        return None
+    base = _site_cta_variant(raw)
+    if base is None:
+        return None
+    result = {
         # A CTA belongs to the compiled node that owns it.  Do not accept a
         # second, free-form node reference that could point outside the active
         # immutable document.
         "node_id": str(node.get("id") or "") or None,
-        "label": label,
-        "message_template": message,
+        **base,
     }
+    # `by_audience` lets the CTA wording itself declare the customer's
+    # purchase profile (varejo vs atacado) so the model's semantic
+    # classification picks it up from the customer's own first message,
+    # with zero technical tags. It is an optional enhancement on top of the
+    # required base CTA above: a variant that fails validation (or is
+    # simply absent) drops silently and the base CTA still applies -- see
+    # `_catalog_cta_errors`, which never inspects `by_audience`.
+    raw_variants = raw.get("by_audience")
+    if isinstance(raw_variants, dict):
+        by_audience = {}
+        for audience_slug, variant_raw in raw_variants.items():
+            variant = _site_cta_variant(variant_raw)
+            if variant is not None:
+                by_audience[str(audience_slug)] = variant
+        if by_audience:
+            result["by_audience"] = by_audience
+    return result
 
 
 def _catalog_cta_errors(categories: list[dict]) -> list[str]:
@@ -480,8 +518,8 @@ def _publication_grants(publication: dict, nodes: dict[str, dict], edges: list[d
     }
 
 
-def _compiled_offer(node: dict) -> Optional[dict]:
-    data = node.get("data") or {}
+def _compiled_offer(node: dict, offer_node: dict | None = None) -> Optional[dict]:
+    data = (offer_node or node).get("data") or {}
     raw = data.get("offer") or data.get("price")
     if isinstance(raw, dict) and isinstance(raw.get("unit"), dict):
         raw = raw["unit"]
@@ -610,13 +648,18 @@ def _compiled_catalog_payload(
         node_id: node for node_id, node in nodes.items()
         if node.get("node_type") == "faq" and node_id in granted_node_ids
     }
+    offer_nodes = {
+        node_id: node for node_id, node in nodes.items() if node.get("node_type") == "offer"
+    }
 
     products_by_group: dict[str, list[str]] = {}
     related_by_product: dict[str, list[str]] = {}
     asset_edges_by_owner: dict[str, list[dict]] = {}
+    offers_by_product: dict[str, list[dict]] = {}
     group_relations = {"product_group_has_product", "in_category", "category_has_product", "contains"}
     copy_relations = {"product_has_copy", "supports_copy", "offer_has_copy"}
     faq_relations = {"product_has_faq", "answers_question"}
+    offer_relations = {"about_product"}
     for edge in edges:
         source = str(edge.get("source") or "")
         target = str(edge.get("target") or "")
@@ -633,6 +676,16 @@ def _compiled_catalog_payload(
         if relation in {"uses_asset", "brand_has_asset", "category_has_asset", "campaign_has_asset"}:
             if source in nodes and target in asset_nodes:
                 asset_edges_by_owner.setdefault(source, []).append(edge)
+        if relation in offer_relations and source in offer_nodes and target in product_nodes:
+            offers_by_product.setdefault(target, []).append(offer_nodes[source])
+
+    def _product_offer(product_id: str, node: dict) -> Optional[dict]:
+        """Public storefront shows the retail (varejo) price; wholesale needs
+        an audience/quantity qualifier the anonymous carousel never has."""
+        candidates = offers_by_product.get(product_id) or []
+        by_channel = {str((c.get("data") or {}).get("channel") or ""): c for c in candidates}
+        chosen = by_channel.get("varejo") or (candidates[0] if candidates else None)
+        return _compiled_offer(node, chosen)
 
     seen_brand_assets: set[str] = set()
     for edge in asset_edges_by_owner.get(str(brand_node.get("id") or ""), []):
@@ -690,7 +743,7 @@ def _compiled_catalog_payload(
             "slug": str(node.get("slug") or product_id),
             "name": str(node.get("title") or node.get("slug") or "Produto"),
             "description": to_clean_markdown(node.get("summary") or data.get("description") or ""),
-            "offer": _compiled_offer(node),
+            "offer": _product_offer(product_id, node),
             "visible": data.get("visible") is not False,
             "position": _read_int(data.get("position") or data.get("sort_order"), 0),
             "cta": _site_cta(node),

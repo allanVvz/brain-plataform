@@ -598,6 +598,46 @@ def ensure_lead_membership(
     )
     return (result.data or [payload])[0] if result else payload
 
+
+def _lead_membership(lead_id: int, audience_id: str) -> Optional[dict]:
+    return _one(
+        get_client()
+        .table("lead_audience_memberships")
+        .select("id,lead_id,audience_id,membership_type,created_by_user_id,created_at")
+        .eq("lead_id", lead_id)
+        .eq("audience_id", audience_id)
+        .maybe_single()
+    )
+
+
+def ensure_shared_lead_membership(lead_id: int, audience_id: str) -> Optional[dict]:
+    """Insert-only join for graph-driven audience segmentation (Bug 5).
+
+    Unlike ``ensure_lead_membership`` -- which upserts on (lead_id,
+    audience_id) and would silently downgrade an existing row's
+    ``membership_type`` -- this never touches a row that already exists.
+    ``primary`` is reserved for manual/import/CRM membership; a lead already
+    linked to the audience through any of those keeps it untouched. Only
+    when no row exists yet does this create one, always ``shared``. Callers
+    (graph_agent_runtime_v3.sync_lead_audience_memberships) treat this as
+    best-effort and must not let a failure here reach the turn commit.
+    """
+    if not lead_id or not audience_id:
+        return None
+    existing = _lead_membership(lead_id, audience_id)
+    if existing:
+        return existing
+    payload = {"lead_id": lead_id, "audience_id": audience_id, "membership_type": "shared"}
+    try:
+        return _insert_one(get_client().table("lead_audience_memberships").insert(payload)) or payload
+    except Exception:
+        # Most likely a concurrent turn/import already inserted the row
+        # (unique (lead_id, audience_id)) between our check and our insert.
+        # Re-read instead of raising -- this path must never surface an
+        # error to the caller.
+        return _lead_membership(lead_id, audience_id)
+
+
 def _audience_ids_for_persona(persona_id: str, audience_id: Optional[str] = None, audience_slug: Optional[str] = None) -> list[str]:
     if audience_id:
         audience = get_audience(audience_id)

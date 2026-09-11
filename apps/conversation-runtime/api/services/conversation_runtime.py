@@ -166,6 +166,40 @@ def _commit_graph_turn_and_outbox_or_raise(
         ) from exc
 
 
+def _sync_lead_audience_memberships_for_turn(
+    *, lead: dict[str, Any], lead_ref: int, turn_envelope: dict[str, Any],
+) -> None:
+    """Resolve this turn's product/branch focus into audience memberships.
+
+    Runs right after `_commit_graph_turn_and_outbox_or_raise` succeeds. The
+    caller wraps this in its own try/except -- this function may still raise
+    (e.g. a malformed publication) and that is fine, since it never reaches
+    the customer-facing commit path either way.
+    """
+    persona_id = str(lead.get("persona_id") or "")
+    if not persona_id:
+        return
+    publication_id = str(turn_envelope.get("publication_id") or "")
+    publication = supabase_client.get_graph_publication_by_id(publication_id) or {}
+    document = publication.get("document_json") or {}
+    if not document:
+        return
+    model_proposal = turn_envelope.get("model_proposal") or {}
+    candidate_node_ids = [
+        *([turn_envelope["active_branch_node_id"]] if turn_envelope.get("active_branch_node_id") else []),
+        *(turn_envelope.get("active_branch_node_ids") or []),
+        *(model_proposal.get("cited_node_ids") or []),
+    ]
+    if not candidate_node_ids:
+        return
+    graph_agent_runtime_v3.sync_lead_audience_memberships(
+        persona_id=persona_id,
+        lead_id=int(lead_ref),
+        document=document,
+        candidate_node_ids=candidate_node_ids,
+    )
+
+
 class ModelDecisionError(RuntimeError):
     pass
 
@@ -2747,6 +2781,20 @@ def commit(
                 "id": atomic_commit["outbound_buffer_id"],
                 "status": atomic_commit.get("outbound_status"),
             }
+        # Best-effort lead -> audience segmentation (Bug 5): the turn already
+        # committed above -- this must never affect that success or the
+        # reply already prepared for the customer. Any failure here (a bad
+        # publication fetch, a missing audience row, a DB hiccup) is logged
+        # and swallowed, never raised.
+        try:
+            _sync_lead_audience_memberships_for_turn(
+                lead=lead, lead_ref=lead_ref, turn_envelope=turn_envelope,
+            )
+        except Exception:
+            logger.exception(
+                "lead_audience_membership_sync_failed lead_ref=%s correlation_id=%s",
+                lead_ref, correlation_id,
+            )
         # Projection only: ledger/facts/proof/outbox above are already durable.
         if response.proof.get("journey_action") == "none":
             pass

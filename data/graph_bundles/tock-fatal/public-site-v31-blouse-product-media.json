@@ -51292,7 +51292,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Básica lisa. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Básica lisa. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Básica lisa. Quero ver as opções — é para uso próprio."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Básica lisa. Quero ver as opções — trabalho com revenda."
+            }
+          }
         }
       }
     },
@@ -51328,7 +51338,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Blusa em POÁ — R$ 39,90. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Blusa em POÁ — R$ 39,90. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Blusa em POÁ — R$ 39,90. Quero ver as opções, vou usar já."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Blusa em POÁ — R$ 39,90. Quero ver as opções pra revender na minha loja."
+            }
+          }
         }
       }
     },
@@ -51364,7 +51384,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Blusa em poliamida. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Blusa em poliamida. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Blusa em poliamida. Quero ver as opções, é pra mim mesma."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Blusa em poliamida. Quero saber sobre quantidade mínima pra revenda."
+            }
+          }
         }
       }
     },
@@ -51400,7 +51430,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Blusa em ribana — lisa. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Blusa em ribana — lisa. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Blusa em ribana — lisa. Quero ver as opções pra comprar uma peça pra mim."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Blusa em ribana — lisa. Quero ver as opções pra montar meu mix de revenda."
+            }
+          }
         }
       }
     },
@@ -51436,7 +51476,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Blusa em ribana — listrada. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Blusa em ribana — listrada. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Blusa em ribana — listrada. Quero ver as opções, é para uso pessoal."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Blusa em ribana — listrada. Quero ver as opções — sou revendedora, qual o mínimo?"
+            }
+          }
         }
       }
     },
@@ -51472,7 +51522,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Blusa em tule. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Blusa em tule. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Blusa em tule. Quero ver as opções — não é pra revenda, é pra mim."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Blusa em tule. Quero ver as opções e as condições de atacado."
+            }
+          }
         }
       }
     },
@@ -51507,7 +51567,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Blusa POÁ. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Blusa POÁ. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Blusa POÁ. Quero ver as opções pra escolher a minha cor."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Blusa POÁ. Quero ver as opções pra comprar em quantidade pra revender."
+            }
+          }
         }
       }
     },
@@ -51543,7 +51613,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Blusa térmica. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Blusa térmica. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Blusa térmica. Quero ver as opções, quero uma peça pra vestir já."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Blusa térmica. Quero ver as opções — é pra revenda, não uso próprio."
+            }
+          }
         }
       }
     },
@@ -51579,7 +51659,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Blusa tule texturizado. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Blusa tule texturizado. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Blusa tule texturizado. Quero ver as opções — é compra pra uso próprio mesmo."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Blusa tule texturizado. Quero ver as opções pra fechar um pedido de atacado."
+            }
+          }
         }
       }
     },
@@ -51615,7 +51705,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Blusão de coração. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Blusão de coração. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Blusão de coração. Quero ver as opções pra separar a minha peça."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Blusão de coração. Quero ver as opções, trabalho revendendo e quero o preço de atacado."
+            }
+          }
         }
       }
     },
@@ -51651,7 +51751,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Blusão em mousse — P/M e G/GG. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Blusão em mousse — P/M e G/GG. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Blusão em mousse — P/M e G/GG. Quero ver as opções — é para uso próprio."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Blusão em mousse — P/M e G/GG. Quero ver as opções — trabalho com revenda."
+            }
+          }
         }
       }
     },
@@ -51687,7 +51797,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Blusão em mousse — R$ 79,90 (variação 1). Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Blusão em mousse — R$ 79,90 (variação 1). Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Blusão em mousse — R$ 79,90 (variação 1). Quero ver as opções, vou usar já."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Blusão em mousse — R$ 79,90 (variação 1). Quero ver as opções pra revender na minha loja."
+            }
+          }
         }
       }
     },
@@ -51723,7 +51843,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Blusão em mousse — R$ 79,90 (variação 2). Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Blusão em mousse — R$ 79,90 (variação 2). Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Blusão em mousse — R$ 79,90 (variação 2). Quero ver as opções, é pra mim mesma."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Blusão em mousse — R$ 79,90 (variação 2). Quero saber sobre quantidade mínima pra revenda."
+            }
+          }
         }
       }
     },
@@ -51759,7 +51889,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Blusão em mousse — R$ 99,90. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Blusão em mousse — R$ 99,90. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Blusão em mousse — R$ 99,90. Quero ver as opções pra comprar uma peça pra mim."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Blusão em mousse — R$ 99,90. Quero ver as opções pra montar meu mix de revenda."
+            }
+          }
         }
       }
     },
@@ -51795,7 +51935,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Body em suplex. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Body em suplex. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Body em suplex. Quero ver as opções, é para uso pessoal."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Body em suplex. Quero ver as opções — sou revendedora, qual o mínimo?"
+            }
+          }
         }
       }
     },
@@ -51831,7 +51981,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Body em tule POÁ. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Body em tule POÁ. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Body em tule POÁ. Quero ver as opções — não é pra revenda, é pra mim."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Body em tule POÁ. Quero ver as opções e as condições de atacado."
+            }
+          }
         }
       }
     },
@@ -51867,7 +52027,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Body estampado. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Body estampado. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Body estampado. Quero ver as opções pra escolher a minha cor."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Body estampado. Quero ver as opções pra comprar em quantidade pra revender."
+            }
+          }
         }
       }
     },
@@ -51903,7 +52073,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Body mula manca. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Body mula manca. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Body mula manca. Quero ver as opções, quero uma peça pra vestir já."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Body mula manca. Quero ver as opções — é pra revenda, não uso próprio."
+            }
+          }
         }
       }
     },
@@ -51939,7 +52119,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Body poliamida. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Body poliamida. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Body poliamida. Quero ver as opções — é compra pra uso próprio mesmo."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Body poliamida. Quero ver as opções pra fechar um pedido de atacado."
+            }
+          }
         }
       }
     },
@@ -51975,7 +52165,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Body rendado. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Body rendado. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Body rendado. Quero ver as opções pra separar a minha peça."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Body rendado. Quero ver as opções, trabalho revendendo e quero o preço de atacado."
+            }
+          }
         }
       }
     },
@@ -52011,7 +52211,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Camisa bicolor. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Camisa bicolor. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Camisa bicolor. Quero ver as opções — é para uso próprio."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Camisa bicolor. Quero ver as opções — trabalho com revenda."
+            }
+          }
         }
       }
     },
@@ -52047,7 +52257,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Camisa com amarração. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Camisa com amarração. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Camisa com amarração. Quero ver as opções, vou usar já."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Camisa com amarração. Quero ver as opções pra revender na minha loja."
+            }
+          }
         }
       }
     },
@@ -52083,7 +52303,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Camisa em POÁ. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Camisa em POÁ. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Camisa em POÁ. Quero ver as opções, é pra mim mesma."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Camisa em POÁ. Quero saber sobre quantidade mínima pra revenda."
+            }
+          }
         }
       }
     },
@@ -52118,7 +52348,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Bota Comfortflex. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Bota Comfortflex. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Bota Comfortflex. Quero ver as opções pra comprar uma peça pra mim."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Bota Comfortflex. Quero ver as opções pra montar meu mix de revenda."
+            }
+          }
         }
       }
     },
@@ -52154,7 +52394,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Bota courino. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Bota courino. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Bota courino. Quero ver as opções, é para uso pessoal."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Bota courino. Quero ver as opções — sou revendedora, qual o mínimo?"
+            }
+          }
         }
       }
     },
@@ -52190,7 +52440,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Bota Vizzano. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Bota Vizzano. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Bota Vizzano. Quero ver as opções — não é pra revenda, é pra mim."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Bota Vizzano. Quero ver as opções e as condições de atacado."
+            }
+          }
         }
       }
     },
@@ -52226,7 +52486,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Botas. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Botas. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Botas. Quero ver as opções pra escolher a minha cor."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Botas. Quero ver as opções pra comprar em quantidade pra revender."
+            }
+          }
         }
       }
     },
@@ -52262,7 +52532,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Tênis Vans, Adidas, Nike, Asics. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Tênis Vans, Adidas, Nike, Asics. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Tênis Vans, Adidas, Nike, Asics. Quero ver as opções, quero uma peça pra vestir já."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Tênis Vans, Adidas, Nike, Asics. Quero ver as opções — é pra revenda, não uso próprio."
+            }
+          }
         }
       }
     },
@@ -52298,7 +52578,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Tênis Via Marte — branco/bege. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Tênis Via Marte — branco/bege. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Tênis Via Marte — branco/bege. Quero ver as opções — é compra pra uso próprio mesmo."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Tênis Via Marte — branco/bege. Quero ver as opções pra fechar um pedido de atacado."
+            }
+          }
         }
       }
     },
@@ -52334,7 +52624,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Tênis Via Marte — preto slip-on. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Tênis Via Marte — preto slip-on. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Tênis Via Marte — preto slip-on. Quero ver as opções pra separar a minha peça."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Tênis Via Marte — preto slip-on. Quero ver as opções, trabalho revendendo e quero o preço de atacado."
+            }
+          }
         }
       }
     },
@@ -52370,7 +52670,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Tênis Via Marte — preto. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Tênis Via Marte — preto. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Tênis Via Marte — preto. Quero ver as opções — é para uso próprio."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Tênis Via Marte — preto. Quero ver as opções — trabalho com revenda."
+            }
+          }
         }
       }
     },
@@ -52406,7 +52716,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Tênis Vizzano. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Tênis Vizzano. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Tênis Vizzano. Quero ver as opções, vou usar já."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Tênis Vizzano. Quero ver as opções pra revender na minha loja."
+            }
+          }
         }
       }
     },
@@ -52442,7 +52762,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Calça cargo com bolso. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Calça cargo com bolso. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Calça cargo com bolso. Quero ver as opções, é pra mim mesma."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Calça cargo com bolso. Quero saber sobre quantidade mínima pra revenda."
+            }
+          }
         }
       }
     },
@@ -52478,7 +52808,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Calça em bengaline. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Calça em bengaline. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Calça em bengaline. Quero ver as opções pra comprar uma peça pra mim."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Calça em bengaline. Quero ver as opções pra montar meu mix de revenda."
+            }
+          }
         }
       }
     },
@@ -52514,7 +52854,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Calça em modal. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Calça em modal. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Calça em modal. Quero ver as opções, é para uso pessoal."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Calça em modal. Quero ver as opções — sou revendedora, qual o mínimo?"
+            }
+          }
         }
       }
     },
@@ -52550,7 +52900,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Calça flare em cotele. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Calça flare em cotele. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Calça flare em cotele. Quero ver as opções — não é pra revenda, é pra mim."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Calça flare em cotele. Quero ver as opções e as condições de atacado."
+            }
+          }
         }
       }
     },
@@ -52586,7 +52946,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Calça flare em suplex. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Calça flare em suplex. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Calça flare em suplex. Quero ver as opções pra escolher a minha cor."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Calça flare em suplex. Quero ver as opções pra comprar em quantidade pra revender."
+            }
+          }
         }
       }
     },
@@ -52622,7 +52992,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Calça flare jeans. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Calça flare jeans. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Calça flare jeans. Quero ver as opções, quero uma peça pra vestir já."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Calça flare jeans. Quero ver as opções — é pra revenda, não uso próprio."
+            }
+          }
         }
       }
     },
@@ -52658,7 +53038,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Calça flare peluciada. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Calça flare peluciada. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Calça flare peluciada. Quero ver as opções — é compra pra uso próprio mesmo."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Calça flare peluciada. Quero ver as opções pra fechar um pedido de atacado."
+            }
+          }
         }
       }
     },
@@ -52694,7 +53084,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Calça moletinho. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Calça moletinho. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Calça moletinho. Quero ver as opções pra separar a minha peça."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Calça moletinho. Quero ver as opções, trabalho revendendo e quero o preço de atacado."
+            }
+          }
         }
       }
     },
@@ -52730,7 +53130,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Calça moletinho com punho. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Calça moletinho com punho. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Calça moletinho com punho. Quero ver as opções — é para uso próprio."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Calça moletinho com punho. Quero ver as opções — trabalho com revenda."
+            }
+          }
         }
       }
     },
@@ -52766,7 +53176,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Calça perua. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Calça perua. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Calça perua. Quero ver as opções, vou usar já."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Calça perua. Quero ver as opções pra revender na minha loja."
+            }
+          }
         }
       }
     },
@@ -52802,7 +53222,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Legging suplex. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Legging suplex. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Legging suplex. Quero ver as opções, é pra mim mesma."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Legging suplex. Quero saber sobre quantidade mínima pra revenda."
+            }
+          }
         }
       }
     },
@@ -52838,7 +53268,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Short saia resinada. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Short saia resinada. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Short saia resinada. Quero ver as opções pra comprar uma peça pra mim."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Short saia resinada. Quero ver as opções pra montar meu mix de revenda."
+            }
+          }
         }
       }
     },
@@ -52874,7 +53314,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Cardigan pelinho. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Cardigan pelinho. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Cardigan pelinho. Quero ver as opções, é para uso pessoal."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Cardigan pelinho. Quero ver as opções — sou revendedora, qual o mínimo?"
+            }
+          }
         }
       }
     },
@@ -52910,7 +53360,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Casaco com saia. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Casaco com saia. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Casaco com saia. Quero ver as opções — não é pra revenda, é pra mim."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Casaco com saia. Quero ver as opções e as condições de atacado."
+            }
+          }
         }
       }
     },
@@ -52946,7 +53406,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Casaco em lã batida. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Casaco em lã batida. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Casaco em lã batida. Quero ver as opções pra escolher a minha cor."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Casaco em lã batida. Quero ver as opções pra comprar em quantidade pra revender."
+            }
+          }
         }
       }
     },
@@ -52982,7 +53452,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Casaco em modal plus size. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Casaco em modal plus size. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Casaco em modal plus size. Quero ver as opções, quero uma peça pra vestir já."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Casaco em modal plus size. Quero ver as opções — é pra revenda, não uso próprio."
+            }
+          }
         }
       }
     },
@@ -53018,7 +53498,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Casaco plus em lãzinha. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Casaco plus em lãzinha. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Casaco plus em lãzinha. Quero ver as opções — é compra pra uso próprio mesmo."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Casaco plus em lãzinha. Quero ver as opções pra fechar um pedido de atacado."
+            }
+          }
         }
       }
     },
@@ -53054,7 +53544,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Jaqueta gominho plus size. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Jaqueta gominho plus size. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Jaqueta gominho plus size. Quero ver as opções pra separar a minha peça."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Jaqueta gominho plus size. Quero ver as opções, trabalho revendendo e quero o preço de atacado."
+            }
+          }
         }
       }
     },
@@ -53090,7 +53590,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Pala em modal. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Pala em modal. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Pala em modal. Quero ver as opções — é para uso próprio."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Pala em modal. Quero ver as opções — trabalho com revenda."
+            }
+          }
         }
       }
     },
@@ -53126,7 +53636,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Pala em mousse. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Pala em mousse. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Pala em mousse. Quero ver as opções, vou usar já."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Pala em mousse. Quero ver as opções pra revender na minha loja."
+            }
+          }
         }
       }
     },
@@ -53162,7 +53682,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Conjunto camisa e colete. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Conjunto camisa e colete. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Conjunto camisa e colete. Quero ver as opções, é pra mim mesma."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Conjunto camisa e colete. Quero saber sobre quantidade mínima pra revenda."
+            }
+          }
         }
       }
     },
@@ -53198,7 +53728,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Conjunto canelado. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Conjunto canelado. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Conjunto canelado. Quero ver as opções pra comprar uma peça pra mim."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Conjunto canelado. Quero ver as opções pra montar meu mix de revenda."
+            }
+          }
         }
       }
     },
@@ -53234,7 +53774,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Conjunto em cotele. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Conjunto em cotele. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Conjunto em cotele. Quero ver as opções, é para uso pessoal."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Conjunto em cotele. Quero ver as opções — sou revendedora, qual o mínimo?"
+            }
+          }
         }
       }
     },
@@ -53270,7 +53820,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Conjunto em modal. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Conjunto em modal. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Conjunto em modal. Quero ver as opções — não é pra revenda, é pra mim."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Conjunto em modal. Quero ver as opções e as condições de atacado."
+            }
+          }
         }
       }
     },
@@ -53306,7 +53866,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Conjunto em modal manga morcego. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Conjunto em modal manga morcego. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Conjunto em modal manga morcego. Quero ver as opções pra escolher a minha cor."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Conjunto em modal manga morcego. Quero ver as opções pra comprar em quantidade pra revender."
+            }
+          }
         }
       }
     },
@@ -53342,7 +53912,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Conjunto em mousse — R$ 169,90. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Conjunto em mousse — R$ 169,90. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Conjunto em mousse — R$ 169,90. Quero ver as opções, quero uma peça pra vestir já."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Conjunto em mousse — R$ 169,90. Quero ver as opções — é pra revenda, não uso próprio."
+            }
+          }
         }
       }
     },
@@ -53378,7 +53958,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Conjunto em mousse — R$ 189,90. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Conjunto em mousse — R$ 189,90. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Conjunto em mousse — R$ 189,90. Quero ver as opções — é compra pra uso próprio mesmo."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Conjunto em mousse — R$ 189,90. Quero ver as opções pra fechar um pedido de atacado."
+            }
+          }
         }
       }
     },
@@ -53414,7 +54004,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Conjunto em suede. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Conjunto em suede. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Conjunto em suede. Quero ver as opções pra separar a minha peça."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Conjunto em suede. Quero ver as opções, trabalho revendendo e quero o preço de atacado."
+            }
+          }
         }
       }
     },
@@ -53450,7 +54050,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Blusão masculino. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Blusão masculino. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Blusão masculino. Quero ver as opções — é para uso próprio."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Blusão masculino. Quero ver as opções — trabalho com revenda."
+            }
+          }
         }
       }
     },
@@ -53486,7 +54096,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Óculos de sol. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Óculos de sol. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Óculos de sol. Quero ver as opções, vou usar já."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Óculos de sol. Quero ver as opções pra revender na minha loja."
+            }
+          }
         }
       }
     },
@@ -53522,7 +54142,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Pijama infantil. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Pijama infantil. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Pijama infantil. Quero ver as opções, é pra mim mesma."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Pijama infantil. Quero saber sobre quantidade mínima pra revenda."
+            }
+          }
         }
       }
     },
@@ -53558,7 +54188,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Vestido canelado com fecho. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Vestido canelado com fecho. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Vestido canelado com fecho. Quero ver as opções pra comprar uma peça pra mim."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Vestido canelado com fecho. Quero ver as opções pra montar meu mix de revenda."
+            }
+          }
         }
       }
     },
@@ -53594,7 +54234,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Vestido canelado gola alta — azul. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Vestido canelado gola alta — azul. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Vestido canelado gola alta — azul. Quero ver as opções, é para uso pessoal."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Vestido canelado gola alta — azul. Quero ver as opções — sou revendedora, qual o mínimo?"
+            }
+          }
         }
       }
     },
@@ -53630,7 +54280,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Vestido canelado gola alta — preto. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Vestido canelado gola alta — preto. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Vestido canelado gola alta — preto. Quero ver as opções — não é pra revenda, é pra mim."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Vestido canelado gola alta — preto. Quero ver as opções e as condições de atacado."
+            }
+          }
         }
       }
     },
@@ -53666,7 +54326,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Vestido decote quadrado. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Vestido decote quadrado. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Vestido decote quadrado. Quero ver as opções pra escolher a minha cor."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Vestido decote quadrado. Quero ver as opções pra comprar em quantidade pra revender."
+            }
+          }
         }
       }
     },
@@ -53702,7 +54372,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Vestido drapeado. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Vestido drapeado. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Vestido drapeado. Quero ver as opções, quero uma peça pra vestir já."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Vestido drapeado. Quero ver as opções — é pra revenda, não uso próprio."
+            }
+          }
         }
       }
     },
@@ -53738,7 +54418,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Vestido em modal. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Vestido em modal. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Vestido em modal. Quero ver as opções — é compra pra uso próprio mesmo."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Vestido em modal. Quero ver as opções pra fechar um pedido de atacado."
+            }
+          }
         }
       }
     },
@@ -53774,7 +54464,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Vestido em mousse — R$ 129,90. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Vestido em mousse — R$ 129,90. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Vestido em mousse — R$ 129,90. Quero ver as opções pra separar a minha peça."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Vestido em mousse — R$ 129,90. Quero ver as opções, trabalho revendendo e quero o preço de atacado."
+            }
+          }
         }
       }
     },
@@ -53810,7 +54510,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Vestido em mousse — R$ 159,90. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Vestido em mousse — R$ 159,90. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Vestido em mousse — R$ 159,90. Quero ver as opções — é para uso próprio."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Vestido em mousse — R$ 159,90. Quero ver as opções — trabalho com revenda."
+            }
+          }
         }
       }
     },
@@ -53846,7 +54556,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Vestido gola quadrada. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Vestido gola quadrada. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Vestido gola quadrada. Quero ver as opções, vou usar já."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Vestido gola quadrada. Quero ver as opções pra revender na minha loja."
+            }
+          }
         }
       }
     },
@@ -53882,7 +54602,17 @@
         ],
         "cta": {
           "label": "Eu quero!",
-          "message_template": "Vim pela vitrine e me interessei por Vestido POÁ. Quero ver opções."
+          "message_template": "Vim pela vitrine e me interessei por Vestido POÁ. Quero ver opções.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Eu quero!",
+              "message_template": "Vim pela vitrine e me interessei por Vestido POÁ. Quero ver as opções, é pra mim mesma."
+            },
+            "tock-reseller": {
+              "label": "Quero revender!",
+              "message_template": "Vim pela vitrine e me interessei por Vestido POÁ. Quero saber sobre quantidade mínima pra revenda."
+            }
+          }
         }
       }
     },
@@ -53901,7 +54631,17 @@
         "graph_json_node_id": "product_group:tock-blusas-bodies-camisas-e-partes-de-cima",
         "cta": {
           "label": "Quero conhecer este estilo",
-          "message_template": "Vim pela vitrine e quero conhecer melhor o estilo Blusas, bodies, camisas e partes de cima."
+          "message_template": "Vim pela vitrine e quero conhecer melhor o estilo Blusas, bodies, camisas e partes de cima.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Quero conhecer este estilo",
+              "message_template": "Vim pela vitrine e quero conhecer melhor o estilo Blusas, bodies, camisas e partes de cima — é pra mim mesma, quero escolher uma peça pra usar já."
+            },
+            "tock-reseller": {
+              "label": "Quero montar meu mix",
+              "message_template": "Vim pela vitrine e quero conhecer melhor o estilo Blusas, bodies, camisas e partes de cima pra revender. Me ajuda a montar o mix que mais gira?"
+            }
+          }
         }
       }
     },
@@ -53920,7 +54660,17 @@
         "graph_json_node_id": "product_group:tock-calcados",
         "cta": {
           "label": "Quero conhecer este estilo",
-          "message_template": "Vim pela vitrine e quero conhecer melhor o estilo Calçados."
+          "message_template": "Vim pela vitrine e quero conhecer melhor o estilo Calçados.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Quero conhecer este estilo",
+              "message_template": "Vim pela vitrine e quero conhecer melhor o estilo Calçados — é pra mim, quero um par pra usar já."
+            },
+            "tock-reseller": {
+              "label": "Quero montar meu mix",
+              "message_template": "Vim pela vitrine e quero conhecer melhor o estilo Calçados pra revenda. Quero saber a quantidade mínima e o mix disponível."
+            }
+          }
         }
       }
     },
@@ -53939,7 +54689,17 @@
         "graph_json_node_id": "product_group:tock-calcas-leggings-shorts-e-partes-de-baixo",
         "cta": {
           "label": "Quero conhecer este estilo",
-          "message_template": "Vim pela vitrine e quero conhecer melhor o estilo Calças, leggings, shorts e partes de baixo."
+          "message_template": "Vim pela vitrine e quero conhecer melhor o estilo Calças, leggings, shorts e partes de baixo.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Quero conhecer este estilo",
+              "message_template": "Vim pela vitrine e quero conhecer melhor o estilo Calças, leggings, shorts e partes de baixo — é pra uso próprio."
+            },
+            "tock-reseller": {
+              "label": "Quero montar meu mix",
+              "message_template": "Vim pela vitrine e quero conhecer melhor o estilo Calças, leggings, shorts e partes de baixo pra revender. Quais as condições de atacado?"
+            }
+          }
         }
       }
     },
@@ -53958,7 +54718,17 @@
         "graph_json_node_id": "product_group:tock-casacos-jaquetas-cardigans-e-sobreposicoes",
         "cta": {
           "label": "Quero conhecer este estilo",
-          "message_template": "Vim pela vitrine e quero conhecer melhor o estilo Casacos, jaquetas, cardigans e sobreposições."
+          "message_template": "Vim pela vitrine e quero conhecer melhor o estilo Casacos, jaquetas, cardigans e sobreposições.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Quero conhecer este estilo",
+              "message_template": "Vim pela vitrine e quero conhecer melhor o estilo Casacos, jaquetas, cardigans e sobreposições — quero uma peça pra mim."
+            },
+            "tock-reseller": {
+              "label": "Quero montar meu mix",
+              "message_template": "Vim pela vitrine e quero conhecer melhor o estilo Casacos, jaquetas, cardigans e sobreposições pra revenda. Pode me passar o mínimo e o preço de atacado?"
+            }
+          }
         }
       }
     },
@@ -53977,7 +54747,17 @@
         "graph_json_node_id": "product_group:tock-conjuntos",
         "cta": {
           "label": "Quero conhecer este estilo",
-          "message_template": "Vim pela vitrine e quero conhecer melhor o estilo Conjuntos."
+          "message_template": "Vim pela vitrine e quero conhecer melhor o estilo Conjuntos.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Quero conhecer este estilo",
+              "message_template": "Vim pela vitrine e quero conhecer melhor o estilo Conjuntos — é pra usar já, não pra revender."
+            },
+            "tock-reseller": {
+              "label": "Quero montar meu mix",
+              "message_template": "Vim pela vitrine e quero conhecer melhor o estilo Conjuntos pra revenda. Trabalho com revenda e quero montar um mix."
+            }
+          }
         }
       }
     },
@@ -53996,7 +54776,17 @@
         "graph_json_node_id": "product_group:tock-infantil-masculino-e-acessorios",
         "cta": {
           "label": "Quero conhecer este estilo",
-          "message_template": "Vim pela vitrine e quero conhecer melhor o estilo Infantil, masculino e acessórios."
+          "message_template": "Vim pela vitrine e quero conhecer melhor o estilo Infantil, masculino e acessórios.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Quero conhecer este estilo",
+              "message_template": "Vim pela vitrine e quero conhecer melhor o estilo Infantil, masculino e acessórios — é pra uso da família, não pra revenda."
+            },
+            "tock-reseller": {
+              "label": "Quero montar meu mix",
+              "message_template": "Vim pela vitrine e quero conhecer melhor o estilo Infantil, masculino e acessórios pra revender. Qual a quantidade mínima do pedido?"
+            }
+          }
         }
       }
     },
@@ -54015,7 +54805,17 @@
         "graph_json_node_id": "product_group:tock-vestidos",
         "cta": {
           "label": "Quero conhecer este estilo",
-          "message_template": "Vim pela vitrine e quero conhecer melhor o estilo Vestidos."
+          "message_template": "Vim pela vitrine e quero conhecer melhor o estilo Vestidos.",
+          "by_audience": {
+            "tock-retail": {
+              "label": "Quero conhecer este estilo",
+              "message_template": "Vim pela vitrine e quero conhecer melhor o estilo Vestidos — quero um vestido pra usar já."
+            },
+            "tock-reseller": {
+              "label": "Quero montar meu mix",
+              "message_template": "Vim pela vitrine e quero conhecer melhor o estilo Vestidos pra revenda. Me chama pra fechar o mix?"
+            }
+          }
         }
       }
     },

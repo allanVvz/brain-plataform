@@ -67,14 +67,39 @@ function leadAudiences(lead: Lead): Audience[] {
     });
 }
 
-function primaryAudienceLabel(lead: Lead, fallback: string): string {
+function primarySemanticMembership(lead: Lead): Membership | undefined {
   const list = (lead?.memberships as Membership[] | undefined) || [];
-  const semantic = list.find((membership) => {
+  return list.find((membership) => {
     const audience = membership.audience;
     return audience && audience.slug !== "import" && audience.source_type !== "import";
   });
-  if (semantic?.audience?.name) return semantic.audience.name;
-  return fallback;
+}
+
+function primaryAudienceLabel(lead: Lead, fallback: string): string {
+  return primarySemanticMembership(lead)?.audience?.name || fallback;
+}
+
+// Bug 5: audiences a lead joined automatically because a turn's product/
+// branch resolved to a graph audience_has_product_group/offers_product edge
+// (graph_agent_runtime_v3.sync_lead_audience_memberships). Always
+// membership_type "shared" -- never the manual/import/CRM "primary" already
+// shown by primaryAudienceLabel above -- and shown as its own small pill so
+// "why did this lead land here" stays visible without a new panel.
+function sharedAudienceMemberships(lead: Lead, excludeAudienceId?: string): Audience[] {
+  const list = (lead?.memberships as Membership[] | undefined) || [];
+  const seen = new Set<string>();
+  const result: Audience[] = [];
+  for (const membership of list) {
+    const audience = membership.audience;
+    if (!audience) continue;
+    if (audience.slug === "import" || audience.source_type === "import") continue;
+    if (membership.membership_type !== "shared") continue;
+    if (excludeAudienceId && audience.id === excludeAudienceId) continue;
+    if (seen.has(audience.id)) continue;
+    seen.add(audience.id);
+    result.push(audience);
+  }
+  return result;
 }
 
 function LeadsPageInner() {
@@ -314,6 +339,9 @@ function LeadsPageInner() {
                   const phone = lead.lead_id || lead.telefone || "";
                   const canStart = canStartConversation(lead);
                   const primaryName = primaryAudienceLabel(lead, "Sem grupo");
+                  const sharedAudiences = sharedAudienceMemberships(
+                    lead, primarySemanticMembership(lead)?.audience?.id,
+                  );
                   return (
                     <tr key={lead.id || phone}>
                       <td>
@@ -349,6 +377,15 @@ function LeadsPageInner() {
                       <td>
                         <div className="flex flex-wrap items-center gap-1">
                           <span className="lg-badge">{primaryName}</span>
+                          {sharedAudiences.map((audience) => (
+                            <span
+                              key={audience.id}
+                              className="lg-badge lg-badge-info"
+                              title="Segmentacao automatica por produto/galho do grafo"
+                            >
+                              {audience.name}
+                            </span>
+                          ))}
                         </div>
                       </td>
                       <td className="lg-cell-truncate text-xs text-obs-subtle">
