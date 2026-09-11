@@ -27,17 +27,33 @@ Per persona config lives in `personas.config.public_site`:
 
 The externally published URL remains `personas.catalog_url`.
 
-## Baita deployment
+## Shared Card-pio deployment (corrected 2026-09-11)
 
-The Baita public renderer is the separate `Card-pio` repository. Its production
-build must use `VITE_MENU_SOURCE=api` and an absolute
-`VITE_AI_BRAIN_API_URL` for the approved public Brain API. The backend must
-allow `https://baita-cardapio.vercel.app` in `ALLOWED_ORIGINS`. This prevents a
-Vercel static rewrite from masking a failed API request with the local mock.
+> The section below describing `baita-cardapio.vercel.app` and a per-persona
+> `VITE_AI_BRAIN_API_URL`/`ALLOWED_ORIGINS` pair is **obsolete and describes a
+> broken deployment**: `baita-cardapio.vercel.app` proxies to a hostname that
+> no longer resolves (`DNS_HOSTNAME_NOT_FOUND`), confirmed 2026-09-11.
 
-The current canonical Baita public route is
-`https://baita-cardapio.vercel.app/cardapio/baita`; its Brain persona remains
-`baita-conveniencia` and its default collection is `cardapio-baita-v14`.
+The actual `Card-pio` repository ships **one Vercel project** aliased to
+multiple domains (`tockfatal.com`, `lp-catalogo-cardapio.vercel.app`, etc.).
+Its `vercel.json` has a single project-wide rule, `/api-brain/(.*) ->
+https://lpapi.vzforeal.com/$1`, and a generic SPA route for `/cardapio/:slug`.
+This means **any** persona's cardapio works automatically, with zero
+per-persona domain, env var, or CORS setup, at:
+
+```
+https://lp-catalogo-cardapio.vercel.app/cardapio/{site_slug}
+```
+
+`personas.catalog_url` is optional. `public_site_payload` (in
+`services/public_site.py`) derives this exact URL automatically from
+`site_slug` + the format's `default_route_prefix` whenever `catalog_url` is
+unset — set `catalog_url` explicitly only for a persona with a real branded
+domain (e.g. Tock Fatal's `tockfatal.com`), never to point at the shared
+Card-pio domain by hand.
+
+`baita-conveniencia`'s `site_slug` is `baita` (default collection
+`cardapio-baita-v14`); `vz-lupas`'s `site_slug` is `vz-lupas`.
 
 ## Format Registry
 

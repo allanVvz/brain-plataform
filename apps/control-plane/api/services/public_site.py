@@ -1,9 +1,20 @@
 from __future__ import annotations
 
+import os
 import re
 import unicodedata
 from typing import Any, Optional
 from urllib.parse import quote
+
+
+# The shared Card-pio deployment renders any persona's cardapio/catalog under
+# this one domain via a generic `/cardapio/:site_slug` SPA route and a single
+# `/api-brain` proxy rule -- no per-persona domain or CORS config needed. A
+# persona with a real branded domain (e.g. Tock Fatal) sets its own
+# `catalog_url` explicitly, which always takes precedence over this default.
+_DEFAULT_PUBLIC_SITE_BASE_URL = (
+    os.environ.get("PUBLIC_SITE_BASE_URL") or "https://lp-catalogo-cardapio.vercel.app"
+).rstrip("/")
 
 
 DEFAULT_FORMATS = [
@@ -120,13 +131,18 @@ def public_site_payload(
     route_prefix = (fmt.get("default_route_prefix") or "").strip("/")
     route_path = f"/{route_prefix}/{config['site_slug']}" if route_prefix else f"/{config['site_slug']}"
     href = whatsapp_href(config.get("whatsapp_phone"), config.get("whatsapp_message_template"))
+    resolved_catalog_url = (
+        catalog_url
+        or persona.get("catalog_url")
+        or f"{_DEFAULT_PUBLIC_SITE_BASE_URL}{route_path}"
+    )
     return {
         "slug": config["site_slug"],
         "name": config["site_name"],
         "format_key": config["format_key"],
         "format_label": fmt.get("label") or config["format_key"],
         "route_path": route_path,
-        "catalog_url": catalog_url or persona.get("catalog_url"),
+        "catalog_url": resolved_catalog_url,
         "default_collection_slug": config["default_collection_slug"],
         "whatsapp": {
             "phone": config.get("whatsapp_phone") or None,
