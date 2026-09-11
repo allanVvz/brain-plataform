@@ -118,7 +118,10 @@ def is_public_path(path: str) -> bool:
     # the same prefix must still pass through session/persona authorization.
     if path.startswith("/api/menu/"):
         remainder = path.removeprefix("/api/menu/").strip("/")
-        return bool(remainder) and "/" not in remainder
+        parts = remainder.split("/")
+        return (bool(remainder) and "/" not in remainder
+                or len(parts) == 2 and bool(parts[0]) and parts[1] == "blocks"
+                or len(parts) == 3 and bool(parts[0]) and parts[1] == "media" and bool(parts[2]))
     return False
 
 

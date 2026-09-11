@@ -1,6 +1,8 @@
 """Two-phase, branch-scoped GraphRAG context and proposal reconciliation."""
 from __future__ import annotations
 
+from services import catalog_images
+
 import json
 import logging
 import os
@@ -3319,6 +3321,9 @@ def build_context(
         rag_paths=[card.path for card in cards],
         rag_chunks=[_compact_prompt_chunk(row) for row in package],
         context_cards=cards,
+        catalog_images=catalog_images.context_images(document, publication,
+            scoped_ids=contract.get("closure_node_ids") or [], retrieved_ids=set(by_source)),
+        max_response_images=min(3, max(0, int((persona.get("config") or {}).get("max_response_images", 3)))),
         system_prompt=prompt, available_services=[{
             "branch_anchor_node_id": anchor,
             "slug": document["node_by_id"][anchor]["slug"], "label": document["node_by_id"][anchor]["title"]
@@ -4301,6 +4306,12 @@ def _decide(
         active_branch_node_ids=active_ids_for_fields,
         additional_fields=additional_fields,
     )
+    selected_images = []
+    try:
+        selected_images = catalog_images.validate(context, proposal.images)
+    except ValueError as exc:
+        proof["errors"] = [*proof.get("errors", []), str(exc)]
+        proof["valid"] = False
     if service_operations and not service_proof["valid"]:
         proof["errors"] = [*proof.get("errors", []), *service_proof["errors"]]
         proof["valid"] = False
@@ -4892,6 +4903,7 @@ def _decide(
             "technical_pass": True,
             "quality_pass": repetition["passed"],
         }
+        proof["catalog_images"] = selected_images
         evidence_node_ids = list(dict.fromkeys([
             *proposal.cited_node_ids,
         ]))
@@ -4904,7 +4916,7 @@ def _decide(
             AgentResponse(reply_text=reply or None, role=route, evidence_node_ids=evidence_node_ids,
                           cart_state=state,
                           handoff_required=bool(terminal_intent),
-                          proposal=proposal, proof=proof),
+                          proposal=proposal, proof=proof, images=selected_images),
         )
     # A rejected proposal never crosses into graph-authored public copy.
     # One model repair is allowed; a second inconsistency becomes an

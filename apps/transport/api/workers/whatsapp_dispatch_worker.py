@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from services import (
+    catalog_response,
     event_emitter,
     n8n_client,
     runtime_client,
@@ -411,6 +412,18 @@ class WhatsAppDispatchWorker(BaseWorker):
         if transport_mode == "provider_direct":
             outbound_payload = row.get("payload") or {}
             provider = get_provider(binding.get("provider"))
+            if outbound_payload.get("catalog_images"):
+                try:
+                    external_id = catalog_response.dispatch(row, worker_id=self.worker_id,
+                        provider=provider, binding=binding, recipient=recipient,
+                        authorize=lambda: runtime_client.authorize_catalog_response(row["id"], row["persona_id"]))
+                except Exception:
+                    # The item journal preserves successes and uncertain attempts.
+                    # Recovery requires reconciliation, never a blind row retry.
+                    return
+                supabase_client.complete_whatsapp_outbound(row["id"], binding_id=binding["id"],
+                    correlation_id=correlation_id, wamid=external_id, success=True)
+                return
             if outbound_payload.get("media") and binding.get("provider") == "evolution_baileys":
                 media = outbound_payload["media"]
                 signed_url = supabase_client._storage_signed_url(

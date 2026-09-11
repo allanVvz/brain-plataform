@@ -4320,7 +4320,14 @@ def ensure_bucket(name: str, public: bool = False) -> bool:
 # â”€â”€ Assets / asset_readings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def insert_asset(data: dict) -> dict:
-    result = get_client().table("assets").insert(data).execute()
+    try:
+        result = get_client().table("assets").insert(data).execute()
+    except Exception as exc:
+        if data.get("id") and _unique_violation(exc):
+            existing = get_asset(data["id"])
+            if existing and existing.get("persona_id") == data.get("persona_id"):
+                return existing
+        raise
     return (result.data or [{}])[0]
 
 

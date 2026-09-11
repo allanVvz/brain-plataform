@@ -48,6 +48,16 @@ def execute_inbound(payload: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def authorize_catalog_response(response_buffer_id: str, persona_id: str) -> dict:
+    base_url, token = _configuration()
+    with httpx.Client(timeout=15, verify=get_ca_bundle_path()) as client:
+        response = client.post(base_url + "/internal/v1/conversations/authorize-catalog-response",
+            json={"response_buffer_id": response_buffer_id, "persona_id": persona_id},
+            headers={"X-Webhook-Token": token})
+    response.raise_for_status()
+    return response.json()
+
+
 def decorate_leads(
     leads: list[dict[str, Any]],
     *,

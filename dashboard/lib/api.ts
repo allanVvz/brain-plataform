@@ -1125,6 +1125,12 @@ export const api = {
       `/graph-bundles/versions?${params.toString()}`,
     );
   },
+  graphMediaPreview: (body: { bundle: any; scope: string; owner_node_id: string }) =>
+    req<any>("/graph-bundles/media-preview", { method: "POST", body: JSON.stringify(body) }),
+  graphMediaUrl: (assetNodeId: string, personaSlug: string, publicationId: string) =>
+    `${BASE}/graph-bundles/media/${encodeURIComponent(assetNodeId)}?persona_slug=${encodeURIComponent(personaSlug)}&publication_id=${encodeURIComponent(publicationId)}`,
+  graphMediaPlan: (body: { bundle: any; operations: any[] }) =>
+    req<any>("/graph-bundles/media-plan", { method: "POST", body: JSON.stringify(body) }),
   graphBundleView: (
     personaSlug: string,
     source: import("./graph-bundle-v3").GraphBundleSource,

@@ -2691,6 +2691,15 @@ def commit(
             )
             buffer = {"id": envelope.get("buffer_id"), "status": envelope.get("status")}
 
+    if prepared_outbound and response.images:
+        from services import catalog_images
+        # Re-resolve model choices at commit; never trust caller-supplied URLs.
+        selected = catalog_images.validate(context, (response.proposal.images if response.proposal else []))
+        if selected != response.images or response.proof.get("catalog_images") != selected:
+            raise ValueError("catalog_images_commit_mismatch")
+        prepared_outbound["buffer"]["payload"]["catalog_images"] = selected
+        prepared_outbound["message"].setdefault("metadata", {})["attachments"] = selected
+
     graph_turn = None
     if context.runtime_version == graph_agent_runtime_v3.RUNTIME_VERSION:
         active_branch = response.cart_state.get("active_branch_node_id")

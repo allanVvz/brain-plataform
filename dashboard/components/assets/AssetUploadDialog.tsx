@@ -30,7 +30,7 @@ const ASSET_FUNCTIONS = [
 ];
 
 const SELECTABLE_PARENT_TYPES = new Set([
-  "brand", "briefing", "campaign", "product_collection", "category", "product", "audience", "copy", "faq", "offer", "rule", "tone",
+  "brand", "briefing", "campaign", "product_collection", "category", "product_group", "product", "audience", "copy", "faq", "offer", "rule", "tone",
 ]);
 
 export default function AssetUploadDialog({ open, onClose, onUploaded, personas, initialPersonaId }: Props) {
@@ -38,7 +38,9 @@ export default function AssetUploadDialog({ open, onClose, onUploaded, personas,
   const [parentSlug, setParentSlug] = useState("");
   const [parentQuery, setParentQuery] = useState("");
   const [assetFunction, setAssetFunction] = useState("");
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  const file = files[0] ?? null;
+  const setFile = (value: File | null) => setFiles(value ? [value] : []);
   const [preview, setPreview] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -98,8 +100,8 @@ export default function AssetUploadDialog({ open, onClose, onUploaded, personas,
 
   function onDrop(e: React.DragEvent) {
     e.preventDefault();
-    const f = e.dataTransfer.files?.[0];
-    if (f) onPick(f);
+    setFiles(Array.from(e.dataTransfer.files));
+    setError(null);
   }
 
   async function submit() {
@@ -109,13 +111,16 @@ export default function AssetUploadDialog({ open, onClose, onUploaded, personas,
     if (!file) { setError("Escolha um arquivo."); return; }
     setSubmitting(true);
     try {
-      const result = await api.assetUpload(file, {
+      for (let index = 0; index < files.length; index++) {
+      const result = await api.assetUpload(files[index], {
         persona_id: personaId,
         branch_hint: parentSlug,
         asset_function: assetFunction || undefined,
         persona_slug: personaSlug || undefined,
       });
       onUploaded(result);
+      setFiles(files.slice(index + 1));
+      }
       // Reset and close
       setFile(null);
       setParentSlug("");
@@ -158,6 +163,7 @@ export default function AssetUploadDialog({ open, onClose, onUploaded, personas,
             </select>
           </div>
 
+          {files.length > 1 && <p className="text-sm">{files.length} arquivos selecionados</p>}
           {/* File picker / dropzone */}
           <div
             onDragOver={(e) => e.preventDefault()}
@@ -168,9 +174,10 @@ export default function AssetUploadDialog({ open, onClose, onUploaded, personas,
             <input
               ref={fileInputRef}
               type="file"
+              multiple
               className="hidden"
               accept="image/*,.heic,.heif,video/*,application/pdf,text/plain,text/markdown,.md,.txt"
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) onPick(f); }}
+              onChange={(e) => { setFiles(Array.from(e.target.files ?? [])); setError(null); }}
             />
             {!file && (
               <>

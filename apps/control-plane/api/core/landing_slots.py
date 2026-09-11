@@ -99,6 +99,7 @@ SLOTS_BY_PARENT_TYPE: dict[str, list[LandingSlot]] = {
     "brand": [LandingSlot.BRAND_LOGO, LandingSlot.BRAND_SECONDARY, LandingSlot.BRAND_COVER],
     "campaign": [LandingSlot.HERO, LandingSlot.CAMPAIGN_FOOTER],
     "category": [LandingSlot.PRODUCT_GROUP_COVER],
+    "product_group": [LandingSlot.PRODUCT_GROUP_COVER],
     "product": [LandingSlot.PRODUCT_IMAGE],
 }
 

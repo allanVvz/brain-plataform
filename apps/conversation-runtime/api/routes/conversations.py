@@ -13,9 +13,36 @@ from schemas.conversation import (
     StrictModel,
 )
 from services import conversation_runtime, internal_auth, transport_client
+from services import supabase_client
+
+
+class CatalogAuthorizationRequest(StrictModel):
+    response_buffer_id: str
+    persona_id: str
 
 
 router = APIRouter(prefix="/internal/v1/conversations", tags=["conversations"])
+
+
+@router.post("/authorize-catalog-response")
+def authorize_catalog_response(body: CatalogAuthorizationRequest,
+    x_webhook_token: str | None = Header(None, alias="X-Webhook-Token")):
+    internal_auth.authorize_webhook_token(x_webhook_token)
+    rows = (supabase_client.get_client().table("conversation_turn_proofs")
+            .select("publication_id,proof_result").eq("outbound_id", body.response_buffer_id).limit(1).execute().data or [])
+    if not rows:
+        raise HTTPException(409, "Catalog response has no committed proof")
+    proof = rows[0].get("proof_result") or {}
+    publication = supabase_client.get_active_graph_publication(body.persona_id) or {}
+    images = proof.get("catalog_images") or []
+    identity = {k: publication.get(k) for k in ("id", "version", "checksum")}
+    if (proof.get("delivery_authorized") is not True
+            or str(publication.get("persona_id")) != body.persona_id
+            or str(publication.get("id")) != str(rows[0]["publication_id"])
+            or not 1 <= len(images) <= 3
+            or any(image.get("publication") != identity for image in images)):
+        raise HTTPException(409, "Catalog response publication expired or proof invalid")
+    return {"images": images}
 
 
 class ContextRequest(StrictModel):
