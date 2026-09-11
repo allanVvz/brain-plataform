@@ -20,7 +20,7 @@ python-multipart==0.0.32
 # Asset pipeline — local classifier + PDF text extraction.
 pillow==12.3.0
 pillow-heif==1.5.0
-pypdf==6.15.0
+pypdf==6.16.1
 # Optional local OCR backends (install in prod via Dockerfile if desired):
 #   paddleocr, easyocr, pytesseract — selected at runtime via ASSET_OCR_BACKEND env.
 # CI runs with backend=mock so no OCR lib is required for tests.
