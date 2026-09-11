@@ -1,5 +1,5 @@
 {
-  "source_sha": "082c7be02dae6166193a2f2a53844ee7b071e4c9",
+  "source_sha": "f3975d74f2563d7aec0d3b716851252bcfcc0800",
   "contracts_version": "3.0.0",
   "contracts_checksum": "sha256:c2418a764622b7c71fb62fded53669c5292db959a8c9dd5332a8a4a59cc49ec7",
   "schema_version": 139,
@@ -8,30 +8,30 @@
   "services": {
     "gateway": {
       "repository": "allanVvz/brain-plataform",
-      "sha": "082c7be02dae6166193a2f2a53844ee7b071e4c9",
-      "digest": "sha256:dcdadd274e0a7e11179dd445808cfc74060a8973191f63bb35164f6826917bfb",
-      "required_schema_version": 135,
+      "sha": "f3975d74f2563d7aec0d3b716851252bcfcc0800",
+      "digest": "sha256:3c67ddb055112507ca4810b381797a194bf4648624a1116f58f186b4d2af70ba",
+      "required_schema_version": 139,
       "build_context": "apps/gateway"
     },
     "control-plane": {
       "repository": "allanVvz/brain-plataform",
-      "sha": "082c7be02dae6166193a2f2a53844ee7b071e4c9",
-      "digest": "sha256:add6eaa806ec6e09e68678e2ac761ca5f814f88b61e7f4cabb63abc40f48cfff",
+      "sha": "f3975d74f2563d7aec0d3b716851252bcfcc0800",
+      "digest": "sha256:db56e409caf531bfec64b3842e84a279523c836343f9aa3a96b55405ce6d74bb",
       "required_schema_version": 139,
       "build_context": "apps/control-plane"
     },
     "conversation-runtime": {
       "repository": "allanVvz/brain-plataform",
-      "sha": "082c7be02dae6166193a2f2a53844ee7b071e4c9",
-      "digest": "sha256:79e7776943c60ed230a5e21663219b695ffbcba8567e2a24f0a12b331da4ce93",
+      "sha": "f3975d74f2563d7aec0d3b716851252bcfcc0800",
+      "digest": "sha256:812ce6347ae205e19fbbe5526bc889fce969f48f699cab948f3a2e3fdd5478a6",
       "required_schema_version": 139,
       "build_context": "apps/conversation-runtime"
     },
     "transport": {
       "repository": "allanVvz/brain-plataform",
-      "sha": "082c7be02dae6166193a2f2a53844ee7b071e4c9",
-      "digest": "sha256:a91c0f7514ad2e744619eaf1f7035db64303661e0b49681e7ce3e51a6b910a91",
-      "required_schema_version": 135,
+      "sha": "f3975d74f2563d7aec0d3b716851252bcfcc0800",
+      "digest": "sha256:165d968e71cb7f11a6d2c41988155b7b5e5afaa710fda334f6b9baca99bb00f4",
+      "required_schema_version": 139,
       "build_context": "apps/transport"
     }
   }

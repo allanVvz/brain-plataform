@@ -45,7 +45,10 @@ def render(*, source_sha: str, digests: dict[str, str], schema_version: int) -> 
                 "repository": "allanVvz/brain-plataform",
                 "sha": source_sha,
                 "digest": digests[name],
-                "required_schema_version": 131,
+                # A release manifest is one atomic compatibility contract.
+                # Pinning services to an old literal made readiness report
+                # green while newer release-queue RPCs were not checked.
+                "required_schema_version": schema_version,
                 "build_context": f"apps/{name}",
             }
             for name in SERVICES
