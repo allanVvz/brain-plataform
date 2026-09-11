@@ -1,5 +1,5 @@
 {
-  "source_sha": "38a9ab876196a538d2add864984783e461e04aa3",
+  "source_sha": "c212312f8e583093d952f6cb81d562cf6e4a1130",
   "contracts_version": "3.0.0",
   "contracts_checksum": "sha256:23f7b271bff1a62b868e41216f4e148166d1f38bc59192e6f6ea40cffd8178b7",
   "schema_version": 139,
@@ -8,29 +8,29 @@
   "services": {
     "gateway": {
       "repository": "allanVvz/brain-plataform",
-      "sha": "38a9ab876196a538d2add864984783e461e04aa3",
+      "sha": "c212312f8e583093d952f6cb81d562cf6e4a1130",
       "digest": "sha256:f8c6ac97fe4b65ee91c84b57de9e86298a9fe91d41021e9fd93f98191501fa0e",
       "required_schema_version": 139,
       "build_context": "apps/gateway"
     },
     "control-plane": {
       "repository": "allanVvz/brain-plataform",
-      "sha": "38a9ab876196a538d2add864984783e461e04aa3",
-      "digest": "sha256:5df0c8a23f0a68d7e6cda9a4cb5116a04ed0c4082226a18270d88e029321e9dc",
+      "sha": "c212312f8e583093d952f6cb81d562cf6e4a1130",
+      "digest": "sha256:64e89a496f9adb00470a2994a55cc290a3cb4810e6efea85e68e1878869872af",
       "required_schema_version": 139,
       "build_context": "apps/control-plane"
     },
     "conversation-runtime": {
       "repository": "allanVvz/brain-plataform",
-      "sha": "38a9ab876196a538d2add864984783e461e04aa3",
-      "digest": "sha256:c2e397467c8dd2e33cf7e9132dc70536717bff818c038c1b7ec80fb6fdcd781b",
+      "sha": "c212312f8e583093d952f6cb81d562cf6e4a1130",
+      "digest": "sha256:96cc062484cf50ba6fb23cc1a6ddc7afa3e5db12b885a7b39b64d6b5cff4eef3",
       "required_schema_version": 139,
       "build_context": "apps/conversation-runtime"
     },
     "transport": {
       "repository": "allanVvz/brain-plataform",
-      "sha": "38a9ab876196a538d2add864984783e461e04aa3",
-      "digest": "sha256:2815a272af85f7bf88444b39aeaaf3b451ecbadfffab83a2fdfa62e426b7df61",
+      "sha": "c212312f8e583093d952f6cb81d562cf6e4a1130",
+      "digest": "sha256:869d85432ebdd8d52f9b19817723c160ff5b5aceb0a3bef6bc703b05d0efdbf4",
       "required_schema_version": 139,
       "build_context": "apps/transport"
     }
