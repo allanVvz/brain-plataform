@@ -1900,7 +1900,7 @@ def list_product_collection_nodes(
         )
         if persona_id:
             q = q.eq("persona_id", persona_id)
-        return _q(q.order("updated_at", desc=True).range(offset, offset + limit - 1))
+        return _q(q)
     except Exception as exc:
         if _kg_unavailable(exc):
             _KG_TABLES_MISSING = True
