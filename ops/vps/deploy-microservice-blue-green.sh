@@ -147,7 +147,18 @@ pull_candidate_images() {
 }
 
 if [[ "$ACTION" == "--rollback" ]]; then
-  "${COMPOSE[@]}" start "${target_services[@]}"
+  # A rollback restores the HTTP service immediately, but it must not wake
+  # queue consumers while a release-wide safety pause is in effect.  The old
+  # behaviour started every sidecar here, defeating the pause during a
+  # recovery.
+  if [[ -s "$ROOT_DIR/.deploy/control/claims-paused.json" && ${#target_services[@]} -gt 1 ]]; then
+    "${COMPOSE[@]}" start "$target_service"
+    "${COMPOSE[@]}" stop -t 120 "${target_services[@]:1}" >/dev/null 2>&1 || true
+    workers_paused=true
+  else
+    "${COMPOSE[@]}" start "${target_services[@]}"
+    workers_paused=false
+  fi
 else
   pull_candidate_images
   if [[ -s "$ROOT_DIR/.deploy/control/claims-paused.json" && ${#target_services[@]} -gt 1 ]]; then
@@ -174,7 +185,10 @@ if [[ "${workers_paused:-false}" != "true" ]]; then
   done
 fi
 
-candidate="$STATE_DIR/slots.candidate.json"
+# Candidate state is per service.  A shared filename allowed simultaneous
+# deploy workflows to move each other's candidate and strand routing on an
+# empty slot.
+candidate="$STATE_DIR/slots.${SERVICE}.candidate.json"
 python3 - "$STATE_FILE" "$candidate" "$SERVICE" "$target" "$active" <<'PY'
 import json, sys
 source, target_path, service, target_slot, old_slot = sys.argv[1:]
@@ -185,7 +199,7 @@ with open(target_path, "w", encoding="utf-8") as handle:
     handle.write("\n")
 PY
 
-rendered="$STATE_DIR/caddy-candidate"
+rendered="$STATE_DIR/caddy-candidate-${SERVICE}"
 python3 "$ROOT_DIR/ops/microservices/render-active-routes.py" "$candidate" "$rendered"
 cp "$CADDY_DIR/public-upstream.caddy" "$STATE_DIR/public-upstream.previous.caddy" 2>/dev/null || true
 cp "$CADDY_DIR/internal-upstreams.caddy" "$STATE_DIR/internal-upstreams.previous.caddy" 2>/dev/null || true
