@@ -922,6 +922,21 @@ def _canonical_site_from_publication(publication: dict, cache: dict) -> dict:
             asset.pop("width", None)
             asset.pop("height", None)
             identity[key] = asset
+    # A short/icon-only mark is a rollout-in-progress enhancement, not part of
+    # the required identity contract: unlike the three above, its absence
+    # must never turn into a `public_site_contract_incomplete` 503 for every
+    # persona that hasn't authored one yet.
+    if "logo_short" in identity_raw:
+        short_errors: list[str] = []
+        short_asset = _site_asset(
+            identity_raw.get("logo_short"), nodes=nodes, gallery_by_node=gallery_by_node,
+            granted_asset_ids=granted_asset_ids,
+            path="site.identity.logo_short", errors=short_errors,
+        )
+        if short_asset:
+            short_asset.pop("width", None)
+            short_asset.pop("height", None)
+            identity["logo_short"] = short_asset
 
     pages = []
     for index, raw in enumerate(root.get("pages") or []):
