@@ -56,10 +56,16 @@ def test_blue_green_has_gateway_and_role_separated_env_files():
     assert "BRAIN_RUNTIME_URL" in services["transport-blue"]["environment"]
     assert "BRAIN_RUNTIME_URL" in services["transport-green"]["environment"]
     for service in (
-        "control-plane-blue", "control-plane-green", "runtime-blue",
-        "runtime-green", "transport-blue", "transport-green",
+        "gateway-blue", "gateway-green", "control-plane-blue", "control-plane-green",
+        "runtime-blue", "runtime-green", "transport-blue", "transport-green",
     ):
-        assert services[service]["environment"]["REQUIRED_SCHEMA_VERSION"] == "131"
+        environment = services[service]["environment"]
+        assert environment["REQUIRED_SCHEMA_VERSION"] == (
+            "${REQUIRED_SCHEMA_VERSION:?release manifest schema version required}"
+        )
+        assert environment["CURRENT_SCHEMA_VERSION"] == (
+            "${CURRENT_SCHEMA_VERSION:?release manifest schema version required}"
+        )
 
     groups = {
         service["labels"]["brain.worker-group"]
@@ -279,6 +285,34 @@ def test_release_audit_accepts_retired_monolith_only_with_active_microservices()
         assert service in script
 
 
+def test_microservice_schema_gate_covers_the_manifest_target():
+    manifest = json.loads(
+        (ROOT / "ops/microservices/release-manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["schema_version"] == 139
+
+    audit = (ROOT / "ops/vps/validate-production-release.sh").read_text(encoding="utf-8")
+    for migration in (
+        "132_runtime_vector_distance_grant.sql",
+        "133_conversation_turn_exactly_once_v5.sql",
+        "136_business_hours_release_queue.sql",
+        "137_canonical_asset_content_dedup.sql",
+        "138_resume_binding_without_releasable_backlog.sql",
+        "139_release_queue_microservice_grants.sql",
+    ):
+        assert migration in audit
+    assert "release migrations 112-139 are incomplete" in audit
+
+    for script_name in (
+        "ops/vps/deploy-microservice-blue-green.sh",
+        "ops/vps/rollout-microservices.sh",
+        "ops/vps/resume-microservice-workers.sh",
+    ):
+        source = (ROOT / script_name).read_text(encoding="utf-8")
+        assert 'export REQUIRED_SCHEMA_VERSION=' in source
+        assert 'export CURRENT_SCHEMA_VERSION="$REQUIRED_SCHEMA_VERSION"' in source
+
+
 def test_release_audit_allows_only_healthy_digest_drift_during_preflight():
     script = (ROOT / "ops" / "vps" / "validate-production-release.sh").read_text()
     assert 'ALLOW_PENDING_MICROSERVICE_DIGESTS="${ALLOW_PENDING_MICROSERVICE_DIGESTS:-false}"' in script
@@ -391,6 +425,8 @@ def test_service_env_bootstrap_never_distributes_universal_database_secrets():
     assert 'TRANSPORT = COMMON | {\n    # The transport dispatch worker invokes' in bootstrap
     assert '    "N8N_BASE_URL",' in bootstrap
     assert '    "AI_BRAIN_SECRETS_KEY",' in bootstrap
+    assert "def current_schema_version" in bootstrap
+    assert "return str(max(versions))" in bootstrap
     assert '"SERVICE_ROLE_KEY"' not in bootstrap
     assert '"POSTGRES_PASSWORD"' not in bootstrap
 

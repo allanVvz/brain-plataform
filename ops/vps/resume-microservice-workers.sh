@@ -19,6 +19,8 @@ manifest_value() {
   python3 -c 'import json,sys; data=json.load(open(sys.argv[1], encoding="utf-8")); print(data["services"][sys.argv[2]][sys.argv[3]])' "$MANIFEST" "$@"
 }
 export BRAIN_CONTRACTS_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["contracts_version"])' "$MANIFEST")"
+export REQUIRED_SCHEMA_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["schema_version"])' "$MANIFEST")"
+export CURRENT_SCHEMA_VERSION="$REQUIRED_SCHEMA_VERSION"
 export GATEWAY_SHA="$(manifest_value gateway sha)" GATEWAY_DIGEST="$(manifest_value gateway digest)"
 export CONTROL_PLANE_SHA="$(manifest_value control-plane sha)" CONTROL_PLANE_DIGEST="$(manifest_value control-plane digest)"
 export RUNTIME_SHA="$(manifest_value conversation-runtime sha)" RUNTIME_DIGEST="$(manifest_value conversation-runtime digest)"

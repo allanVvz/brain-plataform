@@ -58,7 +58,13 @@ def test_release_validator_requires_this_release_migration_and_exact_sha():
     assert "129_carry_over_facts_by_lead.sql" in VALIDATOR
     assert "130_shared_lead_memory_and_journey_commit_v4.sql" in VALIDATOR
     assert "131_microservice_role_grants.sql" in VALIDATOR
-    assert "release migrations 112-131 are incomplete" in VALIDATOR
+    assert "132_runtime_vector_distance_grant.sql" in VALIDATOR
+    assert "133_conversation_turn_exactly_once_v5.sql" in VALIDATOR
+    assert "136_business_hours_release_queue.sql" in VALIDATOR
+    assert "137_canonical_asset_content_dedup.sql" in VALIDATOR
+    assert "138_resume_binding_without_releasable_backlog.sql" in VALIDATOR
+    assert "139_release_queue_microservice_grants.sql" in VALIDATOR
+    assert "release migrations 112-139 are incomplete" in VALIDATOR
     assert "microservice database roles are missing or unsafe" in VALIDATOR
     assert "authenticator cannot assume every microservice role" in VALIDATOR
     assert "microservice role inherits universal service_role" in VALIDATOR

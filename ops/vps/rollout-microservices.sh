@@ -10,7 +10,7 @@
 #
 #   bash ops/vps/rollout-microservices.sh status    # read-only, safe, start here
 #   bash ops/vps/rollout-microservices.sh prepare   # stop stale workers (needs pause)
-#   bash ops/vps/rollout-microservices.sh finish    # restart workers, clear pause
+#   bash ops/vps/rollout-microservices.sh finish    # recreate workers, clear pause
 #
 # The pause itself is deliberately NOT here. Pausing claims stops a live
 # customer-facing agent, so it stays an explicit operator action:
@@ -33,6 +33,8 @@ MODE="${1:-status}"
 MANIFEST="$ROOT_DIR/ops/microservices/release-manifest.json"
 SLOTS="$ROOT_DIR/.deploy/microservices/slots.json"
 PAUSE_MARKER="$ROOT_DIR/.deploy/control/claims-paused.json"
+ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env.compose}"
+COMPOSE=(docker compose --env-file "$ENV_FILE" -f "$ROOT_DIR/docker-compose.yml" -f "$ROOT_DIR/infra/microservices/docker-compose.blue-green.yml")
 
 # Sidecar workers a service owns. They are the reason a rollout needs a pause at
 # all: the service container tolerates a pending digest and only warns, while a
@@ -60,6 +62,38 @@ slot_of() {
 }
 expected_digest() {
   python3 -c 'import json,sys; print(json.load(open(sys.argv[1],encoding="utf-8"))["services"][sys.argv[2]]["digest"])' "$MANIFEST" "$1"
+}
+manifest_value() {
+  python3 -c 'import json,sys; data=json.load(open(sys.argv[1],encoding="utf-8")); print(data[sys.argv[2]] if sys.argv[2] != "service" else data["services"][sys.argv[3]][sys.argv[4]])' "$MANIFEST" "$@"
+}
+configure_manifest_environment() {
+  python3 "$ROOT_DIR/ops/microservices/validate-release-manifest.py" "$MANIFEST"
+  export BRAIN_CONTRACTS_VERSION="$(manifest_value contracts_version)"
+  export REQUIRED_SCHEMA_VERSION="$(manifest_value schema_version)"
+  export CURRENT_SCHEMA_VERSION="$REQUIRED_SCHEMA_VERSION"
+  export GATEWAY_SHA="$(manifest_value service gateway sha)"
+  export GATEWAY_DIGEST="$(manifest_value service gateway digest)"
+  export CONTROL_PLANE_SHA="$(manifest_value service control-plane sha)"
+  export CONTROL_PLANE_DIGEST="$(manifest_value service control-plane digest)"
+  export RUNTIME_SHA="$(manifest_value service conversation-runtime sha)"
+  export RUNTIME_DIGEST="$(manifest_value service conversation-runtime digest)"
+  export TRANSPORT_SHA="$(manifest_value service transport sha)"
+  export TRANSPORT_DIGEST="$(manifest_value service transport digest)"
+  export GATEWAY_IMAGE_BLUE="ghcr.io/allanvvz/brain-gateway@$GATEWAY_DIGEST"
+  export GATEWAY_IMAGE_GREEN="$GATEWAY_IMAGE_BLUE"
+  export CONTROL_PLANE_IMAGE_BLUE="ghcr.io/allanvvz/brain-control-plane@$CONTROL_PLANE_DIGEST"
+  export CONTROL_PLANE_IMAGE_GREEN="$CONTROL_PLANE_IMAGE_BLUE"
+  export RUNTIME_IMAGE_BLUE="ghcr.io/allanvvz/brain-conversation-runtime@$RUNTIME_DIGEST"
+  export RUNTIME_IMAGE_GREEN="$RUNTIME_IMAGE_BLUE"
+  export TRANSPORT_IMAGE_BLUE="ghcr.io/allanvvz/brain-transport@$TRANSPORT_DIGEST"
+  export TRANSPORT_IMAGE_GREEN="$TRANSPORT_IMAGE_BLUE"
+  export GATEWAY_ENV_FILE="${GATEWAY_ENV_FILE:-$ROOT_DIR/.env.microservices/gateway.env}"
+  export CONTROL_PLANE_ENV_FILE="${CONTROL_PLANE_ENV_FILE:-$ROOT_DIR/.env.microservices/control-plane.env}"
+  export RUNTIME_ENV_FILE="${RUNTIME_ENV_FILE:-$ROOT_DIR/.env.microservices/runtime.env}"
+  export TRANSPORT_ENV_FILE="${TRANSPORT_ENV_FILE:-$ROOT_DIR/.env.microservices/transport.env}"
+  for required in "$ENV_FILE" "$GATEWAY_ENV_FILE" "$CONTROL_PLANE_ENV_FILE" "$RUNTIME_ENV_FILE" "$TRANSPORT_ENV_FILE"; do
+    [[ -s "$required" ]] || { echo "missing required environment file: $required" >&2; return 1; }
+  done
 }
 running_digest() {
   local cid
@@ -172,38 +206,11 @@ case "$MODE" in
     ;;
 
   finish)
-    restored=0
-
-    # Every container name that belongs to a slot that is active right now.
-    # A blue/green deploy flips the slot between `prepare` and `finish`, so the
-    # workers `prepare` stopped are frequently the ones the deploy just retired.
-    # Restarting those put both slots on the queue at once, the retired one on
-    # the previous image -- including transport-dispatch, which sends WhatsApp.
-    # Observed on 2026-09-05 after rolling out three services in one window.
-    active_names=""
-    for service in gateway control-plane conversation-runtime transport; do
-      slot="$(slot_of "$service")"
-      compose_name="${service/conversation-runtime/runtime}"
-      active_names+=" brain-ai-${compose_name}-${slot}-1"
-      for worker in ${SERVICE_WORKERS[$service]}; do
-        active_names+=" brain-ai-${worker}-${slot}-1"
-      done
-    done
-    is_active_slot() { [[ " $active_names " == *" $1 "* ]]; }
-
-    if [[ -s "$STOPPED_RECORD" ]]; then
-      while IFS= read -r name; do
-        [[ -n "$name" ]] || continue
-        if ! is_active_slot "$name"; then
-          echo "left $name stopped (its slot is no longer active)"
-          continue
-        fi
-        if [[ -n "$(docker ps -aq --filter "name=^/${name}$")" && -z "$(docker ps -q --filter "name=^/${name}$")" ]]; then
-          docker start "$name" >/dev/null && echo "started $name" && restored=$((restored + 1))
-        fi
-      done < "$STOPPED_RECORD"
-      rm -f "$STOPPED_RECORD"
-    fi
+    paused || {
+      echo "refusing: claims are not paused; workers must be recreated before the pause is released." >&2
+      exit 1
+    }
+    configure_manifest_environment
 
     # The mirror of the rule above: a worker left running on a slot that is no
     # longer active consumes the same queue on a stale image.
@@ -218,24 +225,40 @@ case "$MODE" in
       done
     done
 
-    # Safety net. A rollout may stop a container outside `prepare` -- by hand, or
-    # because a deploy replaced a slot -- and leaving an active-slot worker down
-    # is silent: the service reports healthy while nothing consumes its queue.
-    for service in gateway control-plane conversation-runtime transport; do
+    # A slot flip changes the active side after `prepare`.  Never `docker start`
+    # a previously stopped worker here: it retains the old image.  Recreate every
+    # active worker from the manifest while claims remain paused, then prove its
+    # immutable image digest before removing the pause marker.
+    active_workers=()
+    for service in control-plane conversation-runtime transport; do
       slot="$(slot_of "$service")"
-      compose_name="${service/conversation-runtime/runtime}"
-      for name in "brain-ai-${compose_name}-${slot}-1" $(for w in ${SERVICE_WORKERS[$service]}; do echo "brain-ai-${w}-${slot}-1"; done); do
-        [[ -n "$(docker ps -aq --filter "name=^/${name}$")" ]] || continue
-        if [[ -z "$(docker ps -q --filter "name=^/${name}$")" ]]; then
-          docker start "$name" >/dev/null             && echo "started $name (active slot was down; not recorded by prepare)"             && restored=$((restored + 1))
-        fi
+      for worker in ${SERVICE_WORKERS[$service]}; do
+        active_workers+=("${worker}-${slot}")
       done
     done
+    "${COMPOSE[@]}" pull "${active_workers[@]}"
+    "${COMPOSE[@]}" up -d --no-deps --force-recreate "${active_workers[@]}"
+    for service in control-plane conversation-runtime transport; do
+      slot="$(slot_of "$service")"
+      want="$(expected_digest "$service")"
+      for worker in ${SERVICE_WORKERS[$service]}; do
+        name="brain-ai-${worker}-${slot}-1"
+        [[ -n "$(docker ps -q --filter "name=^/${name}$")" ]] || {
+          echo "worker did not start on the active slot: $name" >&2
+          exit 1
+        }
+        [[ "$(running_digest "$name")" == "$want" ]] || {
+          echo "worker digest mismatch after recreate: $name" >&2
+          exit 1
+        }
+      done
+    done
+    rm -f "$STOPPED_RECORD"
 
     if [[ -e "$PAUSE_MARKER" ]]; then
       rm -f "$PAUSE_MARKER" && echo "cleared $PAUSE_MARKER"
     fi
-    echo "restarted $restored container(s); re-run 'status' to confirm every service matches the manifest."
+    echo "recreated ${#active_workers[@]} active-slot workers; re-run 'status' to confirm every service matches the manifest."
     ;;
 
   *)

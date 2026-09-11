@@ -27,6 +27,8 @@ manifest_value() {
 }
 
 export BRAIN_CONTRACTS_VERSION="$(manifest_value contracts_version)"
+export REQUIRED_SCHEMA_VERSION="$(manifest_value schema_version)"
+export CURRENT_SCHEMA_VERSION="$REQUIRED_SCHEMA_VERSION"
 export GATEWAY_SHA="$(manifest_value service gateway sha)"
 export GATEWAY_DIGEST="$(manifest_value service gateway digest)"
 export CONTROL_PLANE_SHA="$(manifest_value service control-plane sha)"

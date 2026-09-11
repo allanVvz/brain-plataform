@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import time
 from pathlib import Path
@@ -15,6 +16,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / ".env.compose"
 TARGET_DIR = ROOT / ".env.microservices"
+MIGRATIONS = ROOT / "supabase/migrations"
+MIGRATION_FILENAME = re.compile(r"^(\d+)_.*\.sql$")
 
 COMMON = {
     "ENV", "PYTHON_ENV", "ENVIRONMENT", "SUPABASE_URL", "SUPABASE_PUBLIC_URL",
@@ -93,12 +96,23 @@ def existing_internal_secret() -> str | None:
     return None
 
 
+def current_schema_version(migrations: Path = MIGRATIONS) -> str:
+    versions = [
+        int(match.group(1))
+        for path in migrations.glob("*.sql")
+        if (match := MIGRATION_FILENAME.fullmatch(path.name))
+    ]
+    if not versions:
+        raise SystemExit("no versioned schema migrations found")
+    return str(max(versions))
+
+
 def write_env(name: str, allowed: set[str], source: dict[str, str], *, role: str | None,
-              jwt_secret: str, internal_secret: str) -> None:
+              jwt_secret: str, internal_secret: str, schema_version: str) -> None:
     values = {key: source[key] for key in sorted(allowed) if source.get(key)}
     values.update({
         "ENVIRONMENT": "production",
-        "CURRENT_SCHEMA_VERSION": "131",
+        "CURRENT_SCHEMA_VERSION": schema_version,
         "BRAIN_INTERNAL_AUTH_SECRET": internal_secret,
     })
     if role:
@@ -127,19 +141,21 @@ def main() -> int:
         missing.append("AI_BRAIN_AUTH_SECRET|NEXTAUTH_SECRET")
     if missing:
         raise SystemExit("missing source configuration keys: " + ", ".join(missing))
+    schema_version = current_schema_version()
     TARGET_DIR.mkdir(mode=0o700, exist_ok=True)
     os.chmod(TARGET_DIR, 0o700)
     internal_secret = existing_internal_secret() or secrets.token_urlsafe(48)
-    write_env("gateway.env", set(), source, role=None, jwt_secret=jwt_secret, internal_secret=internal_secret)
+    write_env("gateway.env", set(), source, role=None, jwt_secret=jwt_secret,
+              internal_secret=internal_secret, schema_version=schema_version)
     write_env("control-plane.env", CONTROL, source, role="brain_control_plane", jwt_secret=jwt_secret,
-              internal_secret=internal_secret)
+              internal_secret=internal_secret, schema_version=schema_version)
     write_env("runtime.env", RUNTIME, source, role="brain_runtime", jwt_secret=jwt_secret,
-              internal_secret=internal_secret)
+              internal_secret=internal_secret, schema_version=schema_version)
     transport_allowed = TRANSPORT | {
         key for key in source if key.startswith("EVOLUTION_WEBHOOK_") and key.endswith("_SECRET")
     }
     write_env("transport.env", transport_allowed, source, role="brain_transport", jwt_secret=jwt_secret,
-              internal_secret=internal_secret)
+              internal_secret=internal_secret, schema_version=schema_version)
     return 0
 
 

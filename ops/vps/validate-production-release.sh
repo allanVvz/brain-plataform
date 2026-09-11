@@ -220,7 +220,13 @@ where filename in (
   '128_confirm_branch_offering_within_journey.sql',
   '129_carry_over_facts_by_lead.sql',
   '130_shared_lead_memory_and_journey_commit_v4.sql',
-  '131_microservice_role_grants.sql'
+  '131_microservice_role_grants.sql',
+  '132_runtime_vector_distance_grant.sql',
+  '133_conversation_turn_exactly_once_v5.sql',
+  '136_business_hours_release_queue.sql',
+  '137_canonical_asset_content_dedup.sql',
+  '138_resume_binding_without_releasable_backlog.sql',
+  '139_release_queue_microservice_grants.sql'
 ) order by filename;
 
 select 'microservice_role' metric,
@@ -296,8 +302,14 @@ begin
       '128_confirm_branch_offering_within_journey.sql',
       '129_carry_over_facts_by_lead.sql',
       '130_shared_lead_memory_and_journey_commit_v4.sql',
-      '131_microservice_role_grants.sql')) <> 20 then
-    raise exception 'release migrations 112-131 are incomplete';
+      '131_microservice_role_grants.sql',
+      '132_runtime_vector_distance_grant.sql',
+      '133_conversation_turn_exactly_once_v5.sql',
+      '136_business_hours_release_queue.sql',
+      '137_canonical_asset_content_dedup.sql',
+      '138_resume_binding_without_releasable_backlog.sql',
+      '139_release_queue_microservice_grants.sql')) <> 26 then
+    raise exception 'release migrations 112-139 are incomplete';
   end if;
   if (select count(*) from pg_roles
       where rolname in ('brain_gateway','brain_control_plane','brain_runtime','brain_transport')
