@@ -45,6 +45,26 @@ class EvolutionActionBody(BaseModel):
     webhook_token: str | None = None
 
 
+class MetaTemplateCreateBody(BaseModel):
+    persona_id: str
+    name: str
+    language: str
+    category: str
+    components: list[dict[str, Any]]
+
+
+class MetaTemplateUpdateBody(BaseModel):
+    persona_id: str
+    meta_template_id: str
+    components: list[dict[str, Any]] | None = None
+    category: str | None = None
+
+
+class MetaTemplateStatusBody(BaseModel):
+    persona_id: str
+    meta_template_id: str
+
+
 def _mask(phone: str | None) -> str | None:
     if not phone:
         return None
@@ -324,6 +344,13 @@ def _evolution_binding(binding_id: str) -> dict:
     return binding
 
 
+def _meta_binding(persona_id: str) -> dict:
+    binding = supabase_client.get_active_whatsapp_binding(persona_id) or {}
+    if not binding or binding.get("provider") != "meta_cloud":
+        raise HTTPException(404, "Active Meta Cloud binding not found for persona")
+    return binding
+
+
 @internal_router.post("/evolution/provision")
 def provision_evolution_internal(
     body: EvolutionProvisionBody,
@@ -385,3 +412,61 @@ def evolution_action_internal(
             body.binding_id, {"connection_status": "qr_ready"}
         )
     return result
+
+
+def _run_meta_template_call(fn, *args, **kwargs) -> dict:
+    """Cross the internal HTTP boundary without losing Meta's own error detail.
+
+    Left uncaught, a provider RuntimeError/ValueError or httpx.HTTPStatusError
+    reaches FastAPI with no registered handler and comes back as a bare 500 --
+    the rich ``meta_error: ...`` text `_raise_for_status_with_detail` captured
+    would never reach control-plane's `transport_client`, which does forward a
+    JSON ``detail`` field.
+    """
+    try:
+        return fn(*args, **kwargs)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(exc.response.status_code, str(exc)) from exc
+
+
+@internal_router.post("/meta/templates/create")
+def meta_template_create_internal(
+    body: MetaTemplateCreateBody,
+    x_webhook_token: str | None = Header(None, alias="X-Webhook-Token"),
+) -> dict:
+    internal_auth.authorize_webhook_token(x_webhook_token)
+    binding = _meta_binding(body.persona_id)
+    return _run_meta_template_call(
+        get_provider("meta_cloud").create_template,
+        binding, name=body.name, language=body.language,
+        category=body.category, components=body.components,
+    )
+
+
+@internal_router.post("/meta/templates/update")
+def meta_template_update_internal(
+    body: MetaTemplateUpdateBody,
+    x_webhook_token: str | None = Header(None, alias="X-Webhook-Token"),
+) -> dict:
+    internal_auth.authorize_webhook_token(x_webhook_token)
+    binding = _meta_binding(body.persona_id)
+    return _run_meta_template_call(
+        get_provider("meta_cloud").update_template,
+        binding, meta_template_id=body.meta_template_id,
+        components=body.components, category=body.category,
+    )
+
+
+@internal_router.post("/meta/templates/status")
+def meta_template_status_internal(
+    body: MetaTemplateStatusBody,
+    x_webhook_token: str | None = Header(None, alias="X-Webhook-Token"),
+) -> dict:
+    internal_auth.authorize_webhook_token(x_webhook_token)
+    binding = _meta_binding(body.persona_id)
+    return _run_meta_template_call(
+        get_provider("meta_cloud").get_template_status,
+        binding, meta_template_id=body.meta_template_id,
+    )

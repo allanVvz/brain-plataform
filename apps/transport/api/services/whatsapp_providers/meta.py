@@ -107,6 +107,76 @@ class MetaWhatsAppProvider:
         _raise_for_status_with_detail(response)
         return response.json()
 
+    def create_template(
+        self,
+        binding: dict[str, Any],
+        *,
+        name: str,
+        language: str,
+        category: str,
+        components: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Submit a new template to the WABA for review.
+
+        Meta's create endpoint hangs off the WhatsApp Business Account, not
+        the phone number id used for sending -- a persona binding can send
+        from one phone number while its templates live on the parent WABA.
+        """
+        waba_id = str((binding.get("metadata") or {}).get("waba_id") or "")
+        if not waba_id:
+            raise RuntimeError("Meta binding has no waba_id; cannot submit a template for review")
+        token, api_version = _credential(binding)
+        response = httpx.post(
+            f"https://graph.facebook.com/{api_version}/{waba_id}/message_templates",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"name": name, "language": language, "category": category, "components": components},
+            timeout=30.0,
+        )
+        _raise_for_status_with_detail(response)
+        return response.json()
+
+    def update_template(
+        self,
+        binding: dict[str, Any],
+        *,
+        meta_template_id: str,
+        components: list[dict[str, Any]] | None = None,
+        category: str | None = None,
+    ) -> dict[str, Any]:
+        """Edit an already-submitted template's content or category.
+
+        Addressed by Meta's own template id, not the WABA -- name and
+        language are immutable once created; changing either means creating
+        a new template, never calling this. Any content edit resets the
+        template's review status back to pending on Meta's side.
+        """
+        body: dict[str, Any] = {}
+        if components is not None:
+            body["components"] = components
+        if category is not None:
+            body["category"] = category
+        if not body:
+            raise ValueError("update_template requires components and/or category to change")
+        token, api_version = _credential(binding)
+        response = httpx.post(
+            f"https://graph.facebook.com/{api_version}/{meta_template_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            json=body, timeout=30.0,
+        )
+        _raise_for_status_with_detail(response)
+        return response.json()
+
+    def get_template_status(self, binding: dict[str, Any], *, meta_template_id: str) -> dict[str, Any]:
+        token, api_version = _credential(binding)
+        response = httpx.get(
+            f"https://graph.facebook.com/{api_version}/{meta_template_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"fields": "status,category,rejected_reason"},
+            timeout=30.0,
+        )
+        _raise_for_status_with_detail(response)
+        return response.json()
+
     def provision_instance(self, *_args, **_kwargs):
         raise NotImplementedError("Meta provisioning is managed by the existing integration flow")
 
