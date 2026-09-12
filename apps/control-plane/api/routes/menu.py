@@ -10,6 +10,7 @@ from urllib.parse import quote, urlsplit
 
 from fastapi import APIRouter, HTTPException, Query, Response
 
+from brain_contracts.pricing import normalize_offer, offer_to_price_cents
 from core.landing_slots import LandingSlot, slot_for_metadata
 from services import public_site, supabase_client, graph_json_v2_store, graph_json_v21_adapter
 from utils.rich_text import to_clean_markdown
@@ -519,24 +520,13 @@ def _publication_grants(publication: dict, nodes: dict[str, dict], edges: list[d
 
 
 def _compiled_offer(node: dict, offer_node: dict | None = None) -> Optional[dict]:
-    data = (offer_node or node).get("data") or {}
-    raw = data.get("offer") or data.get("price")
-    if isinstance(raw, dict) and isinstance(raw.get("unit"), dict):
-        raw = raw["unit"]
-    if isinstance(raw, dict) and raw.get("amount") is not None:
-        try:
-            return {
-                "amount": float(raw["amount"]),
-                "currency": str(raw.get("currency") or "BRL"),
-            }
-        except (TypeError, ValueError):
-            return None
-    if data.get("price_cents") is not None:
-        try:
-            return {"amount": int(data["price_cents"]) / 100, "currency": "BRL"}
-        except (TypeError, ValueError):
-            return None
-    return None
+    target = offer_node or node
+    data = target.get("data") or {}
+    metadata = target.get("metadata") or {}
+    offer = normalize_offer(data, metadata)
+    if offer is None:
+        return None
+    return {"amount": offer.amount, "currency": offer.currency}
 
 
 def _compiled_asset_payload(
@@ -679,13 +669,20 @@ def _compiled_catalog_payload(
         if relation in offer_relations and source in offer_nodes and target in product_nodes:
             offers_by_product.setdefault(target, []).append(offer_nodes[source])
 
-    def _product_offer(product_id: str, node: dict) -> Optional[dict]:
+    def _chosen_offer_target(product_id: str, node: dict) -> dict:
         """Public storefront shows the retail (varejo) price; wholesale needs
         an audience/quantity qualifier the anonymous carousel never has."""
         candidates = offers_by_product.get(product_id) or []
         by_channel = {str((c.get("data") or {}).get("channel") or ""): c for c in candidates}
-        chosen = by_channel.get("varejo") or (candidates[0] if candidates else None)
-        return _compiled_offer(node, chosen)
+        return by_channel.get("varejo") or (candidates[0] if candidates else node)
+
+    def _product_offer(product_id: str, node: dict) -> Optional[dict]:
+        return _compiled_offer(node, _chosen_offer_target(product_id, node))
+
+    def _product_price_cents(product_id: str, node: dict) -> int:
+        target = _chosen_offer_target(product_id, node)
+        offer = normalize_offer(target.get("data") or {}, target.get("metadata") or {})
+        return offer_to_price_cents(offer)
 
     seen_brand_assets: set[str] = set()
     for edge in asset_edges_by_owner.get(str(brand_node.get("id") or ""), []):
@@ -744,6 +741,7 @@ def _compiled_catalog_payload(
             "name": str(node.get("title") or node.get("slug") or "Produto"),
             "description": to_clean_markdown(node.get("summary") or data.get("description") or ""),
             "offer": _product_offer(product_id, node),
+            "price_cents": _product_price_cents(product_id, node),
             "visible": data.get("visible") is not False,
             "position": _read_int(data.get("position") or data.get("sort_order"), 0),
             "cta": _site_cta(node),
@@ -1739,14 +1737,22 @@ def build_menu_payload(persona_slug: str, collection_slug: Optional[str] = None)
             and node.get("status") != "archived"
             and node.get("id") in embedded_faq_ids
         ]
+        # Both price_cents and offer must come from the same normalized offer
+        # (never metadata["price_cents"] / metadata["price"] read separately):
+        # vz-lupas only writes metadata.price -> price_cents used to default to
+        # 0; Baita only writes metadata.price_cents -> offer used to be None.
+        legacy_offer = normalize_offer(product.get("data") or {}, metadata)
         product_payload = {
             "id": product["id"],
             "slug": product.get("slug") or product["id"],
             "name": product.get("title") or product.get("slug") or "Produto",
-            "price_cents": _read_int(metadata.get("price_cents"), 0),
-            # Offer = preco/kits/variacoes comerciais (metadata.price: unit/kit_5/...).
-            # None quando ausente — nunca inventar preco.
-            "offer": metadata.get("price") or None,
+            "price_cents": offer_to_price_cents(legacy_offer),
+            # Offer = preco/kits/variacoes comerciais, normalizado -> nunca
+            # inventar preco quando ausente.
+            "offer": (
+                {"amount": legacy_offer.amount, "currency": legacy_offer.currency}
+                if legacy_offer is not None else None
+            ),
             # Limpa HTML importado -> markdown enxuto (sem tags cruas).
             "description": to_clean_markdown(product.get("summary") or metadata.get("description") or ""),
             "visible": metadata.get("visible") is not False and product.get("status") != "archived",

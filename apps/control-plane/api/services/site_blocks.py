@@ -23,6 +23,7 @@ Two rules make this safe:
 from __future__ import annotations
 
 from brain_contracts.catalog_media import active, resolve_catalog_media
+from brain_contracts.pricing import normalize_offer, offer_to_price_cents
 from collections import deque
 from typing import Any, Iterable, Optional
 
@@ -189,17 +190,11 @@ def _check_relations(template: dict[str, Any]) -> None:
 # ── Resolution helpers ────────────────────────────────────────────────────
 
 
-def _money(amount: Any) -> Optional[int]:
-    """Prices travel as integer cents so the renderer never does float math."""
-    try:
-        return int(round(float(amount) * 100))
-    except (TypeError, ValueError):
-        return None
-
-
 def _offer_price_cents(offer: dict[str, Any]) -> Optional[int]:
-    price = _data(offer).get("price")
-    return _money(price.get("amount")) if isinstance(price, dict) else None
+    """Prices travel as integer cents so the renderer never does float math."""
+    metadata = offer.get("metadata")
+    normalized = normalize_offer(_data(offer), metadata if isinstance(metadata, dict) else None)
+    return offer_to_price_cents(normalized) if normalized is not None else None
 
 
 def _asset_payload(asset: dict[str, Any]) -> dict[str, Any]:

@@ -14,6 +14,8 @@ from typing import Any, Iterable
 
 import yaml
 
+from brain_contracts.pricing import normalize_offer
+
 
 def _norm(value: str) -> str:
     value = unicodedata.normalize("NFKD", str(value or ""))
@@ -179,30 +181,17 @@ def _is_generic_category_query(message: str, category: str) -> bool:
 def _price_from_graph_data(data: dict[str, Any], metadata: dict[str, Any]) -> tuple[float | None, str]:
     """Extract a validated product price without inventing commercial facts.
 
-    Graph JSON v2 writes ``price.amount``.  Earlier published graph documents
-    retained the same approved value as integer ``price_cents``; supporting it
-    makes the reader backward compatible and avoids falsely claiming a known
-    price is absent.
+    Thin wrapper over the shared ``brain_contracts.pricing.normalize_offer``
+    contract, which is the canonical merge of every price write shape across
+    the platform (v3 ``data.offer``, ``data.price``, ``metadata.price`` with
+    either a dict or string ``unit``, offer-node metadata, and integer
+    ``price_cents``). This function keeps its existing ``(amount, currency)``
+    tuple return so every caller in this module keeps working unchanged.
     """
-    price = data.get("price") or metadata.get("price") or {}
-    if isinstance(price, dict):
-        amount = price.get("amount")
-        if amount is None and isinstance(price.get("unit"), dict):
-            amount = price["unit"].get("amount")
-        if amount is not None:
-            try:
-                return float(amount), str(price.get("currency") or "BRL")
-            except (TypeError, ValueError):
-                pass
-    cents = data.get("price_cents")
-    if cents is None:
-        cents = metadata.get("price_cents")
-    if cents is not None:
-        try:
-            return float(cents) / 100, "BRL"
-        except (TypeError, ValueError):
-            pass
-    return None, "BRL"
+    offer = normalize_offer(data, metadata)
+    if offer is None:
+        return None, "BRL"
+    return offer.amount, offer.currency
 
 
 def _frontmatter(path: Path) -> tuple[dict[str, Any], str]:
