@@ -188,6 +188,7 @@ function CanalSubPanel({ personaSlug }: { personaSlug: string }) {
   const [metaDraft, setMetaDraft] = useState({
     phone_number_id: "",
     whatsapp_number: "",
+    waba_id: "",
     workflow_name: "Meta Cloud WhatsApp",
   });
   const [qr, setQr] = useState("");
@@ -216,6 +217,7 @@ function CanalSubPanel({ personaSlug }: { personaSlug: string }) {
         setMetaDraft((draft) => ({
           phone_number_id: binding.whatsapp_phone_number_id || draft.phone_number_id,
           whatsapp_number: binding.whatsapp_number || draft.whatsapp_number,
+          waba_id: binding.metadata?.waba_id || draft.waba_id,
           workflow_name: binding.workflow_name || draft.workflow_name,
         }));
       }
@@ -297,6 +299,7 @@ function CanalSubPanel({ personaSlug }: { personaSlug: string }) {
       () => api.updateWhatsAppMetaBinding(personaSlug, {
         phone_number_id: metaDraft.phone_number_id.trim(),
         whatsapp_number: metaDraft.whatsapp_number.trim() || undefined,
+        waba_id: metaDraft.waba_id.trim() || undefined,
         workflow_name: metaDraft.workflow_name.trim() || "Meta Cloud WhatsApp",
         mode: "active",
         conversation_mode: "deterministic",
@@ -422,6 +425,14 @@ function CanalSubPanel({ personaSlug }: { personaSlug: string }) {
                   <input
                     value={metaDraft.whatsapp_number}
                     onChange={(event) => setMetaDraft((draft) => ({ ...draft, whatsapp_number: event.target.value }))}
+                    className="mt-1 block w-full rounded-xl border border-white/10 bg-obs-raised px-3 py-2 text-sm text-obs-text"
+                  />
+                </label>
+                <label className="text-xs text-obs-subtle">
+                  waba_id (WhatsApp Business Account) — necessário para submeter templates
+                  <input
+                    value={metaDraft.waba_id}
+                    onChange={(event) => setMetaDraft((draft) => ({ ...draft, waba_id: event.target.value }))}
                     className="mt-1 block w-full rounded-xl border border-white/10 bg-obs-raised px-3 py-2 text-sm text-obs-text"
                   />
                 </label>

@@ -20,6 +20,9 @@ import {
   useState,
 } from "react";
 import { ApiError, api } from "@/lib/api";
+import { isChannelConnected } from "@/lib/channel";
+
+export { isChannelConnected };
 
 type Capabilities = {
   view: boolean;
@@ -38,16 +41,6 @@ type PortalContextValue = {
 };
 
 const PortalContext = createContext<PortalContextValue | null>(null);
-
-// "open" is Evolution/Baileys' own vocabulary for a live session; "connected"
-// covers other providers. Both mean the same thing to a client — anywhere in
-// the portal that shows connection state must treat them the same way, or
-// the header and the Configurações page contradict each other over the
-// exact same channel.
-const CONNECTED_STATES = new Set(["connected", "open"]);
-export function isChannelConnected(status?: string | null) {
-  return CONNECTED_STATES.has(String(status || "").toLowerCase());
-}
 
 // "Configurações" is deliberately not in this list: it already lives in
 // the account dropdown below (opens upward, near the user's name), and

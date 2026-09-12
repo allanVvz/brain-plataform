@@ -7,6 +7,7 @@ import { ApiError, api } from "@/lib/api";
 import { getStoredLanguage, UI_LANGUAGE_EVENT, type UiLanguage } from "@/lib/language";
 import { applyTheme, getStoredTheme, type Theme } from "@/lib/theme";
 import { resolveSessionDestination } from "@/lib/session-routing";
+import { isChannelConnected } from "@/lib/channel";
 import {
   Activity,
   BookOpen,
@@ -107,6 +108,7 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
   const [sessionRetry, setSessionRetry] = useState(0);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>("clean");
+  const [channelConnected, setChannelConnected] = useState<boolean | null>(null);
 
   useEffect(() => {
     setTheme(getStoredTheme());
@@ -218,6 +220,24 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
     window.addEventListener("ai-brain-persona-change", handlePersonaChange as EventListener);
     return () => window.removeEventListener("ai-brain-persona-change", handlePersonaChange as EventListener);
   }, []);
+
+  // Automatic, no button: the client portal already shows this as a colored
+  // dot next to the persona name (PortalContext.tsx); this is the same
+  // signal, reusing the same data source and the same isChannelConnected
+  // rule, so the two surfaces never disagree about what "connected" means.
+  useEffect(() => {
+    if (!persona) { setChannelConnected(null); return; }
+    let active = true;
+    api.whatsappChannel(persona)
+      .then((channel) => { if (active) setChannelConnected(isChannelConnected(channel?.status)); })
+      .catch(() => { if (active) setChannelConnected(null); });
+    const timer = window.setInterval(() => {
+      api.whatsappChannel(persona)
+        .then((channel) => { if (active) setChannelConnected(isChannelConnected(channel?.status)); })
+        .catch(() => { if (active) setChannelConnected(null); });
+    }, 15_000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [persona]);
 
   // Keeps this tab's own URL in sync with the dropdown, so switching
   // persona here never affects any other open tab — only localStorage
@@ -346,6 +366,12 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
                 <option className="bg-obs-raised text-obs-text" value="">{navText(language, "Carregando clientes...")}</option>
               )}
             </select>
+            {persona && channelConnected !== null && (
+              <span
+                title={channelConnected ? "WhatsApp conectado" : "WhatsApp nao conectado"}
+                className={`h-2 w-2 shrink-0 rounded-full ${channelConnected ? "bg-obs-live" : "bg-amber-400"}`}
+              />
+            )}
           </div>
           <div className="relative z-10 ml-auto">
             <button
