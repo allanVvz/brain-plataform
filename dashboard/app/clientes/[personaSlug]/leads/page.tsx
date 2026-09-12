@@ -170,6 +170,12 @@ export default function ClientLeadsPage() {
             );
           }}
           onSubmit={(leadRef, body) => api.updatePortalLead(personaSlug, leadRef, body)}
+          consents={{
+            list: (leadRef, purpose) => api.portalLeadConsents(personaSlug, leadRef, purpose),
+            grant: (leadRef, body) => api.portalGrantLeadConsent(personaSlug, leadRef, body),
+            revoke: (leadRef, body) => api.portalRevokeLeadConsent(personaSlug, leadRef, body),
+          }}
+          canManageConsent={capabilities.edit}
         />
       )}
     </div>

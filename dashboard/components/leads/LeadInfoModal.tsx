@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pencil, Plus, Trash2, X } from "lucide-react";
 import { api } from "@/lib/api";
 
@@ -72,11 +72,21 @@ export type LeadInfoUpdateBody = {
   commercial_note: Record<string, string>;
 };
 
+export type ConsentBindings = {
+  list: (leadRef: number, purpose: string) => Promise<any[]>;
+  grant: (leadRef: number, body: Record<string, unknown>) => Promise<any>;
+  revoke: (leadRef: number, body: Record<string, unknown>) => Promise<any>;
+};
+
+const DEFAULT_PURPOSE = "ofertas_e_novidades";
+
 export function LeadInfoModal({
   lead,
   onClose,
   onSaved,
   onSubmit,
+  consents,
+  canManageConsent = true,
 }: {
   lead: any;
   onClose: () => void;
@@ -85,6 +95,11 @@ export function LeadInfoModal({
    * Pass this to target a different surface, e.g. the client portal's
    * own PATCH /portal/leads/{id} (api.updatePortalLead). */
   onSubmit?: (leadRef: number, body: LeadInfoUpdateBody) => Promise<any>;
+  /** Defaults to the admin /leads/{ref}/consent* endpoints. Pass this to
+   * target the client portal's mirror (/portal/leads/{ref}/consent*). */
+  consents?: ConsentBindings;
+  /** Client viewers without edit/manage capability see status only. */
+  canManageConsent?: boolean;
 }) {
   const [mode, setMode] = useState<"view" | "edit">("view");
   const [nome, setNome] = useState(lead?.nome || "");
@@ -92,6 +107,56 @@ export function LeadInfoModal({
   const [notes, setNotes] = useState<NoteRow[]>(() => noteRowsFromLead(lead));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const leadRef = Number(lead?.id);
+  const consentApi: ConsentBindings = useMemo(() => consents ?? {
+    list: (ref, purpose) => api.leadConsents(ref, lead?.persona_id, purpose),
+    grant: (ref, body) => api.grantLeadConsent(ref, body),
+    revoke: (ref, body) => api.revokeLeadConsent(ref, body),
+  }, [consents, lead?.persona_id]);
+  const [consentPurpose, setConsentPurpose] = useState(DEFAULT_PURPOSE);
+  const [consentHistory, setConsentHistory] = useState<any[]>([]);
+  const [consentLoading, setConsentLoading] = useState(false);
+  const [consentReason, setConsentReason] = useState("");
+  const [consentAction, setConsentAction] = useState<"grant" | "revoke" | null>(null);
+  const [consentBusy, setConsentBusy] = useState(false);
+  const [consentError, setConsentError] = useState("");
+
+  const loadConsents = async (purpose: string) => {
+    if (!leadRef) return;
+    setConsentLoading(true);
+    try { setConsentHistory(await consentApi.list(leadRef, purpose)); }
+    catch { setConsentHistory([]); }
+    finally { setConsentLoading(false); }
+  };
+
+  useEffect(() => {
+    loadConsents(consentPurpose);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leadRef, consentPurpose]);
+
+  const latestConsent = consentHistory[0] || null;
+  const consentStatus: string = latestConsent?.status || "sem_registro";
+
+  async function confirmConsentAction() {
+    if (!consentAction || !consentReason.trim()) return;
+    setConsentBusy(true); setConsentError("");
+    const body = {
+      purpose: consentPurpose,
+      idempotency_key: `consent-${consentAction}:${leadRef}:${crypto.randomUUID()}`,
+      reason: consentReason.trim(),
+    };
+    try {
+      if (consentAction === "grant") await consentApi.grant(leadRef, body);
+      else await consentApi.revoke(leadRef, body);
+      setConsentAction(null); setConsentReason("");
+      await loadConsents(consentPurpose);
+    } catch (e: any) {
+      setConsentError(e?.message || "Falha ao atualizar consentimento.");
+    } finally {
+      setConsentBusy(false);
+    }
+  }
 
   const viewNotes = useMemo(() => noteRowsFromLead(lead), [lead]);
   const offeringGroups = useMemo(() => offeringGroupsFromLead(lead), [lead]);
@@ -230,6 +295,59 @@ export function LeadInfoModal({
                   ))}
                 </div>
               )}
+            </div>
+
+            <div className="flex flex-col gap-2 rounded-xl p-3" style={{ border: "1px solid var(--border-glass)" }}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs text-obs-subtle">Consentimento</span>
+                <input
+                  value={consentPurpose}
+                  onChange={(e) => setConsentPurpose(e.target.value)}
+                  className="lg-input w-40 text-[11px]"
+                  placeholder="finalidade"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <span
+                  className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
+                    consentStatus === "granted" ? "bg-emerald-500/10 text-emerald-500"
+                      : consentStatus === "revoked" || consentStatus === "refused" ? "bg-rose-500/10 text-rose-500"
+                        : "bg-slate-500/10 text-obs-faint"
+                  }`}
+                >
+                  {consentLoading ? "carregando..." : consentStatus}
+                </span>
+                {latestConsent?.effective_at && (
+                  <span className="text-[10px] text-obs-faint">desde {latestConsent.effective_at}</span>
+                )}
+              </div>
+              {canManageConsent && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <button type="button" onClick={() => { setConsentAction("grant"); setConsentReason(""); }} className="lg-btn lg-btn-secondary text-[11px]">
+                    Conceder
+                  </button>
+                  <button type="button" onClick={() => { setConsentAction("revoke"); setConsentReason(""); }} className="lg-btn lg-btn-secondary text-[11px]">
+                    Revogar
+                  </button>
+                </div>
+              )}
+              {consentAction && (
+                <div className="flex flex-wrap items-center gap-2 rounded-lg bg-white/[0.03] p-2">
+                  <input
+                    value={consentReason}
+                    onChange={(e) => setConsentReason(e.target.value)}
+                    placeholder={consentAction === "grant" ? "Motivo da concessao" : "Motivo da revogacao"}
+                    className="lg-input min-w-0 flex-1 text-[11px]"
+                  />
+                  <button type="button" disabled={consentBusy || !consentReason.trim()} onClick={confirmConsentAction} className="lg-btn lg-btn-primary text-[11px]">
+                    Confirmar
+                  </button>
+                  <button type="button" onClick={() => setConsentAction(null)} className="lg-btn lg-btn-secondary text-[11px]">
+                    Voltar
+                  </button>
+                </div>
+              )}
+              {consentError && <p className="text-[11px] text-obs-rose">{consentError}</p>}
             </div>
 
             <div className="flex justify-end gap-2">
