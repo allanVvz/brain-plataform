@@ -146,6 +146,48 @@ asset aprovado, ela só menciona foto após pedido explícito do cliente e infor
 que um atendente poderá enviá-la. Valor e prazo de frete permanecem confirmação
 de especialista humano; a IA não estima nem promete.
 
+### Correção do modelo de asset — 2026-09-12 (auditoria somente-leitura)
+
+Encontrado ao auditar prontidão v3 de `vz-lupas`/`baita-conveniencia`
+(`docs/reports/v3-readiness-vz-baita.md`) e revisar
+`docs/VZ_LUPAS_GRAPH_REBUILD_DEFINITION_OF_DONE.md`: os dois documentos
+modelavam asset como uma cadeia única `Product -> Asset -> Gallery`, e a
+segunda revisão do DoD (mesmo dia) tinha acabado de remover "todo Produto
+precisa de Asset" como critério de aprovação sem substituir pelo modelo
+correto. Verificado contra `_compiled_catalog_payload` em
+`apps/control-plane/api/routes/menu.py` e `resolve_catalog_media` em
+`packages/brain-contracts/brain_contracts/catalog_media.py`, que são a
+fonte de verdade.
+
+**O modelo real tem quatro tipos de dono, não um.** Um asset se conecta a
+Brand (`brand_has_asset`), Campaign (`campaign_has_asset`), Product Group
+(`category_has_asset`) ou Product (`uses_asset`) — arestas distintas, lidas
+por caminhos distintos:
+
+- **Site público** (`menu.py:577-874`): o kit de identidade (3 logos) e o
+  cover do Brand/Campaign são escopados ao **Brand/Campaign**, não ao
+  Product. Um Product Group sem cover próprio herda do primeiro asset de
+  Product encontrado sob ele (`menu.py:780-781`) — nunca o contrário.
+- **Envio em conversa** (`resolve_catalog_media`,
+  `catalog_media.py:58-116`): resolve mídia de Product/Product Group com
+  **herança nas duas direções** entre grupo e produto — um grupo sem foto
+  direta herda do produto, e um produto sem foto própria pode expor a do
+  grupo. Assets de função de marca (`brand_logo`, `brand_font`, `font`,
+  `logo`) são explicitamente excluídos desse caminho
+  (`catalog_media.py:40`) — nunca são enviados como foto de produto.
+
+**Consequência:** "todo Produto precisa de Asset" nunca foi o critério
+certo, em nenhum dos dois documentos — cobertura de imagem não é uma
+propriedade por-Product em nenhum dos dois usos. O kit de identidade (3
+imagens de Brand) já destrava o site público inteiro independentemente de
+quantos Products têm foto; cobertura por Product é um esforço separado,
+maior, de prioridade menor, e parcialmente coberto pela herança acima.
+Vale para qualquer persona que authore mídia daqui em diante, não só
+`vz-lupas`/`baita-conveniencia`.
+
+Corrigido nos dois documentos na mesma sessão; nenhuma mudança de código,
+só de entendimento registrado.
+
 ---
 
 ## Estado do roadmap
@@ -166,7 +208,7 @@ de especialista humano; a IA não estima nem promete.
 | 6 | Aurora migra para o bundle | **em preparação — baseline v75, checksum, projeções e binding produtivos auditados em 2026-08-31; importador shadow-only estrito preparado, mas o export autenticado da publicação ativa ainda não está disponível no workspace. Restam gerar o bundle a partir desse export, dry-run/shadow, revisão dos dois checksums, WA Validator interno e autorização separada de staging/ativação.** | `bundle-migrator` |
 | 7 | Orquestradores por estágio e campanha por ciclo → arquitetura multi-agente | **redesenhado 2026-08-20; decisão nova 2026-08-22: escopo de conhecimento por agente via cards Embedded — ver seção própria abaixo** | `graph-publisher`, `card-editor` |
 | 8 | Runtime semantic-first (interpretação pelo modelo, prova pelo backend) | **em progresso 2026-08-31 — resposta e próxima pergunta pertencem ao modelo no modo n8n; `missing_fields` mede completude e o proof preserva a fala, descartando apenas componentes inválidos. Runtime, migration funcional e rollout ainda aguardam revisão e autorizações separadas.** | `graph-publisher` |
-| 8a | Navegação consultiva de catálogo, mídia e logística no SDR | **FAQ por ProductGroup entregue no candidato 2026-08-24. Candidato Tock v17 preparado em 2026-09-05 com distinção autoral entre foto aprovada e ausente, envio/visita como qualificação, frete sempre confirmado por especialista e aviso pré-handoff; publicação ainda depende de plano e autorização. Envio de mídia: `MetaWhatsAppProvider.send_media` implementado 2026-08-31; ainda faltam retrieval multimodal, resolução de lote, execução pelo futuro agente especialista de mídia/logística, integração de cotação, vídeos/links e avaliação offline. Rascunho de referência em `.worktrees/recovery-question-hotfix/` (não commitado).** | `faq-coverage`, `sdr-evaluator` |
+| 8a | Navegação consultiva de catálogo, mídia e logística no SDR | **FAQ por ProductGroup entregue no candidato 2026-08-24. Candidato Tock v17 preparado em 2026-09-05 com distinção autoral entre foto aprovada e ausente, envio/visita como qualificação, frete sempre confirmado por especialista e aviso pré-handoff; publicação ainda depende de plano e autorização. Envio de mídia: `MetaWhatsAppProvider.send_media` implementado 2026-08-31; ainda faltam retrieval multimodal, resolução de lote, execução pelo futuro agente especialista de mídia/logística, integração de cotação, vídeos/links e avaliação offline. Rascunho de referência em `.worktrees/recovery-question-hotfix/` (não commitado). **Correção 2026-09-12:** o retrieval de mídia por conversa já herda entre Product e Product Group nas duas direções (`resolve_catalog_media`, ver "Correção do modelo de asset — 2026-09-12") — o que falta não é a herança em si, é o agente especialista que a orquestra fim a fim.** | `faq-coverage`, `sdr-evaluator` |
 | 9 | Deploy incremental, leve e retomável | **em progresso 2026-08-24 — lifecycle durável, classificação, pausa/drain/resume, proof do primeiro claim, blue-green da API, imagens separadas, retenção autorizada e gates semânticos implementados no candidato; medição real e prova em QA/produção ainda pendentes** | `release-gate` |
 | 10 | Saída pública por template de blocos | **em progresso 2026-09-04 — `api/services/site_blocks.py` resolve blocos declarativos com `scope` de galho; LP de varejo da Tock Fatal gerada e renderizada em `/lp/:personaSlug`. Falta expor os blocos por `/api/menu`, mover `structure` para o banco e ligar a Sofia.** | `graph-publisher`, `card-editor` |
 | 11 | Plataforma Brain: cliente, CRM e páginas públicas integrados | **a fazer — no login o cliente acessa suas páginas públicas (LP e cardápio/catálogo), configurações e o CRM já existente. Fundação obrigatória: evento e clique usam `node_id` do grafo como chave nos dois lados.** | — |
