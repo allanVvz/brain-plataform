@@ -584,7 +584,7 @@ def create_message_template(payload: dict[str, Any], *, actor_user_id: str | Non
     return data[0] if isinstance(data, list) and data else row
 
 
-def _get_message_template(template_id: str) -> dict[str, Any]:
+def get_message_template(template_id: str) -> dict[str, Any]:
     rows = _rows(
         supabase_client.get_client().table("message_templates").select("*")
         .eq("id", template_id).limit(1)
@@ -632,7 +632,7 @@ def edit_message_template(
             f"Nao e possivel editar {sorted(changed_identity)}; nome/idioma/provider sao a identidade "
             "do template na Meta -- crie um template novo em vez de renomear este.",
         )
-    template = _get_message_template(template_id)
+    template = get_message_template(template_id)
 
     local_patch: dict[str, Any] = {}
     if "components" in patch:
@@ -684,7 +684,7 @@ def submit_message_template(
 ) -> dict[str, Any]:
     if not idempotency_key or not reason:
         raise HTTPException(422, "idempotency_key e reason sao obrigatorios.")
-    template = _get_message_template(template_id)
+    template = get_message_template(template_id)
     if template.get("provider") != "meta_cloud":
         raise HTTPException(422, "Apenas templates meta_cloud sao submetidos a revisao da Meta.")
     if template.get("meta_template_id"):
@@ -730,7 +730,7 @@ def sync_message_template_status(template_id: str) -> dict[str, Any]:
     No webhook/background polling exists for this yet (deliberately, for
     now) -- this is the only way the local ``meta_approval_status`` moves
     off ``pending`` until that lands."""
-    template = _get_message_template(template_id)
+    template = get_message_template(template_id)
     if template.get("provider") != "meta_cloud" or not template.get("meta_template_id"):
         raise HTTPException(422, "Template nao foi submetido a Meta ainda.")
     response = transport_client.get_meta_template_status(

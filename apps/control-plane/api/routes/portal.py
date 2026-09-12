@@ -103,10 +103,26 @@ class PortalTemplateCreateBody(BaseModel):
     persona_slug: str
     provider: str
     template_key: str
-    body: str
+    body: str | None = None
+    components: list[dict[str, Any]] | None = None
     meta_template_name: str | None = None
     meta_template_language: str = "pt_BR"
     meta_template_category: str = "MARKETING"
+
+
+class PortalTemplateEditBody(BaseModel):
+    expected_revision: int
+    idempotency_key: str
+    reason: str
+    components: list[dict[str, Any]] | None = None
+    meta_template_category: str | None = None
+    body: str | None = None
+
+
+class PortalTemplateActionBody(BaseModel):
+    expected_revision: int
+    idempotency_key: str
+    reason: str
 
 
 def _require_internal_admin(request: Request) -> dict[str, Any]:
@@ -673,6 +689,114 @@ def portal_create_template(body: PortalTemplateCreateBody, request: Request):
     user = auth_service.current_user(request)
     payload = {**body.model_dump(exclude={"persona_slug"}), "persona_id": persona["id"]}
     return campaigns_service.create_message_template(payload, actor_user_id=user.get("id"))
+
+
+def _template_for_persona(template_id: str, persona_id: str) -> dict[str, Any]:
+    template = campaigns_service.get_message_template(template_id)
+    if str(template.get("persona_id")) != str(persona_id):
+        raise HTTPException(404, "Template nao encontrado.")
+    return template
+
+
+@router.patch("/templates/{template_id}")
+def portal_edit_template(
+    template_id: str, body: PortalTemplateEditBody, request: Request, persona_slug: str = Query(...),
+):
+    persona = _persona(persona_slug, request, "edit")
+    _template_for_persona(template_id, persona["id"])
+    user = auth_service.current_user(request)
+    patch = body.model_dump(exclude={"expected_revision", "idempotency_key", "reason"}, exclude_none=True)
+    return campaigns_service.edit_message_template(
+        template_id, expected_revision=body.expected_revision,
+        idempotency_key=body.idempotency_key, reason=body.reason, patch=patch,
+        actor_user_id=user.get("id"),
+    )
+
+
+@router.post("/templates/{template_id}/submit")
+def portal_submit_template(
+    template_id: str, body: PortalTemplateActionBody, request: Request, persona_slug: str = Query(...),
+):
+    persona = _persona(persona_slug, request, "edit")
+    _template_for_persona(template_id, persona["id"])
+    user = auth_service.current_user(request)
+    return campaigns_service.submit_message_template(
+        template_id, expected_revision=body.expected_revision,
+        idempotency_key=body.idempotency_key, reason=body.reason,
+        actor_user_id=user.get("id"),
+    )
+
+
+@router.post("/templates/{template_id}/sync")
+def portal_sync_template(template_id: str, request: Request, persona_slug: str = Query(...)):
+    persona = _persona(persona_slug, request, "edit")
+    _template_for_persona(template_id, persona["id"])
+    return campaigns_service.sync_message_template_status(template_id)
+
+
+class PortalConsentChangeBody(BaseModel):
+    channel: str = "whatsapp"
+    purpose: str
+    source: str = "manual"
+    idempotency_key: str
+    reason: str
+
+
+def _actor_id(user: dict[str, Any] | None) -> str | None:
+    try:
+        return str(uuid.UUID(str((user or {}).get("id")))) if (user or {}).get("id") else None
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+def _record_portal_consent(
+    lead_ref: int, persona_id: str, body: PortalConsentChangeBody, request: Request, *, status: str,
+) -> dict[str, Any]:
+    if not body.purpose.strip() or not body.idempotency_key.strip() or not body.reason.strip():
+        raise HTTPException(422, "purpose, idempotency_key e reason sao obrigatorios.")
+    now = datetime.now(timezone.utc).isoformat()
+    user = auth_service.current_user(request)
+    consent = supabase_client.insert_contact_consent({
+        "lead_id": lead_ref, "persona_id": persona_id,
+        "channel": body.channel, "purpose": body.purpose, "status": status,
+        "source": body.source, "effective_at": now,
+        "granted_at": now if status == "granted" else None,
+        "revoked_at": now if status == "revoked" else None,
+        "evidence": {"reason": body.reason},
+        "actor_user_id": _actor_id(user),
+        "idempotency_key": body.idempotency_key,
+    }, audit_payload={"reason": body.reason, "actor_ref": user.get("id")})
+    return {"ok": True, "consent": consent}
+
+
+@router.get("/leads/{lead_ref}/consents")
+def portal_lead_consents(
+    lead_ref: int, request: Request, persona_slug: str = Query(...),
+    channel: str | None = Query(None), purpose: str | None = Query(None),
+):
+    persona = _persona(persona_slug, request, "view")
+    _lead(lead_ref, persona["id"])
+    return supabase_client.list_contact_consents(
+        lead_id=lead_ref, persona_id=persona["id"], channel=channel, purpose=purpose,
+    )
+
+
+@router.post("/leads/{lead_ref}/consent/grant")
+def portal_grant_lead_consent(
+    lead_ref: int, body: PortalConsentChangeBody, request: Request, persona_slug: str = Query(...),
+):
+    persona = _persona(persona_slug, request, "edit")
+    _lead(lead_ref, persona["id"])
+    return _record_portal_consent(lead_ref, persona["id"], body, request, status="granted")
+
+
+@router.post("/leads/{lead_ref}/consent/revoke")
+def portal_revoke_lead_consent(
+    lead_ref: int, body: PortalConsentChangeBody, request: Request, persona_slug: str = Query(...),
+):
+    persona = _persona(persona_slug, request, "edit")
+    _lead(lead_ref, persona["id"])
+    return _record_portal_consent(lead_ref, persona["id"], body, request, status="revoked")
 
 
 @router.get("/pipeline")

@@ -86,7 +86,7 @@ def _campaign(request: Request, campaign_id: str, capability: str = "view") -> d
 def _template(request: Request, template_id: str, capability: str = "view") -> dict:
     """Resolve persona_id from the row itself, never from the caller's body --
     same reasoning as ``_campaign`` above."""
-    template = campaigns_service._get_message_template(template_id)
+    template = campaigns_service.get_message_template(template_id)
     auth_service.assert_persona_capability(request, capability, persona_id=template.get("persona_id"))
     return template
 
