@@ -458,6 +458,71 @@ def _extract_placeholders(text: str) -> list[str]:
     return seen
 
 
+_META_SUBMITTABLE_TYPES = {"HEADER", "BODY", "FOOTER", "BUTTONS"}
+
+
+def _to_meta_wire_component(component: dict[str, Any]) -> dict[str, Any]:
+    """Normalize one authored component into the exact shape Meta's Message
+
+    Templates API expects, raising ``ValueError`` (never a silent guess) when
+    the component can't be submitted as-is -- missing text, a variable with
+    no sample value, or a named ({{nome}}) instead of positional ({{1}})
+    placeholder, which Meta's template language doesn't support at all.
+    """
+    ctype = str(component.get("type") or "").strip().upper()
+    if ctype not in _META_SUBMITTABLE_TYPES:
+        raise ValueError(f"invalid_component_type:{ctype or '(empty)'}")
+    if ctype == "BUTTONS":
+        buttons = component.get("buttons") or []
+        if not buttons:
+            raise ValueError("buttons_component_requires_at_least_one_button")
+        return {"type": "BUTTONS", "buttons": buttons}
+
+    text = str(component.get("text") or "").strip()
+    if not text:
+        raise ValueError(f"{ctype.lower()}_component_requires_text")
+    placeholders = _extract_placeholders(text)
+    wire: dict[str, Any] = {"type": ctype, "text": text}
+    if ctype == "HEADER":
+        wire["format"] = str(component.get("format") or "TEXT").strip().upper()
+    if placeholders:
+        if not all(p.isdigit() for p in placeholders):
+            raise ValueError(
+                f"{ctype.lower()}_only_positional_variables_supported:{','.join(placeholders)}"
+            )
+        example_values = component.get("example_values") or {}
+        missing = [p for p in placeholders if p not in example_values]
+        if missing:
+            raise ValueError(f"{ctype.lower()}_missing_example_for_variables:{','.join(missing)}")
+        samples = [str(example_values[p]) for p in placeholders]
+        if ctype == "HEADER":
+            wire["example"] = {"header_text": samples}
+        else:
+            wire["example"] = {"body_text": [samples]}
+    return wire
+
+
+def _meta_wire_components(meta_component_schema: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Build the full Meta submission payload from a template's stored schema.
+
+    Raises ``ValueError`` naming every failing component (Meta rejects the
+    whole submission for one bad component; the operator needs to know which
+    one before retrying) rather than submitting a partial or guessed payload.
+    """
+    if not meta_component_schema:
+        raise ValueError("template_has_no_components")
+    errors: list[str] = []
+    wire: list[dict[str, Any]] = []
+    for index, component in enumerate(meta_component_schema):
+        try:
+            wire.append(_to_meta_wire_component(component))
+        except ValueError as exc:
+            errors.append(f"components[{index}]:{exc}")
+    if errors:
+        raise ValueError("; ".join(errors))
+    return wire
+
+
 def list_message_templates(persona_id: str, provider: str) -> list[dict[str, Any]]:
     return _rows(
         supabase_client.get_client().table("message_templates").select("*")
@@ -467,12 +532,22 @@ def list_message_templates(persona_id: str, provider: str) -> list[dict[str, Any
 
 
 def create_message_template(payload: dict[str, Any], *, actor_user_id: str | None) -> dict[str, Any]:
+    """Create a local template row.
+
+    For ``meta_cloud``, this only ever creates a local **draft** -- it never
+    talks to Meta. ``submit_message_template`` does that, separately, because
+    creating a row and submitting it to a third party for review are
+    different levels of consequence and shouldn't share one call.
+    """
     persona_id = str(payload.get("persona_id") or "")
     provider = str(payload.get("provider") or "")
     template_key = str(payload.get("template_key") or "").strip()
     body = str(payload.get("body") or "").strip()
-    if not persona_id or provider not in {"meta_cloud", "evolution_baileys"} or not template_key or not body:
-        raise HTTPException(422, "persona_id, provider, template_key e corpo do template sao obrigatorios.")
+    components = payload.get("components")
+    if not persona_id or provider not in {"meta_cloud", "evolution_baileys"} or not template_key:
+        raise HTTPException(422, "persona_id, provider e template_key sao obrigatorios.")
+    if not body and not components:
+        raise HTTPException(422, "Informe o corpo do template ou a lista de componentes.")
 
     row: dict[str, Any] = {
         "persona_id": persona_id,
@@ -481,25 +556,195 @@ def create_message_template(payload: dict[str, Any], *, actor_user_id: str | Non
         "status": "active",
         "created_by_user_id": _uuid_or_none(actor_user_id),
     }
-    placeholders = _extract_placeholders(body)
     if provider == "meta_cloud":
         name = str(payload.get("meta_template_name") or "").strip()
         if not name:
             raise HTTPException(422, "Nome do template aprovado na Meta e obrigatorio.")
+        # Structured components (header/body/footer/buttons) are the
+        # canonical schema going forward; a flat `body` is accepted as a
+        # convenience shortcut for the common no-frills case and wrapped
+        # into a single BODY component -- never both at once, to avoid an
+        # ambiguous "which one wins" question.
+        schema = components if components else [{"type": "BODY", "text": body}]
         row.update({
             "meta_template_name": name,
             "meta_template_language": str(payload.get("meta_template_language") or "pt_BR").strip(),
             "meta_template_category": str(payload.get("meta_template_category") or "MARKETING").strip(),
-            "meta_component_schema": [{"type": "body", "placeholders": placeholders}] if placeholders else [],
+            "meta_component_schema": schema,
         })
     else:
+        if not body:
+            raise HTTPException(422, "Corpo do template e obrigatorio para Evolution.")
         row.update({
             "evolution_body_template": body,
-            "evolution_variables": placeholders,
+            "evolution_variables": _extract_placeholders(body),
         })
     result = supabase_client.get_client().table("message_templates").insert(row).execute()
     data = getattr(result, "data", None)
     return data[0] if isinstance(data, list) and data else row
+
+
+def _get_message_template(template_id: str) -> dict[str, Any]:
+    rows = _rows(
+        supabase_client.get_client().table("message_templates").select("*")
+        .eq("id", template_id).limit(1)
+    )
+    if not rows:
+        raise HTTPException(404, "Template nao encontrado.")
+    return rows[0]
+
+
+def _write_message_template(
+    template_id: str, *, expected_revision: int, patch: dict[str, Any],
+) -> dict[str, Any]:
+    """Optimistic-concurrency update: only writes if the row is still at
+    ``expected_revision``, mirroring the ``expected_revision`` check campaigns
+    use (`update_campaign_status`) -- simpler here (no dedicated RPC) because
+    template edits are a low-frequency, single-writer admin action, not a
+    high-throughput send path."""
+    patch = {**patch, "revision": expected_revision + 1, "updated_at": _now_iso()}
+    result = (
+        supabase_client.get_client().table("message_templates").update(patch)
+        .eq("id", template_id).eq("revision", expected_revision).execute()
+    )
+    data = getattr(result, "data", None)
+    if not isinstance(data, list) or not data:
+        raise HTTPException(409, "O template foi alterado; recarregue antes de continuar.")
+    return data[0]
+
+
+def edit_message_template(
+    template_id: str,
+    *,
+    expected_revision: int,
+    idempotency_key: str,
+    reason: str,
+    patch: dict[str, Any],
+    actor_user_id: str | None,
+) -> dict[str, Any]:
+    if not idempotency_key or not reason:
+        raise HTTPException(422, "idempotency_key e reason sao obrigatorios.")
+    forbidden = {"meta_template_name", "meta_template_language", "provider", "template_key", "persona_id"}
+    changed_identity = forbidden & set(patch)
+    if changed_identity:
+        raise HTTPException(
+            422,
+            f"Nao e possivel editar {sorted(changed_identity)}; nome/idioma/provider sao a identidade "
+            "do template na Meta -- crie um template novo em vez de renomear este.",
+        )
+    template = _get_message_template(template_id)
+
+    local_patch: dict[str, Any] = {}
+    if "components" in patch:
+        local_patch["meta_component_schema"] = patch["components"]
+    if "meta_template_category" in patch:
+        local_patch["meta_template_category"] = str(patch["meta_template_category"]).strip()
+    if "body" in patch and template.get("provider") == "evolution_baileys":
+        body = str(patch["body"] or "").strip()
+        local_patch["evolution_body_template"] = body
+        local_patch["evolution_variables"] = _extract_placeholders(body)
+    if not local_patch:
+        raise HTTPException(422, "Nenhum campo editavel informado.")
+
+    updated = _write_message_template(template_id, expected_revision=expected_revision, patch=local_patch)
+
+    if template.get("provider") == "meta_cloud" and template.get("meta_template_id"):
+        # Already submitted: any content/category edit resubmits it to Meta
+        # for review. Meta itself puts the template back to pending; mirror
+        # that locally right away rather than waiting for the next sync so
+        # the dashboard never shows a stale "approved" for content Meta is
+        # actively re-reviewing.
+        wire_components = _meta_wire_components(updated.get("meta_component_schema") or [])
+        transport_client.update_meta_template(
+            str(template["persona_id"]),
+            meta_template_id=str(template["meta_template_id"]),
+            components=wire_components if "components" in patch else None,
+            category=local_patch.get("meta_template_category"),
+        )
+        updated = _write_message_template(
+            template_id, expected_revision=updated["revision"],
+            patch={"meta_approval_status": "pending", "meta_synced_at": _now_iso()},
+        )
+
+    event_emitter.emit(
+        "message_template_edited", entity_type="message_template", entity_id=template_id,
+        persona_id=str(template["persona_id"]),
+        payload={"idempotency_key": idempotency_key, "reason": reason, "actor_user_id": actor_user_id},
+    )
+    return updated
+
+
+def submit_message_template(
+    template_id: str,
+    *,
+    expected_revision: int,
+    idempotency_key: str,
+    reason: str,
+    actor_user_id: str | None,
+) -> dict[str, Any]:
+    if not idempotency_key or not reason:
+        raise HTTPException(422, "idempotency_key e reason sao obrigatorios.")
+    template = _get_message_template(template_id)
+    if template.get("provider") != "meta_cloud":
+        raise HTTPException(422, "Apenas templates meta_cloud sao submetidos a revisao da Meta.")
+    if template.get("meta_template_id"):
+        raise HTTPException(409, "Template ja foi submetido; use a edicao para alterar conteudo.")
+    if int(template.get("revision") or 1) != int(expected_revision):
+        raise HTTPException(409, "O template foi alterado; recarregue antes de continuar.")
+
+    wire_components = _meta_wire_components(template.get("meta_component_schema") or [])
+    response = transport_client.create_meta_template(
+        str(template["persona_id"]),
+        name=str(template["meta_template_name"]),
+        language=str(template.get("meta_template_language") or "pt_BR"),
+        category=str(template.get("meta_template_category") or "MARKETING"),
+        components=wire_components,
+    )
+    updated = _write_message_template(
+        template_id, expected_revision=expected_revision,
+        patch={
+            "meta_template_id": str(response.get("id") or ""),
+            "meta_approval_status": str(response.get("status") or "pending").lower(),
+            "meta_synced_at": _now_iso(),
+        },
+    )
+    event_emitter.emit(
+        "message_template_submitted", entity_type="message_template", entity_id=template_id,
+        persona_id=str(template["persona_id"]),
+        payload={"idempotency_key": idempotency_key, "reason": reason, "actor_user_id": actor_user_id,
+                 "meta_template_id": updated.get("meta_template_id")},
+    )
+    return updated
+
+
+_META_APPROVAL_STATUS_MAP = {
+    "APPROVED": "approved", "REJECTED": "rejected", "PENDING": "pending",
+    "PAUSED": "paused", "DISABLED": "disabled", "IN_APPEAL": "pending",
+    "PENDING_DELETION": "disabled",
+}
+
+
+def sync_message_template_status(template_id: str) -> dict[str, Any]:
+    """On-demand pull of a submitted template's current Meta status.
+
+    No webhook/background polling exists for this yet (deliberately, for
+    now) -- this is the only way the local ``meta_approval_status`` moves
+    off ``pending`` until that lands."""
+    template = _get_message_template(template_id)
+    if template.get("provider") != "meta_cloud" or not template.get("meta_template_id"):
+        raise HTTPException(422, "Template nao foi submetido a Meta ainda.")
+    response = transport_client.get_meta_template_status(
+        str(template["persona_id"]), meta_template_id=str(template["meta_template_id"]),
+    )
+    meta_status = str(response.get("status") or "").upper()
+    return _write_message_template(
+        template_id, expected_revision=int(template.get("revision") or 1),
+        patch={
+            "meta_approval_status": _META_APPROVAL_STATUS_MAP.get(meta_status, "pending"),
+            "meta_rejection_reason": response.get("rejected_reason"),
+            "meta_synced_at": _now_iso(),
+        },
+    )
 
 
 def preview_campaign(payload: dict[str, Any]) -> dict[str, Any]:

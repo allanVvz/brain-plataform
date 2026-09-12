@@ -53,10 +53,26 @@ class MessageTemplateCreateBody(BaseModel):
     persona_id: str
     provider: Literal["meta_cloud", "evolution_baileys"]
     template_key: str = Field(min_length=1, max_length=120)
-    body: str = Field(min_length=1)
+    body: str | None = None
+    components: list[dict[str, Any]] | None = None
     meta_template_name: str | None = None
     meta_template_language: str = "pt_BR"
     meta_template_category: str = "MARKETING"
+
+
+class MessageTemplateEditBody(BaseModel):
+    expected_revision: int = Field(gt=0)
+    idempotency_key: str = Field(min_length=8, max_length=200)
+    reason: str = Field(min_length=3, max_length=500)
+    components: list[dict[str, Any]] | None = None
+    meta_template_category: str | None = None
+    body: str | None = None
+
+
+class MessageTemplateActionBody(BaseModel):
+    expected_revision: int = Field(gt=0)
+    idempotency_key: str = Field(min_length=8, max_length=200)
+    reason: str = Field(min_length=3, max_length=500)
 
 
 def _campaign(request: Request, campaign_id: str, capability: str = "view") -> dict:
@@ -65,6 +81,14 @@ def _campaign(request: Request, campaign_id: str, capability: str = "view") -> d
         request, capability, persona_id=detail["campaign"].get("persona_id")
     )
     return detail
+
+
+def _template(request: Request, template_id: str, capability: str = "view") -> dict:
+    """Resolve persona_id from the row itself, never from the caller's body --
+    same reasoning as ``_campaign`` above."""
+    template = campaigns_service._get_message_template(template_id)
+    auth_service.assert_persona_capability(request, capability, persona_id=template.get("persona_id"))
+    return template
 
 
 @router.get("/campaigns")
@@ -147,6 +171,33 @@ def create_template(body: MessageTemplateCreateBody, request: Request):
     return campaigns_service.create_message_template(
         body.model_dump(), actor_user_id=auth_service.current_user(request).get("id")
     )
+
+
+@router.patch("/templates/{template_id}")
+def edit_template(template_id: str, body: MessageTemplateEditBody, request: Request):
+    _template(request, template_id, "edit")
+    patch = body.model_dump(exclude={"expected_revision", "idempotency_key", "reason"}, exclude_none=True)
+    return campaigns_service.edit_message_template(
+        template_id, expected_revision=body.expected_revision,
+        idempotency_key=body.idempotency_key, reason=body.reason, patch=patch,
+        actor_user_id=auth_service.current_user(request).get("id"),
+    )
+
+
+@router.post("/templates/{template_id}/submit")
+def submit_template(template_id: str, body: MessageTemplateActionBody, request: Request):
+    _template(request, template_id, "edit")
+    return campaigns_service.submit_message_template(
+        template_id, expected_revision=body.expected_revision,
+        idempotency_key=body.idempotency_key, reason=body.reason,
+        actor_user_id=auth_service.current_user(request).get("id"),
+    )
+
+
+@router.post("/templates/{template_id}/sync")
+def sync_template(template_id: str, request: Request):
+    _template(request, template_id, "edit")
+    return campaigns_service.sync_message_template_status(template_id)
 
 
 @router.get("/provider-health")

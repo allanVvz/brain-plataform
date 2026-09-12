@@ -73,7 +73,7 @@ def enqueue_campaign_outbound(payload: dict[str, Any]) -> dict:
     return result
 
 
-def _post_evolution(path: str, payload: dict[str, Any]) -> dict:
+def _post_internal(path: str, payload: dict[str, Any]) -> dict:
     base_url = (os.environ.get("BRAIN_TRANSPORT_URL") or "").strip().rstrip("/")
     token = (os.environ.get("AI_BRAIN_WEBHOOK_TOKEN") or "").strip()
     if not base_url or not token:
@@ -91,7 +91,7 @@ def _post_evolution(path: str, payload: dict[str, Any]) -> dict:
             detail = response.json().get("detail")
         except (ValueError, AttributeError):
             detail = None
-        raise HTTPException(response.status_code, detail or "Transport rejected Evolution operation.")
+        raise HTTPException(response.status_code, detail or "Transport rejected the operation.")
     try:
         result = response.json()
     except ValueError as exc:
@@ -104,7 +104,7 @@ def _post_evolution(path: str, payload: dict[str, Any]) -> dict:
 def provision_evolution(
     binding_id: str, *, webhook_url: str, webhook_token: str,
 ) -> dict:
-    return _post_evolution(
+    return _post_internal(
         "/internal/v1/transport/whatsapp/evolution/provision",
         {"binding_id": binding_id, "webhook_url": webhook_url, "webhook_token": webhook_token},
     )
@@ -117,10 +117,40 @@ def evolution_action(
     webhook_url: str | None = None,
     webhook_token: str | None = None,
 ) -> dict:
-    return _post_evolution(
+    return _post_internal(
         "/internal/v1/transport/whatsapp/evolution/action",
         {
             "binding_id": binding_id, "action": action,
             "webhook_url": webhook_url, "webhook_token": webhook_token,
         },
+    )
+
+
+def create_meta_template(
+    persona_id: str, *, name: str, language: str, category: str, components: list[dict[str, Any]],
+) -> dict:
+    """Submit a new WhatsApp message template to Meta for review."""
+    return _post_internal(
+        "/internal/v1/transport/whatsapp/meta/templates/create",
+        {"persona_id": persona_id, "name": name, "language": language,
+         "category": category, "components": components},
+    )
+
+
+def update_meta_template(
+    persona_id: str, *, meta_template_id: str,
+    components: list[dict[str, Any]] | None = None, category: str | None = None,
+) -> dict:
+    """Edit an already-submitted template; Meta resets it to pending review."""
+    return _post_internal(
+        "/internal/v1/transport/whatsapp/meta/templates/update",
+        {"persona_id": persona_id, "meta_template_id": meta_template_id,
+         "components": components, "category": category},
+    )
+
+
+def get_meta_template_status(persona_id: str, *, meta_template_id: str) -> dict:
+    return _post_internal(
+        "/internal/v1/transport/whatsapp/meta/templates/status",
+        {"persona_id": persona_id, "meta_template_id": meta_template_id},
     )
