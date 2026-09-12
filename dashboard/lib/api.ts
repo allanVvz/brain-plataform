@@ -297,6 +297,21 @@ export const api = {
     req<any>(`/leads/${leadRef}/consent/grant`, { method: "POST", body: JSON.stringify(body) }),
   revokeLeadConsent: (leadRef: number, body: Record<string, unknown>) =>
     req<any>(`/leads/${leadRef}/consent/revoke`, { method: "POST", body: JSON.stringify(body) }),
+  portalLeadConsents: (slug: string, leadRef: number, purpose?: string) => {
+    const params = new URLSearchParams({ persona_slug: slug, channel: "whatsapp" });
+    if (purpose) params.set("purpose", purpose);
+    return req<any[]>(`/portal/leads/${leadRef}/consents?${params.toString()}`);
+  },
+  portalGrantLeadConsent: (slug: string, leadRef: number, body: Record<string, unknown>) =>
+    req<any>(`/portal/leads/${leadRef}/consent/grant?${personaQuery(slug)}`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  portalRevokeLeadConsent: (slug: string, leadRef: number, body: Record<string, unknown>) =>
+    req<any>(`/portal/leads/${leadRef}/consent/revoke?${personaQuery(slug)}`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   campaignPreview: (body: Record<string, unknown>) =>
     req<any>("/messaging/campaigns/preview", { method: "POST", body: JSON.stringify(body) }),
   createCampaign: (body: Record<string, unknown>) =>
@@ -317,6 +332,18 @@ export const api = {
     req<any[]>(`/messaging/templates?persona_id=${encodeURIComponent(personaId)}&provider=${encodeURIComponent(provider)}`),
   createMessageTemplate: (body: Record<string, unknown>) =>
     req<any>("/messaging/templates", { method: "POST", body: JSON.stringify(body) }),
+  editMessageTemplate: (templateId: string, body: Record<string, unknown>) =>
+    req<any>(`/messaging/templates/${encodeURIComponent(templateId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  submitMessageTemplate: (templateId: string, body: Record<string, unknown>) =>
+    req<any>(`/messaging/templates/${encodeURIComponent(templateId)}/submit`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  syncMessageTemplateStatus: (templateId: string) =>
+    req<any>(`/messaging/templates/${encodeURIComponent(templateId)}/sync`, { method: "POST" }),
   releaseBatches: (personaId?: string) =>
     req<any[]>(`/messaging/release-queue/batches${personaId ? `?persona_id=${encodeURIComponent(personaId)}` : ""}`),
   releaseBatch: (batchId: string) =>
@@ -545,6 +572,20 @@ export const api = {
     req<any>("/portal/templates", {
       method: "POST",
       body: JSON.stringify({ ...body, persona_slug: slug }),
+    }),
+  portalEditMessageTemplate: (slug: string, templateId: string, body: Record<string, unknown>) =>
+    req<any>(`/portal/templates/${encodeURIComponent(templateId)}?${personaQuery(slug)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  portalSubmitMessageTemplate: (slug: string, templateId: string, body: Record<string, unknown>) =>
+    req<any>(`/portal/templates/${encodeURIComponent(templateId)}/submit?${personaQuery(slug)}`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  portalSyncMessageTemplateStatus: (slug: string, templateId: string) =>
+    req<any>(`/portal/templates/${encodeURIComponent(templateId)}/sync?${personaQuery(slug)}`, {
+      method: "POST",
     }),
   whatsappChannel: (slug: string) => req<any>(`/portal/personas/${encodeURIComponent(slug)}/channels/whatsapp`),
   whatsappMetaBinding: (slug: string) =>

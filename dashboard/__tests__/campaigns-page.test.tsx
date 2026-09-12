@@ -39,7 +39,7 @@ describe("Disparos rollout one", () => {
       { id: "audience-1", name: "Clientes ativos" },
     ]);
     mocks.campaigns.mockResolvedValue([]);
-    mocks.health.mockResolvedValue({ provider: "meta_cloud", ready: true });
+    mocks.health.mockResolvedValue({ provider: "meta_cloud", ready: true, rollout_one_enabled: true });
     mocks.preview.mockResolvedValue({
       counts: { selected_unique: 2, eligible: 1, blocked: 1 },
       blocked_reasons: { consent_not_granted: 1 },
@@ -56,16 +56,16 @@ describe("Disparos rollout one", () => {
     fireEvent.change(await screen.findByPlaceholderText("Opt-in agosto"), {
       target: { value: "Consentimento agosto" },
     });
-    fireEvent.change(screen.getByLabelText("Grupo semantico"), {
+    fireEvent.change(screen.getByLabelText("Grupo semântico"), {
       target: { value: "audience-1" },
     });
     fireEvent.click(screen.getByRole("checkbox", { name: /clientes\.csv/ }));
-    fireEvent.change(screen.getByPlaceholderText("Por que esta campanha esta sendo criada"), {
+    fireEvent.change(screen.getByPlaceholderText("Por que esta campanha está sendo criada"), {
       target: { value: "Reativacao de clientes inativos" },
     });
     fireEvent.click(screen.getByRole("button", { name: /Avaliar elegibilidade/i }));
 
-    expect(await screen.findByText("1 elegiveis")).toBeInTheDocument();
+    expect(await screen.findByText("1 elegíveis")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Confirmar draft congelado/i }));
 
     await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1));
