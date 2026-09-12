@@ -51214,6 +51214,10 @@
             "logo_reverse": {
               "node_id": "asset:tock-fatal-tock-fatal-varejo-ocr-ainda-nao-habilitado-fallba-ca53839e",
               "alt": "Tock Fatal"
+            },
+            "logo_short": {
+              "node_id": "asset:tock-fatal-tock-fatal-varejo-ocr-ainda-nao-habilitado-fallba-ac99e55e",
+              "alt": "Borboleta Tock Fatal"
             }
           },
           "pages": [
@@ -55086,6 +55090,36 @@
         "product_node_id": "product:tock-blusas-bodies-camisas-e-partes-de-cima-body-rendado",
         "graph_json_node_id": "asset:tock-blusas-bodies-camisas-e-partes-de-cima-body-rendado-primary-image",
         "local_evidence_path": "docs/sdr/tock-fatal/product-media/body-rendado.jpeg"
+      }
+    },
+    {
+      "id": "asset:tock-fatal-tock-fatal-varejo-ocr-ainda-nao-habilitado-fallba-ac99e55e",
+      "node_type": "asset",
+      "slug": "tock-fatal-tock-fatal-varejo-ocr-ainda-nao-habilitado-fallba-ac99e55e",
+      "title": "Logo curta (borboleta) Tock Fatal",
+      "summary": "Logo curta (borboleta) Tock Fatal",
+      "tags": [
+        "asset",
+        "brand_logo_short"
+      ],
+      "status": "validated",
+      "projection_node_id": "c1a34213-f8a4-4c84-9fdf-62123d1e1a17",
+      "data": {
+        "asset_id": "ac99e55e-f489-4bdc-9690-4f3dd8bf74fa",
+        "asset_registry_id": "ac99e55e-f489-4bdc-9690-4f3dd8bf74fa",
+        "content_sha256": "1cee1fff8134e21ffe19b82a63a31c514a36ecbff9f3750858a9bb254531785e",
+        "asset_function": "brand_logo_short",
+        "width": 821,
+        "height": 1193,
+        "storage_bucket": "assets-raw",
+        "storage_path": "4acb2739-127e-4143-acf5-f5c3ea1aaa98/sha256/1cee1fff8134e21ffe19b82a63a31c514a36ecbff9f3750858a9bb254531785e.png",
+        "media": {
+          "sha256": "1cee1fff8134e21ffe19b82a63a31c514a36ecbff9f3750858a9bb254531785e",
+          "width": 821,
+          "height": 1193
+        },
+        "source": "vectorized_from_operator_supplied_assets_2026-09-09",
+        "status": "validated"
       }
     }
   ],
@@ -79468,6 +79502,61 @@
       "metadata": {
         "active": true,
         "graph_json_edge_id": "edge:tock-product-asset-blusas-bodies-camisas-e-partes-de-cima-body-rendado"
+      }
+    },
+    {
+      "id": "edge:asset-parent:ac99e55e-f489-4bdc-9690-4f3dd8bf74fa",
+      "source": "brand:tock-fatal-varejo",
+      "target": "asset:tock-fatal-tock-fatal-varejo-ocr-ainda-nao-habilitado-fallba-ac99e55e",
+      "relation_type": "contains",
+      "weight": 0.9,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:gallery:ac99e55e-f489-4bdc-9690-4f3dd8bf74fa",
+      "source": "asset:tock-fatal-tock-fatal-varejo-ocr-ainda-nao-habilitado-fallba-ac99e55e",
+      "target": "gallery:tock-default",
+      "relation_type": "gallery_asset",
+      "weight": 1,
+      "metadata": {
+        "direction": "asset_to_gallery",
+        "graph_layer": "auxiliary",
+        "created_from": "asset_upload",
+        "relation_role": "asset_gallery",
+        "visual_hidden": false
+      }
+    },
+    {
+      "id": "edge:uses-asset:ac99e55e-f489-4bdc-9690-4f3dd8bf74fa",
+      "source": "brand:tock-fatal-varejo",
+      "target": "asset:tock-fatal-tock-fatal-varejo-ocr-ainda-nao-habilitado-fallba-ac99e55e",
+      "relation_type": "uses_asset",
+      "weight": 0.9,
+      "metadata": {
+        "active": true,
+        "direction": "branch_to_asset",
+        "parent_slug": "tock-fatal-varejo",
+        "parent_type": "brand",
+        "created_from": "asset_upload",
+        "visual_hidden": true,
+        "demoted_from_primary_tree": "duplicate_source_target",
+        "role": "brand_logo_short",
+        "page_binding": {
+          "slot_key": "brand_logo_short",
+          "position": 0
+        }
+      }
+    },
+    {
+      "id": "edge:site-publish:node:asset:tock-fatal-tock-fatal-varejo-ocr-ainda-nao-habilitado-fallba-ac99e55e",
+      "source": "asset:tock-fatal-tock-fatal-varejo-ocr-ainda-nao-habilitado-fallba-ac99e55e",
+      "target": "gallery:tock-default",
+      "relation_type": "publishes_to",
+      "weight": 1,
+      "metadata": {
+        "source": "logo_short_rollout_2026-09-11"
       }
     }
   ]

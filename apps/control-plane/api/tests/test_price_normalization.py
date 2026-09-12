@@ -147,3 +147,28 @@ def test_dict_price_beats_price_cents_fallback():
 
 def test_offer_to_price_cents_returns_zero_for_none():
     assert offer_to_price_cents(None) == 0
+
+
+def test_metadata_offer_is_canonical_for_legacy_path_personas():
+    """The backfill script writes `metadata["offer"]`, not `data["offer"]`.
+
+    Personas on the legacy menu path (baita-conveniencia, vz-lupas) keep every
+    node field under `metadata`, so the canonical slot has to be recognised
+    there too -- otherwise consolidating the data would write a key no reader
+    ever consults, and the backfill would be a silent no-op.
+    """
+    offer = normalize_offer({}, {"offer": {"amount": 169.0, "currency": "BRL"}})
+
+    assert offer is not None
+    assert (offer.amount, offer.currency) == (169.0, "BRL")
+
+
+def test_canonical_offer_outranks_the_legacy_keys_beside_it():
+    """After backfill both shapes coexist; the canonical one must win."""
+    offer = normalize_offer(
+        {},
+        {"offer": {"amount": 12.0, "currency": "BRL"}, "price_cents": 999999},
+    )
+
+    assert offer is not None
+    assert offer.amount == 12.0

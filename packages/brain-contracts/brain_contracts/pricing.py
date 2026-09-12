@@ -80,18 +80,28 @@ def normalize_offer(data: dict, metadata: dict | None = None) -> Optional[Offer]
 
     Fallback chain, in order:
       1. ``data["offer"]``           - v3/Tock canonical write.
-      2. ``data["price"]``           - offer-node / legacy graph write.
-      3. ``metadata["price"]``       - product_import_service (unit dict) and
+      2. ``metadata["offer"]``       - same canonical slot for personas that
+         keep node fields under ``metadata`` rather than ``data`` (the legacy
+         menu path). Both are the canonical shape, so they rank above every
+         legacy key below.
+      3. ``data["price"]``           - offer-node / legacy graph write.
+      4. ``metadata["price"]``       - product_import_service (unit dict) and
          knowledge_rag_intake (unit str) shapes.
-      4. ``metadata`` itself         - offer NODES write amount/currency
+      5. ``metadata`` itself         - offer NODES write amount/currency
          directly on the node's own metadata, not nested under "price".
-      5. ``data["price_cents"]``     - already-cents integer at data level.
-      6. ``metadata["price_cents"]`` - Baita's integer-cents write.
+      6. ``data["price_cents"]``     - already-cents integer at data level.
+      7. ``metadata["price_cents"]`` - Baita's integer-cents write.
     """
     data = data or {}
     metadata = metadata or {}
 
-    for raw in (data.get("offer"), data.get("price"), metadata.get("price"), metadata):
+    for raw in (
+        data.get("offer"),
+        metadata.get("offer"),
+        data.get("price"),
+        metadata.get("price"),
+        metadata,
+    ):
         if not isinstance(raw, dict):
             continue
         result = _amount_currency_from_price_dict(raw)
