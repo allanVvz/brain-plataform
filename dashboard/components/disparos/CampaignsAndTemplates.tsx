@@ -9,7 +9,7 @@
  * portal-prefixed) and which persona scope they resolve; both are passed in
  * as props so this component never needs to know which caller it is.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Ban, Loader2, Megaphone, Pause, RefreshCw, Send, ShieldCheck } from "lucide-react";
 
 const DEFAULT_POLICY = {
@@ -165,12 +165,20 @@ export function CampaignsAndTemplates({
     [headerPlaceholders, bodyPlaceholders],
   );
 
+  const hasLoadedRef = useRef(false);
+
   const load = useCallback(async () => {
     if (!personaKey) {
       setImports([]); setGroups([]); setCampaigns([]); setHealth(null); setLoading(false);
       return;
     }
-    setLoading(true);
+    // Only the very first load shows the full-page "Carregando..." state.
+    // The 10s poll below calls this same function to refresh in the
+    // background -- flipping `loading` back to true on every tick collapsed
+    // the whole page (including an open, in-progress template form) to one
+    // line every 10 seconds, which also reset scroll position since the DOM
+    // briefly shrank to fit.
+    if (!hasLoadedRef.current) setLoading(true);
     try {
       const [nextImports, nextGroups, nextCampaigns, nextHealth] = await Promise.all([
         api.leadImports(), api.audiences(), api.campaigns(), api.campaignProviderHealth(),
@@ -179,6 +187,7 @@ export function CampaignsAndTemplates({
       setGroups(nextGroups || []);
       setCampaigns(nextCampaigns || []);
       setHealth(nextHealth);
+      hasLoadedRef.current = true;
     } catch (reason: any) {
       setError(reason?.message || "Falha ao carregar disparos.");
     } finally {
