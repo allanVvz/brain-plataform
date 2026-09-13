@@ -66,6 +66,9 @@ def test_internal_transport_commands_reach_route_token_authentication():
         "33333333-3333-4333-8333-333333333333/2/complete",
         "/internal/v1/transport/messages/inbound/"
         "44444444-4444-4444-8444-444444444444/technical-failure",
+        "/internal/v1/transport/whatsapp/meta/templates/create",
+        "/internal/v1/transport/whatsapp/meta/templates/update",
+        "/internal/v1/transport/whatsapp/meta/templates/status",
     ):
         assert is_public_path(path)
     assert not is_public_path("/internal/v1/transport/messages/admin")

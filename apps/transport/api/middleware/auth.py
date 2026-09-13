@@ -22,6 +22,9 @@ PUBLIC_EXACT_PATHS = {
     "/internal/v1/transport/messages/outbound",
     "/internal/v1/transport/messages/validator-media",
     "/internal/v1/transport/messages/validator-inbound",
+    "/internal/v1/transport/whatsapp/meta/templates/create",
+    "/internal/v1/transport/whatsapp/meta/templates/update",
+    "/internal/v1/transport/whatsapp/meta/templates/status",
 }
 
 ADMIN_TOKEN_HEADER = "x-ai-brain-admin-token"
