@@ -13,8 +13,16 @@ Updated: 2026-09-14
 > campanha de marketing depois de dias parado — não presumir que a campanha
 > puxa essas falas automaticamente. Das 56 leads da persona, **0 têm linha em
 > `contact_consents`** — qualquer campanha `campaign_kind="promotional"`
-> bloqueia 100% delas com `consent_not_granted`; a primeira campanha de
-> reativação precisa ser `campaign_kind="consent_request"`. `leads.updated_at`
+> bloqueia 100% delas com `consent_not_granted`.
+> **Atualização no mesmo dia:** o operador autorizou backfill de consentimento
+> com base em contato orgânico real (lead que mandou mensagem primeiro conta
+> como evidência de relacionamento/interesse) em vez de exigir opt-in formal.
+> Rodado via `record_contact_consent_v1` (RPC auditada, não INSERT direto):
+> as 56 leads agora têm `contact_consents.status='granted'`,
+> `channel='whatsapp'`, `purpose='ofertas_e_novidades'`,
+> `source='organic_whatsapp_contact'`, `evidence` apontando pra primeira
+> mensagem real da lead. Campanhas `promotional` para essas leads não devem
+> mais bloquear por `consent_not_granted`. `leads.updated_at`
 > não é fonte confiável de "há quanto tempo a lead não conversa" (contaminado
 > por qualquer rebind de binding); a fonte real é `max(messages.created_at)
 > group by lead_id` — por essa conta, 52 das 56 leads não têm mensagem há mais
