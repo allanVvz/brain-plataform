@@ -1,6 +1,30 @@
 # Brain Platform Memory
 
-Updated: 2026-08-24
+Updated: 2026-09-14
+
+> Checkpoint mais recente — auditoria pré-disparo da campanha de reativação
+> Tock Fatal (2026-09-14), read-only contra produção via `psql`. Binding Meta
+> ativo/conectado (`ead9dbcd-...`, `whatsapp_phone_number_id=1274565599076808`).
+> Publicação GraphRAG ativa é a **v33** (`graph_publications`, ativada
+> 2026-09-11) — mais nova que qualquer versão citada nos checkpoints abaixo;
+> contém um bloco de reengajamento (`idle_return`, `stale_reengagement`,
+> `journey_completed`, `journey_cancelled`) para quando o próprio bot demorou
+> pra responder, que **não é o mesmo mecanismo** de reabrir contato via
+> campanha de marketing depois de dias parado — não presumir que a campanha
+> puxa essas falas automaticamente. Das 56 leads da persona, **0 têm linha em
+> `contact_consents`** — qualquer campanha `campaign_kind="promotional"`
+> bloqueia 100% delas com `consent_not_granted`; a primeira campanha de
+> reativação precisa ser `campaign_kind="consent_request"`. `leads.updated_at`
+> não é fonte confiável de "há quanto tempo a lead não conversa" (contaminado
+> por qualquer rebind de binding); a fonte real é `max(messages.created_at)
+> group by lead_id` — por essa conta, 52 das 56 leads não têm mensagem há mais
+> de 2 dias. O vazamento de marca varejo/atacado documentado abaixo
+> (2026-09-05) tem correção **e** cobertura de teste desde o mesmo dia
+> (`test_neutral_branch_scope.py`, 9 testes, todos passando em 2026-09-14) —
+> o texto do roadmap que dizia o contrário estava desatualizado, já corrigido
+> em `docs/roadmaps/AGENT_ROADMAP.md`. "Tricot" não existe como produto no
+> grafo (nenhum bundle real tem esse node); os 4 templates de reativação
+> criados nesta sessão não o mencionam, então não é bloqueante agora.
 
 > Checkpoint positivo atual: Aurora e Tock Fatal passaram a preservar a fala
 > natural do modelo depois do proof. A Aurora demonstrou boa compreensão de

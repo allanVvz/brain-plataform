@@ -1340,14 +1340,35 @@ modelo propôs — comparada com `proof_result.accepted_facts` — o que foi ace
 Isso separa em um passo "o modelo não propôs" de "algo rejeitou", e as duas
 causas levam a correções opostas. Está fixado como regra de governança 9.
 
-**O que fica em aberto:** a prevenção. O WA Validator rodou
-`sdr_sales_branch_switch` e **passou** o galho
-(`active_branch_node_id: audience:tock-reseller`,
-`deterministic_branch_match: true`), porque exercitou a direção fácil — o
-cliente disse "Quero conhecer opções para revenda", e "revenda" é alias exato.
-Nenhum cenário jamais exercitou um cliente de varejo respondendo com palavra
-fora da lista. Os cenários que faltam estão especificados em
-`docs/handoffs/TOCK_FATAL_BRANCH_STABILITY_2026-09-05.md`, seção 10.5.
+**Correção aplicada em 2026-09-05** (mesmo dia, na sequência): três commits
+fecharam a prevenção descrita acima —
+`e4d1e1a` (`fix(n8n): classify the customer answer instead of matching its
+aliases` — o prompt agora pede ao modelo para classificar o significado da
+resposta, não casar contra a lista fechada), `f563ae2` (`fix(conversation):
+make a null branch mean no brand, not every brand` — `branch_closure(graph,
+None)` deixou de devolver os dois galhos) e `a21f3c2` (`fix(conversation):
+withhold both brands from a branchless GraphRAG turn` — o runtime v3, que é
+quem serve a Tock Fatal de fato, parou de escolher um galho arbitrário
+quando não há sinal). Um galho nulo agora fica neutro; não vaza mais preço
+nem condição da marca errada.
+
+**Correção verificada em 2026-09-14 (auditoria pré-disparo da campanha de
+reativação):** o parágrafo anterior desta seção, "nenhum cenário jamais
+exercitou um cliente de varejo respondendo com palavra fora da lista",
+**está desatualizado desde o próprio dia da correção**. O commit `a21f3c2`
+(2026-09-05, o mesmo citado acima) já trouxe junto
+`apps/conversation-runtime/api/tests/test_neutral_branch_scope.py` — 9
+testes que rodam contra o bundle publicado real (não uma fixture sintética)
+e cobrem exatamente essa classe de bug: nenhum node exclusivo de uma marca
+sobrevive a um galho nulo, o card de contexto do turno branchless não carrega
+`R$ 69,93` nem `rule:tock-desconto-atacado-30`, e o agente ainda tem conteúdo
+neutro suficiente pra continuar falando (não fica mudo). Rodados nesta data,
+os 9 passam. O gap real não era ausência de teste — era o próprio texto do
+roadmap não ter sido atualizado depois que o teste foi escrito no mesmo
+commit da correção. Os cenários mais amplos de WA Validator (o cliente
+literalmente respondendo "Proprio" pelo n8n, fim a fim) seguem especificados
+em `docs/handoffs/TOCK_FATAL_BRANCH_STABILITY_2026-09-05.md`, seção 10.5,
+para quem quiser cobertura end-to-end além do teste unitário do galho.
 
 ## Catálogo de agentes
 
