@@ -737,14 +737,61 @@ def sync_message_template_status(template_id: str) -> dict[str, Any]:
         str(template["persona_id"]), meta_template_id=str(template["meta_template_id"]),
     )
     meta_status = str(response.get("status") or "").upper()
+    rejected_reason = response.get("rejected_reason")
+    if str(rejected_reason or "").strip().upper() == "NONE":
+        # Meta's own placeholder for "not rejected" -- not an absence of the
+        # field, so the None-check above never catches it and the literal
+        # string used to leak straight into the dashboard.
+        rejected_reason = None
     return _write_message_template(
         template_id, expected_revision=int(template.get("revision") or 1),
         patch={
             "meta_approval_status": _META_APPROVAL_STATUS_MAP.get(meta_status, "pending"),
-            "meta_rejection_reason": response.get("rejected_reason"),
+            "meta_rejection_reason": rejected_reason,
             "meta_synced_at": _now_iso(),
         },
     )
+
+
+def delete_message_template(
+    template_id: str,
+    *,
+    expected_revision: int,
+    idempotency_key: str,
+    reason: str,
+    actor_user_id: str | None,
+) -> dict[str, Any]:
+    """Permanently remove a template, deleting it from Meta first if it was
+    ever submitted there -- a local-only delete would leave an orphaned,
+    still-reviewable template on the WABA that the dashboard no longer
+    tracks."""
+    if not idempotency_key or not reason:
+        raise HTTPException(422, "idempotency_key e reason sao obrigatorios.")
+    template = get_message_template(template_id)
+    if int(template.get("revision") or 1) != int(expected_revision):
+        raise HTTPException(409, "O template foi alterado; recarregue antes de continuar.")
+
+    if template.get("provider") == "meta_cloud" and template.get("meta_template_id"):
+        transport_client.delete_meta_template(
+            str(template["persona_id"]),
+            name=str(template["meta_template_name"]),
+            meta_template_id=str(template["meta_template_id"]),
+        )
+
+    result = (
+        supabase_client.get_client().table("message_templates").delete()
+        .eq("id", template_id).eq("revision", expected_revision).execute()
+    )
+    data = getattr(result, "data", None)
+    if not isinstance(data, list) or not data:
+        raise HTTPException(409, "O template foi alterado; recarregue antes de continuar.")
+
+    event_emitter.emit(
+        "message_template_deleted", entity_type="message_template", entity_id=template_id,
+        persona_id=str(template["persona_id"]),
+        payload={"idempotency_key": idempotency_key, "reason": reason, "actor_user_id": actor_user_id},
+    )
+    return {"deleted": True, "id": template_id}
 
 
 def preview_campaign(payload: dict[str, Any]) -> dict[str, Any]:

@@ -24,6 +24,7 @@ export default function ClientDisparosPage() {
     editMessageTemplate: (id, body) => api.portalEditMessageTemplate(personaSlug, id, body),
     submitMessageTemplate: (id, body) => api.portalSubmitMessageTemplate(personaSlug, id, body),
     syncMessageTemplateStatus: (id) => api.portalSyncMessageTemplateStatus(personaSlug, id),
+    deleteMessageTemplate: (id, body) => api.portalDeleteMessageTemplate(personaSlug, id, body),
   }), [personaSlug]);
 
   return (

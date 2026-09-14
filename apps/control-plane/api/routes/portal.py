@@ -734,6 +734,20 @@ def portal_sync_template(template_id: str, request: Request, persona_slug: str =
     return campaigns_service.sync_message_template_status(template_id)
 
 
+@router.delete("/templates/{template_id}")
+def portal_delete_template(
+    template_id: str, body: PortalTemplateActionBody, request: Request, persona_slug: str = Query(...),
+):
+    persona = _persona(persona_slug, request, "edit")
+    _template_for_persona(template_id, persona["id"])
+    user = auth_service.current_user(request)
+    return campaigns_service.delete_message_template(
+        template_id, expected_revision=body.expected_revision,
+        idempotency_key=body.idempotency_key, reason=body.reason,
+        actor_user_id=user.get("id"),
+    )
+
+
 class PortalConsentChangeBody(BaseModel):
     channel: str = "whatsapp"
     purpose: str

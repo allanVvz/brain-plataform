@@ -37,6 +37,10 @@ class _FakeTable:
         self._payload = payload
         return self
 
+    def delete(self):
+        self._op = "delete"
+        return self
+
     def eq(self, field, value):
         self._filters[field] = value
         return self
@@ -61,6 +65,10 @@ class _FakeTable:
         if self._op == "update":
             for row in matched:
                 row.update(self._payload)
+            return SimpleNamespace(data=matched)
+        if self._op == "delete":
+            for row in matched:
+                del self.store[row["id"]]
             return SimpleNamespace(data=matched)
         return SimpleNamespace(data=matched)
 
@@ -283,3 +291,74 @@ def test_sync_maps_meta_status_and_records_rejection_reason(store, monkeypatch):
 
     assert result["meta_approval_status"] == "rejected"
     assert result["meta_rejection_reason"] == "INVALID_FORMAT"
+
+
+def test_sync_normalizes_metas_none_placeholder_to_null(store, monkeypatch):
+    _seed(store, meta_template_id="meta-tpl-1", meta_approval_status="pending")
+    monkeypatch.setattr(
+        campaigns_service.transport_client, "get_meta_template_status",
+        lambda *_a, **_k: {"status": "APPROVED", "rejected_reason": "NONE"},
+    )
+
+    result = campaigns_service.sync_message_template_status("tpl-1")
+
+    assert result["meta_approval_status"] == "approved"
+    assert result["meta_rejection_reason"] is None
+
+
+# -- delete_message_template ---------------------------------------------------
+
+def test_delete_before_submission_skips_meta_call(store, monkeypatch):
+    _seed(store)
+    called = []
+    monkeypatch.setattr(
+        campaigns_service.transport_client, "delete_meta_template",
+        lambda *_a, **_k: called.append(1),
+    )
+
+    result = campaigns_service.delete_message_template(
+        "tpl-1", expected_revision=1, idempotency_key="key-1", reason="limpeza",
+        actor_user_id=None,
+    )
+
+    assert not called
+    assert result == {"deleted": True, "id": "tpl-1"}
+    assert "tpl-1" not in store
+
+
+def test_delete_after_submission_deletes_at_meta_first(store, monkeypatch):
+    _seed(store, meta_template_id="meta-tpl-1")
+    called = []
+    monkeypatch.setattr(
+        campaigns_service.transport_client, "delete_meta_template",
+        lambda persona_id, *, name, meta_template_id: called.append((name, meta_template_id)),
+    )
+
+    campaigns_service.delete_message_template(
+        "tpl-1", expected_revision=1, idempotency_key="key-1", reason="limpeza",
+        actor_user_id=None,
+    )
+
+    assert called == [("boas_vindas", "meta-tpl-1")]
+    assert "tpl-1" not in store
+
+
+def test_delete_rejects_stale_revision(store):
+    _seed(store, revision=2)
+    with pytest.raises(HTTPException) as exc:
+        campaigns_service.delete_message_template(
+            "tpl-1", expected_revision=1, idempotency_key="key-1", reason="r",
+            actor_user_id=None,
+        )
+    assert exc.value.status_code == 409
+    assert "tpl-1" in store
+
+
+def test_delete_requires_idempotency_key_and_reason(store):
+    _seed(store)
+    with pytest.raises(HTTPException) as exc:
+        campaigns_service.delete_message_template(
+            "tpl-1", expected_revision=1, idempotency_key="", reason="",
+            actor_user_id=None,
+        )
+    assert exc.value.status_code == 422

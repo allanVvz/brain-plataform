@@ -166,6 +166,35 @@ class MetaWhatsAppProvider:
         _raise_for_status_with_detail(response)
         return response.json()
 
+    def delete_template(
+        self,
+        binding: dict[str, Any],
+        *,
+        name: str,
+        meta_template_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Permanently remove a template from the WABA.
+
+        Meta's delete endpoint hangs off the WABA (like create), addressed by
+        template name rather than the per-language id used by update/status.
+        Passing ``meta_template_id`` as ``hsm_id`` narrows the delete to that
+        one language variant instead of every language sharing this name.
+        """
+        waba_id = str((binding.get("metadata") or {}).get("waba_id") or "")
+        if not waba_id:
+            raise RuntimeError("Meta binding has no waba_id; cannot delete a template")
+        token, api_version = _credential(binding)
+        params: dict[str, Any] = {"name": name}
+        if meta_template_id:
+            params["hsm_id"] = meta_template_id
+        response = httpx.delete(
+            f"https://graph.facebook.com/{api_version}/{waba_id}/message_templates",
+            headers={"Authorization": f"Bearer {token}"},
+            params=params, timeout=30.0,
+        )
+        _raise_for_status_with_detail(response)
+        return response.json()
+
     def get_template_status(self, binding: dict[str, Any], *, meta_template_id: str) -> dict[str, Any]:
         token, api_version = _credential(binding)
         response = httpx.get(

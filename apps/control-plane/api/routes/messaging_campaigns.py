@@ -200,6 +200,16 @@ def sync_template(template_id: str, request: Request):
     return campaigns_service.sync_message_template_status(template_id)
 
 
+@router.delete("/templates/{template_id}")
+def delete_template(template_id: str, body: MessageTemplateActionBody, request: Request):
+    _template(request, template_id, "edit")
+    return campaigns_service.delete_message_template(
+        template_id, expected_revision=body.expected_revision,
+        idempotency_key=body.idempotency_key, reason=body.reason,
+        actor_user_id=auth_service.current_user(request).get("id"),
+    )
+
+
 @router.get("/provider-health")
 def provider_health(request: Request, persona_id: str = Query(...)):
     auth_service.assert_persona_capability(request, "view", persona_id=persona_id)

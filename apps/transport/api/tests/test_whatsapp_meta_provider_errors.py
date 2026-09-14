@@ -231,3 +231,61 @@ def test_get_template_status_surfaces_meta_error_message(monkeypatch):
         provider.get_template_status(_binding_with_waba(), meta_template_id="tpl-1")
 
     assert "Unsupported get request" in str(exc.value)
+
+
+def test_delete_template_requires_waba_id():
+    provider = MetaWhatsAppProvider()
+    with pytest.raises(RuntimeError, match="waba_id"):
+        provider.delete_template(_binding(), name="boas_vindas")
+
+
+def test_delete_template_deletes_by_name_at_the_waba(monkeypatch):
+    request = httpx.Request("DELETE", "https://graph.facebook.com/v21.0/waba-123/message_templates")
+    ok_response = httpx.Response(200, json={"success": True}, request=request)
+    captured = {}
+
+    def _fake_delete(url, *, headers, params, timeout):
+        captured["url"] = url
+        captured["params"] = params
+        return ok_response
+
+    monkeypatch.setattr("services.whatsapp_providers.meta.httpx.delete", _fake_delete)
+
+    provider = MetaWhatsAppProvider()
+    result = provider.delete_template(_binding_with_waba(), name="boas_vindas", meta_template_id="tpl-1")
+
+    assert result["success"] is True
+    assert captured["url"] == "https://graph.facebook.com/v21.0/waba-123/message_templates"
+    assert captured["params"] == {"name": "boas_vindas", "hsm_id": "tpl-1"}
+
+
+def test_delete_template_without_meta_template_id_omits_hsm_id(monkeypatch):
+    request = httpx.Request("DELETE", "https://graph.facebook.com/v21.0/waba-123/message_templates")
+    ok_response = httpx.Response(200, json={"success": True}, request=request)
+    captured = {}
+
+    def _fake_delete(url, *, headers, params, timeout):
+        captured["params"] = params
+        return ok_response
+
+    monkeypatch.setattr("services.whatsapp_providers.meta.httpx.delete", _fake_delete)
+
+    provider = MetaWhatsAppProvider()
+    provider.delete_template(_binding_with_waba(), name="boas_vindas")
+
+    assert captured["params"] == {"name": "boas_vindas"}
+
+
+def test_delete_template_surfaces_meta_error_message(monkeypatch):
+    meta_error_body = {"error": {"message": "Template not found", "code": 100}}
+    request = httpx.Request("DELETE", "https://graph.facebook.com/v21.0/waba-123/message_templates")
+    monkeypatch.setattr(
+        "services.whatsapp_providers.meta.httpx.delete",
+        lambda *_a, **_k: httpx.Response(400, json=meta_error_body, request=request),
+    )
+
+    provider = MetaWhatsAppProvider()
+    with pytest.raises(httpx.HTTPStatusError) as exc:
+        provider.delete_template(_binding_with_waba(), name="boas_vindas")
+
+    assert "Template not found" in str(exc.value)

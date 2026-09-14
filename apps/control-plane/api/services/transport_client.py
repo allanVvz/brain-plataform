@@ -154,3 +154,10 @@ def get_meta_template_status(persona_id: str, *, meta_template_id: str) -> dict:
         "/internal/v1/transport/whatsapp/meta/templates/status",
         {"persona_id": persona_id, "meta_template_id": meta_template_id},
     )
+
+
+def delete_meta_template(persona_id: str, *, name: str, meta_template_id: str | None = None) -> dict:
+    return _post_internal(
+        "/internal/v1/transport/whatsapp/meta/templates/delete",
+        {"persona_id": persona_id, "name": name, "meta_template_id": meta_template_id},
+    )

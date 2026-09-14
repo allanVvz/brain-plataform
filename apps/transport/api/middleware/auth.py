@@ -25,6 +25,7 @@ PUBLIC_EXACT_PATHS = {
     "/internal/v1/transport/whatsapp/meta/templates/create",
     "/internal/v1/transport/whatsapp/meta/templates/update",
     "/internal/v1/transport/whatsapp/meta/templates/status",
+    "/internal/v1/transport/whatsapp/meta/templates/delete",
 }
 
 ADMIN_TOKEN_HEADER = "x-ai-brain-admin-token"

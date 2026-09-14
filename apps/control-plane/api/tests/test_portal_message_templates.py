@@ -87,6 +87,25 @@ def test_sync_delegates_to_campaigns_service(monkeypatch):
     assert result["meta_approval_status"] == "approved"
 
 
+def test_delete_delegates_to_campaigns_service(monkeypatch):
+    monkeypatch.setattr(
+        campaigns_service, "get_message_template",
+        lambda _id: {"id": "tpl-1", "persona_id": "persona-1"},
+    )
+    called = {}
+    monkeypatch.setattr(
+        campaigns_service, "delete_message_template",
+        lambda template_id, **kwargs: called.update(template_id=template_id, **kwargs) or {"deleted": True, "id": template_id},
+    )
+
+    body = portal.PortalTemplateActionBody(expected_revision=1, idempotency_key="key-1", reason="limpeza")
+    result = portal.portal_delete_template("tpl-1", body, request=None, persona_slug="vz-lupas")
+
+    assert result == {"deleted": True, "id": "tpl-1"}
+    assert called["template_id"] == "tpl-1"
+    assert called["actor_user_id"] == "user-1"
+
+
 def test_template_from_another_persona_is_404(monkeypatch):
     monkeypatch.setattr(
         campaigns_service, "get_message_template",

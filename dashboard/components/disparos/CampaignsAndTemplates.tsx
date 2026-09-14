@@ -48,6 +48,7 @@ export type CampaignsApi = {
   editMessageTemplate: (templateId: string, body: Record<string, unknown>) => Promise<any>;
   submitMessageTemplate: (templateId: string, body: Record<string, unknown>) => Promise<any>;
   syncMessageTemplateStatus: (templateId: string) => Promise<any>;
+  deleteMessageTemplate: (templateId: string, body: Record<string, unknown>) => Promise<any>;
 };
 
 export type Capabilities = { view: boolean; edit: boolean; manage?: boolean };
@@ -155,7 +156,7 @@ export function CampaignsAndTemplates({
   const [buttonTexts, setButtonTexts] = useState<string[]>([""]);
   const [exampleValues, setExampleValues] = useState<Record<string, string>>({});
   const [templateBusy, setTemplateBusy] = useState(false);
-  const [templateReasonAction, setTemplateReasonAction] = useState<{ template: any; action: "submit" | "edit" } | null>(null);
+  const [templateReasonAction, setTemplateReasonAction] = useState<{ template: any; action: "submit" | "edit" | "delete" } | null>(null);
   const [templateActionReason, setTemplateActionReason] = useState("");
 
   const headerPlaceholders = useMemo(() => extractPlaceholders(headerText), [headerText]);
@@ -362,10 +363,16 @@ export function CampaignsAndTemplates({
         });
         setShowTemplateForm(false);
         resetTemplateForm();
-      } else {
+      } else if (action === "submit") {
         await api.submitMessageTemplate(template.id, {
           expected_revision: template.revision || 1,
           idempotency_key: `template-submit:${template.id}:${crypto.randomUUID()}`,
+          reason: templateActionReason.trim(),
+        });
+      } else {
+        await api.deleteMessageTemplate(template.id, {
+          expected_revision: template.revision || 1,
+          idempotency_key: `template-delete:${template.id}:${crypto.randomUUID()}`,
           reason: templateActionReason.trim(),
         });
       }
@@ -620,6 +627,12 @@ export function CampaignsAndTemplates({
                   {row.meta_template_id && (
                     <button disabled={templateBusy} onClick={() => syncTemplate(row)} className={cx.btnSecondary}>Sincronizar status</button>
                   )}
+                  <button
+                    onClick={() => { setTemplateReasonAction({ template: row, action: "delete" }); setTemplateActionReason(""); }}
+                    className={cx.btnDanger}
+                  >
+                    Excluir
+                  </button>
                 </>
               )}
               {templateReasonAction?.action === "submit" && templateReasonAction.template.id === row.id && (
@@ -627,6 +640,17 @@ export function CampaignsAndTemplates({
                   <input value={templateActionReason} onChange={(e) => setTemplateActionReason(e.target.value)}
                     placeholder="Motivo da submissao" className={`min-w-0 flex-1 ${cx.input}`} />
                   <button disabled={templateBusy || !templateActionReason.trim()} onClick={confirmTemplateReasonAction} className={cx.btnPrimary}>Confirmar</button>
+                  <button onClick={() => { setTemplateReasonAction(null); setTemplateActionReason(""); }} className={cx.btnSecondary}>Voltar</button>
+                </div>
+              )}
+              {templateReasonAction?.action === "delete" && templateReasonAction.template.id === row.id && (
+                <div className={`mt-2 flex w-full flex-wrap items-center gap-2 ${cx.inlineBox}`}>
+                  <span className="text-obs-rose text-[11px]">
+                    Isso remove o template permanentemente{row.meta_template_id ? " (inclusive na Meta)" : ""}.
+                  </span>
+                  <input value={templateActionReason} onChange={(e) => setTemplateActionReason(e.target.value)}
+                    placeholder="Motivo da exclusao" className={`min-w-0 flex-1 ${cx.input}`} />
+                  <button disabled={templateBusy || !templateActionReason.trim()} onClick={confirmTemplateReasonAction} className={cx.btnDanger}>Confirmar exclusao</button>
                   <button onClick={() => { setTemplateReasonAction(null); setTemplateActionReason(""); }} className={cx.btnSecondary}>Voltar</button>
                 </div>
               )}

@@ -344,6 +344,11 @@ export const api = {
     }),
   syncMessageTemplateStatus: (templateId: string) =>
     req<any>(`/messaging/templates/${encodeURIComponent(templateId)}/sync`, { method: "POST" }),
+  deleteMessageTemplate: (templateId: string, body: Record<string, unknown>) =>
+    req<any>(`/messaging/templates/${encodeURIComponent(templateId)}`, {
+      method: "DELETE",
+      body: JSON.stringify(body),
+    }),
   releaseBatches: (personaId?: string) =>
     req<any[]>(`/messaging/release-queue/batches${personaId ? `?persona_id=${encodeURIComponent(personaId)}` : ""}`),
   releaseBatch: (batchId: string) =>
@@ -586,6 +591,11 @@ export const api = {
   portalSyncMessageTemplateStatus: (slug: string, templateId: string) =>
     req<any>(`/portal/templates/${encodeURIComponent(templateId)}/sync?${personaQuery(slug)}`, {
       method: "POST",
+    }),
+  portalDeleteMessageTemplate: (slug: string, templateId: string, body: Record<string, unknown>) =>
+    req<any>(`/portal/templates/${encodeURIComponent(templateId)}?${personaQuery(slug)}`, {
+      method: "DELETE",
+      body: JSON.stringify(body),
     }),
   whatsappChannel: (slug: string) => req<any>(`/portal/personas/${encodeURIComponent(slug)}/channels/whatsapp`),
   whatsappMetaBinding: (slug: string) =>

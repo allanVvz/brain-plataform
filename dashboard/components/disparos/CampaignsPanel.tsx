@@ -32,6 +32,7 @@ export function CampaignsPanel() {
     editMessageTemplate: (id, body) => api.editMessageTemplate(id, body),
     submitMessageTemplate: (id, body) => api.submitMessageTemplate(id, body),
     syncMessageTemplateStatus: (id) => api.syncMessageTemplateStatus(id),
+    deleteMessageTemplate: (id, body) => api.deleteMessageTemplate(id, body),
   }), [personaId]);
 
   return (

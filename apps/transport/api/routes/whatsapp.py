@@ -65,6 +65,12 @@ class MetaTemplateStatusBody(BaseModel):
     meta_template_id: str
 
 
+class MetaTemplateDeleteBody(BaseModel):
+    persona_id: str
+    name: str
+    meta_template_id: str | None = None
+
+
 def _mask(phone: str | None) -> str | None:
     if not phone:
         return None
@@ -469,4 +475,17 @@ def meta_template_status_internal(
     return _run_meta_template_call(
         get_provider("meta_cloud").get_template_status,
         binding, meta_template_id=body.meta_template_id,
+    )
+
+
+@internal_router.post("/meta/templates/delete")
+def meta_template_delete_internal(
+    body: MetaTemplateDeleteBody,
+    x_webhook_token: str | None = Header(None, alias="X-Webhook-Token"),
+) -> dict:
+    internal_auth.authorize_webhook_token(x_webhook_token)
+    binding = _meta_binding(body.persona_id)
+    return _run_meta_template_call(
+        get_provider("meta_cloud").delete_template,
+        binding, name=body.name, meta_template_id=body.meta_template_id,
     )
