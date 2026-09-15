@@ -466,17 +466,22 @@ def _required_retrieval_node_ids(
 ) -> list[str]:
     """Return the executable structural package for one turn.
 
-    The published branch contract already carries every question and handoff
-    rule verbatim. The chunk package therefore needs the full active path and
-    handoff rule nodes. Question order is model-owned in agentic mode; the
-    contract exposes every still-askable authored question without reserving
-    one question chunk as the backend-selected next step.
+    New GraphBundles publish ``turn_context_node_ids``: the branch, path,
+    field owners, authored questions and handoff rules required for a safe
+    natural turn. This keeps proof evidence graph-owned and makes Phase-B a
+    recovery path for genuinely new information, not a prerequisite for an
+    ordinary qualification transition. Older immutable publications retain
+    the former conservative path/rule fallback.
     """
     path = (
         ((document.get("coordinates") or {}).get(branch_node_id) or {})
         .get("path_node_ids") or []
     )
+    graph_owned = contract.get("turn_context_node_ids") or []
+    if graph_owned:
+        return [str(node_id) for node_id in graph_owned if node_id]
     return list(dict.fromkeys([
+        branch_node_id,
         *path,
         *(contract.get("handoff_rule_node_ids") or []),
     ]))
@@ -2311,6 +2316,10 @@ def _contract_scoped_to_neutral(
         node_id for node_id in contract.get("closure_node_ids") or []
         if node_id in neutral
     )
+    scoped["turn_context_node_ids"] = [
+        node_id for node_id in contract.get("turn_context_node_ids") or []
+        if node_id in neutral
+    ]
     scoped["eligible_faq_node_ids"] = sorted(
         node_id for node_id in contract.get("eligible_faq_node_ids") or []
         if node_id in neutral
@@ -3235,6 +3244,20 @@ def build_context(
         for index, (node_id, chunks) in enumerate(by_source.items())
         if node_id in (document.get("node_by_id") or {})
     ]
+    # A branch/persona node often has no semantic RAG chunk of its own. It is
+    # nevertheless part of the graph-owned executable turn closure and a
+    # legitimate proof citation. Materialize an empty structural card for
+    # every declared context node that retrieval did not return as a chunk;
+    # this keeps the proof package closed without inventing content or
+    # triggering a Phase-B retrieval for ordinary qualification.
+    card_ids = {card.id for card in cards}
+    for node_id in required_nodes:
+        if node_id in card_ids or node_id not in (document.get("node_by_id") or {}):
+            continue
+        cards.append(_card(
+            publication, document["node_by_id"][node_id], [], len(cards),
+        ))
+        card_ids.add(node_id)
     if brand_scope_withheld and not cards:
         # Withholding both brands must never make the agent mute. If a persona
         # publishes nothing outside its branches there is no neutral content
@@ -3310,7 +3333,7 @@ def build_context(
             str(row.get("chunk_id") or row.get("id")) for row in required_structural
         ],
         "chunk_ids": [str(row.get("chunk_id") or row.get("id")) for row in package],
-        "source_node_ids": sorted(by_source),
+        "source_node_ids": sorted(card_ids),
         "latency_ms": round((time.perf_counter() - started) * 1000, 3),
     }
     # Identity leads the prompt: the agent has to know who she is before any

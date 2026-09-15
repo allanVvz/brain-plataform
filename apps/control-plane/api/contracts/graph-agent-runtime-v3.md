@@ -53,6 +53,13 @@ inbound canônico
 → outbox idempotente
 ```
 
+Cada contrato de branch publica `turn_context_node_ids`: anchor, caminho,
+donos dos fields, perguntas qualificadoras e regras de handoff. Esse fechamento
+deve caber em doze nodes; caso contrario, a compilacao bloqueia a publicacao.
+O runtime carrega esse pacote antes da proposta do modelo. O repair/Phase-B
+fica reservado para informacao nova solicitada no turno, nunca para completar
+uma transicao normal de qualificacao.
+
 `service_operations[]` é o contrato autoritativo do conjunto de serviços. Cada
 operação contém `add`, `keep` ou `drop`, anchor publicado, checksum do caminho e
 evidência literal. Um novo serviço é adicionado por padrão; somente linguagem

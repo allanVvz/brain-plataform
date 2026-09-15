@@ -117,6 +117,28 @@ def test_the_bundle_still_carries_the_two_competing_brands(document):
 
 
 @pytest.mark.unit
+def test_each_branch_publishes_a_closed_turn_context(document):
+    """A normal qualification turn must not require Phase-B to cite its FAQ."""
+    for anchor, contract in document["branch_contracts"].items():
+        turn_context = set(contract["turn_context_node_ids"])
+        assert anchor in turn_context
+        assert set(document["coordinates"][anchor]["path_node_ids"]) <= turn_context
+        assert len(turn_context) <= graph_compiler_v3.TURN_CONTEXT_NODE_LIMIT
+        for field in contract["fields"]:
+            assert field["owner_node_id"] in turn_context
+            assert field["question_node_id"] in turn_context
+        assert set(contract["handoff_rule_node_ids"]) <= turn_context
+
+
+@pytest.mark.unit
+def test_runtime_retrieval_uses_the_published_turn_context(document):
+    contract = document["branch_contracts"][RESELLER]
+    assert graph_agent_runtime_v3._required_retrieval_node_ids(
+        document, RESELLER, contract, missing_fields=[]
+    ) == contract["turn_context_node_ids"]
+
+
+@pytest.mark.unit
 def test_a_null_branch_never_reaches_a_reseller_only_node(neutral, document):
     """The 2026-09-05 leak, node by node."""
     for node_id in RESELLER_ONLY:
@@ -286,3 +308,4 @@ def test_branchless_turn_scopes_evidence_expansion_to_the_neutral_set(branchless
     assert "rule:tock-desconto-atacado-30" not in set(context.branch_node_ids)
     assert context.retrieval_trace["brand_scope_withheld"] is True
     assert context.retrieval_trace["neutral_scope_node_count"] == len(neutral)
+    assert {card.id for card in context.context_cards} <= neutral
