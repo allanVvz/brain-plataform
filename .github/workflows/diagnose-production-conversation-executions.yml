@@ -78,6 +78,17 @@ jobs:
                             "error_name": error.get("name"),
                             "error_message": str(error.get("message") or "")[:300] or None,
                             "http_code": error.get("httpCode"),
+                            "forwarded_errors": [
+                                {
+                                    "message": str(((item.get("json") or {}).get("error") or {}).get("message") or "")[:300] or None,
+                                    "description": str(((item.get("json") or {}).get("error") or {}).get("description") or "")[:300] or None,
+                                    "http_code": ((item.get("json") or {}).get("error") or {}).get("httpCode"),
+                                    "node": ((((item.get("json") or {}).get("error") or {}).get("node") or {}).get("name")),
+                                }
+                                for branch in (((attempt.get("data") or {}).get("main") or []))
+                                for item in (branch or [])
+                                if isinstance((item.get("json") or {}).get("error"), dict)
+                            ],
                         })
                 sanitized.append({
                     "id": execution.get("id"),
