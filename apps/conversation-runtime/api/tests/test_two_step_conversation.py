@@ -200,7 +200,12 @@ def test_template_routes_sdr_two_step_without_semantic_repair_and_fails_safe():
     assert connections["Prove resolved conversation reply"]["main"][1][0]["node"] == "Fail-safe two-step handoff"
     fail_safe = next(node for node in workflow["nodes"] if node["name"] == "Fail-safe two-step handoff")
     assert "/internal/v1/conversations/technical-failure" in fail_safe["parameters"]["url"]
-    assert "interpret_then_respond" in fail_safe["parameters"]["body"]
+    fail_safe_body = fail_safe["parameters"]["body"]
+    assert "interpret_then_respond" in fail_safe_body
+    assert "$json.error&&$json.error.message" in fail_safe_body
+    assert "$json.message||$json.error||'unknown'" in fail_safe_body
+    assert "??" not in fail_safe_body
+    assert "(()=>" not in fail_safe_body
     two_step_names = {
         "Build turn understanding request", "Bound understanding model",
         "Validate turn understanding", "Resolve understanding and scoped RAG",
@@ -240,6 +245,8 @@ def test_two_step_model_requests_use_provider_compatible_structured_output():
         assert "json_object" in code and "json_schema" in code
         assert "thinking:{type:'disabled'}" in code
     reply_code = nodes["Build natural conversation reply request"]["parameters"]["jsCode"]
+    understanding_code = nodes["Build turn understanding request"]["parameters"]["jsCode"]
+    assert "Return only one JSON object" in understanding_code
     assert "conversation_brief" in reply_code
     assert "It is fine to ask nothing" in reply_code
     assert "claims and citations only for factual commercial statements" in reply_code
