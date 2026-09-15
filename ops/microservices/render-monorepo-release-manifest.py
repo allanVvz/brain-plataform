@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import re
+import tomllib
 from pathlib import Path
 
 
@@ -13,6 +14,13 @@ ROOT = Path(__file__).resolve().parents[2]
 SERVICES = ("gateway", "control-plane", "conversation-runtime", "transport")
 SHA = re.compile(r"^[0-9a-f]{40}$")
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+def contracts_version() -> str:
+    metadata = tomllib.loads(
+        (ROOT / "packages/brain-contracts/pyproject.toml").read_text(encoding="utf-8")
+    )
+    return str(metadata["project"]["version"])
 
 
 def checksum(path: Path) -> str:
@@ -35,7 +43,7 @@ def render(*, source_sha: str, digests: dict[str, str], schema_version: int) -> 
     package_checksum = contracts_checksum()
     return {
         "source_sha": source_sha,
-        "contracts_version": "3.0.0",
+        "contracts_version": contracts_version(),
         "contracts_checksum": package_checksum,
         "schema_version": schema_version,
         "route_map_checksum": checksum(ROOT / "ops/microservices/route-map.json"),

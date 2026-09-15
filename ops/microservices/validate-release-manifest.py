@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 import sys
+import tomllib
 from pathlib import Path
 
 
@@ -19,6 +20,13 @@ EXPECTED_SERVICES = {
 MONOREPO_REPOSITORY = "allanVvz/brain-plataform"
 SHA = re.compile(r"^[0-9a-f]{40}$")
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+def _current_contracts_version() -> str:
+    metadata = tomllib.loads(
+        (ROOT / "packages/brain-contracts/pyproject.toml").read_text(encoding="utf-8")
+    )
+    return str(metadata["project"]["version"])
 
 
 def _require(condition: bool, message: str) -> None:
@@ -42,9 +50,10 @@ def validate(path: Path, *, verify_checkout_artifacts: bool = True) -> dict:
     }
     _require(required <= manifest.keys(), f"missing fields: {sorted(required - manifest.keys())}")
     _require(bool(SHA.fullmatch(str(manifest["source_sha"]))), "invalid source_sha")
+    contracts_version = str(manifest["contracts_version"])
     _require(
-        manifest["contracts_version"] in {"1.0.0", "1.1.0", "3.0.0"},
-        "contracts_version must be 1.0.0, 1.1.0 or 3.0.0",
+        contracts_version in {"1.0.0", "1.1.0", "3.0.0", _current_contracts_version()},
+        "contracts_version is not supported by this checkout",
     )
     _require(isinstance(manifest["schema_version"], int) and manifest["schema_version"] >= 131,
              "schema_version must be at least 131")
@@ -55,7 +64,7 @@ def validate(path: Path, *, verify_checkout_artifacts: bool = True) -> dict:
     services = manifest["services"]
     _require(isinstance(services, dict), "services must be an object")
     _require(set(services) == set(EXPECTED_SERVICES), "service set does not match release boundary")
-    monorepo_release = manifest["contracts_version"] == "3.0.0"
+    monorepo_release = contracts_version.startswith("3.")
     if monorepo_release:
         _require(bool(DIGEST.fullmatch(str(manifest.get("contracts_checksum", "")))),
                  "monorepo manifest requires contracts_checksum")
