@@ -5,6 +5,10 @@
     "audience:tock-retail"
   ],
   "breaking_contract_changes": [
+    "edge_removed:edge:contains:product_group:tock-blusas-bodies-camisas-e-partes-de-cima:faq:tock-blusas-bodies-camisas-e-partes-de-cima-navegacao",
+    "edge_removed:edge:contains:product_group:tock-conjuntos:faq:tock-conjuntos-navegacao",
+    "edge_removed:edge:contains:product_group:tock-vestidos:faq:tock-vestidos-navegacao",
+    "edge_removed:edge:v17:product:tock-blusas-bodies-camisas-e-partes-de-cima-blusa-em-poa:faq:blusas-bodies-camisas-e-partes-de-cima-blusa-em-poa-approved-photo:contains",
     "branch_contract_changed:audience:tock-reseller",
     "branch_structure_changed:audience:tock-reseller"
   ],
@@ -12,27 +16,31 @@
   "chunks_to_embed": 450,
   "compiler_version": "graph-compiler-v3.6.4",
   "disposition": "awaiting_approval",
-  "draft_checksum": "sha256:1104ad64956c09e1b60eb219034eebd86dad6a152dd905928026482f89ef0846",
+  "draft_checksum": "sha256:18fbc32df6b1ad353bfe3ffdc8930d592f389fee635aff79d67ead8fa042c4e9",
   "edge_changes": {
     "added": [
       "edge:retail-only:faq:blusas-bodies-camisas-e-partes-de-cima-blusa-em-poa-approved-photo",
       "edge:retail-only:faq:tock-blusas-bodies-camisas-e-partes-de-cima-navegacao",
       "edge:retail-only:faq:tock-conjuntos-navegacao",
       "edge:retail-only:faq:tock-vestidos-navegacao",
+      "edge:retail-source:faq:blusas-bodies-camisas-e-partes-de-cima-blusa-em-poa-approved-photo",
+      "edge:retail-source:faq:tock-blusas-bodies-camisas-e-partes-de-cima-navegacao",
+      "edge:retail-source:faq:tock-conjuntos-navegacao",
+      "edge:retail-source:faq:tock-vestidos-navegacao",
       "edge:tock-brand-atacado-rule-preco-sob-consulta",
       "edge:tock-reseller-rule-preco-sob-consulta"
     ],
-    "changed": [
+    "changed": [],
+    "removed": [
       "edge:contains:product_group:tock-blusas-bodies-camisas-e-partes-de-cima:faq:tock-blusas-bodies-camisas-e-partes-de-cima-navegacao",
       "edge:contains:product_group:tock-conjuntos:faq:tock-conjuntos-navegacao",
       "edge:contains:product_group:tock-vestidos:faq:tock-vestidos-navegacao",
       "edge:v17:product:tock-blusas-bodies-camisas-e-partes-de-cima-blusa-em-poa:faq:blusas-bodies-camisas-e-partes-de-cima-blusa-em-poa-approved-photo:contains"
-    ],
-    "removed": []
+    ]
   },
-  "edges_added": 6,
-  "edges_changed": 4,
-  "edges_removed": 0,
+  "edges_added": 10,
+  "edges_changed": 0,
+  "edges_removed": 4,
   "estimated_embedding_cost": {
     "amount": null,
     "currency": "USD",
@@ -498,6 +506,6 @@
   "nodes_removed": 0,
   "plan_version": "1.0",
   "publication_allowed": true,
-  "runtime_checksum": "sha256:65d622debc35d6909eca3255d4a83a74590c1efeac03301e721969a8e70909d8",
+  "runtime_checksum": "sha256:4a8fcc17bd49eb685b99cbaa939df63784afe0026133888b6e5f7514f5fe64e1",
   "validation_errors": []
 }

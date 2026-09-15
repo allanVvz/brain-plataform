@@ -14520,20 +14520,6 @@
       "weight": 1.0
     },
     {
-      "id": "edge:contains:product_group:tock-blusas-bodies-camisas-e-partes-de-cima:faq:tock-blusas-bodies-camisas-e-partes-de-cima-navegacao",
-      "metadata": {
-        "active": true,
-        "generator": "tock_conversation_faqs_v1",
-        "graph_json_edge_id": "edge:contains:product_group:tock-blusas-bodies-camisas-e-partes-de-cima:faq:tock-blusas-bodies-camisas-e-partes-de-cima-navegacao",
-        "primary_tree": false,
-        "source": "wholesale_price_confidentiality_2026-09-14"
-      },
-      "relation_type": "derived_from",
-      "source": "product_group:tock-blusas-bodies-camisas-e-partes-de-cima",
-      "target": "faq:tock-blusas-bodies-camisas-e-partes-de-cima-navegacao",
-      "weight": 1.0
-    },
-    {
       "id": "edge:contains:product_group:tock-calcados:faq:tock-calcados-navegacao",
       "metadata": {
         "active": true,
@@ -14570,20 +14556,6 @@
       "weight": 1.0
     },
     {
-      "id": "edge:contains:product_group:tock-conjuntos:faq:tock-conjuntos-navegacao",
-      "metadata": {
-        "active": true,
-        "generator": "tock_conversation_faqs_v1",
-        "graph_json_edge_id": "edge:contains:product_group:tock-conjuntos:faq:tock-conjuntos-navegacao",
-        "primary_tree": false,
-        "source": "wholesale_price_confidentiality_2026-09-14"
-      },
-      "relation_type": "derived_from",
-      "source": "product_group:tock-conjuntos",
-      "target": "faq:tock-conjuntos-navegacao",
-      "weight": 1.0
-    },
-    {
       "id": "edge:contains:product_group:tock-infantil-masculino-e-acessorios:faq:tock-infantil-masculino-e-acessorios-navegacao",
       "metadata": {
         "active": true,
@@ -14593,20 +14565,6 @@
       "relation_type": "contains",
       "source": "product_group:tock-infantil-masculino-e-acessorios",
       "target": "faq:tock-infantil-masculino-e-acessorios-navegacao",
-      "weight": 1.0
-    },
-    {
-      "id": "edge:contains:product_group:tock-vestidos:faq:tock-vestidos-navegacao",
-      "metadata": {
-        "active": true,
-        "generator": "tock_conversation_faqs_v1",
-        "graph_json_edge_id": "edge:contains:product_group:tock-vestidos:faq:tock-vestidos-navegacao",
-        "primary_tree": false,
-        "source": "wholesale_price_confidentiality_2026-09-14"
-      },
-      "relation_type": "derived_from",
-      "source": "product_group:tock-vestidos",
-      "target": "faq:tock-vestidos-navegacao",
       "weight": 1.0
     },
     {
@@ -22186,6 +22144,50 @@
       "weight": 1.0
     },
     {
+      "id": "edge:retail-source:faq:blusas-bodies-camisas-e-partes-de-cima-blusa-em-poa-approved-photo",
+      "metadata": {
+        "active": true,
+        "source": "wholesale_price_confidentiality_2026-09-14"
+      },
+      "relation_type": "derived_from",
+      "source": "product:tock-blusas-bodies-camisas-e-partes-de-cima-blusa-em-poa",
+      "target": "faq:blusas-bodies-camisas-e-partes-de-cima-blusa-em-poa-approved-photo",
+      "weight": 1.0
+    },
+    {
+      "id": "edge:retail-source:faq:tock-blusas-bodies-camisas-e-partes-de-cima-navegacao",
+      "metadata": {
+        "active": true,
+        "source": "wholesale_price_confidentiality_2026-09-14"
+      },
+      "relation_type": "derived_from",
+      "source": "product_group:tock-blusas-bodies-camisas-e-partes-de-cima",
+      "target": "faq:tock-blusas-bodies-camisas-e-partes-de-cima-navegacao",
+      "weight": 1.0
+    },
+    {
+      "id": "edge:retail-source:faq:tock-conjuntos-navegacao",
+      "metadata": {
+        "active": true,
+        "source": "wholesale_price_confidentiality_2026-09-14"
+      },
+      "relation_type": "derived_from",
+      "source": "product_group:tock-conjuntos",
+      "target": "faq:tock-conjuntos-navegacao",
+      "weight": 1.0
+    },
+    {
+      "id": "edge:retail-source:faq:tock-vestidos-navegacao",
+      "metadata": {
+        "active": true,
+        "source": "wholesale_price_confidentiality_2026-09-14"
+      },
+      "relation_type": "derived_from",
+      "source": "product_group:tock-vestidos",
+      "target": "faq:tock-vestidos-navegacao",
+      "weight": 1.0
+    },
+    {
       "id": "edge:site-linktree-contact",
       "metadata": {
         "active": true,
@@ -24575,19 +24577,6 @@
       "relation_type": "publishes_to",
       "source": "faq:tock-variations-confirmation",
       "target": "embed:tock-default",
-      "weight": 1.0
-    },
-    {
-      "id": "edge:v17:product:tock-blusas-bodies-camisas-e-partes-de-cima-blusa-em-poa:faq:blusas-bodies-camisas-e-partes-de-cima-blusa-em-poa-approved-photo:contains",
-      "metadata": {
-        "active": true,
-        "graph_json_edge_id": "edge:v17:product:tock-blusas-bodies-camisas-e-partes-de-cima-blusa-em-poa:faq:blusas-bodies-camisas-e-partes-de-cima-blusa-em-poa-approved-photo:contains",
-        "primary_tree": false,
-        "source": "wholesale_price_confidentiality_2026-09-14"
-      },
-      "relation_type": "derived_from",
-      "source": "product:tock-blusas-bodies-camisas-e-partes-de-cima-blusa-em-poa",
-      "target": "faq:blusas-bodies-camisas-e-partes-de-cima-blusa-em-poa-approved-photo",
       "weight": 1.0
     },
     {
