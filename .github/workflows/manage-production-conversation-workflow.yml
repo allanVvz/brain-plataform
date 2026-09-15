@@ -85,6 +85,61 @@ jobs:
               "${compose[@]}" exec -T "$control_service" python -c 'import hashlib,json,sys; from scripts import resync_graph_agent_workflows as r; from services import conversation_workflow_service as d, n8n_client, supabase_client; slug=sys.argv[1]; peers=sys.argv[2:]; persona=supabase_client.get_persona(slug); bindings=supabase_client.get_workflow_bindings(str(persona["id"])); active_bindings=[row for row in bindings if row.get("active")]; binding=r._binding(persona,require_active=False); publication=supabase_client.get_active_graph_publication(str(persona["id"])); connection=supabase_client.get_persona_integration_connection(str(persona["id"]), "deepseek") or {}; config=r._resolved_config(persona, connection, binding); expected=d._workflow_for_persona(persona, credential_id=str(config["n8n_credential_id"]), credential_name="Brain Conversation Model \u2014 " + slug, model_binding={"model": config.get("model"), "endpoint": config.get("endpoint"), "reply_source": config.get("reply_source"), "structured_output_mode": config.get("structured_output_mode")}); live=n8n_client.get_workflow(str(config["n8n_workflow_id"])) or {}; expected_checksum=d._workflow_checksum(expected); live_checksum=d._workflow_checksum(live) if live else None; structure={"nodes":[(n.get("id"),n.get("type")) for n in expected.get("nodes") or []],"connections":expected.get("connections") or {}}; structure_checksum="sha256:"+hashlib.sha256(json.dumps(structure,sort_keys=True,separators=(",",":")).encode()).hexdigest(); expected_binding=(expected.get("meta") or {}).get("binding") or {}; live_binding=(live.get("meta") or {}).get("binding") or {}; inbound=next((n for n in live.get("nodes") or [] if n.get("id")=="inbound"),{}); live_webhook_path=str((inbound.get("parameters") or {}).get("path") or "").strip("/"); binding_metadata=binding.get("metadata") or {}; rendered=json.dumps(expected,ensure_ascii=False).lower(); foreign_hits=sorted(peer for peer in peers if peer!=slug and peer.lower() in rendered); print(json.dumps({"persona_slug":slug,"workflow_id":config.get("n8n_workflow_id"),"binding_id":binding.get("id"),"active_binding_count":len(active_bindings),"active_publication_id":(publication or {}).get("id"),"active":live.get("active"),"stored_checksum":config.get("workflow_checksum"),"live_checksum":live_checksum,"candidate_checksum":expected_checksum,"would_change":live_checksum!=expected_checksum,"template":(expected.get("meta") or {}).get("template"),"structure_checksum":structure_checksum,"foreign_persona_hits":foreign_hits,"candidate_pipeline_contract":expected_binding.get("pipeline_contract"),"live_pipeline_contract":live_binding.get("pipeline_contract"),"binding_pipeline_contract":binding_metadata.get("pipeline_contract"),"candidate_webhook_path":slug+"/conversation","live_webhook_path":live_webhook_path},ensure_ascii=True,sort_keys=True))' "$slug" "${personas[@]}"
             }
 
+            audit_difference_paths() {
+              local slug="$1"
+              "${compose[@]}" exec -T "$control_service" python - "$slug" <<'PY'
+            import json
+            import sys
+
+            from scripts import resync_graph_agent_workflows as resync
+            from services import conversation_workflow_service, n8n_client, supabase_client
+
+            slug = sys.argv[1]
+            persona = supabase_client.get_persona(slug)
+            binding = resync._binding(persona, require_active=False)
+            connection = supabase_client.get_persona_integration_connection(str(persona["id"]), "deepseek") or {}
+            config = resync._resolved_config(persona, connection, binding)
+            expected = conversation_workflow_service._workflow_for_persona(
+                persona,
+                credential_id=str(config["n8n_credential_id"]),
+                credential_name="Brain Conversation Model — " + slug,
+                model_binding={
+                    "model": config.get("model"),
+                    "endpoint": config.get("endpoint"),
+                    "reply_source": config.get("reply_source"),
+                    "structured_output_mode": config.get("structured_output_mode"),
+                },
+            )
+            live = n8n_client.get_workflow(str(config["n8n_workflow_id"])) or {}
+            expected = n8n_client.workflow_payload(expected)
+            live = n8n_client.workflow_payload(live)
+
+            def differences(left, right, path="$", result=None):
+                result = [] if result is None else result
+                if type(left) is not type(right):
+                    result.append(path + ":type")
+                elif isinstance(left, dict):
+                    for key in sorted(set(left) | set(right)):
+                        child = f"{path}.{key}"
+                        if key not in left:
+                            result.append(child + ":live_only")
+                        elif key not in right:
+                            result.append(child + ":candidate_only")
+                        else:
+                            differences(left[key], right[key], child, result)
+                elif isinstance(left, list):
+                    if len(left) != len(right):
+                        result.append(path + ":length")
+                    for index, (left_item, right_item) in enumerate(zip(left, right)):
+                        differences(left_item, right_item, f"{path}[{index}]", result)
+                elif left != right:
+                    result.append(path + ":value")
+                return result
+
+            print(json.dumps({"persona_slug": slug, "difference_paths": differences(expected, live)}, sort_keys=True))
+            PY
+            }
+
             validate_group() {
               local phase="$1"
               shift
@@ -143,6 +198,7 @@ jobs:
               record="$(audit_template "$slug")"
               before_records+=("$record")
               echo "N8N_TEMPLATE_AUDIT_BEFORE=$record"
+              echo "N8N_TEMPLATE_DIFFERENCE_PATHS=$(audit_difference_paths "$slug")"
             done
             validate_group "$OPERATION-before" "${before_records[@]}"
             if [[ "$OPERATION" == "audit" || "$OPERATION" == "dry-run" ]]; then
