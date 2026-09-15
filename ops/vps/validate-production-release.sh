@@ -226,7 +226,8 @@ where filename in (
   '136_business_hours_release_queue.sql',
   '137_canonical_asset_content_dedup.sql',
   '138_resume_binding_without_releasable_backlog.sql',
-  '139_release_queue_microservice_grants.sql'
+  '139_release_queue_microservice_grants.sql',
+  '140_message_template_meta_lifecycle.sql'
 ) order by filename;
 
 select 'microservice_role' metric,
@@ -308,8 +309,9 @@ begin
       '136_business_hours_release_queue.sql',
       '137_canonical_asset_content_dedup.sql',
       '138_resume_binding_without_releasable_backlog.sql',
-      '139_release_queue_microservice_grants.sql')) <> 26 then
-    raise exception 'release migrations 112-139 are incomplete';
+      '139_release_queue_microservice_grants.sql',
+      '140_message_template_meta_lifecycle.sql')) <> 27 then
+    raise exception 'release migrations 112-140 are incomplete';
   end if;
   if (select count(*) from pg_roles
       where rolname in ('brain_gateway','brain_control_plane','brain_runtime','brain_transport')
