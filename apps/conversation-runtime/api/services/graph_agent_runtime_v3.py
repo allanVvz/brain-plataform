@@ -4407,6 +4407,71 @@ def _decide(
         })
     repair_cards: list[dict[str, Any]] = []
     if proof["repair_required"] and int(observation.get("repair_attempt") or 0) < 1:
+        # A Phase-B/citation repair can be the turn's only repair call.  Fold
+        # question eligibility into that same package so a question whose
+        # fact was resolved by this proposal cannot survive the first repair
+        # and be discovered only after the repair budget is exhausted.
+        repair_grouped = {
+            str(key): list(values) for key, values in grouped_facts.items()
+        }
+        for fact in [
+            *prospective_contract_facts.values(),
+            *(proof.get("accepted_facts") or []),
+        ]:
+            key = str(fact.get("field_key") or "")
+            owner = str(fact.get("owner_node_id") or "")
+            if not key:
+                continue
+            repair_grouped[key] = [
+                current for current in repair_grouped.get(key, [])
+                if str(current.get("owner_node_id") or "") != owner
+            ] + [fact]
+        repair_active_branch_ids = list(dict.fromkeys(
+            service_proof.get("next_active_branch_node_ids") or active_ids_for_fields
+        ))
+        if repair_active_branch_ids:
+            repair_askable = graph_proof_checker_v3.aggregate_askable_fields(
+                document.get("branch_contracts") or {},
+                repair_active_branch_ids,
+                repair_grouped,
+                asked_question_node_ids=(
+                    context.cart.get("asked_question_node_ids") or []
+                ),
+            )
+        else:
+            repair_contract = document.get("common_contract") or contract
+            repair_askable = graph_proof_checker_v3.askable_pending_fields(
+                repair_contract,
+                _facts_for_contract(repair_contract, repair_grouped),
+                asked_question_node_ids=(
+                    context.cart.get("asked_question_node_ids") or []
+                ),
+            )
+        repair_askable_question_ids = {
+            str(field.get("question_node_id") or "")
+            for field in repair_askable
+            if field.get("question_node_id")
+        }
+        repair_rejected_question_id = _rejected_qualification_question_id(
+            proposal.next_question_node_id,
+            repair_askable_question_ids,
+        )
+        if repair_rejected_question_id:
+            proof["repair_requirements"] = [
+                *(proof.get("repair_requirements") or []),
+                {
+                    "kind": "model_reply",
+                    "issue": "qualification_question_not_askable",
+                    "rejected_question_node_id": repair_rejected_question_id,
+                    "eligible_question_node_ids": sorted(
+                        repair_askable_question_ids
+                    ),
+                    "instruction": (
+                        "Remove the non-askable qualification question and "
+                        "ask at most one currently eligible graph field."
+                    ),
+                },
+            ]
         logger.warning(
             "graph proof repair triggered persona=%s lead_stage=%s branch=%s errors=%s",
             context.persona_slug, context.cart.get("_lead_stage"),
