@@ -39,6 +39,7 @@ manifest_value() {
   python3 -c 'import json,sys; data=json.load(open(sys.argv[1], encoding="utf-8")); print(data[sys.argv[2]] if sys.argv[2] != "service" else data["services"][sys.argv[3]][sys.argv[4]])' "$MANIFEST" "$@"
 }
 export BRAIN_CONTRACTS_VERSION="$(manifest_value contracts_version)"
+export REQUIRED_SCHEMA_VERSION="$(manifest_value schema_version)"
 export GATEWAY_SHA="$(manifest_value service gateway sha)"
 export GATEWAY_DIGEST="$(manifest_value service gateway digest)"
 export CONTROL_PLANE_SHA="$(manifest_value service control-plane sha)"
