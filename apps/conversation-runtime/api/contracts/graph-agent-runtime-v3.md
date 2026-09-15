@@ -2,14 +2,17 @@
 
 Contract-ID: `graph-agent-runtime-v3`
 
-Compiler: `graph-compiler-v3.6.2`
+Compiler: `graph-compiler-v3.6.5`
 
 ## Fronteira normativa entre engines
 
 `apps/conversation-runtime` e a unica fonte produtiva. O dashboard grava a
 escolha em `workflow_bindings.metadata.decision_owner`: `deterministic` entra
 somente por `/internal/v1/conversations/execute`; `n8n_agents` entra somente por
-`/context`, `/decide` e `/commit`, e `/decide` exige `model_observation`.
+`/context`, `/resolve-understanding`, `/decide` e `/commit`. `/decide` exige
+`model_observation` no modo compatível `single_pass`, ou o par
+`ResolvedUnderstandingV1` + `ConversationReplyV1` em
+`interpret_then_respond`.
 `/commit` confere o owner persistido e falha fechado se o outro motor tentar
 publicar.
 
@@ -22,9 +25,11 @@ substituir a reply.
 
 Os hard gates agentic ficam restritos a checksum/publicacao, isolamento de
 persona/agente, evidencia de claims comerciais, confirmacao insegura de
-preco/data/horario e exactly-once. Repeticao ou metadata inconsistente permite
-uma unica reparacao do modelo; reincidencia gera handoff observavel sem pergunta
-automatica. O teste-canario de fronteira e obrigatorio em toda mudanca.
+preco/data/horario e exactly-once. Em `interpret_then_respond`, JSON invalido,
+falha de qualquer modelo ou proof invalido gera handoff observavel e pausa da
+IA, sem chamada de reparo nem fallback publico fabricado. `single_pass`
+permanece como compatibilidade por papel. O teste-canario de fronteira e
+obrigatorio em toda mudanca.
 
 Descricoes historicas abaixo sobre FAQ unica, primeira pergunta, resumo
 terminal, escada publicada ou fallback textual aplicam-se somente ao motor
@@ -68,13 +73,11 @@ elegivel possui membership, entry e chunk canonico `faq` com pergunta e resposta
 
 ```text
 inbound canônico
-→ resolução literal/semântica de todos os serviços
-→ consumo dos spans de serviço
-→ retrieval híbrido dentro da membership
-→ proposta JSON estrita do modelo
-→ validação declarativa dos demais fields
-→ proof checker e um repair direcionado opcional
-→ pergunta/fallback publicado
+→ TurnUnderstandingV1 sem linguagem pública
+→ validação de fields, owners, galho e spans literais
+→ estado prospectivo e retrieval híbrido no galho resolvido
+→ ConversationReplyV1 com pergunta natural entre fields elegíveis
+→ proof de claims, citações e isolamento
 → ledger + proof exatamente uma vez
 → outbox idempotente
 ```
@@ -83,9 +86,9 @@ Cada contrato de branch publica `turn_context_node_ids`: anchor, caminho,
 donos dos fields, perguntas qualificadoras e regras de handoff. Esse fechamento
 estrutural deve caber em 48 nodes. O subconjunto semantico obrigatorio,
 `turn_context_chunk_node_ids`, deve caber em doze chunks; fields e perguntas
-entram como cards estruturais do contrato. O runtime carrega esse pacote antes
-da proposta do modelo. O repair/Phase-B fica reservado para informacao nova
-solicitada no turno, nunca para completar uma transicao normal de qualificacao.
+entram como cards estruturais do contrato. No fluxo em duas etapas, o runtime
+refaz esse pacote depois do entendimento do galho e antes da resposta. Essa
+resolução é read-only e não grava ledger nem produz linguagem pública.
 
 `service_operations[]` é o contrato autoritativo do conjunto de serviços. Cada
 operação contém `add`, `keep` ou `drop`, anchor publicado, checksum do caminho e

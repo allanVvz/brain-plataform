@@ -28,6 +28,7 @@ _local_embedding_model_name: str | None = None
 CONTRACT_DOCUMENT = Path(__file__).resolve().parents[1] / "contracts" / "graph-agent-runtime-v3.md"
 PUBLISHED_STATUSES = {"approved", "active", "validated", "ativo", "embedded"}
 FACT_STATUSES = {"known", "unknown", "declined", "needs_confirmation", "invalid"}
+EXECUTION_STRATEGIES = {"single_pass", "interpret_then_respond"}
 TURN_CONTEXT_NODE_LIMIT = 48
 TURN_CONTEXT_CHUNK_NODE_LIMIT = 12
 STRUCTURAL_RELATIONS = {"contains"}
@@ -800,6 +801,20 @@ def compile_graph(
     conversation_policy = (
         conversation_policy if isinstance(conversation_policy, dict) else {}
     )
+    agent_role = str(persona_data.get("agent_role") or "sdr").strip().lower()
+    strategies_by_role = conversation_policy.get("execution_strategy_by_role")
+    strategies_by_role = (
+        strategies_by_role if isinstance(strategies_by_role, dict) else {}
+    )
+    execution_strategy = str(
+        strategies_by_role.get(agent_role)
+        or strategies_by_role.get("default")
+        or "single_pass"
+    )
+    if execution_strategy not in EXECUTION_STRATEGIES:
+        errors.append(
+            f"invalid_execution_strategy:{agent_role}:{execution_strategy}"
+        )
     appointment_policy = persona_data.get("appointment_policy")
     appointment_policy = (
         appointment_policy if isinstance(appointment_policy, dict) else {}
@@ -1101,6 +1116,8 @@ def compile_graph(
             "claims": claims,
             "completion": completion,
             "conversation_policy": conversation_policy,
+            "agent_role": agent_role,
+            "execution_strategy": execution_strategy,
             "field_labels": dict(
                 conversation_policy.get("field_labels")
                 or appointment_policy.get("field_labels")
@@ -1251,6 +1268,8 @@ def compile_graph(
         "branch_memberships": memberships,
         "branch_contracts": contracts,
         "common_contract": common_contract,
+        "agent_role": agent_role,
+        "execution_strategy": execution_strategy,
         "confirmation_templates": confirmation_templates,
         "service_resolution_policy": service_resolution_policy,
         "faq_projection_contract": FAQ_PROJECTION_CONTRACT,

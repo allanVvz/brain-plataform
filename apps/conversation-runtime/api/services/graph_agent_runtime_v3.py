@@ -31,6 +31,8 @@ from schemas.conversation import (
     ServiceOperation,
     ServiceOperationAction,
     ServiceObservation,
+    ResolvedUnderstandingV1,
+    TurnUnderstandingV1,
 )
 from services import (
     context_cards,
@@ -3387,6 +3389,8 @@ def build_context(
         )
     return ConversationContext(
         persona_slug=persona_slug, agent_slug=str((persona.get("config") or {}).get("agent_slug") or "agent"),
+        agent_role=str(document.get("agent_role") or "sdr"),
+        execution_strategy=str(document.get("execution_strategy") or "single_pass"),
         graph_version=int(publication["version"]), graph_checksum=publication["checksum"],
         messages=_project_recent_messages(messages), cart={**((lead.get("metadata") or {}).get("conversation_state") or {}),
                                       "facts": ledger.get("facts") or {},
@@ -3862,6 +3866,328 @@ def decide(
             },
         })
     return final_decision, final_response
+
+
+def _context_scoped_to_understanding_branch(
+    context: ConversationContext,
+    branch_anchor_node_id: str | None,
+) -> ConversationContext:
+    """Rebuild the authorized turn package after model branch interpretation.
+
+    This is deliberately read-only. It pins the publication already captured
+    by ``/context`` and never touches the ledger, proof table or outbound queue.
+    """
+    if not branch_anchor_node_id:
+        return context
+    publication = _turn_publication(context)
+    document = publication.get("document_json") or {}
+    contracts = document.get("branch_contracts") or {}
+    contract = contracts.get(branch_anchor_node_id)
+    if not contract:
+        raise RuntimeError("understanding selected an unpublished branch")
+
+    message = _latest_user_message(context)
+    embedding = graph_compiler_v3.query_embeddings([message])[0]
+    facts_by_key = context.cart.get("facts_by_key") or {}
+    missing = [
+        field["key"]
+        for field in graph_proof_checker_v3.pending_fields(
+            contract, _facts_for_contract(contract, facts_by_key)
+        )
+    ]
+    rows = supabase_client.search_graph_rag_v3(
+        persona_id=str((publication.get("persona") or {}).get("id") or "")
+        or str((document.get("persona") or {}).get("id") or ""),
+        publication_id=publication["id"],
+        branch_node_id=branch_anchor_node_id,
+        query=message,
+        query_embedding=embedding,
+        active_path_node_ids=(
+            ((document.get("coordinates") or {}).get(branch_anchor_node_id) or {})
+            .get("path_node_ids") or []
+        ),
+        missing_fields=missing,
+        limit=48,
+    )
+    closure = set(contract.get("closure_node_ids") or [])
+    rows = [row for row in rows if _chunk_source_node_id(row) in closure]
+    required_nodes = _required_retrieval_node_ids(
+        document, branch_anchor_node_id, contract, missing
+    )
+    required_chunk_nodes = _required_retrieval_chunk_node_ids(
+        document, branch_anchor_node_id, contract
+    )
+    package = supabase_client.get_graph_branch_package_v3(
+        publication_id=publication["id"],
+        branch_node_id=branch_anchor_node_id,
+        chunk_ids=[
+            str(row.get("chunk_id") or row.get("id"))
+            for row in rows
+            if row.get("chunk_id") or row.get("id")
+        ],
+        node_ids=[str(node_id) for node_id in required_chunk_nodes if node_id],
+        limit=RAG_CHUNK_LIMIT,
+    )
+    merged: dict[str, dict[str, Any]] = {}
+    for row in [*(package.get("chunks") or []), *rows]:
+        chunk_id = str(row.get("chunk_id") or row.get("id") or "")
+        if (
+            chunk_id
+            and _chunk_source_node_id(row) in closure
+            and len(merged) < RAG_CHUNK_LIMIT
+        ):
+            merged.setdefault(chunk_id, row)
+    chunks = list(merged.values())
+    by_source: dict[str, list[dict[str, Any]]] = {}
+    for row in chunks:
+        by_source.setdefault(_chunk_source_node_id(row), []).append(row)
+    node_by_id = document.get("node_by_id") or {}
+    cards = [
+        _card(publication, node_by_id[node_id], source_chunks, index)
+        for index, (node_id, source_chunks) in enumerate(by_source.items())
+        if node_id in node_by_id
+    ]
+    card_ids = {card.id for card in cards}
+    for node_id in required_nodes:
+        if node_id in card_ids or node_id not in node_by_id:
+            continue
+        cards.append(_card(publication, node_by_id[node_id], [], len(cards)))
+        card_ids.add(node_id)
+
+    trace = {
+        **context.retrieval_trace,
+        "retrieval_branch_node_id": branch_anchor_node_id,
+        "resolved_understanding_branch_node_id": branch_anchor_node_id,
+        "brand_scope_withheld": False,
+        "chunk_ids": list(merged),
+        "source_node_ids": sorted(card_ids),
+        "branch_candidates": list({
+            str(item.get("branch_anchor_node_id") or ""): item
+            for item in [
+                *(context.retrieval_trace.get("branch_candidates") or []),
+                {
+                    "branch_anchor_node_id": branch_anchor_node_id,
+                    "branch_path_checksum": contract.get("branch_path_checksum"),
+                    "source": "turn_understanding_v1",
+                },
+            ]
+            if item.get("branch_anchor_node_id")
+        }.values()),
+        "possible_switches": list(dict.fromkeys([
+            *(context.retrieval_trace.get("possible_switches") or []),
+            branch_anchor_node_id,
+        ])),
+    }
+    return context.model_copy(update={
+        "rag_nodes": [
+            node_by_id[node_id] for node_id in by_source if node_id in node_by_id
+        ],
+        "rag_paths": [card.path for card in cards],
+        "rag_chunks": [_compact_prompt_chunk(row) for row in chunks],
+        "context_cards": cards,
+        "catalog_images": catalog_images.context_images(
+            document,
+            publication,
+            scoped_ids=contract.get("closure_node_ids") or [],
+            retrieved_ids=set(by_source),
+        ),
+        "branch_node_ids": contract.get("closure_node_ids") or [],
+        "graph_contract": contract,
+        "retrieval_trace": trace,
+    })
+
+
+def resolve_understanding(
+    context: ConversationContext,
+    understanding: TurnUnderstandingV1,
+) -> ResolvedUnderstandingV1:
+    """Validate model understanding and compute prospective state without IO writes."""
+    if context.execution_strategy != "interpret_then_respond":
+        raise RuntimeError("resolve-understanding requires interpret_then_respond")
+    selection = next(
+        (
+            item for item in understanding.branch_selections
+            if item.action is not BranchAction.NONE and item.branch_anchor_node_id
+        ),
+        None,
+    )
+    focused_branch = (
+        selection.branch_anchor_node_id if selection else context.active_branch_node_id
+    )
+    focused_context = _context_scoped_to_understanding_branch(
+        context, focused_branch
+    )
+    contract = focused_context.graph_contract or {}
+    branch_checksum = str(contract.get("branch_path_checksum") or "") or None
+    if selection:
+        evidence_span = str(selection.evidence_span or "").strip()
+        if not graph_proof_checker_v3._literal_span(
+            _latest_user_message(context), evidence_span
+        ):
+            raise RuntimeError("understanding branch evidence is not literal")
+        active = str(context.active_branch_node_id or "") or None
+        active_set = set(context.active_branch_node_ids)
+        if active:
+            active_set.add(active)
+        if selection.action is BranchAction.SELECT and active_set:
+            raise RuntimeError("understanding cannot select over an active branch")
+        if selection.action is BranchAction.SWITCH and (
+            not active or focused_branch == active
+        ):
+            raise RuntimeError("understanding switch is not applicable")
+        if selection.action is BranchAction.ADD and (
+            not active_set or focused_branch in active_set
+        ):
+            raise RuntimeError("understanding add is not applicable")
+        if selection.action is BranchAction.KEEP and focused_branch not in active_set:
+            raise RuntimeError("understanding cannot keep an inactive branch")
+        operations: list[dict[str, Any]] = []
+        consumed: list[dict[str, Any]] = []
+        if selection.action is BranchAction.SWITCH and active:
+            old_checksum = str(
+                (((_turn_publication(context).get("document_json") or {})
+                  .get("coordinates") or {}).get(active) or {}).get("path_checksum")
+                or ""
+            )
+            operations.append({
+                "action": "drop",
+                "branch_anchor_node_id": active,
+                "branch_path_checksum": old_checksum,
+                "evidence_span": evidence_span,
+                "evidence_type": "explicit_change",
+                "resolution_method": "turn_understanding_v1",
+                "score": 1.0,
+                "margin": 1.0,
+            })
+            consumed.append({
+                "text": evidence_span,
+                "branch_anchor_node_id": active,
+                "evidence_type": "explicit_change",
+            })
+        operation_action = (
+            "keep" if selection.action is BranchAction.KEEP else "add"
+        )
+        operations.append({
+            "action": operation_action,
+            "branch_anchor_node_id": focused_branch,
+            "branch_path_checksum": branch_checksum,
+            "evidence_span": evidence_span,
+            "evidence_type": "confirmed_candidate",
+            "resolution_method": "turn_understanding_v1",
+            "score": 1.0,
+            "margin": 1.0,
+        })
+        consumed.append({
+            "text": evidence_span,
+            "branch_anchor_node_id": focused_branch,
+            "evidence_type": "confirmed_candidate",
+        })
+        focused_context = focused_context.model_copy(update={
+            "retrieval_trace": {
+                **focused_context.retrieval_trace,
+                "service_resolution": {
+                    **(focused_context.retrieval_trace.get("service_resolution") or {}),
+                    "focused_branch_node_id": focused_branch,
+                    "operations": operations,
+                    "consumed_spans": consumed,
+                    "resolution_method": "turn_understanding_v1",
+                },
+            },
+        })
+    proposal = ConversationProposal(
+        interaction_observation=understanding.interaction_observation,
+        branch_action=selection.action if selection else (
+            BranchAction.KEEP if context.active_branch_node_id else BranchAction.NONE
+        ),
+        branch_anchor_node_id=focused_branch,
+        branch_path_checksum=branch_checksum if focused_branch else None,
+        branch_evidence_span=selection.evidence_span if selection else "",
+        extracted_facts=understanding.facts,
+        reply="",
+    )
+    observation = {
+        "proposal": proposal.model_dump(mode="json"),
+        "interpretation": {
+            "customer_questions": [
+                item.model_dump(mode="json")
+                for item in understanding.customer_questions
+            ],
+            "confirmation": understanding.confirmation.model_dump(mode="json"),
+            "asked_field_key": None,
+        },
+        # Invalid understanding fails closed. There is no semantic repair call.
+        "repair_attempt": 1,
+    }
+    decision, response = decide(focused_context, model_observation=observation)
+    proof = response.proof or {}
+    if (
+        proof.get("valid") is not True
+        or proof.get("repair_required") is True
+        or proof.get("delivery_authorized") is False
+    ):
+        errors = proof.get("errors") or ["understanding_proof_invalid"]
+        raise RuntimeError("understanding proof failed: " + "; ".join(map(str, errors)))
+
+    prospective_state = dict(response.cart_state or {})
+    active_branch = str(prospective_state.get("active_branch_node_id") or "") or None
+    active_branches = list(prospective_state.get("active_branch_node_ids") or [])
+    confirmation_state = str(proof.get("confirmation_state") or "")
+    resolved_mode = (
+        "confirmation" if confirmation_state == "awaiting_confirmation"
+        else "post_qualification_support"
+        if confirmation_state in {"post_qualification_support", "consultative_support"}
+        else "collection"
+        if confirmation_state in {"collecting", "field_confirmation"}
+        else focused_context.operational_mode
+    )
+    resolved_context = focused_context.model_copy(update={
+        "cart": prospective_state,
+        "active_branch_node_id": active_branch,
+        "active_branch_node_ids": active_branches,
+        "operational_mode": resolved_mode,
+        "retrieval_trace": {
+            **focused_context.retrieval_trace,
+            "understanding_resolution_proof": proof,
+            # The final reply proof starts from the already-resolved state. It
+            # must not replay branch operations a second time.
+            "service_resolution": {
+                "focused_branch_node_id": active_branch,
+                "operations": [],
+                "consumed_spans": [],
+                "resolution_method": "resolved_understanding_state",
+            },
+        },
+    })
+    grouped = prospective_state.get("facts_by_key") or {}
+    if active_branches:
+        eligible = graph_proof_checker_v3.aggregate_askable_fields(
+            (_turn_publication(resolved_context).get("document_json") or {})
+            .get("branch_contracts") or {},
+            active_branches,
+            grouped,
+            asked_question_node_ids=(
+                prospective_state.get("asked_question_node_ids") or []
+            ),
+        )
+        missing = proof.get("missing_fields") or []
+    else:
+        eligible = graph_proof_checker_v3.askable_pending_fields(
+            resolved_context.graph_contract,
+            _facts_for_contract(resolved_context.graph_contract, grouped),
+            asked_question_node_ids=(
+                prospective_state.get("asked_question_node_ids") or []
+            ),
+        )
+        missing = proof.get("missing_fields") or []
+    return ResolvedUnderstandingV1(
+        understanding=understanding,
+        context=resolved_context,
+        prospective_state=prospective_state,
+        eligible_fields=eligible,
+        missing_fields=list(missing),
+        operational_mode=resolved_context.operational_mode,
+        resolution_proof=proof,
+    )
 
 
 def _sanitize_untrusted_service_operations(raw: Any) -> Any:

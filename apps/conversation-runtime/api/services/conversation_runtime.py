@@ -15,10 +15,13 @@ logger = logging.getLogger("conversation_runtime")
 from schemas.conversation import (
     AgentResponse,
     CartAction,
+    ConversationReplyV1,
     ConversationContext,
     ConversationDecision,
     ConversationProposal,
     ConversationRoute,
+    ResolvedUnderstandingV1,
+    TurnUnderstandingV1,
 )
 from services import (
     context_cards as context_cards_service,
@@ -1515,11 +1518,74 @@ def _ground_decision_in_context_cards(
 def decide_agentic(
     context: ConversationContext,
     *,
-    model_observation: dict[str, Any],
+    model_observation: dict[str, Any] | None = None,
+    resolved_understanding: ResolvedUnderstandingV1 | None = None,
+    conversation_reply: ConversationReplyV1 | None = None,
     trace_id: str | None = None,
     lead_ref: int | None = None,
 ) -> tuple[ConversationDecision, AgentResponse]:
     _started_at = time.monotonic()
+    if resolved_understanding is not None or conversation_reply is not None:
+        if resolved_understanding is None or conversation_reply is None:
+            raise ValueError(
+                "resolved_understanding and conversation_reply are required together"
+            )
+        if context.execution_strategy != "interpret_then_respond":
+            raise RuntimeError("two-step decision requires interpret_then_respond")
+        resolved_context = resolved_understanding.context
+        if (
+            resolved_context.graph_checksum != context.graph_checksum
+            or resolved_context.publication_id != context.publication_id
+            or resolved_context.persona_slug != context.persona_slug
+        ):
+            raise RuntimeError("resolved understanding does not belong to turn context")
+        question_id = next(
+            (
+                field.get("question_node_id")
+                for field in resolved_context.graph_contract.get("fields") or []
+                if str(field.get("key") or "")
+                == str(conversation_reply.asked_field_key or "")
+            ),
+            None,
+        )
+        active_branch = resolved_context.active_branch_node_id
+        proposal = ConversationProposal(
+            interaction_observation=(
+                resolved_understanding.understanding.interaction_observation
+            ),
+            branch_action="keep" if active_branch else "none",
+            branch_anchor_node_id=active_branch,
+            branch_path_checksum=(
+                resolved_context.graph_contract.get("branch_path_checksum")
+                if active_branch else None
+            ),
+            extracted_facts=[],
+            claims=conversation_reply.claims,
+            next_question_node_id=question_id,
+            cited_node_ids=conversation_reply.cited_node_ids,
+            cited_chunk_ids=conversation_reply.cited_chunk_ids,
+            reply=conversation_reply.reply,
+            handoff_requested=conversation_reply.handoff_requested,
+        )
+        usage = (model_observation or {}).get("token_usage") or {}
+        model_observation = {
+            "proposal": proposal.model_dump(mode="json"),
+            "interpretation": {
+                "asked_field_key": conversation_reply.asked_field_key,
+                "customer_questions": [
+                    item.model_dump(mode="json")
+                    for item in resolved_understanding.understanding.customer_questions
+                ],
+                "confirmation": (
+                    resolved_understanding.understanding.confirmation.model_dump(
+                        mode="json"
+                    )
+                ),
+            },
+            "repair_attempt": 1,
+            "token_usage": usage,
+        }
+        context = resolved_context
     if not isinstance(model_observation, dict):
         raise ValueError("model_observation is required for the agentic engine")
     if context.runtime_version != graph_agent_runtime_v3.RUNTIME_VERSION:
@@ -1529,8 +1595,34 @@ def decide_agentic(
     decision, response = graph_agent_runtime_v3.decide(
         context, model_observation=model_observation
     )
+    if resolved_understanding is not None:
+        if (
+            response.reply_text is None
+            or response.proof.get("valid") is not True
+            or response.proof.get("delivery_authorized") is False
+            or response.proof.get("repair_required") is True
+        ):
+            raise RuntimeError("conversation reply proof failed")
+        accepted = list(
+            resolved_understanding.resolution_proof.get("accepted_facts") or []
+        )
+        response = response.model_copy(update={
+            "proof": {
+                **response.proof,
+                "accepted_facts": accepted,
+                "understanding_contract": "turn_understanding_v1",
+                "reply_contract": "conversation_reply_v1",
+                "execution_strategy": "interpret_then_respond",
+                "semantic_repairs": 0,
+            },
+        })
     observation = model_observation or {}
-    is_repair = int(observation.get("repair_attempt") or 0) > 0
+    # The two-step path sets repair_attempt=1 only to make proof fail closed;
+    # it did not perform a semantic repair model call.
+    is_repair = (
+        resolved_understanding is None
+        and int(observation.get("repair_attempt") or 0) > 0
+    )
     token_usage = observation.get("token_usage") or (response.token_usage or {})
     emit_turn_event(
         agent_name="conversation.repair_call" if is_repair else "conversation.decide_llm_call",
@@ -1555,6 +1647,36 @@ def decide_agentic(
         },
     )
     return decision, response
+
+
+def resolve_understanding(
+    context: ConversationContext,
+    *,
+    understanding: TurnUnderstandingV1,
+    trace_id: str | None = None,
+    lead_ref: int | None = None,
+) -> ResolvedUnderstandingV1:
+    started = time.monotonic()
+    resolved = graph_agent_runtime_v3.resolve_understanding(context, understanding)
+    emit_turn_event(
+        agent_name="conversation.resolve_understanding",
+        trace_id=trace_id,
+        lead_ref=lead_ref,
+        status="success",
+        latency_ms=int((time.monotonic() - started) * 1000),
+        output_data={
+            "active_branch_node_id": resolved.context.active_branch_node_id,
+            "missing_fields": resolved.missing_fields,
+            "eligible_field_keys": [
+                field.get("key") for field in resolved.eligible_fields
+            ],
+            "accepted_fact_count": len(
+                resolved.resolution_proof.get("accepted_facts") or []
+            ),
+        },
+        metadata={"execution_strategy": context.execution_strategy},
+    )
+    return resolved
 
 
 def decide(

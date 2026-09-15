@@ -263,6 +263,10 @@ DIVERGENT_BASELINE: tuple[tuple[str, str], ...] = (
     ("control-plane", "faq_bulk_generator.py"),
     ("control-plane", "graph_bundle_publisher.py"),
     ("control-plane", "graph_bundle_view.py"),
+    # Execution strategy is compiled only by the productive control-plane and
+    # conversation-runtime copies. The monolith is frozen reference code and
+    # must not become a third runtime source (AGENTS.md section 28).
+    ("control-plane", "graph_compiler_v3.py"),
     # Same 2026-09-11 chat-context fallback as context_cards.py above --
     # load_active_publication() is the new function context_cards.py calls.
     ("control-plane", "graph_json_v2_store.py"),
@@ -282,6 +286,7 @@ DIVERGENT_BASELINE: tuple[tuple[str, str], ...] = (
     ("conversation-runtime", "conversation_runtime.py"),
     ("conversation-runtime", "deepseek_n8n_service.py"),
     ("conversation-runtime", "graph_agent_runtime_v3.py"),
+    ("conversation-runtime", "graph_compiler_v3.py"),
     ("conversation-runtime", "graph_json_v2_store.py"),
     ("conversation-runtime", "graph_json_v2_validator.py"),
     ("conversation-runtime", "graph_proof_checker_v3.py"),

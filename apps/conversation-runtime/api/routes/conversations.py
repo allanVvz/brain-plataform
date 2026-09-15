@@ -4,13 +4,16 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from schemas.conversation import (
     AgentResponse,
+    ConversationReplyV1,
     ConversationContext,
     ConversationDecision,
+    ResolvedUnderstandingV1,
     StrictModel,
+    TurnUnderstandingV1,
 )
 from services import conversation_runtime, internal_auth, transport_client
 from services import supabase_client
@@ -67,11 +70,39 @@ class ContextRequest(StrictModel):
 
 class DecisionRequest(StrictModel):
     context: ConversationContext
-    model_observation: dict
+    model_observation: dict | None = None
+    resolved_understanding: ResolvedUnderstandingV1 | None = None
+    conversation_reply: ConversationReplyV1 | None = None
     trace_id: str | None = None
     # ConversationContext carries no lead identity of its own (by design --
     # /decide reasons only from context + model_observation) -- forwarded
     # separately, purely for observability logging (lead_id column).
+    lead_ref: int | None = None
+
+    @model_validator(mode="after")
+    def require_one_decision_input(self) -> "DecisionRequest":
+        single_pass = self.model_observation is not None
+        two_step = (
+            self.resolved_understanding is not None
+            and self.conversation_reply is not None
+        )
+        if not single_pass and not two_step:
+            raise ValueError(
+                "model_observation or resolved understanding + reply is required"
+            )
+        if (self.resolved_understanding is None) != (
+            self.conversation_reply is None
+        ):
+            raise ValueError(
+                "resolved_understanding and conversation_reply are required together"
+            )
+        return self
+
+
+class ResolveUnderstandingRequest(StrictModel):
+    context: ConversationContext
+    understanding: TurnUnderstandingV1
+    trace_id: str | None = None
     lead_ref: int | None = None
 
 
@@ -171,6 +202,8 @@ def decide(
         decision, response = conversation_runtime.decide_agentic(
             body.context,
             model_observation=body.model_observation,
+            resolved_understanding=body.resolved_understanding,
+            conversation_reply=body.conversation_reply,
             trace_id=body.trace_id,
             lead_ref=body.lead_ref,
         )
@@ -180,6 +213,23 @@ def decide(
         "decision": decision.model_dump(mode="json"),
         "response": response.model_dump(mode="json"),
     }
+
+
+@router.post("/resolve-understanding", response_model=ResolvedUnderstandingV1)
+def resolve_understanding(
+    body: ResolveUnderstandingRequest,
+    x_webhook_token: str | None = Header(None, alias="X-Webhook-Token"),
+) -> ResolvedUnderstandingV1:
+    internal_auth.authorize_webhook_token(x_webhook_token)
+    try:
+        return conversation_runtime.resolve_understanding(
+            body.context,
+            understanding=body.understanding,
+            trace_id=body.trace_id,
+            lead_ref=body.lead_ref,
+        )
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @router.post("/commit")

@@ -39,6 +39,7 @@ def test_service_identity_and_readiness_surface():
     assert "/health/ready" in paths
     assert "/process" in paths
     assert "/internal/v1/conversations/context" in paths
+    assert "/internal/v1/conversations/resolve-understanding" in paths
     assert "/internal/v1/conversations/execute" in paths
     assert "/internal/v1/agents/leads/{lead_ref}/journey-events" in paths
     assert "/internal/v1/agents/leads/{lead_ref}/journey-state" in paths

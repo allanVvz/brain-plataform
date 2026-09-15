@@ -100,6 +100,266 @@
           },
           "conditions": [
             {
+              "id": "two-step-strategy",
+              "leftValue": "={{$json.execution_strategy}}",
+              "rightValue": "interpret_then_respond",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "strategy_gate",
+      "name": "Interpret then respond strategy",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1080,
+        300
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const context = $('Load published graph context').item.json;\nconst binding = $('Validate conversation binding').item.json;\nconst contract = context.graph_contract || {};\nconst schema = {type:'object',additionalProperties:false,required:['contract_version','facts','branch_selections','confirmation','customer_questions','interaction_observation'],properties:{contract_version:{const:'turn_understanding_v1'},facts:{type:'array',items:{type:'object',additionalProperties:false,required:['field_key','value','status','owner_node_id','evidence_span','source_message_id','confidence','metadata'],properties:{field_key:{type:'string'},value:{},status:{enum:['known','unknown','declined','needs_confirmation','invalid']},owner_node_id:{type:'string'},evidence_span:{type:'string'},source_message_id:{type:['string','null']},confidence:{type:'number',minimum:0,maximum:1},metadata:{type:'object'}}}},branch_selections:{type:'array',items:{type:'object',additionalProperties:false,required:['action','branch_anchor_node_id','evidence_span'],properties:{action:{enum:['none','keep','select','switch','add']},branch_anchor_node_id:{type:['string','null']},evidence_span:{type:'string'}}}},confirmation:{type:'object',additionalProperties:false,required:['state','target_ref','evidence_span','correction_field_key','correction_value'],properties:{state:{enum:['none','affirm','reject','partial','ambiguous']},target_ref:{type:['string','null']},evidence_span:{type:'string'},correction_field_key:{type:['string','null']},correction_value:{}}},customer_questions:{type:'array',items:{type:'object',additionalProperties:false,required:['kind','topic','entity_node_ids','evidence_span'],properties:{kind:{enum:['availability','price','stock','policy','schedule','deadline','product_detail','other']},topic:{type:'string'},entity_node_ids:{type:'array',items:{type:'string'}},evidence_span:{type:'string'}}}},interaction_observation:{type:'object',additionalProperties:false,required:['kind','evidence_span','confidence'],properties:{kind:{enum:['continue_current','new_demand','post_completion_question','courtesy_close','post_sale_operation','unclear']},evidence_span:{type:'string'},confidence:{type:'number',minimum:0,maximum:1}}}}};\nconst payload={contract:'turn_understanding_v1',customer_message:binding.message,source_message_id:binding.external_message_id||null,active_branch_node_id:context.active_branch_node_id,available_branches:context.available_services||[],branch_candidates:(context.retrieval_trace||{}).branch_candidates||[],fields:contract.fields||[],questions:contract.questions||{},known_facts:(context.cart||{}).facts_by_key||{},pending_confirmation_ref:(context.cart||{}).pending_confirmation_ref||null};\nconst request_body={model:binding.model,temperature:0,response_format:{type:'json_schema',json_schema:{name:'turn_understanding_v1',strict:true,schema}},messages:[{role:'system',content:'Return only structured understanding, never customer-facing language. Extract every declared fact supplied in this inbound. Every fact, branch selection, confirmation and question must copy its evidence_span literally from customer_message. Classify paraphrases by meaning against published canonical values; aliases are examples, not a closed vocabulary. Select or switch only to a published branch. Do not invent claims, answers, questions or reply text.'},{role:'user',content:JSON.stringify(payload)}]};\nreturn [{json:{request_body,llm_call_started_at:Date.now()}}];"
+      },
+      "id": "understanding_request",
+      "name": "Build turn understanding request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1260,
+        40
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "__MODEL_ENDPOINT__",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{JSON.stringify($json.request_body)}}",
+        "options": {
+          "retry": {
+            "maxTries": 1,
+            "waitBetweenTries": 1000
+          }
+        }
+      },
+      "id": "understanding_model",
+      "name": "Bound understanding model",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1500,
+        40
+      ],
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__MODEL_CREDENTIAL_ID__",
+          "name": "__MODEL_CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const content=$json.choices&&$json.choices[0]&&$json.choices[0].message&&$json.choices[0].message.content;\nconst finishReason=$json.choices&&$json.choices[0]&&$json.choices[0].finish_reason||null;\nif(!content||finishReason==='length') throw new Error('turn_understanding_model_failed:'+String(finishReason||'empty_response'));\nlet parsed; try{parsed=JSON.parse(content);}catch(error){throw new Error('turn_understanding_invalid_json:'+error.message);}\nconst required=['contract_version','facts','branch_selections','confirmation','customer_questions','interaction_observation'];\nfor(const key of required) if(!(key in parsed)) throw new Error('turn_understanding_missing:'+key);\nif(parsed.contract_version!=='turn_understanding_v1') throw new Error('turn_understanding_wrong_contract');\nconst usage=$json.usage||{};\nreturn [{json:{understanding:parsed,understanding_usage:{model:$('Validate conversation binding').item.json.model,prompt_tokens:Number(usage.prompt_tokens||0),completion_tokens:Number(usage.completion_tokens||0),total_tokens:Number(usage.total_tokens||0),llm_latency_ms:Date.now()-$('Build turn understanding request').item.json.llm_call_started_at}}}];"
+      },
+      "id": "understanding_response",
+      "name": "Validate turn understanding",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1740,
+        40
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.API_INTERNAL_BASE_URL + '/internal/v1/conversations/resolve-understanding'}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Webhook-Token",
+              "value": "={{$env.AI_BRAIN_WEBHOOK_TOKEN}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{JSON.stringify({context: $('Load published graph context').item.json, understanding: $('Validate turn understanding').item.json.understanding, trace_id: $('Validate conversation binding').item.json.buffer_id, lead_ref: $('Validate conversation binding').item.json.lead_ref})}}",
+        "options": {}
+      },
+      "id": "resolve_understanding",
+      "name": "Resolve understanding and scoped RAG",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        40
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const resolved=$json;\nconst context=resolved.context||{};\nconst binding=$('Validate conversation binding').item.json;\nconst policy=(context.graph_contract||{}).conversation_policy||{};\nconst eligible=(resolved.eligible_fields||[]).map(function(field){return {key:field.key,label:field.label||field.key,question_node_id:field.question_node_id||null,question_text:((context.graph_contract.questions||{})[field.question_node_id]||{}).text||'',depends_on:field.depends_on||[]};});\nconst schema={type:'object',additionalProperties:false,required:['contract_version','reply','asked_field_key','claims','cited_node_ids','cited_chunk_ids','handoff_requested'],properties:{contract_version:{const:'conversation_reply_v1'},reply:{type:'string',minLength:1},asked_field_key:{type:['string','null']},claims:{type:'array',items:{type:'object',additionalProperties:false,required:['claim_type','value','evidence_node_ids','evidence_chunk_ids'],properties:{claim_type:{enum:['price','availability','schedule','stock','duration','service_detail','other']},value:{type:'object'},evidence_node_ids:{type:'array',items:{type:'string'}},evidence_chunk_ids:{type:'array',items:{type:'string'}}}},cited_node_ids:{type:'array',items:{type:'string'}},cited_chunk_ids:{type:'array',items:{type:'string'}},handoff_requested:{type:'boolean'}}};\nconst approved_nodes=(context.context_cards||[]).map(function(card){return {node_id:card.id,type:card.node_type,title:card.title,content:card.rendered_content,source:card.source,status:card.status};});\nconst approved_chunks=context.rag_chunks||[];\nconst payload={contract:'conversation_reply_v1',identity:context.system_prompt||'',customer_message:binding.message,understanding:resolved.understanding,prospective_state:resolved.prospective_state,operational_mode:resolved.operational_mode,missing_fields:resolved.missing_fields||[],eligible_fields:eligible,do_not_ask_question_node_ids:(resolved.prospective_state||{}).asked_question_node_ids||[],recent_messages:(context.messages||[]).slice(-6),approved_nodes,approved_chunks,conversation_policy:policy};\nconst request_body={model:binding.model,temperature:0.55,response_format:{type:'json_schema',json_schema:{name:'conversation_reply_v1',strict:true,schema}},messages:[{role:'system',content:'Write one natural customer-facing reply from the already-resolved state and authorized RAG. Answer the customer doubt before any qualification question. You may choose any one eligible field naturally; if you ask it, asked_field_key must be its exact key. Never ask a known or already-asked field. Ask at most one question. In post_qualification_support answer doubts and do not hand off until explicit readiness or a published rule. Cite every commercial claim with authorized node/chunk evidence. Never mix branches or invent price, stock, timing, action, media, policy or handoff language. Return JSON only.'},{role:'user',content:JSON.stringify(payload)}]};\nreturn [{json:{request_body,llm_call_started_at:Date.now()}}];"
+      },
+      "id": "reply_request",
+      "name": "Build natural conversation reply request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2220,
+        40
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "__MODEL_ENDPOINT__",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{JSON.stringify($json.request_body)}}",
+        "options": {
+          "retry": {
+            "maxTries": 1,
+            "waitBetweenTries": 1000
+          }
+        }
+      },
+      "id": "reply_model",
+      "name": "Bound conversation reply model",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2460,
+        40
+      ],
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__MODEL_CREDENTIAL_ID__",
+          "name": "__MODEL_CREDENTIAL_NAME__"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const content=$json.choices&&$json.choices[0]&&$json.choices[0].message&&$json.choices[0].message.content;\nconst finishReason=$json.choices&&$json.choices[0]&&$json.choices[0].finish_reason||null;\nif(!content||finishReason==='length') throw new Error('conversation_reply_model_failed:'+String(finishReason||'empty_response'));\nlet parsed; try{parsed=JSON.parse(content);}catch(error){throw new Error('conversation_reply_invalid_json:'+error.message);}\nconst required=['contract_version','reply','asked_field_key','claims','cited_node_ids','cited_chunk_ids','handoff_requested'];\nfor(const key of required) if(!(key in parsed)) throw new Error('conversation_reply_missing:'+key);\nif(parsed.contract_version!=='conversation_reply_v1'||typeof parsed.reply!=='string'||!parsed.reply.trim()) throw new Error('conversation_reply_invalid_contract');\nconst first=$('Validate turn understanding').item.json.understanding_usage||{}; const usage=$json.usage||{};\nconst token_usage={model:$('Validate conversation binding').item.json.model,prompt_tokens:Number(first.prompt_tokens||0)+Number(usage.prompt_tokens||0),completion_tokens:Number(first.completion_tokens||0)+Number(usage.completion_tokens||0),total_tokens:Number(first.total_tokens||0)+Number(usage.total_tokens||0),llm_latency_ms:Number(first.llm_latency_ms||0)+(Date.now()-$('Build natural conversation reply request').item.json.llm_call_started_at),model_calls:2,repair_calls:0};\nreturn [{json:{conversation_reply:parsed,token_usage}}];"
+      },
+      "id": "reply_response",
+      "name": "Validate natural conversation reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2700,
+        40
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.API_INTERNAL_BASE_URL + '/internal/v1/conversations/decide'}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Webhook-Token",
+              "value": "={{$env.AI_BRAIN_WEBHOOK_TOKEN}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{JSON.stringify({context: $('Load published graph context').item.json, resolved_understanding: $('Resolve understanding and scoped RAG').item.json, conversation_reply: $json.conversation_reply, model_observation: {token_usage: $json.token_usage}, trace_id: $('Validate conversation binding').item.json.buffer_id, lead_ref: $('Validate conversation binding').item.json.lead_ref})}}",
+        "options": {}
+      },
+      "id": "prove_reply",
+      "name": "Prove resolved conversation reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2940,
+        40
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.API_INTERNAL_BASE_URL + '/internal/v1/conversations/fail-safe-handoff'}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Webhook-Token",
+              "value": "={{$env.AI_BRAIN_WEBHOOK_TOKEN}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{JSON.stringify({lead_ref: $('Validate conversation binding').item.json.lead_ref, reason: 'interpret_then_respond_failed:' + String(($json.error && $json.error.node && $json.error.node.name) || 'unknown'), correlation_id: $('Validate conversation binding').item.json.correlation_id, trace_id: $('Validate conversation binding').item.json.buffer_id, diagnostic: {workflow_template:'graph_agentic_v3',execution_strategy:'interpret_then_respond',failed_node:String(($json.error && $json.error.node && $json.error.node.name) || 'unknown'),message:String(($json.error && $json.error.message) || $json.message || 'unknown').slice(0,1000)}})}}",
+        "options": {}
+      },
+      "id": "model_failsafe",
+      "name": "Fail-safe two-step handoff",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3180,
+        -180
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
               "id": "model-required-for-turn",
               "leftValue": "={{$json.decision && $json.decision.intent}}",
               "rightValue": "await_model_proposal",
@@ -490,7 +750,7 @@
       "main": [
         [
           {
-            "node": "Model required for turn",
+            "node": "Interpret then respond strategy",
             "type": "main",
             "index": 0
           }
@@ -735,6 +995,186 @@
       ]
     },
     "Quarantine technical failure": {
+      "main": [
+        [
+          {
+            "node": "Return canonical result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Interpret then respond strategy": {
+      "main": [
+        [
+          {
+            "node": "Build turn understanding request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Model required for turn",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Quarantine technical failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build turn understanding request": {
+      "main": [
+        [
+          {
+            "node": "Bound understanding model",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fail-safe two-step handoff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bound understanding model": {
+      "main": [
+        [
+          {
+            "node": "Validate turn understanding",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fail-safe two-step handoff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate turn understanding": {
+      "main": [
+        [
+          {
+            "node": "Resolve understanding and scoped RAG",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fail-safe two-step handoff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve understanding and scoped RAG": {
+      "main": [
+        [
+          {
+            "node": "Build natural conversation reply request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fail-safe two-step handoff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build natural conversation reply request": {
+      "main": [
+        [
+          {
+            "node": "Bound conversation reply model",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fail-safe two-step handoff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bound conversation reply model": {
+      "main": [
+        [
+          {
+            "node": "Validate natural conversation reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fail-safe two-step handoff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate natural conversation reply": {
+      "main": [
+        [
+          {
+            "node": "Prove resolved conversation reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fail-safe two-step handoff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prove resolved conversation reply": {
+      "main": [
+        [
+          {
+            "node": "Align reply with qualification state",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fail-safe two-step handoff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fail-safe two-step handoff": {
       "main": [
         [
           {

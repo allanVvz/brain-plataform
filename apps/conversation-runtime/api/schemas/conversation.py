@@ -189,6 +189,61 @@ class CommercialClaim(StrictModel):
     evidence_chunk_ids: list[str] = Field(default_factory=list)
 
 
+class UnderstandingBranchSelection(StrictModel):
+    action: BranchAction = BranchAction.NONE
+    branch_anchor_node_id: str | None = None
+    evidence_span: str = ""
+
+
+class UnderstandingConfirmation(StrictModel):
+    state: str = Field(
+        default="none",
+        pattern="^(none|affirm|reject|partial|ambiguous)$",
+    )
+    target_ref: str | None = None
+    evidence_span: str = ""
+    correction_field_key: str | None = None
+    correction_value: Any | None = None
+
+
+class CustomerQuestion(StrictModel):
+    kind: str = Field(
+        default="other",
+        pattern="^(availability|price|stock|policy|schedule|deadline|product_detail|other)$",
+    )
+    topic: str = ""
+    entity_node_ids: list[str] = Field(default_factory=list)
+    evidence_span: str = ""
+
+
+class TurnUnderstandingV1(StrictModel):
+    """Semantic reading of one inbound, with no customer-facing language."""
+
+    contract_version: str = Field(default="turn_understanding_v1", pattern="^turn_understanding_v1$")
+    facts: list[ExtractedFact] = Field(default_factory=list)
+    branch_selections: list[UnderstandingBranchSelection] = Field(
+        default_factory=list,
+        max_length=1,
+    )
+    confirmation: UnderstandingConfirmation = Field(default_factory=UnderstandingConfirmation)
+    customer_questions: list[CustomerQuestion] = Field(default_factory=list)
+    interaction_observation: InteractionObservation = Field(
+        default_factory=InteractionObservation
+    )
+
+
+class ConversationReplyV1(StrictModel):
+    """Customer-facing model output after state and RAG have been resolved."""
+
+    contract_version: str = Field(default="conversation_reply_v1", pattern="^conversation_reply_v1$")
+    reply: str = Field(min_length=1)
+    asked_field_key: str | None = None
+    claims: list[CommercialClaim] = Field(default_factory=list)
+    cited_node_ids: list[str] = Field(default_factory=list)
+    cited_chunk_ids: list[str] = Field(default_factory=list)
+    handoff_requested: bool = False
+
+
 class ConversationProposal(StrictModel):
     """One model suggestion that must be proved against the graph contract."""
 
@@ -215,6 +270,11 @@ class ConversationProposal(StrictModel):
 class ConversationContext(StrictModel):
     persona_slug: str
     agent_slug: str
+    agent_role: str = "sdr"
+    execution_strategy: str = Field(
+        default="single_pass",
+        pattern="^(single_pass|interpret_then_respond)$",
+    )
     graph_version: int = Field(ge=1)
     graph_checksum: str = Field(min_length=1)
     messages: list[dict[str, Any]]
@@ -255,6 +315,19 @@ class ConversationContext(StrictModel):
     operational_mode: ConversationOperationalMode = ConversationOperationalMode.COLLECTION
     shared_memory: SharedLeadMemory = Field(default_factory=SharedLeadMemory)
     post_completion_state: dict[str, Any] = Field(default_factory=dict)
+
+
+class ResolvedUnderstandingV1(StrictModel):
+    """Read-only, turn-pinned prospective state consumed by the reply model."""
+
+    contract_version: str = Field(default="resolved_understanding_v1", pattern="^resolved_understanding_v1$")
+    understanding: TurnUnderstandingV1
+    context: ConversationContext
+    prospective_state: dict[str, Any] = Field(default_factory=dict)
+    eligible_fields: list[dict[str, Any]] = Field(default_factory=list)
+    missing_fields: list[str] = Field(default_factory=list)
+    operational_mode: ConversationOperationalMode = ConversationOperationalMode.COLLECTION
+    resolution_proof: dict[str, Any] = Field(default_factory=dict)
 
 
 class ConversationDecision(StrictModel):
