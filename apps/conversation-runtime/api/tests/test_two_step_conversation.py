@@ -210,6 +210,20 @@ def test_template_routes_sdr_two_step_without_semantic_repair_and_fails_safe():
         assert connections[name]["main"][1][0]["node"] == "Fail-safe two-step handoff"
 
 
+def test_two_step_model_requests_use_provider_compatible_structured_output():
+    workflow = json.loads(TEMPLATE.read_text(encoding="utf-8"))
+    nodes = {node["name"]: node for node in workflow["nodes"]}
+    for name in (
+        "Build turn understanding request",
+        "Build natural conversation reply request",
+    ):
+        code = nodes[name]["parameters"]["jsCode"]
+        assert "includes('deepseek')" in code
+        assert "deepseek?{type:'json_object'}" in code
+        assert "{type:'json_schema'" in code
+        assert "thinking:{type:'disabled'}" in code
+
+
 def test_tock_understanding_persists_retail_need_before_reply_and_refocuses_rag(monkeypatch):
     bundle_path = (
         ROOT.parent.parent / "data" / "graph_bundles" / "tock-fatal"
