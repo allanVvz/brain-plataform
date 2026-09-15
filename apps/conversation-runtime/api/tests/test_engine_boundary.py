@@ -407,6 +407,8 @@ def test_decide_route_calls_only_agentic_entrypoint(monkeypatch):
     result = conversations.decide(body, x_webhook_token="token")
 
     assert result["response"]["reply_text"] == "modelo"
+    assert result["agent_role"] == body.context.agent_role
+    assert result["execution_strategy"] == body.context.execution_strategy
 
 
 def test_agentic_entrypoint_rejects_deterministic_context():

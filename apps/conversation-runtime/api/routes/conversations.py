@@ -210,6 +210,8 @@ def decide(
     except RuntimeError as exc:
         raise HTTPException(409, str(exc)) from exc
     return {
+        "agent_role": body.context.agent_role,
+        "execution_strategy": body.context.execution_strategy,
         "decision": decision.model_dump(mode="json"),
         "response": response.model_dump(mode="json"),
     }
