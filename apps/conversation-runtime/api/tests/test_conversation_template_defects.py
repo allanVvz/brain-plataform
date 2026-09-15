@@ -795,3 +795,29 @@ def test_repair_prompt_prefers_announced_handoff_over_silence():
     assert "published_handoff.notice" in code
     assert "never hand off silently" in code
     assert "Do not invent a handoff" in code
+
+
+def test_graph_closed_context_and_consultative_mode_reach_the_model():
+    contract = _purchase_profile_contract()
+    contract["turn_context_node_ids"] = ["audience:retail", "faq:profile"]
+    contract["turn_context_chunk_node_ids"] = ["audience:retail"]
+    result = _run_prompt_builder(
+        _context(
+            graph_contract=contract,
+            operational_mode="post_qualification_support",
+        ),
+        _binding(message="Tenho uma duvida antes de falar com a equipe"),
+    )
+    prompt = json.loads(result["request_body"]["messages"][1]["content"])
+    instructions = " ".join(prompt["policy"]["instructions"])
+
+    assert prompt["operational_mode"] == "post_qualification_support"
+    assert prompt["graph_contract"]["turn_context_node_ids"] == [
+        "audience:retail", "faq:profile",
+    ]
+    assert prompt["graph_contract"]["turn_context_chunk_node_ids"] == [
+        "audience:retail",
+    ]
+    assert "temporary consultative state" in instructions
+    assert "keep handoff_requested false" in instructions
+    assert "Do not restart qualification" in instructions

@@ -28,7 +28,8 @@ _local_embedding_model_name: str | None = None
 CONTRACT_DOCUMENT = Path(__file__).resolve().parents[1] / "contracts" / "graph-agent-runtime-v3.md"
 PUBLISHED_STATUSES = {"approved", "active", "validated", "ativo", "embedded"}
 FACT_STATUSES = {"known", "unknown", "declined", "needs_confirmation", "invalid"}
-TURN_CONTEXT_NODE_LIMIT = 12
+TURN_CONTEXT_NODE_LIMIT = 48
+TURN_CONTEXT_CHUNK_NODE_LIMIT = 12
 STRUCTURAL_RELATIONS = {"contains"}
 RAG_CONTENT_TYPES = {
     "faq", "product", "service", "product_group", "offer", "brand", "campaign",
@@ -79,6 +80,25 @@ def turn_context_node_ids(
         *path_node_ids,
         *(field.get("owner_node_id") for field in fields),
         *(field.get("question_node_id") for field in fields),
+        *handoff_rule_node_ids,
+    ] if value))
+
+
+def turn_context_chunk_node_ids(
+    *,
+    branch_anchor_node_id: str | None,
+    path_node_ids: Iterable[str],
+    handoff_rule_node_ids: Iterable[str],
+) -> list[str]:
+    """Subset whose semantic chunks must fit the retrieval budget.
+
+    Field and question nodes stay in the turn closure as structural cards; the
+    declarative contract already conveys their authored data. Only the branch
+    path and handoff policy require mandatory semantic chunks.
+    """
+    return list(dict.fromkeys(value for value in [
+        branch_anchor_node_id,
+        *path_node_ids,
         *handoff_rule_node_ids,
     ] if value))
 
@@ -622,6 +642,11 @@ def _common_persona_contract(
         fields=shared,
         handoff_rule_node_ids=[],
     )
+    chunk_context = turn_context_chunk_node_ids(
+        branch_anchor_node_id=None,
+        path_node_ids=[],
+        handoff_rule_node_ids=[],
+    )
     if len(turn_context) > TURN_CONTEXT_NODE_LIMIT:
         raise GraphCompilationError([
             f"common_turn_context_node_limit_exceeded:{len(turn_context)}"
@@ -632,6 +657,7 @@ def _common_persona_contract(
         "closure_checksum": canonical_checksum(closure),
         "closure_node_ids": [value for value in closure if value],
         "turn_context_node_ids": turn_context,
+        "turn_context_chunk_node_ids": chunk_context,
         "fields": shared,
         "required_fields": required,
         "questions": questions,
@@ -1044,12 +1070,22 @@ def compile_graph(
             errors.append(
                 f"turn_context_node_limit_exceeded:{anchor}:{len(turn_context)}"
             )
+        chunk_context = turn_context_chunk_node_ids(
+            branch_anchor_node_id=anchor,
+            path_node_ids=coordinates[anchor]["path_node_ids"],
+            handoff_rule_node_ids=handoff_rules,
+        )
+        if len(chunk_context) > TURN_CONTEXT_CHUNK_NODE_LIMIT:
+            errors.append(
+                f"turn_context_chunk_node_limit_exceeded:{anchor}:{len(chunk_context)}"
+            )
         contract = {
             "branch_anchor_node_id": anchor,
             "branch_path_checksum": coordinates[anchor]["path_checksum"],
             "closure_checksum": closure_checksum,
             "closure_node_ids": closure,
             "turn_context_node_ids": turn_context,
+            "turn_context_chunk_node_ids": chunk_context,
             "fields": ordered_fields,
             "required_fields": [field["key"] for field in ordered_fields if field["required"]],
             "questions": {

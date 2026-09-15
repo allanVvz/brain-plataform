@@ -124,6 +124,10 @@ def test_each_branch_publishes_a_closed_turn_context(document):
         assert anchor in turn_context
         assert set(document["coordinates"][anchor]["path_node_ids"]) <= turn_context
         assert len(turn_context) <= graph_compiler_v3.TURN_CONTEXT_NODE_LIMIT
+        assert set(contract["turn_context_chunk_node_ids"]) <= turn_context
+        assert len(contract["turn_context_chunk_node_ids"]) <= (
+            graph_compiler_v3.TURN_CONTEXT_CHUNK_NODE_LIMIT
+        )
         for field in contract["fields"]:
             assert field["owner_node_id"] in turn_context
             assert field["question_node_id"] in turn_context
@@ -136,6 +140,9 @@ def test_runtime_retrieval_uses_the_published_turn_context(document):
     assert graph_agent_runtime_v3._required_retrieval_node_ids(
         document, RESELLER, contract, missing_fields=[]
     ) == contract["turn_context_node_ids"]
+    assert graph_agent_runtime_v3._required_retrieval_chunk_node_ids(
+        document, RESELLER, contract
+    ) == contract["turn_context_chunk_node_ids"]
 
 
 @pytest.mark.unit

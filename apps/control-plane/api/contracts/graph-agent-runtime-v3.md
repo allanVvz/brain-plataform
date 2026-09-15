@@ -55,10 +55,11 @@ inbound canônico
 
 Cada contrato de branch publica `turn_context_node_ids`: anchor, caminho,
 donos dos fields, perguntas qualificadoras e regras de handoff. Esse fechamento
-deve caber em doze nodes; caso contrario, a compilacao bloqueia a publicacao.
-O runtime carrega esse pacote antes da proposta do modelo. O repair/Phase-B
-fica reservado para informacao nova solicitada no turno, nunca para completar
-uma transicao normal de qualificacao.
+estrutural deve caber em 48 nodes. O subconjunto semantico obrigatorio,
+`turn_context_chunk_node_ids`, deve caber em doze chunks; fields e perguntas
+entram como cards estruturais do contrato. O runtime carrega esse pacote antes
+da proposta do modelo. O repair/Phase-B fica reservado para informacao nova
+solicitada no turno, nunca para completar uma transicao normal de qualificacao.
 
 `service_operations[]` é o contrato autoritativo do conjunto de serviços. Cada
 operação contém `add`, `keep` ou `drop`, anchor publicado, checksum do caminho e

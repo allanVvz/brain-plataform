@@ -487,6 +487,31 @@ def _required_retrieval_node_ids(
     ]))
 
 
+def _required_retrieval_chunk_node_ids(
+    document: dict[str, Any],
+    branch_node_id: str,
+    contract: dict[str, Any],
+) -> list[str]:
+    """Return the closed subset that needs semantic chunks this turn.
+
+    The larger turn context also includes fields and questions. Those are
+    materialized as structural cards from the compiled contract, avoiding a
+    misleading one-node/one-chunk budget that would reject valid graphs.
+    """
+    chunk_context = contract.get("turn_context_chunk_node_ids") or []
+    if chunk_context:
+        return [str(node_id) for node_id in chunk_context if node_id]
+    path = (
+        ((document.get("coordinates") or {}).get(branch_node_id) or {})
+        .get("path_node_ids") or []
+    )
+    return list(dict.fromkeys([
+        branch_node_id,
+        *path,
+        *(contract.get("handoff_rule_node_ids") or []),
+    ]))
+
+
 def _repair_chunks(
     rows: list[dict[str, Any]], requirements: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -2320,6 +2345,10 @@ def _contract_scoped_to_neutral(
         node_id for node_id in contract.get("turn_context_node_ids") or []
         if node_id in neutral
     ]
+    scoped["turn_context_chunk_node_ids"] = [
+        node_id for node_id in contract.get("turn_context_chunk_node_ids") or []
+        if node_id in neutral
+    ]
     scoped["eligible_faq_node_ids"] = sorted(
         node_id for node_id in contract.get("eligible_faq_node_ids") or []
         if node_id in neutral
@@ -3168,14 +3197,20 @@ def build_context(
     required_nodes = _required_retrieval_node_ids(
         document, retrieval_branch, contract, missing,
     )
+    required_chunk_nodes = _required_retrieval_chunk_node_ids(
+        document, retrieval_branch, contract,
+    )
     if brand_scope_withheld:
         required_nodes = [
             node_id for node_id in required_nodes if node_id in neutral_scope
         ]
+        required_chunk_nodes = [
+            node_id for node_id in required_chunk_nodes if node_id in neutral_scope
+        ]
     branch_package = supabase_client.get_graph_branch_package_v3(
         publication_id=publication["id"], branch_node_id=retrieval_branch,
         chunk_ids=[str(row.get("chunk_id") or row.get("id")) for row in rows if row.get("chunk_id") or row.get("id")],
-        node_ids=[str(node_id) for node_id in required_nodes if node_id],
+        node_ids=[str(node_id) for node_id in required_chunk_nodes if node_id],
         limit=RAG_CHUNK_LIMIT,
     )
     structural = branch_package.get("chunks") or []
