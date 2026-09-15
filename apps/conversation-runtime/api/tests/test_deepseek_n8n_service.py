@@ -49,6 +49,21 @@ def test_every_persona_uses_the_same_graph_agentic_template():
     assert "baita" not in str(commerce).lower()
     assert "aurora" not in str(appointment).lower()
 
+    for workflow, credential_id in (
+        (commerce, "cred-commerce"),
+        (appointment, "cred-appointment"),
+    ):
+        model_nodes = [
+            node for node in workflow["nodes"]
+            if "httpHeaderAuth" in (node.get("credentials") or {})
+        ]
+        assert len(model_nodes) == 4
+        assert all(
+            node["credentials"]["httpHeaderAuth"]["id"] == credential_id
+            for node in model_nodes
+        )
+        assert "__MODEL_CREDENTIAL_ID__" not in str(model_nodes)
+
 
 def test_canonical_template_connections_resolve_to_published_node_names():
     template = json.loads(

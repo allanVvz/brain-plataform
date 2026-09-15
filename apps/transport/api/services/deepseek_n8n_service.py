@@ -125,7 +125,7 @@ def _workflow_for_persona(
     _validate_workflow_topology(workflow)
     workflow["active"] = False
     for node in workflow.get("nodes") or []:
-        if node.get("id") in {"deepseek", "deepseek_repair"}:
+        if node.get("id") in {"deepseek", "deepseek_repair"} or "httpHeaderAuth" in (node.get("credentials") or {}):
             node["credentials"] = {
                 "httpHeaderAuth": {
                     "id": credential_id,
