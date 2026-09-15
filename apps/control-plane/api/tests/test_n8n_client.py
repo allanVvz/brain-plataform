@@ -61,3 +61,54 @@ def test_workflow_checksum_matches_the_deployable_n8n_payload():
     assert conversation_workflow_service._workflow_checksum(canonical) == (
         conversation_workflow_service._workflow_checksum(live)
     )
+
+
+def test_workflow_checksum_ignores_n8n_credential_label_but_not_identity():
+    canonical = {
+        "name": "Conversation",
+        "nodes": [
+            {
+                "id": "model",
+                "credentials": {
+                    "httpHeaderAuth": {
+                        "id": "credential-id",
+                        "name": "Published label",
+                    }
+                },
+            }
+        ],
+        "connections": {},
+        "settings": {},
+    }
+    normalized_by_n8n = {
+        **canonical,
+        "nodes": [
+            {
+                **canonical["nodes"][0],
+                "credentials": {
+                    "httpHeaderAuth": {
+                        "id": "credential-id",
+                        "name": "Stored n8n label",
+                    }
+                },
+            }
+        ],
+    }
+    wrong_credential = {
+        **normalized_by_n8n,
+        "nodes": [
+            {
+                **normalized_by_n8n["nodes"][0],
+                "credentials": {
+                    "httpHeaderAuth": {
+                        "id": "different-credential-id",
+                        "name": "Stored n8n label",
+                    }
+                },
+            }
+        ],
+    }
+
+    expected = conversation_workflow_service._workflow_checksum(canonical)
+    assert conversation_workflow_service._workflow_checksum(normalized_by_n8n) == expected
+    assert conversation_workflow_service._workflow_checksum(wrong_credential) != expected

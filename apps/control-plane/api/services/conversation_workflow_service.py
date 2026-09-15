@@ -97,7 +97,7 @@ def _validate_workflow_topology(workflow: dict[str, Any]) -> None:
 
 
 def _workflow_checksum(workflow: dict[str, Any]) -> str:
-    payload = n8n_client.workflow_payload(workflow)
+    payload = n8n_client.workflow_checksum_payload(workflow)
     encoded = json.dumps(
         payload,
         ensure_ascii=False,

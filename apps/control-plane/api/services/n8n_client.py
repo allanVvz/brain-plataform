@@ -86,6 +86,27 @@ def workflow_payload(workflow: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def workflow_checksum_payload(workflow: dict[str, Any]) -> dict[str, Any]:
+    """Return the deployable workflow with n8n-owned display labels removed.
+
+    n8n resolves a credential reference by ``id`` and rewrites its ``name`` to
+    the label stored in n8n. The label is not executable identity and therefore
+    cannot participate in convergence checks; the credential id remains part
+    of the checksum.
+    """
+    payload = workflow_payload(workflow)
+    for node in payload.get("nodes") or []:
+        if not isinstance(node, dict):
+            continue
+        credentials = node.get("credentials")
+        if not isinstance(credentials, dict):
+            continue
+        for credential in credentials.values():
+            if isinstance(credential, dict):
+                credential.pop("name", None)
+    return payload
+
+
 def get_executions(
     limit: int = 100,
     status: Optional[str] = None,
