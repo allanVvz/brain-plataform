@@ -91,6 +91,7 @@ jobs:
                             ],
                             "forwarded_failures": [
                                 {
+                                    "keys": sorted(str(key) for key in (item.get("json") or {}).keys()),
                                     "message": str((item.get("json") or {}).get("message") or "")[:300] or None,
                                     "description": str((item.get("json") or {}).get("description") or "")[:300] or None,
                                     "status_code": (item.get("json") or {}).get("statusCode"),
