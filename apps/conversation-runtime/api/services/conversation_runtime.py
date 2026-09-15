@@ -1582,7 +1582,8 @@ def decide_agentic(
                     )
                 ),
             },
-            "repair_attempt": 1,
+            "repair_attempt": 0,
+            "execution_strategy": "interpret_then_respond",
             "token_usage": usage,
         }
         context = resolved_context
@@ -1617,22 +1618,29 @@ def decide_agentic(
             },
         })
     observation = model_observation or {}
-    # The two-step path sets repair_attempt=1 only to make proof fail closed;
-    # it did not perform a semantic repair model call.
     is_repair = (
         resolved_understanding is None
         and int(observation.get("repair_attempt") or 0) > 0
     )
     token_usage = observation.get("token_usage") or (response.token_usage or {})
+    event_usage = (
+        (token_usage.get("stages") or {}).get("reply")
+        if resolved_understanding is not None
+        else token_usage
+    ) or token_usage
     emit_turn_event(
-        agent_name="conversation.repair_call" if is_repair else "conversation.decide_llm_call",
+        agent_name=(
+            "conversation.repair_call" if is_repair
+            else "conversation.reply_llm_call" if resolved_understanding is not None
+            else "conversation.decide_llm_call"
+        ),
         trace_id=trace_id,
         lead_ref=lead_ref,
         status="error" if response.reply_text is None and response.proof.get("errors") else "success",
-        model_used=token_usage.get("model"),
-        token_input=token_usage.get("prompt_tokens"),
-        token_output=token_usage.get("completion_tokens"),
-        latency_ms=token_usage.get("llm_latency_ms")
+        model_used=event_usage.get("model"),
+        token_input=event_usage.get("prompt_tokens"),
+        token_output=event_usage.get("completion_tokens"),
+        latency_ms=event_usage.get("llm_latency_ms")
         or int((time.monotonic() - _started_at) * 1000),
         output_data={
             "reply_text": response.reply_text,
@@ -1655,9 +1663,22 @@ def resolve_understanding(
     understanding: TurnUnderstandingV1,
     trace_id: str | None = None,
     lead_ref: int | None = None,
+    token_usage: dict[str, Any] | None = None,
 ) -> ResolvedUnderstandingV1:
     started = time.monotonic()
     resolved = graph_agent_runtime_v3.resolve_understanding(context, understanding)
+    usage = token_usage or {}
+    emit_turn_event(
+        agent_name="conversation.understanding_llm_call",
+        trace_id=trace_id,
+        lead_ref=lead_ref,
+        status="success",
+        model_used=usage.get("model"),
+        token_input=usage.get("prompt_tokens"),
+        token_output=usage.get("completion_tokens"),
+        latency_ms=usage.get("llm_latency_ms"),
+        metadata={"execution_strategy": "interpret_then_respond"},
+    )
     emit_turn_event(
         agent_name="conversation.resolve_understanding",
         trace_id=trace_id,

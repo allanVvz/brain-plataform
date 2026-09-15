@@ -3,7 +3,7 @@
 Runs the exact same n8n_agents activation path as
 routes.personas.update_routing: validates the persona's DeepSeek
 credential, resyncs (creates or updates) the n8n workflow via
-deepseek_n8n_service.resync_workflow_for_persona(), then points every
+conversation_workflow_service.resync_workflow_for_persona(), then points every
 active workflow binding at it. Exists so this switch can be applied from
 the VPS without going through an authenticated HTTP session — the
 same reason configure_whatsapp_hotfix_bindings.py exists as a script
@@ -24,7 +24,7 @@ for path in (API_DIR, ROOT_DIR):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from services import deepseek_n8n_service, supabase_client
+from services import conversation_workflow_service, supabase_client
 
 _KNOWN_MODES = {"deterministic", "n8n_agents", "orquestrador"}
 
@@ -55,7 +55,7 @@ def main() -> None:
                 "(enabled=false ou sem n8n_credential_id)."
             )
         if args.apply:
-            deepseek_config = deepseek_n8n_service.resync_workflow_for_persona(
+            deepseek_config = conversation_workflow_service.resync_workflow_for_persona(
                 persona, deepseek_config,
             )
             supabase_client.save_persona_integration_connection(

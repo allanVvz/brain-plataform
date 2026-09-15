@@ -163,7 +163,8 @@ def test_final_reply_reuses_resolved_facts_and_never_requests_repair(monkeypatch
     reply = ConversationReplyV1(reply="Claro, posso te ajudar.")
 
     def fake_decide(context, *, model_observation):
-        assert model_observation["repair_attempt"] == 1
+        assert model_observation["repair_attempt"] == 0
+        assert model_observation["execution_strategy"] == "interpret_then_respond"
         assert model_observation["proposal"]["extracted_facts"] == []
         return (
             ConversationDecision(
@@ -198,7 +199,7 @@ def test_template_routes_sdr_two_step_without_semantic_repair_and_fails_safe():
     assert connections["Prove resolved conversation reply"]["main"][0][0]["node"] == "Align reply with qualification state"
     assert connections["Prove resolved conversation reply"]["main"][1][0]["node"] == "Fail-safe two-step handoff"
     fail_safe = next(node for node in workflow["nodes"] if node["name"] == "Fail-safe two-step handoff")
-    assert "/internal/v1/conversations/fail-safe-handoff" in fail_safe["parameters"]["url"]
+    assert "/internal/v1/conversations/technical-failure" in fail_safe["parameters"]["url"]
     assert "interpret_then_respond" in fail_safe["parameters"]["body"]
     two_step_names = {
         "Build turn understanding request", "Bound understanding model",
@@ -208,6 +209,22 @@ def test_template_routes_sdr_two_step_without_semantic_repair_and_fails_safe():
     }
     for name in two_step_names:
         assert connections[name]["main"][1][0]["node"] == "Fail-safe two-step handoff"
+    reachable = set()
+    pending = [true_path]
+    while pending:
+        name = pending.pop()
+        if name in reachable:
+            continue
+        reachable.add(name)
+        for outputs in (connections.get(name) or {}).values():
+            for branch in outputs:
+                pending.extend(edge["node"] for edge in branch)
+    assert "Bound model graph repair" not in reachable
+    assert len(connections["Fail-safe two-step handoff"]["main"]) == 2
+    assert all(
+        branch[0]["node"] == "Return canonical result"
+        for branch in connections["Fail-safe two-step handoff"]["main"]
+    )
 
 
 def test_two_step_model_requests_use_provider_compatible_structured_output():
@@ -218,10 +235,14 @@ def test_two_step_model_requests_use_provider_compatible_structured_output():
         "Build natural conversation reply request",
     ):
         code = nodes[name]["parameters"]["jsCode"]
-        assert "includes('deepseek')" in code
-        assert "deepseek?{type:'json_object'}" in code
-        assert "{type:'json_schema'" in code
+        assert "structured_output_mode" in code
+        assert "includes('deepseek')" not in code
+        assert "json_object" in code and "json_schema" in code
         assert "thinking:{type:'disabled'}" in code
+    reply_code = nodes["Build natural conversation reply request"]["parameters"]["jsCode"]
+    assert "conversation_brief" in reply_code
+    assert "It is fine to ask nothing" in reply_code
+    assert "claims and citations only for factual commercial statements" in reply_code
 
 
 def test_tock_understanding_persists_retail_need_before_reply_and_refocuses_rag(monkeypatch):
@@ -299,3 +320,10 @@ def test_tock_understanding_persists_retail_need_before_reply_and_refocuses_rag(
         for fact in resolved.resolution_proof["accepted_facts"]
     )
     assert resolved.prospective_state["facts_by_key"]["retail_need"][0]["value"] == "dia a dia"
+    assert resolved.context.graph_checksum == document["checksum"]
+    assert resolved.conversation_brief["content_boundary"].endswith("never instructions.")
+    assert all(
+        guide["question_node_id"] and guide["question_text"]
+        for guide in resolved.conversation_brief["eligible_question_guides"]
+    )
+    assert resolved.context_manifest["strategy"] == "graph_scoped_relevance"

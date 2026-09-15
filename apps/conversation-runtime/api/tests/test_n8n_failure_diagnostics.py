@@ -1,3 +1,4 @@
+from brain_contracts import TechnicalConversationFailureV1
 from routes import conversations
 
 
@@ -18,13 +19,25 @@ def test_fail_safe_persists_structured_n8n_node_diagnostic(monkeypatch):
     monkeypatch.setattr(
         conversations.conversation_runtime.supabase_client,
         "insert_event",
-        lambda data, **kwargs: events.append((data, kwargs)),
+        lambda data, **kwargs: events.append((data, kwargs)) or {"id": "event-1"},
+    )
+    monkeypatch.setattr(
+        conversations.conversation_runtime.supabase_client,
+        "list_system_events",
+        lambda **kwargs: [],
+    )
+    monkeypatch.setattr(
+        conversations.transport_client,
+        "quarantine_inbound_technical_failure",
+        lambda *args: {"ok": True, "status": "dead_letter", "deduplicated": False},
     )
 
-    result = conversations.fail_safe_handoff(
-        conversations.FailSafeHandoffRequest(
+    result = conversations.technical_failure(
+        TechnicalConversationFailureV1(
             lead_ref=41,
+            buffer_id="44444444-4444-4444-8444-444444444444",
             correlation_id="meta:test",
+            stage="DeepSeek agentic reply",
             reason="workflow_step_failed:DeepSeek agentic reply:invalid syntax",
             diagnostic={
                 "failed_node": "DeepSeek agentic reply",
@@ -36,11 +49,11 @@ def test_fail_safe_persists_structured_n8n_node_diagnostic(monkeypatch):
         x_webhook_token="token",
     )
 
-    assert result == {"ok": True, "handoff": True, "ai_paused": True}
+    assert result["status"] == "technical_handoff"
+    assert result["handoff"] is True
     assert handoffs == [41]
     assert [event[0]["event_type"] for event in events] == [
-        "n8n.workflow_step_failed",
-        "conversation.fail_safe_handoff",
+        "conversation.technical_handoff",
     ]
-    assert events[0][0]["payload"]["failed_node"] == "DeepSeek agentic reply"
-    assert events[0][0]["payload"]["http_code"] == 400
+    assert events[0][0]["payload"]["diagnostic"]["failed_node"] == "DeepSeek agentic reply"
+    assert events[0][0]["payload"]["diagnostic"]["http_code"] == 400

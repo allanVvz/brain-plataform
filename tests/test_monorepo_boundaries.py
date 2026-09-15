@@ -26,11 +26,17 @@ def test_template_has_one_owner() -> None:
 
 
 def test_deployable_apps_do_not_require_deep_repository_parents_at_import_time() -> None:
-    for app in ("control-plane", "conversation-runtime"):
-        source = (
-            ROOT / "apps" / app / "api" / "services" / "deepseek_n8n_service.py"
-        ).read_text(encoding="utf-8")
-        assert "parents[4]" not in source
+    source = (
+        ROOT / "apps/control-plane/api/services/conversation_workflow_service.py"
+    ).read_text(encoding="utf-8")
+    assert "parents[4]" not in source
+    for app in ("conversation-runtime", "transport"):
+        assert not (
+            ROOT / "apps" / app / "api/services/deepseek_n8n_service.py"
+        ).exists()
+        assert not (
+            ROOT / "apps" / app / "api/services/integration_service.py"
+        ).exists()
 
 
 def test_v2_event_is_normalized_to_v3() -> None:

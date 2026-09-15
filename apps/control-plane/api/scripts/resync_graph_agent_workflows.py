@@ -17,7 +17,7 @@ from typing import Any
 API_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(API_ROOT))
 
-from services import deepseek_n8n_service, n8n_client, supabase_client
+from services import conversation_workflow_service, n8n_client, supabase_client
 
 
 def _binding(persona: dict[str, Any], *, require_active: bool) -> dict[str, Any]:
@@ -49,12 +49,20 @@ def _resolved_config(
         "endpoint", metadata.get("model_endpoint") or metadata.get("endpoint")
     )
     config.setdefault("reply_source", metadata.get("reply_source") or config.get("model"))
+    config.setdefault(
+        "structured_output_mode",
+        metadata.get("structured_output_mode") or "json_object",
+    )
     if not config.get("endpoint") and config.get("n8n_workflow_id"):
         workflow = n8n_client.get_workflow(str(config["n8n_workflow_id"])) or {}
         workflow_binding = (workflow.get("meta") or {}).get("binding") or {}
         config.setdefault("endpoint", workflow_binding.get("endpoint"))
+        config["structured_output_mode"] = (
+            workflow_binding.get("structured_output_mode")
+            or config["structured_output_mode"]
+        )
         for node in workflow.get("nodes") or []:
-            if node.get("id") not in {"deepseek", "deepseek_repair"}:
+            if (node.get("meta") or {}).get("credential_binding") != "conversation_model":
                 continue
             live_url = str((node.get("parameters") or {}).get("url") or "").strip()
             if live_url.startswith("https://"):
@@ -88,6 +96,7 @@ def _binding_update(
         "model": result.get("model"),
         "model_endpoint": result.get("endpoint"),
         "reply_source": result.get("reply_source"),
+        "structured_output_mode": result.get("structured_output_mode"),
     })
     supabase_client.get_client().table("workflow_bindings").update({
         "metadata": metadata,
@@ -117,7 +126,7 @@ def run(slugs: list[str], *, active_personas: set[str]) -> list[dict[str, Any]]:
 
     for persona, connection, binding, config, active in prepared:
         slug = str(persona["slug"])
-        synced = deepseek_n8n_service.resync_workflow_for_persona(
+        synced = conversation_workflow_service.resync_workflow_for_persona(
             persona, config, activate_workflow=active
         )
         supabase_client.save_persona_integration_connection({

@@ -327,6 +327,8 @@ class ResolvedUnderstandingV1(StrictModel):
     eligible_fields: list[dict[str, Any]] = Field(default_factory=list)
     missing_fields: list[str] = Field(default_factory=list)
     operational_mode: ConversationOperationalMode = ConversationOperationalMode.COLLECTION
+    conversation_brief: dict[str, Any] = Field(default_factory=dict)
+    context_manifest: dict[str, Any] = Field(default_factory=dict)
     resolution_proof: dict[str, Any] = Field(default_factory=dict)
 
 

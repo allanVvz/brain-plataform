@@ -152,13 +152,9 @@ def test_runtime_technical_failure_is_terminalized_by_transport(monkeypatch):
     monkeypatch.setattr(messages.internal_auth, "authorize_webhook_token", calls.append)
     monkeypatch.setattr(
         messages.supabase_client,
-        "get_whatsapp_buffer",
-        lambda value: {"id": value, "direction": "inbound", "lead_ref": 42},
-    )
-    monkeypatch.setattr(
-        messages.supabase_client,
-        "complete_whatsapp_buffer",
-        lambda value, status, error=None: calls.append((value, status, error)),
+        "terminalize_inbound_technical_failure",
+        lambda value, lead_ref, error: calls.append((value, lead_ref, error))
+        or {"status": "dead_letter", "deduplicated": False},
     )
 
     result = messages.quarantine_inbound_technical_failure_internal(
@@ -172,7 +168,7 @@ def test_runtime_technical_failure_is_terminalized_by_transport(monkeypatch):
     assert result["status"] == "dead_letter"
     assert calls == [
         "internal-token",
-        (str(buffer_id), "dead_letter", "graph context unavailable"),
+        (str(buffer_id), 42, "graph context unavailable"),
     ]
 
 
@@ -203,7 +199,8 @@ def test_transport_repository_contains_only_the_reviewed_production_surface():
         for node in tree.body
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
-    assert len(functions) == 73
+    assert len(functions) == 74
+    assert "terminalize_inbound_technical_failure" in functions
     assert {
         "claim_conversation_commit",
         "enqueue_wa_validator_session",

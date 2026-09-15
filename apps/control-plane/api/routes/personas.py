@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict
 
 from schemas.persona import PersonaCreate, PersonaUpdate
 from services import public_site
-from services import auth_service, deepseek_n8n_service, supabase_client, vault_sync
+from services import auth_service, conversation_workflow_service, supabase_client, vault_sync
 
 router = APIRouter(prefix="/personas", tags=["personas"])
 logger = logging.getLogger("personas")
@@ -360,10 +360,10 @@ def update_routing(slug: str, body: RoutingUpdate, request: Request):
                     409,
                     "Ative uma publicacao GraphRAG v3 consistente antes de ativar o modelo.",
                 )
-            deepseek_config = deepseek_n8n_service.resync_workflow_for_persona(
+            deepseek_config = conversation_workflow_service.resync_workflow_for_persona(
                 full_persona, deepseek_config,
             )
-            workflow_check = deepseek_n8n_service.check_workflow_wiring(
+            workflow_check = conversation_workflow_service.check_workflow_wiring(
                 deepseek_config
             )
             supabase_client.insert_event(
@@ -438,10 +438,10 @@ def update_routing(slug: str, body: RoutingUpdate, request: Request):
                     "persona_id": binding.get("persona_id") or current.get("id"),
                     "metadata": metadata,
                 }
-                binding_check = deepseek_n8n_service.check_binding(
+                binding_check = conversation_workflow_service.check_binding(
                     persona=full_persona,
                     binding=effective_binding,
-                    deepseek_config=deepseek_config,
+                    model_config=deepseek_config,
                     n8n_base_url=n8n_base,
                 )
                 supabase_client.insert_event(

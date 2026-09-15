@@ -2,13 +2,14 @@ import json
 
 import pytest
 
-from services import deepseek_n8n_service
+from services import conversation_workflow_service as deepseek_n8n_service
 
 
 MODEL_BINDING = {
     "model": "fixture-model",
     "endpoint": "https://models.example.test/chat/completions",
     "reply_source": "fixture-model",
+    "structured_output_mode": "json_object",
 }
 
 
@@ -63,6 +64,46 @@ def test_every_persona_uses_the_same_graph_agentic_template():
             for node in model_nodes
         )
         assert "__MODEL_CREDENTIAL_ID__" not in str(model_nodes)
+        assert all(
+            node["meta"]["credential_binding"] == "conversation_model"
+            for node in model_nodes
+        )
+        assert "includes('deepseek')" not in str(workflow)
+        assert "__STRUCTURED_OUTPUT_MODE__" not in str(workflow)
+
+
+def test_structured_output_capability_is_declared_not_inferred():
+    workflow = deepseek_n8n_service._workflow_for_persona(
+        {"id": "p-1", "slug": "generic", "name": "Generic"},
+        credential_id="cred-1",
+        credential_name="Conversation model",
+        model_binding={**MODEL_BINDING, "structured_output_mode": "json_schema"},
+    )
+    assert workflow["meta"]["binding"]["structured_output_mode"] == "json_schema"
+    request_nodes = [
+        node for node in workflow["nodes"]
+        if (node.get("meta") or {}).get("model_call_stage")
+        in {"understanding", "reply"}
+    ]
+    assert request_nodes
+    assert "includes('deepseek')" not in str(workflow)
+
+
+def test_unknown_structured_output_capability_is_rejected():
+    with pytest.raises(ValueError, match="structured_output_mode"):
+        deepseek_n8n_service._workflow_for_persona(
+            {"id": "p-1", "slug": "generic", "name": "Generic"},
+            credential_id="cred-1",
+            credential_name="Conversation model",
+            model_binding={**MODEL_BINDING, "structured_output_mode": "automatic"},
+        )
+
+
+def test_unresolved_technical_placeholder_is_rejected():
+    with pytest.raises(ValueError, match="unresolved workflow placeholder"):
+        deepseek_n8n_service._assert_no_placeholders(
+            {"binding": {"credential": "__MISSING_BINDING__"}}
+        )
 
 
 def test_canonical_template_connections_resolve_to_published_node_names():
@@ -373,7 +414,7 @@ def test_check_workflow_wiring_ok_when_workflow_active_and_credential_matches(mo
     )
     assert result["ok"] is True
     assert result["reason"] is None
-    assert result["diagnostics"]["checks"]["required_nodes"] is True
+    assert result["diagnostics"]["checks"]["model_stages"] is True
 
 
 def test_check_workflow_wiring_fails_when_workflow_deleted(monkeypatch):

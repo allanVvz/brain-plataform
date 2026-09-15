@@ -10,7 +10,7 @@ import gspread
 import httpx
 from google.oauth2.service_account import Credentials
 
-from services import deepseek_n8n_service, n8n_client, secret_store, supabase_client
+from services import conversation_workflow_service, n8n_client, secret_store, supabase_client
 from utils.tls import get_ca_bundle_path
 
 CATALOG: list[dict[str, Any]] = [
@@ -199,14 +199,22 @@ def _normalize_llm_api_key_payload(service: str, payload: dict[str, Any]) -> tup
         or "https://api.deepseek.com/chat/completions"
     ).strip()
     reply_source = str(payload.get("reply_source") or model).strip()
+    structured_output_mode = str(
+        payload.get("structured_output_mode") or "json_object"
+    ).strip()
     if not model or not endpoint.startswith("https://"):
         raise IntegrationValidationError(
             "DeepSeek model binding requires model and HTTPS endpoint."
+        )
+    if structured_output_mode not in {"json_object", "json_schema"}:
+        raise IntegrationValidationError(
+            "structured_output_mode must be json_object or json_schema."
         )
     return api_key, {
         "model": model,
         "endpoint": endpoint,
         "reply_source": reply_source,
+        "structured_output_mode": structured_output_mode,
     }
 
 
@@ -660,7 +668,7 @@ def save_persona_integration(
         validate_deepseek(secret_value, model=model_binding.get("model"))
         persona = supabase_client.get_persona_by_id(persona_id) or {}
         try:
-            config_json = deepseek_n8n_service.provision(
+            config_json = conversation_workflow_service.provision(
                 persona=persona,
                 api_key=secret_value,
                 previous_config=existing.get("config_json") or {},
@@ -744,7 +752,7 @@ def validate_persona_integration(
             raise IntegrationValidationError("DeepSeek is not provisioned in n8n.")
         if not ok:
             raise IntegrationValidationError("n8n is unavailable.")
-        wiring = deepseek_n8n_service.check_workflow_wiring(existing.get("config_json") or {})
+        wiring = conversation_workflow_service.check_workflow_wiring(existing.get("config_json") or {})
         if not wiring["ok"]:
             existing["status"] = "error"
             existing["last_error"] = wiring["reason"]
@@ -829,7 +837,7 @@ def delete_persona_credentials(
             supabase_client.get_persona_integration_connection(persona_id, service)
             or {}
         )
-        deepseek_n8n_service.revoke(existing.get("config_json") or {})
+        conversation_workflow_service.revoke(existing.get("config_json") or {})
     supabase_client.save_persona_integration_connection(
         {
             "persona_id": persona_id,

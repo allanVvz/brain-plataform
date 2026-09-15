@@ -4,7 +4,13 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from brain_contracts import BuildHealth, CanonicalInboundEnvelope, InternalPrincipalClaims
+from brain_contracts import (
+    BuildHealth,
+    CanonicalConversationResultV1,
+    CanonicalInboundEnvelope,
+    InternalPrincipalClaims,
+    TechnicalConversationFailureV1,
+)
 
 
 def test_internal_claims_are_strict_and_immutable():
@@ -34,3 +40,29 @@ def test_inbound_v2_is_normalized_to_canonical_v3_identity():
     )
     assert envelope.contract_version == "2"
     assert envelope.canonical_inbound_id == "inbound-1"
+
+
+def test_technical_failure_and_result_are_strict_versioned_envelopes():
+    command = TechnicalConversationFailureV1(
+        lead_ref=1,
+        buffer_id="buffer-1",
+        correlation_id="correlation-1",
+        stage="reply_model",
+        reason="invalid_json",
+        diagnostic={"failed_node": "reply", "authorization": "Bearer secret"},
+    )
+    result = CanonicalConversationResultV1(
+        ok=False,
+        status="technical_handoff",
+        correlation_id=command.correlation_id,
+        buffer_id=command.buffer_id,
+        technical_failure=True,
+        handoff=True,
+        ai_paused=True,
+        terminalization_status="dead_letter",
+    )
+    assert command.contract_version == "technical_conversation_failure_v1"
+    assert command.diagnostic == {"failed_node": "reply"}
+    assert result.outbound_enqueued is False
+    with pytest.raises(ValidationError):
+        TechnicalConversationFailureV1(**command.model_dump(), secret="no")

@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ContractModel(BaseModel):
@@ -92,6 +92,63 @@ class OutboundEnvelope(ContractModel):
     lead_ref: str
     channel_binding_id: UUID
     content: dict[str, Any]
+
+
+class TechnicalConversationFailureV1(ContractModel):
+    """Sanitized command used to terminalize one failed conversation turn."""
+
+    contract_version: Literal["technical_conversation_failure_v1"] = (
+        "technical_conversation_failure_v1"
+    )
+    lead_ref: int = Field(gt=0)
+    buffer_id: str = Field(min_length=1)
+    correlation_id: str = Field(min_length=1)
+    stage: str = Field(min_length=1, max_length=100)
+    reason: str = Field(min_length=1, max_length=1000)
+    diagnostic: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("diagnostic", mode="before")
+    @classmethod
+    def _sanitize_diagnostic(cls, value: Any) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            return {}
+        allowed = {
+            "workflow_template",
+            "execution_strategy",
+            "failed_node",
+            "message",
+            "http_code",
+        }
+        sanitized: dict[str, Any] = {}
+        for key in allowed:
+            if key not in value:
+                continue
+            item = value.get(key)
+            if isinstance(item, str):
+                sanitized[key] = item[:1000]
+            elif isinstance(item, (int, float, bool)) or item is None:
+                sanitized[key] = item
+        return sanitized
+
+
+class CanonicalConversationResultV1(ContractModel):
+    """Small webhook result; failures never masquerade as customer replies."""
+
+    contract_version: Literal["canonical_conversation_result_v1"] = (
+        "canonical_conversation_result_v1"
+    )
+    ok: bool
+    status: Literal[
+        "committed", "technical_handoff", "technical_failure_unconfirmed"
+    ]
+    correlation_id: str = Field(min_length=1)
+    buffer_id: str | None = None
+    technical_failure: bool = False
+    handoff: bool = False
+    ai_paused: bool = False
+    outbound_enqueued: bool = False
+    terminalization_status: str | None = None
+    error: str | None = None
 
 
 class InternalPrincipalClaims(ContractModel):

@@ -1209,6 +1209,41 @@ def complete_whatsapp_buffer(buffer_id: str, status: str, error: str | None = No
                 )
 
 
+def terminalize_inbound_technical_failure(
+    buffer_id: str, *, lead_ref: int, error: str
+) -> dict[str, Any]:
+    """CAS one inbound into dead_letter; retries observe the existing result."""
+    from datetime import datetime, timezone
+
+    row = get_whatsapp_buffer(buffer_id) or {}
+    if (
+        not row.get("id")
+        or row.get("direction") != "inbound"
+        or int(row.get("lead_ref") or 0) != lead_ref
+    ):
+        raise LookupError("Inbound nao encontrado")
+    current = str(row.get("status") or "")
+    if current == "dead_letter":
+        return {"status": current, "deduplicated": True}
+    if current not in {"waiting", "processing", "retry"}:
+        raise RuntimeError(f"Inbound ja terminalizado como {current or 'unknown'}")
+    result = _execute_with_retry(
+        get_client().table("lead_buffer").update({
+            "status": "dead_letter",
+            "last_error": error[:1000],
+            "locked_at": None,
+            "locked_by": None,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", buffer_id).eq("status", current)
+    )
+    if not (getattr(result, "data", None) or []):
+        latest = get_whatsapp_buffer(buffer_id) or {}
+        if str(latest.get("status") or "") == "dead_letter":
+            return {"status": "dead_letter", "deduplicated": True}
+        raise RuntimeError("Inbound technical-failure CAS conflict")
+    return {"status": "dead_letter", "deduplicated": False}
+
+
 def release_whatsapp_buffer(buffer_id: str, status: str, *, delay_seconds: int, error: str | None, decrement_attempt: bool = False) -> None:
     from datetime import datetime, timedelta, timezone
     payload = {

@@ -368,20 +368,18 @@ def quarantine_inbound_technical_failure_internal(
 ) -> dict:
     """Terminalize one failed inbound under transport data ownership."""
     internal_auth.authorize_webhook_token(x_webhook_token)
-    row = supabase_client.get_whatsapp_buffer(str(buffer_id)) or {}
-    if (
-        not row.get("id")
-        or row.get("direction") != "inbound"
-        or int(row.get("lead_ref") or 0) != body.lead_ref
-    ):
-        raise HTTPException(404, "Inbound nao encontrado")
     error = body.error.strip()
     if not error:
         raise HTTPException(422, "Motivo tecnico vazio")
-    supabase_client.complete_whatsapp_buffer(
-        str(buffer_id), "dead_letter", error=error[:1000]
-    )
-    return {"ok": True, "buffer_id": str(buffer_id), "status": "dead_letter"}
+    try:
+        result = supabase_client.terminalize_inbound_technical_failure(
+            str(buffer_id), lead_ref=body.lead_ref, error=error
+        )
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {"ok": True, "buffer_id": str(buffer_id), **result}
 
 
 def _resolve_scope_lead_refs(

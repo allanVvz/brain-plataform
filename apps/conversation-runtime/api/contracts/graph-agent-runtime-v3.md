@@ -31,6 +31,12 @@ IA, sem chamada de reparo nem fallback publico fabricado. `single_pass`
 permanece como compatibilidade por papel. O teste-canario de fronteira e
 obrigatorio em toda mudanca.
 
+A integracao do modelo declara `structured_output_mode` como capacidade
+tecnica (`json_object` ou `json_schema`). O provisionamento nao infere
+capacidade pelo nome do modelo, endpoint ou persona. Cada node que chama o
+modelo declara `meta.credential_binding=conversation_model` e seu
+`model_call_stage`; IDs de nodes nao fazem parte do contrato de credenciais.
+
 Descricoes historicas abaixo sobre FAQ unica, primeira pergunta, resumo
 terminal, escada publicada ou fallback textual aplicam-se somente ao motor
 `deterministic` e nao sao normativas para `n8n_agents`.
@@ -107,9 +113,13 @@ e motivo `ignored_twice`. “Não sei” explícito pode gerar `unknown`
 imediatamente. `collection_complete` encerra a coleta; `qualification_complete`
 só é verdadeiro quando todos os campos obrigatórios são conhecidos.
 
-Falha técnica não produz copy nem handoff. Handoff só é válido por regra do
-contrato compilado. Claims usam apenas evidência autorizada. Mudanças de
-publicação invalidam fatos incompatíveis antes do próximo commit.
+Falha técnica no modo `n8n_agents` não produz copy nem outbound. Ela
+terminaliza o inbound por CAS, pausa a IA, registra exatamente um handoff
+técnico idempotente e devolve um resultado canônico, inclusive quando a
+orquestração da falha não pode ser confirmada. Handoff comercial continua
+válido somente por regra do contrato compilado. Claims usam apenas evidência
+autorizada. Mudanças de publicação invalidam fatos incompatíveis antes do
+próximo commit.
 
 ## Projeção e auditoria
 

@@ -3,7 +3,7 @@ import time
 import httpx
 from datetime import datetime, timezone
 from workers.base_worker import BaseWorker
-from services import integration_service, supabase_client, n8n_client, sre_logger
+from services import supabase_client, n8n_client, sre_logger
 from utils.tls import get_ca_bundle_path
 
 
@@ -20,7 +20,7 @@ class HealthCheckWorker(BaseWorker):
         ]
         results = {}
         for service, fn in checks:
-            if not integration_service.system_service_has_runtime_credentials(service):
+            if not self._has_runtime_credentials(service):
                 results[service] = "unknown"
                 try:
                     supabase_client.upsert_integration_status({
@@ -56,6 +56,16 @@ class HealthCheckWorker(BaseWorker):
 
         summary = " | ".join(f"{s}={v}" for s, v in results.items())
         sre_logger.info(self.name, f"health: {summary}")
+
+    @staticmethod
+    def _has_runtime_credentials(service: str) -> bool:
+        required = {
+            "n8n": ("N8N_BASE_URL", "N8N_API_KEY"),
+            "supabase": ("SUPABASE_URL", "BRAIN_DB_JWT"),
+            "openai": ("OPENAI_API_KEY",),
+            "anthropic": ("ANTHROPIC_API_KEY",),
+        }
+        return all((os.environ.get(key) or "").strip() for key in required.get(service, ()))
 
     def _check_supabase(self) -> tuple[bool, int]:
         t0 = time.monotonic()

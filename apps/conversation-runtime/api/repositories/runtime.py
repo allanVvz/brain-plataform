@@ -3182,7 +3182,7 @@ def list_contact_consents(
 # Columns that exist in the physical system_events BASE TABLE.
 # Any key not in this set is silently dropped before insert to prevent PGRST204.
 _SYSTEM_EVENTS_COLUMNS = frozenset({
-    "event_type", "entity_type", "entity_id",
+    "id", "event_type", "entity_type", "entity_id",
     "persona_id", "payload", "level", "source",
 })
 

@@ -2,8 +2,13 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import NAMESPACE_URL, uuid5
 
 from fastapi import APIRouter, Header, HTTPException
+from brain_contracts import (
+    CanonicalConversationResultV1,
+    TechnicalConversationFailureV1,
+)
 from pydantic import Field, field_validator, model_validator
 
 from schemas.conversation import (
@@ -104,6 +109,7 @@ class ResolveUnderstandingRequest(StrictModel):
     understanding: TurnUnderstandingV1
     trace_id: str | None = None
     lead_ref: int | None = None
+    token_usage: dict[str, Any] = Field(default_factory=dict)
 
 
 class CommitRequest(StrictModel):
@@ -124,14 +130,6 @@ class FailSafeHandoffRequest(StrictModel):
     correlation_id: str
     diagnostic: dict[str, Any] = Field(default_factory=dict)
     trace_id: str | None = None
-
-
-class TechnicalFailureRequest(StrictModel):
-    lead_ref: int
-    buffer_id: str
-    reason: str
-    correlation_id: str
-    diagnostic: dict[str, Any] = Field(default_factory=dict)
 
 
 class ExecuteRequest(StrictModel):
@@ -229,6 +227,7 @@ def resolve_understanding(
             understanding=body.understanding,
             trace_id=body.trace_id,
             lead_ref=body.lead_ref,
+            token_usage=body.token_usage,
         )
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(409, str(exc)) from exc
@@ -271,83 +270,111 @@ def fail_safe_handoff(
     body: FailSafeHandoffRequest,
     x_webhook_token: str | None = Header(None, alias="X-Webhook-Token"),
 ) -> dict:
+    """Compatibility route for workflows published before the v1 envelope."""
     internal_auth.authorize_webhook_token(x_webhook_token)
-    lead = conversation_runtime.supabase_client.get_lead_by_ref(body.lead_ref) or {}
-    conversation_runtime.supabase_client.handoff_whatsapp_lead(body.lead_ref)
-    if body.diagnostic:
-        conversation_runtime.supabase_client.insert_event(
-            {
-                "event_type": "n8n.workflow_step_failed",
-                "entity_type": "lead",
-                "entity_id": str(body.lead_ref),
-                "persona_id": lead.get("persona_id"),
-                "payload": {
-                    "lead_ref": body.lead_ref,
-                    "correlation_id": body.correlation_id,
-                    "trace_id": body.trace_id,
-                    **body.diagnostic,
-                },
-            },
-            level="error",
-            source="routes.conversations",
-        )
-    conversation_runtime.supabase_client.insert_event(
-        {
-            "event_type": "conversation.fail_safe_handoff",
-            "entity_type": "lead",
-            "entity_id": str(body.lead_ref),
-            "persona_id": lead.get("persona_id"),
-            "payload": {**body.model_dump(), "trace_id": body.trace_id},
-        },
-        level="error",
-        source="routes.conversations",
-    )
-    conversation_runtime.emit_turn_event(
-        agent_name="conversation.error",
-        trace_id=body.trace_id,
+    if not body.trace_id:
+        return CanonicalConversationResultV1(
+            ok=False,
+            status="technical_failure_unconfirmed",
+            correlation_id=body.correlation_id,
+            technical_failure=True,
+            error="legacy fail-safe request has no inbound buffer identity",
+        ).model_dump(mode="json")
+    command = TechnicalConversationFailureV1(
         lead_ref=body.lead_ref,
-        persona_id=lead.get("persona_id"),
-        status="error",
-        error_msg=body.reason[:1000],
-        metadata={"conversation_id": body.lead_ref, "step": "fail_safe_handoff"},
+        buffer_id=body.trace_id,
+        correlation_id=body.correlation_id,
+        stage=str(body.diagnostic.get("failed_node") or "legacy_workflow"),
+        reason=body.reason,
+        diagnostic=body.diagnostic,
     )
-    return {"ok": True, "handoff": True, "ai_paused": True}
+    return _terminalize_technical_failure(command)
 
 
 @router.post("/technical-failure")
 def technical_failure(
-    body: TechnicalFailureRequest,
+    body: TechnicalConversationFailureV1,
     x_webhook_token: str | None = Header(None, alias="X-Webhook-Token"),
 ) -> dict:
-    """Quarantine a failed turn without inventing a commercial handoff."""
+    """Terminalize one failed turn and request one technical handoff."""
     internal_auth.authorize_webhook_token(x_webhook_token)
+    return _terminalize_technical_failure(body)
+
+
+def _terminalize_technical_failure(
+    body: TechnicalConversationFailureV1,
+) -> dict[str, Any]:
+    """Best-effort orchestration with a truthful, non-public result envelope."""
     lead = conversation_runtime.supabase_client.get_lead_by_ref(body.lead_ref) or {}
-    transport_client.quarantine_inbound_technical_failure(
-        body.buffer_id, body.lead_ref, body.reason[:1000]
-    )
-    conversation_runtime.supabase_client.insert_event(
-        {
-            "event_type": "conversation.technical_failure",
-            "entity_type": "lead",
-            "entity_id": str(body.lead_ref),
-            "persona_id": lead.get("persona_id"),
-            "payload": {**body.model_dump(), "trace_id": body.buffer_id},
-        },
-        level="error",
-        source="routes.conversations",
-    )
-    conversation_runtime.emit_turn_event(
-        agent_name="conversation.error",
-        trace_id=body.buffer_id,
-        lead_ref=body.lead_ref,
-        persona_id=lead.get("persona_id"),
-        status="error",
-        error_msg=body.reason[:1000],
-        metadata={"conversation_id": body.lead_ref, "step": "technical_failure"},
-    )
-    return {
-        "ok": False,
-        "technical_failure": True,
-        "handoff": False,
-        "ai_paused": bool(lead.get("ai_paused")),
-    }
+    failures: list[str] = []
+    terminalization: dict[str, Any] = {}
+    try:
+        terminalization = transport_client.quarantine_inbound_technical_failure(
+            body.buffer_id, body.lead_ref, body.reason
+        )
+    except Exception as exc:  # The webhook must still receive canonical JSON.
+        failures.append(f"terminalization:{type(exc).__name__}")
+    try:
+        conversation_runtime.supabase_client.handoff_whatsapp_lead(body.lead_ref)
+    except Exception as exc:
+        failures.append(f"handoff:{type(exc).__name__}")
+    try:
+        event_id = str(
+            uuid5(
+                NAMESPACE_URL,
+                f"brain-ai:conversation.technical_handoff:{body.buffer_id}",
+            )
+        )
+        existing = conversation_runtime.supabase_client.list_system_events(
+            entity_type="lead_buffer",
+            entity_id=body.buffer_id,
+            event_types=["conversation.technical_handoff"],
+            limit=1,
+        )
+        if not existing:
+            inserted = conversation_runtime.supabase_client.insert_event(
+                {
+                    "id": event_id,
+                    "event_type": "conversation.technical_handoff",
+                    "entity_type": "lead_buffer",
+                    "entity_id": body.buffer_id,
+                    "persona_id": lead.get("persona_id"),
+                    "payload": body.model_dump(mode="json"),
+                },
+                level="error",
+                source="routes.conversations",
+            )
+            if inserted is None:
+                # A concurrent retry may have won the deterministic event ID.
+                existing = conversation_runtime.supabase_client.list_system_events(
+                    entity_type="lead_buffer",
+                    entity_id=body.buffer_id,
+                    event_types=["conversation.technical_handoff"],
+                    limit=1,
+                )
+                if not existing:
+                    raise RuntimeError("technical handoff audit was not persisted")
+        conversation_runtime.emit_turn_event(
+            agent_name="conversation.error",
+            trace_id=body.buffer_id,
+            lead_ref=body.lead_ref,
+            persona_id=lead.get("persona_id"),
+            status="error",
+            error_msg=body.reason,
+            metadata={"conversation_id": body.lead_ref, "step": body.stage},
+        )
+    except Exception as exc:
+        failures.append(f"audit:{type(exc).__name__}")
+    confirmed = not failures
+    return CanonicalConversationResultV1(
+        ok=False,
+        status="technical_handoff" if confirmed else "technical_failure_unconfirmed",
+        correlation_id=body.correlation_id,
+        buffer_id=body.buffer_id,
+        technical_failure=True,
+        handoff=confirmed,
+        ai_paused=confirmed,
+        outbound_enqueued=False,
+        terminalization_status=terminalization.get("status"),
+        error=";".join(failures) or None,
+    ).model_dump(mode="json")

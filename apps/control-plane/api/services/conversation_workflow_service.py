@@ -1,9 +1,10 @@
-"""Provision a persona-scoped DeepSeek credential and canonical n8n workflow."""
+"""Provision one persona-scoped model credential and canonical n8n workflow."""
 from __future__ import annotations
 
 import hashlib
 import json
 import os
+import re
 import uuid
 from pathlib import Path
 from typing import Any
@@ -33,12 +34,31 @@ def _resolve_conversation_template_path() -> Path:
 
 _TEMPLATE = _resolve_conversation_template_path()
 _TEMPLATE_VERSION = "graph_agentic_v3"
-_REQUIRED_NODE_IDS = {
-    "inbound", "binding", "context", "policy", "model_request",
-    "deepseek", "model_response", "reconcile", "repair_gate",
-    "repair_request", "deepseek_repair", "repair_response",
-    "repair_reconcile", "final_response", "commit", "failsafe", "respond",
-}
+_STRUCTURED_OUTPUT_MODES = {"json_object", "json_schema"}
+_REQUIRED_MODEL_STAGES = {"understanding", "reply", "single_pass", "repair"}
+_PLACEHOLDER_PATTERN = re.compile(r"__[A-Z][A-Z0-9_]*__")
+
+
+def _credential_bound_nodes(workflow: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return nodes that explicitly opt into the conversation-model credential."""
+    return [
+        node
+        for node in workflow.get("nodes") or []
+        if (node.get("meta") or {}).get("credential_binding")
+        == "conversation_model"
+    ]
+
+
+def _assert_no_placeholders(value: Any, *, path: str = "workflow") -> None:
+    """Fail provisioning before literal template bindings can reach n8n."""
+    if isinstance(value, str) and _PLACEHOLDER_PATTERN.search(value):
+        raise ValueError(f"unresolved workflow placeholder at {path}")
+    if isinstance(value, dict):
+        for key, child in value.items():
+            _assert_no_placeholders(child, path=f"{path}.{key}")
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            _assert_no_placeholders(child, path=f"{path}[{index}]")
 
 
 def _validate_workflow_topology(workflow: dict[str, Any]) -> None:
@@ -64,6 +84,16 @@ def _validate_workflow_topology(workflow: dict[str, Any]) -> None:
                             "conversation workflow connection target is missing: "
                             f"{source_name} -> {target_name or '<empty>'}"
                         )
+    stages = {
+        str((node.get("meta") or {}).get("model_call_stage") or "")
+        for node in _credential_bound_nodes(workflow)
+    }
+    missing_stages = sorted(_REQUIRED_MODEL_STAGES - stages)
+    if missing_stages:
+        raise ValueError(
+            "conversation workflow is missing model stages: "
+            + ", ".join(missing_stages)
+        )
 
 
 def _workflow_checksum(workflow: dict[str, Any]) -> str:
@@ -99,7 +129,7 @@ def _emit(
             **(payload or {}),
         },
         level=level,
-        source="services.deepseek_n8n_service",
+        source="services.conversation_workflow_service",
     )
 
 
@@ -123,8 +153,13 @@ def _workflow_for_persona(
     model = str(configured_model.get("model") or "").strip()
     endpoint = str(configured_model.get("endpoint") or "").strip()
     reply_source = str(configured_model.get("reply_source") or model).strip()
+    structured_output_mode = str(
+        configured_model.get("structured_output_mode") or "json_object"
+    ).strip()
     if not model or not endpoint.startswith("https://"):
         raise ValueError("conversation model binding requires model and HTTPS endpoint")
+    if structured_output_mode not in _STRUCTURED_OUTPUT_MODES:
+        raise ValueError("unsupported structured_output_mode")
     template = json.loads(_TEMPLATE.read_text(encoding="utf-8"))
     webhook_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"brain-ai:{slug}:conversation"))
     serialized = json.dumps(template, ensure_ascii=False)
@@ -136,19 +171,18 @@ def _workflow_for_persona(
         "__MODEL__": model,
         "__MODEL_ENDPOINT__": endpoint,
         "__REPLY_SOURCE__": reply_source,
+        "__STRUCTURED_OUTPUT_MODE__": structured_output_mode,
     }.items():
         serialized = serialized.replace(placeholder, value)
     workflow = json.loads(serialized)
-    _validate_workflow_topology(workflow)
     workflow["active"] = False
-    for node in workflow.get("nodes") or []:
-        if node.get("id") in {"deepseek", "deepseek_repair"} or "httpHeaderAuth" in (node.get("credentials") or {}):
-            node["credentials"] = {
-                "httpHeaderAuth": {
-                    "id": credential_id,
-                    "name": credential_name,
-                }
+    for node in _credential_bound_nodes(workflow):
+        node["credentials"] = {
+            "httpHeaderAuth": {
+                "id": credential_id,
+                "name": credential_name,
             }
+        }
     workflow.setdefault("settings", {})
     workflow.setdefault("meta", {})
     workflow["meta"]["binding"] = {
@@ -162,7 +196,10 @@ def _workflow_for_persona(
         "model_required": True,
         "model": model,
         "endpoint": endpoint,
+        "structured_output_mode": structured_output_mode,
     }
+    _validate_workflow_topology(workflow)
+    _assert_no_placeholders(workflow)
     return workflow
 
 
@@ -175,7 +212,7 @@ def provision(
 ) -> dict[str, Any]:
     previous = dict(previous_config or {})
     slug = str(persona.get("slug") or "")
-    credential_name = f"Brain DeepSeek — {slug}"
+    credential_name = f"Brain Conversation Model — {slug}"
     step = "create_credential"
     credential_id = ""
     _emit(persona, "n8n.workflow_provision.started")
@@ -198,12 +235,16 @@ def provision(
             **{
                 key: value
                 for key, value in previous.items()
-                if key in {"model", "endpoint", "reply_source"} and value
+                if key in {
+                    "model", "endpoint", "reply_source", "structured_output_mode"
+                } and value
             },
             **{
                 key: value
                 for key, value in dict(model_binding or {}).items()
-                if key in {"model", "endpoint", "reply_source"} and value
+                if key in {
+                    "model", "endpoint", "reply_source", "structured_output_mode"
+                } and value
             },
         }
         workflow = _workflow_for_persona(
@@ -256,6 +297,7 @@ def provision(
         "model": workflow["meta"]["binding"]["model"],
         "endpoint": workflow["meta"]["binding"]["endpoint"],
         "reply_source": workflow["meta"]["binding"]["reply_source"],
+        "structured_output_mode": workflow["meta"]["binding"]["structured_output_mode"],
         "fingerprint": hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:12],
         "persona_id": str(persona.get("id") or ""),
         "persona_slug": slug,
@@ -278,12 +320,12 @@ def provision(
 
 def resync_workflow_for_persona(
     persona: dict[str, Any],
-    deepseek_config: dict[str, Any],
+    model_config: dict[str, Any],
     *,
     activate_workflow: bool = True,
 ) -> dict[str, Any]:
     """Rebuild this persona's n8n workflow from the current template/graph
-    and publish it, reusing the DeepSeek credential already provisioned —
+    and publish it, reusing the model credential already provisioned —
     creating the workflow if it doesn't exist yet.
 
     Called whenever the operator switches (or re-confirms) n8n_agents mode
@@ -291,7 +333,7 @@ def resync_workflow_for_persona(
     disk without a manual SSH resync — the same steps that were previously
     run by hand for every persona-level change.
 
-    The credential is only ever reused, never recreated: once a DeepSeek
+    The credential is only ever reused, never recreated: once a model
     key is saved, its raw value isn't retrievable from our own storage
     again (the only place it still lives is inside the n8n credential
     object itself), so a genuinely first-time setup — no credential at all
@@ -305,12 +347,12 @@ def resync_workflow_for_persona(
     path) filled in, so the caller can persist it back onto the persona's
     integration record.
     """
-    credential_id = str(deepseek_config.get("n8n_credential_id") or "")
+    credential_id = str(model_config.get("n8n_credential_id") or "")
     if not credential_id:
-        raise RuntimeError("DeepSeek nao provisionado para esta persona")
-    credential_name = f"Brain DeepSeek — {persona.get('slug') or ''}"
+        raise RuntimeError("Modelo de conversa nao provisionado para esta persona")
+    credential_name = f"Brain Conversation Model — {persona.get('slug') or ''}"
     step = "render_template"
-    workflow_id = str(deepseek_config.get("n8n_workflow_id") or "")
+    workflow_id = str(model_config.get("n8n_workflow_id") or "")
     _emit(
         persona,
         "n8n.workflow_resync.started",
@@ -322,9 +364,10 @@ def resync_workflow_for_persona(
             credential_id=credential_id,
             credential_name=credential_name,
             model_binding={
-                "model": deepseek_config.get("model"),
-                "endpoint": deepseek_config.get("endpoint"),
-                "reply_source": deepseek_config.get("reply_source"),
+                "model": model_config.get("model"),
+                "endpoint": model_config.get("endpoint"),
+                "reply_source": model_config.get("reply_source"),
+                "structured_output_mode": model_config.get("structured_output_mode"),
             },
         )
         workflow_checksum = _workflow_checksum(workflow)
@@ -355,7 +398,7 @@ def resync_workflow_for_persona(
         raise
     slug = str(persona.get("slug") or "")
     result = {
-        **deepseek_config,
+        **model_config,
         "n8n_workflow_id": workflow_id,
         "conversation_webhook_path": f"{slug}/conversation",
         "persona_id": str(persona.get("id") or ""),
@@ -379,12 +422,12 @@ def resync_workflow_for_persona(
     return result
 
 
-def check_workflow_wiring(deepseek_config: dict[str, Any]) -> dict[str, Any]:
+def check_workflow_wiring(model_config: dict[str, Any]) -> dict[str, Any]:
     """Ask n8n whether the persona's workflow still exists and still points
     at the credential id we have on file.
 
     This is the strongest check available without either exposing the raw
-    DeepSeek key or triggering a live execution: n8n's public API has no
+    provider key or triggering a live execution: n8n's public API has no
     read endpoint for credentials themselves (GET by id and list both
     return 405 — deliberately, credentials are write-only over the API).
     So a workflow node can keep referencing a credential id that was
@@ -396,17 +439,17 @@ def check_workflow_wiring(deepseek_config: dict[str, Any]) -> dict[str, Any]:
     workflow and reading n8n's execution error — there is no safe way to
     detect it proactively without that side effect.
     """
-    workflow_id = str(deepseek_config.get("n8n_workflow_id") or "")
-    credential_id = str(deepseek_config.get("n8n_credential_id") or "")
+    workflow_id = str(model_config.get("n8n_workflow_id") or "")
+    credential_id = str(model_config.get("n8n_credential_id") or "")
     diagnostics: dict[str, Any] = {
         "workflow_id": workflow_id or None,
-        "template": deepseek_config.get("workflow_template") or None,
+        "template": model_config.get("workflow_template") or None,
         "checks": {},
     }
     if not workflow_id or not credential_id:
         return {
             "ok": False,
-            "reason": "DeepSeek nao provisionado (sem workflow ou credential id).",
+            "reason": "Modelo de conversa nao provisionado (sem workflow ou credential id).",
             "diagnostics": diagnostics,
         }
     workflow = n8n_client.get_workflow(workflow_id)
@@ -426,11 +469,15 @@ def check_workflow_wiring(deepseek_config: dict[str, Any]) -> dict[str, Any]:
         }
     diagnostics["checks"]["active"] = True
     nodes = workflow.get("nodes") or []
-    node_ids = {str(node.get("id") or "") for node in nodes}
-    missing_nodes = sorted(_REQUIRED_NODE_IDS - node_ids)
-    diagnostics["checks"]["required_nodes"] = not missing_nodes
-    diagnostics["missing_nodes"] = missing_nodes
-    if missing_nodes:
+    model_nodes = _credential_bound_nodes(workflow)
+    stages = {
+        str((node.get("meta") or {}).get("model_call_stage") or "")
+        for node in model_nodes
+    }
+    missing_stages = sorted(_REQUIRED_MODEL_STAGES - stages)
+    diagnostics["checks"]["model_stages"] = not missing_stages
+    diagnostics["missing_model_stages"] = missing_stages
+    if missing_stages:
         return {
             "ok": False,
             "reason": "Workflow n8n nao corresponde ao template agentic canonico.",
@@ -439,7 +486,7 @@ def check_workflow_wiring(deepseek_config: dict[str, Any]) -> dict[str, Any]:
     inbound = next((node for node in nodes if node.get("id") == "inbound"), {})
     live_path = str((inbound.get("parameters") or {}).get("path") or "").strip("/")
     expected_path = str(
-        deepseek_config.get("conversation_webhook_path") or ""
+        model_config.get("conversation_webhook_path") or ""
     ).strip("/")
     diagnostics["checks"]["webhook_path"] = not expected_path or live_path == expected_path
     diagnostics["live_webhook_path"] = live_path
@@ -452,17 +499,16 @@ def check_workflow_wiring(deepseek_config: dict[str, Any]) -> dict[str, Any]:
         }
     referenced_ids = {
         str((node.get("credentials") or {}).get("httpHeaderAuth", {}).get("id") or "")
-        for node in nodes
-        if node.get("id") in {"deepseek", "deepseek_repair"}
+        for node in model_nodes
     }
-    diagnostics["checks"]["credential_reference"] = credential_id in referenced_ids
-    if credential_id not in referenced_ids:
+    diagnostics["checks"]["credential_reference"] = referenced_ids == {credential_id}
+    if referenced_ids != {credential_id}:
         return {
             "ok": False,
-            "reason": "O node DeepSeek do workflow n8n referencia uma credencial diferente da configurada.",
+            "reason": "Um node de modelo referencia credencial diferente da configurada.",
             "diagnostics": diagnostics,
         }
-    expected_checksum = str(deepseek_config.get("workflow_checksum") or "")
+    expected_checksum = str(model_config.get("workflow_checksum") or "")
     live_checksum = _workflow_checksum(workflow)
     diagnostics["live_workflow_checksum"] = live_checksum
     diagnostics["expected_workflow_checksum"] = expected_checksum or None
@@ -482,14 +528,14 @@ def check_binding(
     *,
     persona: dict[str, Any],
     binding: dict[str, Any],
-    deepseek_config: dict[str, Any],
+    model_config: dict[str, Any],
     n8n_base_url: str,
 ) -> dict[str, Any]:
     """Validate the persisted transport binding against the provisioned workflow."""
     metadata = binding.get("metadata") or {}
-    expected_workflow_id = str(deepseek_config.get("n8n_workflow_id") or "")
+    expected_workflow_id = str(model_config.get("n8n_workflow_id") or "")
     expected_path = str(
-        deepseek_config.get("conversation_webhook_path") or ""
+        model_config.get("conversation_webhook_path") or ""
     ).strip("/")
     expected_url = f"{n8n_base_url.rstrip('/')}/webhook/{expected_path}"
     checks = {
@@ -498,9 +544,9 @@ def check_binding(
         == str(persona.get("id") or ""),
         "decision_owner": metadata.get("decision_owner") == "n8n_agents",
         "pipeline_contract": metadata.get("pipeline_contract")
-        == str(deepseek_config.get("pipeline_contract") or "conversation_v3"),
+        == str(model_config.get("pipeline_contract") or "conversation_v3"),
         "runtime_version": metadata.get("runtime_version")
-        == str(deepseek_config.get("runtime_version") or "graph_agent_runtime_v3"),
+        == str(model_config.get("runtime_version") or "graph_agent_runtime_v3"),
         "workflow_id": str(binding.get("n8n_workflow_id") or "")
         == expected_workflow_id,
         "webhook_url": str(metadata.get("conversation_webhook_url") or "")

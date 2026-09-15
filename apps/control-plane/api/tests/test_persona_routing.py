@@ -191,7 +191,7 @@ def test_update_routing_accepts_orquestrador_without_requiring_deepseek(monkeypa
     def _boom_resync(*_a, **_k):
         raise AssertionError("orquestrador must not resync an n8n workflow")
 
-    monkeypatch.setattr(personas.deepseek_n8n_service, "resync_workflow_for_persona", _boom_resync)
+    monkeypatch.setattr(personas.conversation_workflow_service, "resync_workflow_for_persona", _boom_resync)
 
     body = personas.RoutingUpdate(conversation_mode="orquestrador")
     personas.update_routing("aurora", body, _admin_request())
@@ -260,9 +260,9 @@ def test_update_routing_n8n_agents_resyncs_the_live_workflow(monkeypatch):
         resynced.append((persona.get("slug"), deepseek_config))
         return {**deepseek_config, "n8n_workflow_id": "wf-1", "conversation_webhook_path": "aurora/conversation"}
 
-    monkeypatch.setattr(personas.deepseek_n8n_service, "resync_workflow_for_persona", fake_resync)
+    monkeypatch.setattr(personas.conversation_workflow_service, "resync_workflow_for_persona", fake_resync)
     monkeypatch.setattr(
-        personas.deepseek_n8n_service,
+        personas.conversation_workflow_service,
         "check_workflow_wiring",
         lambda _config: {"ok": True, "reason": None, "diagnostics": {}},
     )
@@ -317,7 +317,7 @@ def test_update_routing_auto_creates_the_workflow_when_credential_exists_but_wor
     monkeypatch.setenv("N8N_BASE_URL", "http://n8n:5678")
 
     monkeypatch.setattr(
-        personas.deepseek_n8n_service,
+        personas.conversation_workflow_service,
         "resync_workflow_for_persona",
         lambda _persona, config: {
             **config,
@@ -326,7 +326,7 @@ def test_update_routing_auto_creates_the_workflow_when_credential_exists_but_wor
         },
     )
     monkeypatch.setattr(
-        personas.deepseek_n8n_service,
+        personas.conversation_workflow_service,
         "check_workflow_wiring",
         lambda _config: {"ok": True, "reason": None, "diagnostics": {}},
     )
@@ -357,7 +357,7 @@ def test_update_routing_still_rejects_n8n_agents_with_no_credential_at_all(monke
     def _boom(*_a, **_k):
         raise AssertionError("must not attempt to resync without a credential")
 
-    monkeypatch.setattr(personas.deepseek_n8n_service, "resync_workflow_for_persona", _boom)
+    monkeypatch.setattr(personas.conversation_workflow_service, "resync_workflow_for_persona", _boom)
 
     body = personas.RoutingUpdate(conversation_mode="n8n_agents")
     try:

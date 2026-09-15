@@ -65,7 +65,9 @@ def test_terminal_http_nodes_always_emit_an_item_for_the_webhook_response():
 
     assert by_id["commit"]["alwaysOutputData"] is True
     assert by_id["failsafe"]["alwaysOutputData"] is True
-    assert by_id["respond"]["parameters"]["responseBody"] == "={{$json}}"
+    response_body = by_id["respond"]["parameters"]["responseBody"]
+    assert "canonical_conversation_result_v1" in response_body
+    assert "technical_failure_unconfirmed" in response_body
 
 
 def test_workflow_topology_rejects_dangling_connection():
