@@ -6,7 +6,6 @@ import hashlib
 import json
 import re
 import sys
-import tomllib
 from pathlib import Path
 
 
@@ -20,13 +19,7 @@ EXPECTED_SERVICES = {
 MONOREPO_REPOSITORY = "allanVvz/brain-plataform"
 SHA = re.compile(r"^[0-9a-f]{40}$")
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
-
-
-def _current_contracts_version() -> str:
-    metadata = tomllib.loads(
-        (ROOT / "packages/brain-contracts/pyproject.toml").read_text(encoding="utf-8")
-    )
-    return str(metadata["project"]["version"])
+MONOREPO_CONTRACT_VERSION = re.compile(r"^3\.[0-9]+\.[0-9]+$")
 
 
 def _require(condition: bool, message: str) -> None:
@@ -52,7 +45,8 @@ def validate(path: Path, *, verify_checkout_artifacts: bool = True) -> dict:
     _require(bool(SHA.fullmatch(str(manifest["source_sha"]))), "invalid source_sha")
     contracts_version = str(manifest["contracts_version"])
     _require(
-        contracts_version in {"1.0.0", "1.1.0", "3.0.0", _current_contracts_version()},
+        contracts_version in {"1.0.0", "1.1.0"}
+        or bool(MONOREPO_CONTRACT_VERSION.fullmatch(contracts_version)),
         "contracts_version is not supported by this checkout",
     )
     _require(isinstance(manifest["schema_version"], int) and manifest["schema_version"] >= 131,

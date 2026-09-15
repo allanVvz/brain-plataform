@@ -68,6 +68,19 @@ def test_validator_rejects_unknown_contract_version(tmp_path):
         MODULE.validate(path)
 
 
+def test_validator_accepts_versioned_monorepo_contract_without_package_sources(tmp_path):
+    manifest = _manifest()
+    manifest["contracts_version"] = "3.1.0"
+    manifest["contracts_checksum"] = "sha256:" + "c" * 64
+    for service in manifest["services"].values():
+        service["repository"] = "allanVvz/brain-plataform"
+        service["sha"] = manifest["source_sha"]
+    path = tmp_path / "release.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    assert MODULE.validate(path)["contracts_version"] == "3.1.0"
+
+
 @pytest.mark.parametrize("mutation", ["service", "schema", "checksum", "gateway_sha"])
 def test_validator_rejects_unreleasable_manifest(tmp_path, mutation):
     manifest = _manifest()
