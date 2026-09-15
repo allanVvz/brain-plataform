@@ -503,6 +503,25 @@ def _repair_chunks(
     return list({**structural, **exact}.values())
 
 
+def _repair_card_sources(
+    rows: list[dict[str, Any]],
+    requirements: list[dict[str, Any]],
+    node_by_id: dict[str, dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    """Keep requested graph nodes in the proof package without requiring a chunk."""
+    sources: dict[str, list[dict[str, Any]]] = {
+        str(item.get("id")): []
+        for item in requirements
+        if item.get("kind") == "node"
+        and str(item.get("id") or "") in node_by_id
+    }
+    for row in rows:
+        node_id = str(row.get("source_graph_node_id") or "")
+        if node_id in node_by_id:
+            sources.setdefault(node_id, []).append(row)
+    return sources
+
+
 def _card(publication: dict[str, Any], node: dict[str, Any], chunks: list[dict[str, Any]], position: int) -> ContextCard:
     text = "\n\n".join(str(chunk.get("chunk_text") or "") for chunk in chunks if chunk.get("chunk_text"))
     coordinate = ((publication.get("document_json") or {}).get("coordinates") or {}).get(node["id"]) or {}
@@ -4391,9 +4410,9 @@ def _decide(
                 raise RuntimeError(
                     "required graph repair package exceeds the 12-chunk prompt limit"
                 )
-            sources: dict[str, list[dict[str, Any]]] = {}
-            for row in repair_chunks:
-                sources.setdefault(str(row.get("source_graph_node_id") or ""), []).append(row)
+            sources = _repair_card_sources(
+                repair_chunks, requirements, document.get("node_by_id", {}),
+            )
             repair_cards = [
                 _card(publication, document["node_by_id"][node_id], chunks, index).model_dump(mode="json")
                 for index, (node_id, chunks) in enumerate(sources.items()) if node_id in document.get("node_by_id", {})

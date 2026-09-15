@@ -98,6 +98,8 @@ def test_model_proposal_is_proved_and_repaired_against_graph_before_commit():
     commit = next(node for node in workflow["nodes"] if node["id"] == "commit")
     repair_gate = next(node for node in workflow["nodes"] if node["id"] == "repair_gate")
     repair_reconcile = next(node for node in workflow["nodes"] if node["id"] == "repair_reconcile")
+    repair_request = next(node for node in workflow["nodes"] if node["id"] == "repair_request")
+    repair_response = next(node for node in workflow["nodes"] if node["id"] == "repair_response")
 
     assert node_ids.index("model_response") < node_ids.index("reconcile")
     assert node_ids.index("reconcile") < node_ids.index("repair_gate")
@@ -109,6 +111,9 @@ def test_model_proposal_is_proved_and_repaired_against_graph_before_commit():
     assert "interpretation" in model_response["parameters"]["jsCode"]
     assert "repair_required" in str(repair_gate["parameters"])
     assert "repair_attempt" in repair_reconcile["parameters"]["body"] or "model_observation" in repair_reconcile["parameters"]["body"]
+    assert "repair_context_cards: repairCards" in repair_request["parameters"]["jsCode"]
+    assert "repair_context_node_ids: repairContextNodeIds" in repair_response["parameters"]["jsCode"]
+    assert "repair_context_chunk_sources: repairContextChunkSources" in repair_response["parameters"]["jsCode"]
     assert "graph proof" in final_response["parameters"]["jsCode"]
     assert "response: $json.response" in commit["parameters"]["body"]
 
