@@ -519,6 +519,36 @@ def test_repair_prompt_preserves_field_metadata_needed_to_audit_a_new_question()
     assert "the repaired reply must ask exactly one" in repaired["request_body"]["messages"][0]["content"]
 
 
+def test_repair_excludes_a_question_rejected_after_same_turn_fact_resolution():
+    initial = _run_prompt_builder(_context(), _binding())
+    repaired = _run_repair_builder(
+        initial["request_body"],
+        _envelope(
+            reply="Voce procura para uso proprio ou para revender?",
+            asked_field_key="purchase_profile",
+        ),
+        {
+            "repair_requirements": [{
+                "kind": "model_reply",
+                "issue": "qualification_question_not_askable",
+                "rejected_question_node_id": "faq:tock-purchase-profile",
+                "eligible_question_node_ids": ["faq:tock-sales-readiness"],
+            }],
+        },
+    )
+    compact = json.loads(repaired["request_body"]["messages"][1]["content"])
+    controls = compact["turn_controls"]
+
+    assert any(
+        field["key"] == "purchase_profile"
+        for field in controls["forbidden_fields"]
+    )
+    assert all(
+        field["key"] != "purchase_profile"
+        for field in controls["eligible_fields"]
+    )
+
+
 def test_branch_switch_retry_excludes_fields_owned_by_the_abandoned_branch():
     contract = _purchase_profile_contract()
     contract["fields"].extend([
