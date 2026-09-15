@@ -19,7 +19,7 @@ from typing import Any, Callable, Iterable
 from services import graph_conversation_contract, supabase_client
 
 
-COMPILER_VERSION = "graph-compiler-v3.6.4"
+COMPILER_VERSION = "graph-compiler-v3.6.5"
 FAQ_PROJECTION_CONTRACT = "v1"
 LOCAL_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 EMBEDDING_DIMENSION = 1536
@@ -28,6 +28,7 @@ _local_embedding_model_name: str | None = None
 CONTRACT_DOCUMENT = Path(__file__).resolve().parents[1] / "contracts" / "graph-agent-runtime-v3.md"
 PUBLISHED_STATUSES = {"approved", "active", "validated", "ativo", "embedded"}
 FACT_STATUSES = {"known", "unknown", "declined", "needs_confirmation", "invalid"}
+TURN_CONTEXT_NODE_LIMIT = 12
 STRUCTURAL_RELATIONS = {"contains"}
 RAG_CONTENT_TYPES = {
     "faq", "product", "service", "product_group", "offer", "brand", "campaign",
@@ -57,6 +58,29 @@ def canonical_content_checksum(value: str) -> str:
         "NFC", str(value or "").replace("\r\n", "\n").replace("\r", "\n")
     )
     return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def turn_context_node_ids(
+    *,
+    branch_anchor_node_id: str | None,
+    path_node_ids: Iterable[str],
+    fields: Iterable[dict[str, Any]],
+    handoff_rule_node_ids: Iterable[str],
+) -> list[str]:
+    """Graph-owned closure required to safely execute one qualification turn.
+
+    Retrieval may rank optional FAQ content, but it must never omit the
+    selected branch, an authored eligible question, its field owner, or the
+    published handoff policy. Keeping this declaration in the compiled graph
+    prevents runtime-specific Phase-B recovery from becoming normal dialogue.
+    """
+    return list(dict.fromkeys(value for value in [
+        branch_anchor_node_id,
+        *path_node_ids,
+        *(field.get("owner_node_id") for field in fields),
+        *(field.get("question_node_id") for field in fields),
+        *handoff_rule_node_ids,
+    ] if value))
 
 
 def embedding_provider() -> str:
@@ -592,11 +616,22 @@ def _common_persona_contract(
         str(field.get("key") or "")
         for field in shared if field.get("required", True)
     ]
+    turn_context = turn_context_node_ids(
+        branch_anchor_node_id=None,
+        path_node_ids=[],
+        fields=shared,
+        handoff_rule_node_ids=[],
+    )
+    if len(turn_context) > TURN_CONTEXT_NODE_LIMIT:
+        raise GraphCompilationError([
+            f"common_turn_context_node_limit_exceeded:{len(turn_context)}"
+        ])
     return {
         "branch_anchor_node_id": None,
         "branch_path_checksum": "",
         "closure_checksum": canonical_checksum(closure),
         "closure_node_ids": [value for value in closure if value],
+        "turn_context_node_ids": turn_context,
         "fields": shared,
         "required_fields": required,
         "questions": questions,
@@ -999,11 +1034,22 @@ def compile_graph(
             field["key"] for field in ordered_fields if field["required"]
         ]}
         closure_checksum = canonical_checksum(closure)
+        turn_context = turn_context_node_ids(
+            branch_anchor_node_id=anchor,
+            path_node_ids=coordinates[anchor]["path_node_ids"],
+            fields=ordered_fields,
+            handoff_rule_node_ids=handoff_rules,
+        )
+        if len(turn_context) > TURN_CONTEXT_NODE_LIMIT:
+            errors.append(
+                f"turn_context_node_limit_exceeded:{anchor}:{len(turn_context)}"
+            )
         contract = {
             "branch_anchor_node_id": anchor,
             "branch_path_checksum": coordinates[anchor]["path_checksum"],
             "closure_checksum": closure_checksum,
             "closure_node_ids": closure,
+            "turn_context_node_ids": turn_context,
             "fields": ordered_fields,
             "required_fields": [field["key"] for field in ordered_fields if field["required"]],
             "questions": {
