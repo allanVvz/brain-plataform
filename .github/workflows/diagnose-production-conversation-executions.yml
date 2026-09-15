@@ -92,6 +92,8 @@ jobs:
                             "forwarded_failures": [
                                 {
                                     "keys": sorted(str(key) for key in (item.get("json") or {}).keys()),
+                                    "error_type": type((item.get("json") or {}).get("error")).__name__,
+                                    "error_value": str((item.get("json") or {}).get("error") or "")[:500] or None,
                                     "message": str((item.get("json") or {}).get("message") or "")[:300] or None,
                                     "description": str((item.get("json") or {}).get("description") or "")[:300] or None,
                                     "status_code": (item.get("json") or {}).get("statusCode"),
