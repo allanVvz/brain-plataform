@@ -64,7 +64,8 @@ def test_release_validator_requires_this_release_migration_and_exact_sha():
     assert "137_canonical_asset_content_dedup.sql" in VALIDATOR
     assert "138_resume_binding_without_releasable_backlog.sql" in VALIDATOR
     assert "139_release_queue_microservice_grants.sql" in VALIDATOR
-    assert "release migrations 112-139 are incomplete" in VALIDATOR
+    assert "140_message_template_meta_lifecycle.sql" in VALIDATOR
+    assert "release migrations 112-140 are incomplete" in VALIDATOR
     assert "microservice database roles are missing or unsafe" in VALIDATOR
     assert "authenticator cannot assume every microservice role" in VALIDATOR
     assert "microservice role inherits universal service_role" in VALIDATOR
