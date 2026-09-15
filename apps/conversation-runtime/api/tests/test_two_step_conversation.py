@@ -197,13 +197,16 @@ def test_template_routes_sdr_two_step_without_semantic_repair_and_fails_safe():
     assert true_path == "Build turn understanding request"
     assert false_path == "Model required for turn"
     assert connections["Prove resolved conversation reply"]["main"][0][0]["node"] == "Align reply with qualification state"
-    assert connections["Prove resolved conversation reply"]["main"][1][0]["node"] == "Fail-safe two-step handoff"
+    assert connections["Prove resolved conversation reply"]["main"][1][0]["node"] == "Normalize two-step failure"
+    normalizer = next(node for node in workflow["nodes"] if node["name"] == "Normalize two-step failure")
+    normalizer_code = normalizer["parameters"]["jsCode"]
+    assert "technical_conversation_failure_v1" in normalizer_code
+    assert "typeof raw==='string'" in normalizer_code
+    assert connections["Normalize two-step failure"]["main"][0][0]["node"] == "Fail-safe two-step handoff"
     fail_safe = next(node for node in workflow["nodes"] if node["name"] == "Fail-safe two-step handoff")
     assert "/internal/v1/conversations/technical-failure" in fail_safe["parameters"]["url"]
     fail_safe_body = fail_safe["parameters"]["body"]
-    assert "interpret_then_respond" in fail_safe_body
-    assert "$json.error&&$json.error.message" in fail_safe_body
-    assert "$json.message||$json.error||'unknown'" in fail_safe_body
+    assert fail_safe_body == "={{JSON.stringify($json.failure)}}"
     assert "??" not in fail_safe_body
     assert "(()=>" not in fail_safe_body
     two_step_names = {
@@ -213,7 +216,7 @@ def test_template_routes_sdr_two_step_without_semantic_repair_and_fails_safe():
         "Validate natural conversation reply", "Prove resolved conversation reply",
     }
     for name in two_step_names:
-        assert connections[name]["main"][1][0]["node"] == "Fail-safe two-step handoff"
+        assert connections[name]["main"][1][0]["node"] == "Normalize two-step failure"
     reachable = set()
     pending = [true_path]
     while pending:
