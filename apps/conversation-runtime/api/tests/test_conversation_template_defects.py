@@ -520,12 +520,30 @@ def test_repair_prompt_preserves_field_metadata_needed_to_audit_a_new_question()
 
 
 def test_repair_excludes_a_question_rejected_after_same_turn_fact_resolution():
-    initial = _run_prompt_builder(_context(), _binding())
+    contract = _purchase_profile_contract()
+    contract["fields"].append({
+        "key": "sales_readiness",
+        "label": "momento da compra",
+        "owner_node_id": "audience:tock-retail",
+        "question_node_id": "faq:tock-sales-readiness",
+        "question_text": "Quando voce pretende comprar?",
+        "required": True,
+        "depends_on": ["purchase_profile"],
+        "validation": {"mode": "semantic"},
+    })
+    initial = _run_prompt_builder(_context(graph_contract=contract), _binding())
     repaired = _run_repair_builder(
         initial["request_body"],
         _envelope(
             reply="Voce procura para uso proprio ou para revender?",
             asked_field_key="purchase_profile",
+            facts=[{
+                "field_key": "purchase_profile",
+                "owner_node_id": "audience:tock-retail",
+                "value": "uso-proprio-varejo",
+                "status": "known",
+                "evidence_span": "Proprio",
+            }],
         ),
         {
             "repair_requirements": [{
@@ -547,6 +565,9 @@ def test_repair_excludes_a_question_rejected_after_same_turn_fact_resolution():
         field["key"] != "purchase_profile"
         for field in controls["eligible_fields"]
     )
+    assert {
+        field["question_node_id"] for field in controls["eligible_fields"]
+    } == {"faq:tock-sales-readiness"}
 
 
 def test_branch_switch_retry_excludes_fields_owned_by_the_abandoned_branch():
