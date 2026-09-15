@@ -3,6 +3,7 @@ import hmac
 import json
 import os
 import time
+from copy import deepcopy
 import httpx
 from typing import Any, Optional
 from utils.tls import get_ca_bundle_path
@@ -41,6 +42,48 @@ def send_to_webhook(
 
 def _base() -> str:
     return os.environ["N8N_BASE_URL"].rstrip("/")
+
+
+def _raise_for_status(response: httpx.Response) -> None:
+    """Preserve n8n's useful validation message without echoing its payload."""
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        detail = ""
+        try:
+            body = response.json()
+        except (json.JSONDecodeError, ValueError):
+            body = None
+        if isinstance(body, dict):
+            for key in ("message", "error", "description", "hint"):
+                value = body.get(key)
+                if isinstance(value, str) and value.strip():
+                    detail = value.strip()
+                    break
+        suffix = f": {detail[:1000]}" if detail else ""
+        raise httpx.HTTPStatusError(
+            f"n8n returned HTTP {response.status_code}{suffix}",
+            request=exc.request,
+            response=response,
+        ) from exc
+
+
+def workflow_payload(workflow: dict[str, Any]) -> dict[str, Any]:
+    """Translate the canonical workflow into the public n8n API contract.
+
+    Canonical nodes carry Brain-only ``meta`` used while binding credentials
+    and validating model stages. n8n rejects unknown node properties, so that
+    internal metadata must stop at this adapter boundary.
+    """
+    payload = {
+        key: deepcopy(workflow[key])
+        for key in ("name", "nodes", "connections", "settings")
+        if key in workflow
+    }
+    for node in payload.get("nodes") or []:
+        if isinstance(node, dict):
+            node.pop("meta", None)
+    return payload
 
 
 def get_executions(
@@ -126,34 +169,26 @@ def delete_credential(credential_id: str) -> None:
 
 
 def create_workflow(workflow: dict[str, Any]) -> dict[str, Any]:
-    payload = {
-        key: workflow[key]
-        for key in ("name", "nodes", "connections", "settings")
-        if key in workflow
-    }
+    payload = workflow_payload(workflow)
     with httpx.Client(timeout=20, verify=get_ca_bundle_path()) as client:
         response = client.post(
             f"{_base()}/api/v1/workflows",
             headers=_headers(),
             json=payload,
         )
-        response.raise_for_status()
+        _raise_for_status(response)
         return response.json()
 
 
 def update_workflow(workflow_id: str, workflow: dict[str, Any]) -> dict[str, Any]:
-    payload = {
-        key: workflow[key]
-        for key in ("name", "nodes", "connections", "settings")
-        if key in workflow
-    }
+    payload = workflow_payload(workflow)
     with httpx.Client(timeout=20, verify=get_ca_bundle_path()) as client:
         response = client.put(
             f"{_base()}/api/v1/workflows/{workflow_id}",
             headers=_headers(),
             json=payload,
         )
-        response.raise_for_status()
+        _raise_for_status(response)
         return response.json()
 
 
