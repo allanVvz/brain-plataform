@@ -125,6 +125,25 @@ def test_agentic_validator_accepts_optional_collect_once_name_before_required_fi
     assert audit["criteria"]["question_semantically_askable"] is True
 
 
+def test_agentic_validator_accepts_consultative_turn_when_no_field_is_askable():
+    inputs = _audit_inputs(conversation_mode="n8n_agents")
+    inputs["contract"]["fields"] = []
+    inputs["contract"]["questions"] = {}
+    inputs["proof_record"]["proof_result"].update({
+        "missing_fields": ["unresolved_without_question"],
+        "next_question_node_id": None,
+        "confirmation_state": "consultative_support",
+        "consultative_support": True,
+    })
+    inputs["turn"]["text"] = (
+        "Posso explicar as condições publicadas. Qual ponto você quer esclarecer?"
+    )
+
+    audit = wa_validator_service._semantic_turn_audit(**inputs)
+
+    assert audit["criteria"]["question_semantically_askable"] is True
+
+
 def test_sales_driver_answers_unresolved_question_without_requiring_branch_switch_repetition():
     driver = {
         "switch": {

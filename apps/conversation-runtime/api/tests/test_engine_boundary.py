@@ -248,6 +248,40 @@ def test_agentic_proof_discards_invalid_question_metadata_without_blocking_reply
     ]
 
 
+def test_runtime_rejects_question_for_a_fact_resolved_in_the_same_turn():
+    rejected = graph_agent_runtime_v3._rejected_qualification_question_id(
+        "q:purchase-profile", {"q:sales-readiness", "q:fulfillment"},
+    )
+
+    assert rejected == "q:purchase-profile"
+
+
+def test_runtime_accepts_only_a_currently_askable_qualification_question():
+    rejected = graph_agent_runtime_v3._rejected_qualification_question_id(
+        "q:sales-readiness", {"q:sales-readiness", "q:fulfillment"},
+    )
+
+    assert rejected is None
+
+
+def test_sdr_enters_temporary_consultative_support_before_handoff():
+    assert graph_agent_runtime_v3._consultative_support_active(
+        collection_complete=True,
+        customer_questions=[{"kind": "price", "topic": "pedido"}],
+        post_support=False,
+    ) is True
+    assert graph_agent_runtime_v3._consultative_support_active(
+        collection_complete=False,
+        customer_questions=[{"kind": "price", "topic": "pedido"}],
+        post_support=False,
+    ) is False
+    assert graph_agent_runtime_v3._consultative_support_active(
+        collection_complete=True,
+        customer_questions=[],
+        post_support=False,
+    ) is False
+
+
 def test_optional_collect_once_field_is_askable_then_stops_without_blocking_completion():
     contract = {
         "branch_path_checksum": "checksum:retail",

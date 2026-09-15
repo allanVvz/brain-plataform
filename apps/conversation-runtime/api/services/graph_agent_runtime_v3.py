@@ -4116,6 +4116,20 @@ def _semantic_service_candidate(
 
 
 
+def _rejected_qualification_question_id(
+    proposed_question_id: str | None, askable_question_ids: set[str],
+) -> str | None:
+    question_id = str(proposed_question_id or "")
+    return question_id if question_id and question_id not in askable_question_ids else None
+
+
+def _consultative_support_active(
+    *, collection_complete: bool, customer_questions: list[Any], post_support: bool,
+) -> bool:
+    """Keep an SDR consultative for the customer's current doubts before handoff."""
+    return bool(collection_complete and customer_questions and not post_support)
+
+
 def _decide(
     context: ConversationContext, *, model_observation: dict[str, Any]
 ) -> tuple[ConversationDecision, AgentResponse]:
@@ -4692,6 +4706,82 @@ def _decide(
             if str(proposal.next_question_node_id or "") in askable_question_ids
             else None
         )
+        rejected_question_id = _rejected_qualification_question_id(
+            proposal.next_question_node_id, askable_question_ids,
+        )
+        if rejected_question_id:
+            # Never preserve prose that asks a graph field after that field was
+            # resolved (or before its dependencies are satisfied).  Older
+            # behavior discarded only the structured question id while still
+            # releasing the model's byte-for-byte reply, which let a known
+            # qualification fact be asked again.  Give the model one generic
+            # repair opportunity; a second invalid proposal becomes an
+            # observable handoff and is never published.
+            repair_attempt = int(observation.get("repair_attempt") or 0)
+            repair_requirement = {
+                "kind": "model_reply",
+                "issue": "qualification_question_not_askable",
+                "rejected_question_node_id": rejected_question_id,
+                "eligible_question_node_ids": sorted(askable_question_ids),
+                "instruction": (
+                    "Remove the non-askable qualification question. Ask at "
+                    "most one currently eligible graph field; when none is "
+                    "eligible, remain consultative and keep asked_field_key null."
+                ),
+            }
+            if repair_attempt < 1:
+                return (
+                    ConversationDecision(
+                        classifier="graph_proof_checker_v3",
+                        intent="repair_retrieval",
+                        route=ConversationRoute.SDR,
+                        confidence=0,
+                        lead_stage=str(context.cart.get("_lead_stage") or "novo"),
+                    ),
+                    AgentResponse(
+                        reply_text=None,
+                        role=ConversationRoute.SDR,
+                        cart_state=context.cart,
+                        handoff_required=False,
+                        proposal=proposal,
+                        proof={
+                            **proof,
+                            "valid": False,
+                            "delivery_authorized": False,
+                            "repair_required": True,
+                            "repair_requirements": [repair_requirement],
+                            "fallback_used": False,
+                            "model_reply_preserved": True,
+                        },
+                    ),
+                )
+            return (
+                ConversationDecision(
+                    classifier="graph_proof_checker_v3",
+                    intent="qualification_question_handoff",
+                    route=ConversationRoute.HUMAN,
+                    confidence=0,
+                    lead_stage=str(context.cart.get("_lead_stage") or "novo"),
+                    handoff_reason="qualification_question_not_askable_after_repair",
+                ),
+                AgentResponse(
+                    reply_text=None,
+                    role=ConversationRoute.HUMAN,
+                    cart_state=context.cart,
+                    handoff_required=True,
+                    proposal=proposal,
+                    proof={
+                        **proof,
+                        "valid": False,
+                        "delivery_authorized": False,
+                        "repair_required": False,
+                        "repair_requirements": [repair_requirement],
+                        "fallback_used": False,
+                        "model_reply_preserved": True,
+                        "handoff_observable": True,
+                    },
+                ),
+            )
         question_contract = next(
             (
                 candidate for candidate in (document.get("branch_contracts") or {}).values()
@@ -4720,8 +4810,23 @@ def _decide(
             and not _explicit_change_requested(_latest_user_message(context))
             and not pending_branch_confirmation
         )
-        confirmation_pending = bool(qualification_complete and not post_support)
         terminal_intent = "qualification_incomplete" if qualification_incomplete else None
+        interpretation = (
+            observation.get("interpretation")
+            if isinstance(observation.get("interpretation"), dict)
+            else {}
+        )
+        customer_questions = list(interpretation.get("customer_questions") or [])
+        consultative_support = _consultative_support_active(
+            collection_complete=collection_complete,
+            customer_questions=customer_questions,
+            post_support=post_support,
+        )
+        confirmation_pending = bool(
+            qualification_complete and not post_support and not consultative_support
+        )
+        if consultative_support:
+            terminal_intent = None
         # Public language is model-owned in n8n_agents mode. Structured state
         # may be accepted, discarded or repaired independently, but a valid
         # grounded reply is never appended, summarized, normalized or swapped
@@ -4863,6 +4968,7 @@ def _decide(
             ],
             "sdr_state": (
                 "handed_off" if terminal_intent
+                else "consultative_support" if consultative_support
                 else "awaiting_confirmation" if confirmation_pending
                 else "handed_off" if post_support
                 else "collecting"
@@ -4877,6 +4983,7 @@ def _decide(
         route = ConversationRoute.HUMAN if terminal_intent else ConversationRoute.SDR
         resolved_intent = (
             terminal_intent
+            or ("consultative_support" if consultative_support else None)
             or ("awaiting_confirmation" if confirmation_pending else None)
             or ("post_qualification_support" if post_support else None)
             or "collect_graph_fields"
@@ -4895,9 +5002,11 @@ def _decide(
             "qualification_complete": qualification_complete,
             "qualification_incomplete": qualification_incomplete,
             "collection_complete": collection_complete,
+            "consultative_support": consultative_support,
             "explicit_confirmation": False,
             "confirmation_state": (
                 "field_confirmation" if pending_confirmation_fact
+                else "consultative_support" if consultative_support
                 else "awaiting_confirmation" if confirmation_pending
                 else "handed_off" if terminal_intent
                 else "post_qualification_support" if post_support

@@ -2448,6 +2448,11 @@ def _semantic_turn_audit(
         "question_semantically_askable": (
             (not missing and question_id is None)
             or (
+                proof.get("confirmation_state") == "consultative_support"
+                and question_id is None
+                and first_askable is None
+            )
+            or (
                 proof.get("confirmation_state") == "field_confirmation"
                 and proof.get("pending_confirmation")
                 and question_id is None
