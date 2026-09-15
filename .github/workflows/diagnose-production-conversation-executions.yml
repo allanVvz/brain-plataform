@@ -89,6 +89,16 @@ jobs:
                                 for item in (branch or [])
                                 if isinstance((item.get("json") or {}).get("error"), dict)
                             ],
+                            "forwarded_failures": [
+                                {
+                                    "message": str((item.get("json") or {}).get("message") or "")[:300] or None,
+                                    "description": str((item.get("json") or {}).get("description") or "")[:300] or None,
+                                    "status_code": (item.get("json") or {}).get("statusCode"),
+                                    "code": (item.get("json") or {}).get("code"),
+                                }
+                                for branch in (((attempt.get("data") or {}).get("main") or [])[1:])
+                                for item in (branch or [])
+                            ],
                         })
                 sanitized.append({
                     "id": execution.get("id"),
