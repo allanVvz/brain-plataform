@@ -265,6 +265,10 @@ def test_two_step_model_requests_use_provider_compatible_structured_output():
     assert "value is always an object, never text, number, list, or null" in reply_code
     assert "use an object with a text property containing the factual statement" in reply_code
     assert "Never copy policy, metadata, or any other field from retrieved context into a claim" in reply_code
+    reply_validator = nodes["Validate natural conversation reply"]["parameters"]["jsCode"]
+    assert "conversation_reply_extra_claim" in reply_validator
+    assert "conversation_reply_invalid_claim_value" in reply_validator
+    assert "conversation_reply_invalid_citations" in reply_validator
 
 
 def test_tock_understanding_persists_retail_need_before_reply_and_refocuses_rag(monkeypatch):
