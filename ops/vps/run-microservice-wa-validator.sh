@@ -7,6 +7,7 @@ PERSONA_SLUG="${2:?persona slug required}"
 FLOW_ID="${3:?flow id required}"
 INITIAL_STATE="${4:-cold}"
 SESSION_ID="${5:-}"
+CANDIDATE_WEBHOOK_URL="${6:-}"
 STATE_FILE="$ROOT_DIR/.deploy/microservices/slots.json"
 MANIFEST="$ROOT_DIR/ops/microservices/release-manifest.json"
 
@@ -135,7 +136,7 @@ if [[ "$validator_was_running" != "true" ]]; then
 fi
 [[ "$(docker inspect -f '{{.State.Running}}' "$validator_name")" == "true" ]] || { echo "validator worker failed to start" >&2; exit 1; }
 
-session_output="$(docker exec "$runtime_name" python -c 'import sys; from services import wa_validator_service as w; generated=w.generate_script(persona_slug=sys.argv[1], flow_id=sys.argv[2], target_contact="production-lifecycle", initial_state=sys.argv[3]); session_id=generated["session_id"]; w.enqueue_session_direct(session_id); print("WA_VALIDATOR_SESSION_ID=" + session_id)' "$PERSONA_SLUG" "$FLOW_ID" "$INITIAL_STATE")"
+session_output="$(docker exec "$runtime_name" python -c 'import sys; from services import wa_validator_service as w; generated=w.generate_script(persona_slug=sys.argv[1], flow_id=sys.argv[2], target_contact="production-lifecycle", initial_state=sys.argv[3], validation_target_url=sys.argv[4] or None); session_id=generated["session_id"]; w.enqueue_session_direct(session_id); print("WA_VALIDATOR_SESSION_ID=" + session_id)' "$PERSONA_SLUG" "$FLOW_ID" "$INITIAL_STATE" "$CANDIDATE_WEBHOOK_URL")"
 printf '%s\n' "$session_output"
 session_id="$(printf '%s\n' "$session_output" | sed -n 's/^WA_VALIDATOR_SESSION_ID=//p' | tail -n 1)"
 [[ "$session_id" =~ ^[A-Za-z0-9_-]{8,160}$ ]] || { echo "invalid validator session id" >&2; exit 1; }
