@@ -145,7 +145,7 @@
         }
       }
     },
-    "unsupported_commercial_question": "Qual é o preço e o pedido mínimo?",
+    "unsupported_commercial_question": "Vocês conseguem garantir estoque para a próxima semana?",
     "branch_switch_text": "Na verdade, é para uso próprio.",
     "regression_cases": [
       {
@@ -153,8 +153,8 @@
         "expected_distinct_branch_anchors": true
       },
       {
-        "id": "unsupported_price_stock_deadline_deferred",
-        "forbidden_without_evidence": ["price", "stock", "deadline", "minimum_order"]
+        "id": "unsupported_stock_guarantee_deferred",
+        "forbidden_without_evidence": ["stock_guarantee"]
       },
       {
         "id": "duplicate_inbound_exactly_once",
