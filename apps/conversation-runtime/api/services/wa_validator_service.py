@@ -74,7 +74,9 @@ _CUSTOMER_PROFILES_PATH = _API_DIR / "evaluation" / "wa_validator_customer_profi
 _SDR_FLOW_CORPUS_PATH = _API_DIR / "evaluation" / "sdr_flow_cases.json"
 
 
-def _validated_candidate_webhook_url(value: str | None) -> str | None:
+def _validated_candidate_webhook_url(
+    value: str | None, *, reference_url: str | None = None,
+) -> str | None:
     """Accept an explicit, allow-listed n8n candidate webhook for QA only."""
     url = str(value or "").strip()
     if not url:
@@ -87,6 +89,9 @@ def _validated_candidate_webhook_url(value: str | None) -> str | None:
         for item in (os.environ.get("N8N_VALIDATOR_ALLOWED_ORIGINS") or "").split(",")
         if item.strip()
     }
+    reference = urlparse(str(reference_url or "").strip())
+    if reference.scheme == "https" and reference.netloc:
+        origins.add(f"{reference.scheme}://{reference.netloc}")
     origin = f"{parsed.scheme}://{parsed.netloc}"
     if not origins or origin not in origins:
         raise ValueError("candidate webhook origin is not authorized for validator runs")
@@ -1237,7 +1242,22 @@ def generate_script(
         )
     routing = supabase_client.get_persona_routing(persona_slug) or {}
     conversation_mode = _resolve_conversation_mode(persona_id, routing)
-    candidate_webhook_url = _validated_candidate_webhook_url(validation_target_url)
+    binding = next(
+        (
+            row for row in supabase_client.get_workflow_bindings(persona_id)
+            if row.get("active", True)
+            and (row.get("metadata") or {}).get("decision_owner") in {"n8n_hybrid", "n8n_agents"}
+        ),
+        None,
+    )
+    binding_metadata = (binding or {}).get("metadata") or {}
+    candidate_webhook_url = _validated_candidate_webhook_url(
+        validation_target_url,
+        reference_url=(
+            binding_metadata.get("conversation_webhook_url")
+            or binding_metadata.get("webhook_url")
+        ),
+    )
     if candidate_webhook_url and conversation_mode != "n8n_agents":
         raise ValueError("candidate webhook validation requires n8n_agents mode")
 
@@ -2901,7 +2921,8 @@ async def run_session_direct(
         or ""
     ).strip()
     candidate_webhook_url = _validated_candidate_webhook_url(
-        (script.get("meta") or {}).get("validation_target_url")
+        (script.get("meta") or {}).get("validation_target_url"),
+        reference_url=workflow_url,
     )
     if candidate_webhook_url:
         workflow_url = candidate_webhook_url

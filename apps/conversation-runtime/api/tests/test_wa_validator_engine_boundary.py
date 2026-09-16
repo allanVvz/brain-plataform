@@ -21,6 +21,10 @@ def test_candidate_webhook_requires_declared_n8n_origin(monkeypatch):
 
     monkeypatch.setenv("N8N_VALIDATOR_ALLOWED_ORIGINS", "https://n8n.example.test")
     assert wa_validator_service._validated_candidate_webhook_url(url) == url
+    monkeypatch.delenv("N8N_VALIDATOR_ALLOWED_ORIGINS", raising=False)
+    assert wa_validator_service._validated_candidate_webhook_url(
+        url, reference_url="https://n8n.example.test/webhook/live"
+    ) == url
     with pytest.raises(ValueError, match="HTTPS"):
         wa_validator_service._validated_candidate_webhook_url(
             "http://n8n.example.test/webhook/qa-candidate"
