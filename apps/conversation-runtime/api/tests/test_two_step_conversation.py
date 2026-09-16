@@ -249,7 +249,9 @@ def test_two_step_model_requests_use_provider_compatible_structured_output():
         assert "thinking:{type:'disabled'}" in code
     reply_code = nodes["Build natural conversation reply request"]["parameters"]["jsCode"]
     understanding_code = nodes["Build turn understanding request"]["parameters"]["jsCode"]
-    assert "Return only one JSON object" in understanding_code
+    assert "Read the inbound and return only one JSON object" in understanding_code
+    assert "field_key, owner_node_id, source_message_id or metadata" in understanding_code
+    assert "turn_understanding_unknown_fact" in nodes["Validate turn understanding"]["parameters"]["jsCode"]
     assert "conversation_brief" in reply_code
     assert "It is fine to ask nothing" in reply_code
     assert "claims and citations only for factual commercial statements" in reply_code
