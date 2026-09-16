@@ -258,6 +258,8 @@ def test_two_step_model_requests_use_provider_compatible_structured_output():
     assert "conversation_brief" in reply_code
     assert "evidence_chunk_ids:{type:'array',items:{type:'string'}}}}}" in reply_code
     assert "It is fine to ask nothing" in reply_code
+    assert "Set contract_version to conversation_reply_v1" in reply_code
+    assert "exactly these top-level keys" in reply_code
     assert "claims and citations only for factual commercial statements" in reply_code
 
 
