@@ -12,6 +12,9 @@ on:
         description: Number of recent executions (maximum 20)
         required: true
         default: "10"
+      candidate_workflow_id:
+        description: Optional isolated validation workflow ID; never changes the active binding
+        required: false
 
 permissions:
   contents: read
@@ -30,23 +33,25 @@ jobs:
           VPS_APP_DIR: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           PERSONA_SLUG: ${{ inputs.persona_slug }}
           EXECUTION_LIMIT: ${{ inputs.limit }}
+          CANDIDATE_WORKFLOW_ID: ${{ inputs.candidate_workflow_id }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
           command_timeout: 5m
-          envs: VPS_APP_DIR,PERSONA_SLUG,EXECUTION_LIMIT
+          envs: VPS_APP_DIR,PERSONA_SLUG,EXECUTION_LIMIT,CANDIDATE_WORKFLOW_ID
           script: |
             set -Eeuo pipefail
             cd "$VPS_APP_DIR"
             [[ "$PERSONA_SLUG" =~ ^(tock-fatal|aurora|vz-lupas)$ ]]
             [[ "$EXECUTION_LIMIT" =~ ^[0-9]+$ ]]
             (( EXECUTION_LIMIT >= 1 && EXECUTION_LIMIT <= 20 ))
+            [[ -z "$CANDIDATE_WORKFLOW_ID" || "$CANDIDATE_WORKFLOW_ID" =~ ^[A-Za-z0-9_-]{8,64}$ ]]
             state_file=.deploy/microservices/slots.json
             slot="$(python3 -c 'import json; print(json.load(open(".deploy/microservices/slots.json", encoding="utf-8"))["control-plane"]["active"])')"
             container="brain-ai-control-plane-${slot}-1"
-            docker exec -i -e PERSONA_SLUG="$PERSONA_SLUG" -e EXECUTION_LIMIT="$EXECUTION_LIMIT" "$container" python - <<'PY'
+            docker exec -i -e PERSONA_SLUG="$PERSONA_SLUG" -e EXECUTION_LIMIT="$EXECUTION_LIMIT" -e CANDIDATE_WORKFLOW_ID="$CANDIDATE_WORKFLOW_ID" "$container" python - <<'PY'
             import json
             import os
             from services import n8n_client, supabase_client
@@ -56,8 +61,25 @@ jobs:
             persona = supabase_client.get_persona(slug)
             bindings = supabase_client.get_workflow_bindings(str(persona["id"]))
             binding = next(row for row in bindings if row.get("active"))
-            workflow_id = str(binding.get("n8n_workflow_id") or "")
+            active_workflow_id = str(binding.get("n8n_workflow_id") or "")
+            candidate_workflow_id = os.environ.get("CANDIDATE_WORKFLOW_ID", "").strip()
+            workflow_id = candidate_workflow_id or active_workflow_id
             assert workflow_id, "active binding has no n8n workflow"
+
+            target_kind = "candidate" if candidate_workflow_id else "active"
+            workflow = n8n_client.get_workflow(workflow_id) or {}
+            assert workflow, "n8n workflow not found"
+            if candidate_workflow_id:
+                meta = workflow.get("meta") or {}
+                rendered_binding = meta.get("binding") or {}
+                inbound = next(
+                    (node for node in workflow.get("nodes") or [] if node.get("id") == "inbound"),
+                    {},
+                )
+                webhook_path = str((inbound.get("parameters") or {}).get("path") or "")
+                assert str(rendered_binding.get("persona_slug") or "") == slug, "candidate persona mismatch"
+                assert "/validation/" in f"/{webhook_path.strip('/')}/", "workflow is not an isolated validation candidate"
+                assert workflow_id != active_workflow_id, "candidate workflow must not be the active binding"
             executions = n8n_client.get_executions(
                 limit=limit,
                 workflow_id=workflow_id,
@@ -115,6 +137,7 @@ jobs:
             print("N8N_EXECUTION_DIAGNOSTIC=" + json.dumps({
                 "persona_slug": slug,
                 "workflow_id": workflow_id,
+                "target_kind": target_kind,
                 "executions": sanitized,
             }, ensure_ascii=True, sort_keys=True))
             PY
