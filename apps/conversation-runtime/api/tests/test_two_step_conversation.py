@@ -261,6 +261,8 @@ def test_two_step_model_requests_use_provider_compatible_structured_output():
     assert "Set contract_version to conversation_reply_v1" in reply_code
     assert "exactly these top-level keys" in reply_code
     assert "claims and citations only for factual commercial statements" in reply_code
+    assert "Each claim is exactly {claim_type, value, evidence_node_ids, evidence_chunk_ids}" in reply_code
+    assert "Never copy policy, metadata, or any other field from retrieved context into a claim" in reply_code
 
 
 def test_tock_understanding_persists_retail_need_before_reply_and_refocuses_rag(monkeypatch):
