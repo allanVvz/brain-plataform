@@ -1,0 +1,62 @@
+name: Manage production validation candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Provision or deactivate an isolated n8n candidate
+        type: choice
+        options: [provision, deprovision]
+        required: true
+      persona_slug:
+        description: Persona whose active binding supplies model configuration
+        required: true
+      candidate_id:
+        description: Stable lowercase candidate identifier (provision only)
+        required: false
+      workflow_id:
+        description: Candidate n8n workflow ID (deprovision only)
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: brain-ai-validation-candidate
+  cancel-in-progress: false
+
+jobs:
+  manage:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Synchronize candidate control
+        uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          source: ops/vps/manage-validation-candidate.sh
+          target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+          overwrite: true
+      - name: Manage isolated candidate
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        env:
+          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+          ACTION: ${{ inputs.action }}
+          PERSONA_SLUG: ${{ inputs.persona_slug }}
+          CANDIDATE_ID: ${{ inputs.candidate_id }}
+          WORKFLOW_ID: ${{ inputs.workflow_id }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          envs: VPS_APP_DIR,ACTION,PERSONA_SLUG,CANDIDATE_ID,WORKFLOW_ID
+          command_timeout: 5m
+          script: |
+            set -Eeuo pipefail
+            cd "$VPS_APP_DIR"
+            bash ops/vps/manage-validation-candidate.sh "$ACTION" "$PERSONA_SLUG" "$CANDIDATE_ID" "$WORKFLOW_ID"
