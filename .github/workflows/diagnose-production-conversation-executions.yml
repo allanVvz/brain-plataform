@@ -114,6 +114,40 @@ jobs:
                 for name, attempts in run_data.items():
                     for attempt in attempts or []:
                         error = attempt.get("error") or {}
+                        contract_shape = None
+                        if name == "Bound understanding model":
+                            output_items = [
+                                item
+                                for branch in (((attempt.get("data") or {}).get("main") or []))
+                                for item in (branch or [])
+                            ]
+                            content = str(
+                                (((((output_items[0].get("json") or {}).get("choices") or [{}])[0]).get("message") or {}).get("content") or "")
+                                if output_items else ""
+                            )
+                            try:
+                                parsed_contract = json.loads(content)
+                            except (TypeError, ValueError):
+                                parsed_contract = None
+                            if isinstance(parsed_contract, dict):
+                                questions = parsed_contract.get("customer_questions")
+                                contract_shape = {
+                                    "keys": sorted(str(key) for key in parsed_contract),
+                                    "customer_questions_type": type(questions).__name__,
+                                    "customer_questions": [
+                                        {
+                                            "keys": sorted(str(key) for key in question),
+                                            "kind_type": type(question.get("kind")).__name__,
+                                            "entity_node_ids_type": type(question.get("entity_node_ids")).__name__,
+                                            "entity_node_id_types": [
+                                                type(value).__name__
+                                                for value in (question.get("entity_node_ids") or [])
+                                            ] if isinstance(question.get("entity_node_ids"), list) else [],
+                                        }
+                                        for question in questions
+                                        if isinstance(question, dict)
+                                    ] if isinstance(questions, list) else [],
+                                }
                         nodes.append({
                             "name": name,
                             "execution_time_ms": attempt.get("executionTime"),
@@ -121,6 +155,7 @@ jobs:
                             "error_name": error.get("name"),
                             "error_message": str(error.get("message") or "")[:300] or None,
                             "http_code": error.get("httpCode"),
+                            "contract_shape": contract_shape,
                             "forwarded_errors": [
                                 {
                                     "message": str(((item.get("json") or {}).get("error") or {}).get("message") or "")[:300] or None,
