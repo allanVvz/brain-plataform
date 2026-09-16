@@ -297,6 +297,8 @@ def test_two_step_model_requests_use_provider_compatible_structured_output():
     )
     assert "a bare yes or no answers that confirmation" in understanding_code
     assert "confirmation.target_ref exactly to pending_confirmation_ref" in understanding_code
+    assert "expected_answer_field_key:expectedAnswerFieldKey" in understanding_code
+    assert "customer_message answers it, facts must include that exact key" in understanding_code
     validator_code = nodes["Validate turn understanding"]["parameters"]["jsCode"]
     assert "turn_understanding_unknown_fact" in validator_code
     assert "turn_understanding_invalid_branch" in validator_code
