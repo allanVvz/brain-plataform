@@ -301,10 +301,14 @@ def test_two_step_model_requests_use_provider_compatible_structured_output():
     assert "confirmation.target_ref exactly to pending_confirmation_ref" in understanding_code
     assert "expected_answer_field_key:expectedAnswerFieldKey" in understanding_code
     assert "customer_message answers it, facts must include that exact key" in understanding_code
+    assert "each customer question is {kind,topic,entity_node_ids,evidence_span}" in understanding_code
+    assert "A literal question from customer_message must appear in customer_questions" in understanding_code
+    assert "Do not use legacy keys such as detected_intent" in understanding_code
     validator_code = nodes["Validate turn understanding"]["parameters"]["jsCode"]
     assert "turn_understanding_unknown_fact" in validator_code
     assert "turn_understanding_invalid_branch" in validator_code
-    assert "const understanding={contract_version:\"turn_understanding_v1\"" in validator_code
+    assert "const understanding={contract_version:'turn_understanding_v1'" in validator_code
+    assert "turn_understanding_invalid_observation_shape" in validator_code
     # n8n's Code node passes (value, index, array) to map callbacks. Passing
     # the sandboxed String callable directly raised the index ("0 [line 25]")
     # whenever the model returned a customer question with entity references.
