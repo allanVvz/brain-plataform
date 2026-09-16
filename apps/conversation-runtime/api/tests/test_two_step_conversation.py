@@ -251,7 +251,10 @@ def test_two_step_model_requests_use_provider_compatible_structured_output():
     understanding_code = nodes["Build turn understanding request"]["parameters"]["jsCode"]
     assert "Read the inbound and return only one JSON object" in understanding_code
     assert "field_key, owner_node_id, source_message_id or metadata" in understanding_code
-    assert "turn_understanding_unknown_fact" in nodes["Validate turn understanding"]["parameters"]["jsCode"]
+    validator_code = nodes["Validate turn understanding"]["parameters"]["jsCode"]
+    assert "turn_understanding_unknown_fact" in validator_code
+    assert "turn_understanding_invalid_branch" in validator_code
+    assert "const understanding={contract_version:\"turn_understanding_v1\"" in validator_code
     assert "conversation_brief" in reply_code
     assert "It is fine to ask nothing" in reply_code
     assert "claims and citations only for factual commercial statements" in reply_code
