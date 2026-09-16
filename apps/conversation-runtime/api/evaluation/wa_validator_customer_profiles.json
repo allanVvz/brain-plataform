@@ -146,6 +146,7 @@
       }
     },
     "unsupported_commercial_question": "Vocês conseguem garantir estoque para a próxima semana?",
+    "post_qualification_question": "Ainda estou comparando. Quais tipos de peça casual vocês têm para o dia a dia?",
     "branch_switch_text": "Na verdade, é para uso próprio.",
     "regression_cases": [
       {

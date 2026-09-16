@@ -51,6 +51,25 @@ def _v17_publication() -> dict:
     }
 
 
+def _v36_publication() -> dict:
+    bundle = json.loads(
+        (
+            REPO_ROOT
+            / "data"
+            / "graph_bundles"
+            / "tock-fatal"
+            / "graph-first-consultative-handoff-v36.json"
+        ).read_text(encoding="utf-8")
+    )
+    document = graph_bundle.compile_bundle(graph_bundle.normalize_bundle(bundle))
+    return {
+        "version": 36,
+        "status": "candidate",
+        "checksum": document["checksum"],
+        "document_json": document,
+    }
+
+
 def test_sales_semantic_scripts_select_distinct_graph_branches():
     publication = _publication()
 
@@ -268,6 +287,27 @@ def test_v17_sales_validator_answers_new_fields_and_covers_store_and_shipping():
         "known_name": "Beatriz",
         "client_name_omitted": True,
     }
+
+
+def test_v36_sales_validator_proves_graph_owned_post_qualification_support():
+    driver = wa_validator_service._semantic_sales_script(
+        publication=_v36_publication(), flow_id="sdr_sales_retail"
+    )["driver"]
+
+    assert driver["expected_handoff"] is False
+    assert driver["post_qualification_support"]["forbid_handoff"] is True
+    state = {"confirmation_sent": True}
+    step = wa_validator_service._next_semantic_driver_step(
+        driver=driver,
+        state=state,
+        asked_field="",
+        answered_fields=set(driver["required_fields"]),
+        active_anchor=driver["branch_anchor_node_id"],
+        expected_active_branches=[driver["branch_anchor_node_id"]],
+        qualification_complete=True,
+    )
+    assert step["kind"] == "post_qualification_support"
+    assert state["post_qualification_support_sent"] is True
 
 
 def test_v17_sales_validator_builds_exact_photo_and_no_photo_scenarios():

@@ -980,6 +980,25 @@ def _semantic_sales_script(
             r"\bentrega\s+em\s+\d+", r"\bpedido\s+mínimo\s+(?:é|de)\b",
         ],
     }
+    post_qualification_policy = dict(
+        (contract.get("conversation_policy") or {}).get("post_qualification_support")
+        or {}
+    )
+    post_qualification_support = None
+    if (
+        str(post_qualification_policy.get("mode") or "").strip()
+        and post_qualification_policy.get("handoff_requested") is False
+    ):
+        support_text = str(profile.get("post_qualification_question") or "").strip()
+        if support_text:
+            post_qualification_support = {
+                "text": support_text,
+                "kind": "post_qualification_support",
+                "intended_facts": {},
+                "expected_branch_node_id": anchor,
+                "expected_active_branch_node_ids": [anchor],
+                "forbid_handoff": True,
+            }
     switch = None
     if flow_id == "sdr_sales_branch_switch" and len(branches) > 1:
         alternative = next((row for row in branches if row[0] != anchor), None)
@@ -1021,7 +1040,8 @@ def _semantic_sales_script(
         "questions": driver_questions,
         "branch_anchor_node_id": anchor,
         "max_turns": len(required_fields) + 7,
-        "expected_handoff": True,
+        "expected_handoff": post_qualification_support is None,
+        "post_qualification_support": post_qualification_support,
         "switch": switch,
         "doubt": doubt,
         "interruption_after_answered_fields": max(1, len(required_fields) - 1),
@@ -2606,6 +2626,9 @@ def _semantic_turn_audit(
             or collection_complete
             or bool(customer_step.get("allow_incomplete_handoff"))
         ),
+        "forbidden_handoff_absent": (
+            not customer_step.get("forbid_handoff") or not handoff_observed
+        ),
         "expected_handoff_reached": (
             not expected_handoff
             or first_askable is not None
@@ -2774,6 +2797,17 @@ def _next_semantic_driver_step(
                 "expected_branch_node_id": active_anchor,
                 "expected_active_branch_node_ids": list(expected_active_branches),
             }
+
+    post_qualification_support = driver.get("post_qualification_support")
+    if (
+        qualification_complete
+        and state.get("confirmation_sent")
+        and not state.get("post_qualification_support_sent")
+        and isinstance(post_qualification_support, dict)
+        and str(post_qualification_support.get("text") or "").strip()
+    ):
+        state["post_qualification_support_sent"] = True
+        return dict(post_qualification_support)
 
     second_ignore = driver.get("second_ignore")
     if (
@@ -3451,6 +3485,9 @@ async def run_session_direct(
                             str(value)
                             for value in step.get("expected_active_branch_node_ids") or []
                         ]
+                    if step.get("kind") == "post_qualification_support":
+                        semantic_complete = True
+                        break
                     if audit.get("handoff_observed"):
                         post_handoff = list(driver.get("post_handoff_greetings") or [])
                         if post_handoff and not driver_state["post_handoff_started"]:
