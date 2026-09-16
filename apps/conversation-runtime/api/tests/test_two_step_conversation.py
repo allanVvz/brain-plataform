@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import shutil
+import subprocess
 
 import pytest
 from pydantic import ValidationError
@@ -303,6 +305,11 @@ def test_two_step_model_requests_use_provider_compatible_structured_output():
     assert "turn_understanding_unknown_fact" in validator_code
     assert "turn_understanding_invalid_branch" in validator_code
     assert "const understanding={contract_version:\"turn_understanding_v1\"" in validator_code
+    # n8n's Code node passes (value, index, array) to map callbacks. Passing
+    # the sandboxed String callable directly raised the index ("0 [line 25]")
+    # whenever the model returned a customer question with entity references.
+    assert ".map(String)" not in validator_code
+    assert ".map(function(value){return String(value);})" in validator_code
     assert "conversation_brief" in reply_code
     assert "evidence_chunk_ids:{type:'array',items:{type:'string'}}}}}" in reply_code
     assert "It is fine to ask nothing" in reply_code
@@ -318,6 +325,60 @@ def test_two_step_model_requests_use_provider_compatible_structured_output():
     assert "conversation_reply_extra_claim" in reply_validator
     assert "conversation_reply_invalid_claim_value" in reply_validator
     assert "conversation_reply_invalid_citations" in reply_validator
+
+
+def test_turn_understanding_validator_handles_question_entity_references():
+    if not shutil.which("node"):
+        pytest.skip("node is required to execute the canonical n8n code node")
+    workflow = json.loads(TEMPLATE.read_text(encoding="utf-8"))
+    code = next(
+        node["parameters"]["jsCode"]
+        for node in workflow["nodes"]
+        if node["name"] == "Validate turn understanding"
+    )
+    understanding = {
+        "contract_version": "turn_understanding_v1",
+        "facts": [],
+        "branch_selections": [],
+        "confirmation": {"state": "none"},
+        "customer_questions": [{
+            "kind": "stock",
+            "topic": "estoque para a proxima semana",
+            "entity_node_ids": ["product:daily"],
+            "evidence_span": "garantir estoque para a proxima semana",
+        }],
+        "interaction_observation": {
+            "kind": "continue_current", "evidence_span": "", "confidence": 1,
+        },
+    }
+    harness = r"""
+const fs = require('fs');
+const fixture = JSON.parse(fs.readFileSync(0, 'utf8'));
+const nodes = {
+  'Load published graph context': {graph_contract: {fields: []}},
+  'Validate conversation binding': {model: 'fixture-model', external_message_id: 'message-1'},
+  'Build turn understanding request': {llm_call_started_at: Date.now()},
+};
+const select = (name) => ({item: {json: nodes[name]}});
+const payload = {choices: [{message: {content: JSON.stringify(fixture.understanding)}}]};
+const strictString = function(value) {
+  if (arguments.length !== 1) throw new Error(globalThis.String(arguments[1]));
+  return globalThis.String(value);
+};
+const result = new Function('$', '$json', 'String', fixture.javascript)(select, payload, strictString);
+process.stdout.write(JSON.stringify(result[0].json));
+"""
+    completed = subprocess.run(
+        ["node", "-e", harness],
+        input=json.dumps({"javascript": code, "understanding": understanding}),
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    result = json.loads(completed.stdout)
+    assert result["understanding"]["customer_questions"][0]["entity_node_ids"] == [
+        "product:daily"
+    ]
 
 
 def test_tock_understanding_persists_retail_need_before_reply_and_refocuses_rag(monkeypatch):

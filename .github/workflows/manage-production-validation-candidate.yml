@@ -6,7 +6,7 @@ on:
       action:
         description: Provision or deactivate an isolated n8n candidate
         type: choice
-        options: [provision, deprovision]
+        options: [provision, provision-source, deprovision]
         required: true
       persona_slug:
         description: Persona whose active binding supplies model configuration
@@ -38,7 +38,7 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
-          source: ops/vps/manage-validation-candidate.sh
+          source: ops/vps/manage-validation-candidate.sh,apps/conversation-runtime/n8n/persona-conversation-template.json
           target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           overwrite: true
       - name: Manage isolated candidate

@@ -7,7 +7,7 @@ PERSONA_SLUG="${2:?persona slug required}"
 CANDIDATE_ID="${3:-}"
 WORKFLOW_ID="${4:-}"
 
-[[ "$ACTION" == "provision" || "$ACTION" == "deprovision" ]] || { echo "invalid action" >&2; exit 2; }
+[[ "$ACTION" == "provision" || "$ACTION" == "provision-source" || "$ACTION" == "deprovision" ]] || { echo "invalid action" >&2; exit 2; }
 [[ "$PERSONA_SLUG" =~ ^[a-z0-9-]{2,80}$ ]] || { echo "invalid persona slug" >&2; exit 2; }
 [[ -z "$CANDIDATE_ID" || "$CANDIDATE_ID" =~ ^[a-z0-9-]{8,80}$ ]] || { echo "invalid candidate id" >&2; exit 2; }
 [[ -z "$WORKFLOW_ID" || "$WORKFLOW_ID" =~ ^[A-Za-z0-9_-]{1,160}$ ]] || { echo "invalid workflow id" >&2; exit 2; }
@@ -25,4 +25,17 @@ if [[ "$ACTION" == "deprovision" ]]; then
 fi
 
 [[ -n "$CANDIDATE_ID" ]] || { echo "candidate id required for provision" >&2; exit 2; }
-docker exec "$control_name" python -c 'import json,sys; from scripts import resync_graph_agent_workflows as r; from services import conversation_workflow_service as w, supabase_client; slug,candidate_id=sys.argv[1:]; persona=supabase_client.get_persona(slug); assert persona, "persona not found"; binding=r._binding(persona, require_active=False); connection=supabase_client.get_persona_integration_connection(str(persona["id"]), "deepseek") or {}; config=r._resolved_config(persona, connection, binding); result=w.provision_validation_candidate(persona, config, candidate_id=candidate_id); metadata=binding.get("metadata") or {}; live=str(metadata.get("conversation_webhook_url") or metadata.get("webhook_url") or "").rstrip("/"); assert "/webhook/" in live, "active binding has no n8n production webhook URL"; candidate_url=live.split("/webhook/",1)[0] + "/webhook/" + result["webhook_path"]; print("VALIDATION_CANDIDATE=" + json.dumps({**result, "candidate_webhook_url":candidate_url}, ensure_ascii=True, sort_keys=True))' "$PERSONA_SLUG" "$CANDIDATE_ID"
+template_args=()
+if [[ "$ACTION" == "provision-source" ]]; then
+  source_template="$ROOT_DIR/apps/conversation-runtime/n8n/persona-conversation-template.json"
+  [[ -s "$source_template" ]] || { echo "source conversation template missing" >&2; exit 1; }
+  container_template="/tmp/brain-validation-template-${CANDIDATE_ID}.json"
+  docker cp "$source_template" "$control_name:$container_template"
+  cleanup_template() {
+    docker exec "$control_name" rm -f -- "$container_template" >/dev/null 2>&1 || true
+  }
+  trap cleanup_template EXIT
+  template_args=(-e "BRAIN_CONVERSATION_TEMPLATE_PATH=$container_template")
+fi
+
+docker exec "${template_args[@]}" "$control_name" python -c 'import json,sys; from scripts import resync_graph_agent_workflows as r; from services import conversation_workflow_service as w, supabase_client; slug,candidate_id,template_source=sys.argv[1:]; persona=supabase_client.get_persona(slug); assert persona, "persona not found"; binding=r._binding(persona, require_active=False); connection=supabase_client.get_persona_integration_connection(str(persona["id"]), "deepseek") or {}; config=r._resolved_config(persona, connection, binding); result=w.provision_validation_candidate(persona, config, candidate_id=candidate_id); metadata=binding.get("metadata") or {}; live=str(metadata.get("conversation_webhook_url") or metadata.get("webhook_url") or "").rstrip("/"); assert "/webhook/" in live, "active binding has no n8n production webhook URL"; candidate_url=live.split("/webhook/",1)[0] + "/webhook/" + result["webhook_path"]; print("VALIDATION_CANDIDATE=" + json.dumps({**result, "candidate_webhook_url":candidate_url, "template_source":template_source}, ensure_ascii=True, sort_keys=True))' "$PERSONA_SLUG" "$CANDIDATE_ID" "$ACTION"
