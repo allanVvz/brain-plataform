@@ -303,6 +303,8 @@ def test_two_step_model_requests_use_provider_compatible_structured_output():
     assert "customer_message answers it, facts must include that exact key" in understanding_code
     assert "each customer question is {kind,topic,entity_node_ids,evidence_span}" in understanding_code
     assert "A literal question from customer_message must appear in customer_questions" in understanding_code
+    assert "output_schema:binding.structured_output_mode==='json_object'?schema:null" in understanding_code
+    assert "Follow payload.output_schema exactly when it is present" in understanding_code
     assert "Do not use legacy keys such as detected_intent" in understanding_code
     validator_code = nodes["Validate turn understanding"]["parameters"]["jsCode"]
     assert "turn_understanding_unknown_fact" in validator_code
