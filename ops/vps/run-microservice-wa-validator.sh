@@ -89,7 +89,62 @@ else:
 PY
 
 if [[ "$MODE" == "--inspect" ]]; then
-  docker exec "$runtime_name" python -c 'import json,sys; from services import wa_validator_service as w; s=w.get_session(sys.argv[1]); o=s.get("output") or {}; turns=[]; keep=("role","text","intent","route","handoff","message_id","pipeline_contract","graph_version","graph_checksum","journey_state","turn_audit","semantic_audit","failure_diagnostic"); [turns.append({k:t.get(k) for k in keep if k in t}) for t in (o.get("conversation") or [])]; result={"id":s.get("id"),"persona_slug":s.get("persona_slug"),"publication_id":s.get("publication_id"),"status":s.get("status"),"error":s.get("error"),"technical_pass":o.get("technical_pass",s.get("technical_pass")),"quality_pass":o.get("quality_pass",s.get("quality_pass")),"quality_scope":o.get("quality_scope",s.get("quality_scope")),"turns":turns}; print("WA_VALIDATOR_INSPECTION="+json.dumps(result, ensure_ascii=True, sort_keys=True))' "$SESSION_ID"
+  docker exec -i "$runtime_name" python - "$SESSION_ID" <<'PY'
+import json
+import sys
+from services import wa_validator_service as validator
+
+session = validator.get_session(sys.argv[1])
+output = session.get("output") or {}
+conversation = output.get("conversation") or []
+keep = (
+    "role", "text", "intent", "route", "handoff", "message_id",
+    "pipeline_contract", "graph_version", "graph_checksum", "journey_state",
+    "turn_audit", "semantic_audit", "failure_diagnostic",
+)
+turns = [{key: turn.get(key) for key in keep if key in turn} for turn in conversation]
+bot_turns = [turn for turn in conversation if turn.get("role") == "bot" and turn.get("turn_audit")]
+audits = [turn.get("turn_audit") or {} for turn in bot_turns]
+semantic_audits = [turn.get("semantic_audit") or {} for turn in bot_turns]
+summary = {
+    "bot_turn_count": len(bot_turns),
+    "graph_versions": sorted({turn.get("graph_version") for turn in bot_turns if turn.get("graph_version") is not None}),
+    "graph_checksums": sorted({turn.get("graph_checksum") for turn in bot_turns if turn.get("graph_checksum")}),
+    "decision_counts": [audit.get("decision_count") for audit in audits],
+    "proof_counts": [audit.get("proof_count") for audit in audits],
+    "valid_proof_counts": [audit.get("valid_proof_count") for audit in audits],
+    "commit_states": [audit.get("commit_state") for audit in audits],
+    "outbound_counts": [audit.get("outbound_count") for audit in audits],
+    "model_calls": [audit.get("model_calls") for audit in audits],
+    "repair_calls": [audit.get("repair_calls") for audit in audits],
+    "semantic_passes": [audit.get("passed") for audit in semantic_audits],
+    "qualification_complete_turns": sum(audit.get("qualification_complete") is True for audit in semantic_audits),
+    "handoff_turns": sum(turn.get("handoff") is True for turn in bot_turns),
+}
+summary["turn_invariants_pass"] = bool(bot_turns) and all(
+    audit.get("decision_count") == 1
+    and audit.get("proof_count") == 1
+    and audit.get("valid_proof_count") == 1
+    and audit.get("commit_state") == "completed"
+    and int(audit.get("outbound_count") or 0) <= 1
+    and audit.get("model_calls") == 2
+    and audit.get("repair_calls") == 0
+    for audit in audits
+)
+result = {
+    "id": session.get("id"),
+    "persona_slug": session.get("persona_slug"),
+    "publication_id": session.get("publication_id"),
+    "status": session.get("status"),
+    "error": session.get("error"),
+    "technical_pass": output.get("technical_pass", session.get("technical_pass")),
+    "quality_pass": output.get("quality_pass", session.get("quality_pass")),
+    "quality_scope": output.get("quality_scope", session.get("quality_scope")),
+    "turns": turns,
+}
+print("WA_VALIDATOR_AUDIT=" + json.dumps(summary, ensure_ascii=True, sort_keys=True))
+print("WA_VALIDATOR_INSPECTION=" + json.dumps(result, ensure_ascii=True, sort_keys=True))
+PY
   echo "WA_VALIDATOR_INSPECT_RESULT=passed"
   exit 0
 fi
