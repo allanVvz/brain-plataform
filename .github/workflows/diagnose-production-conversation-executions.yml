@@ -70,15 +70,12 @@ jobs:
             workflow = n8n_client.get_workflow(workflow_id) or {}
             assert workflow, "n8n workflow not found"
             if candidate_workflow_id:
-                meta = workflow.get("meta") or {}
-                rendered_binding = meta.get("binding") or {}
                 inbound = next(
                     (node for node in workflow.get("nodes") or [] if node.get("id") == "inbound"),
                     {},
                 )
-                webhook_path = str((inbound.get("parameters") or {}).get("path") or "")
-                assert str(rendered_binding.get("persona_slug") or "") == slug, "candidate persona mismatch"
-                assert "/validation/" in f"/{webhook_path.strip('/')}/", "workflow is not an isolated validation candidate"
+                webhook_path = str((inbound.get("parameters") or {}).get("path") or "").strip("/")
+                assert webhook_path.startswith(f"{slug}/validation/"), "candidate persona or namespace mismatch"
                 assert workflow_id != active_workflow_id, "candidate workflow must not be the active binding"
             executions = n8n_client.get_executions(
                 limit=limit,
