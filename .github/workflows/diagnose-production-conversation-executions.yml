@@ -15,6 +15,9 @@ on:
       candidate_workflow_id:
         description: Optional isolated validation workflow ID; never changes the active binding
         required: false
+      candidate_id:
+        description: Optional validation candidate namespace; resolves the newest matching workflow
+        required: false
 
 permissions:
   contents: read
@@ -34,13 +37,14 @@ jobs:
           PERSONA_SLUG: ${{ inputs.persona_slug }}
           EXECUTION_LIMIT: ${{ inputs.limit }}
           CANDIDATE_WORKFLOW_ID: ${{ inputs.candidate_workflow_id }}
+          CANDIDATE_ID: ${{ inputs.candidate_id }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
           command_timeout: 5m
-          envs: VPS_APP_DIR,PERSONA_SLUG,EXECUTION_LIMIT,CANDIDATE_WORKFLOW_ID
+          envs: VPS_APP_DIR,PERSONA_SLUG,EXECUTION_LIMIT,CANDIDATE_WORKFLOW_ID,CANDIDATE_ID
           script: |
             set -Eeuo pipefail
             cd "$VPS_APP_DIR"
@@ -48,6 +52,8 @@ jobs:
             [[ "$EXECUTION_LIMIT" =~ ^[0-9]+$ ]]
             (( EXECUTION_LIMIT >= 1 && EXECUTION_LIMIT <= 20 ))
             [[ -z "$CANDIDATE_WORKFLOW_ID" || "$CANDIDATE_WORKFLOW_ID" =~ ^[A-Za-z0-9_-]{8,64}$ ]]
+            [[ -z "$CANDIDATE_ID" || "$CANDIDATE_ID" =~ ^[a-z0-9-]{8,80}$ ]]
+            [[ -z "$CANDIDATE_WORKFLOW_ID" || -z "$CANDIDATE_ID" ]]
             state_file=.deploy/microservices/slots.json
             slot="$(python3 -c 'import json; print(json.load(open(".deploy/microservices/slots.json", encoding="utf-8"))["control-plane"]["active"])')"
             container="brain-ai-control-plane-${slot}-1"
@@ -63,6 +69,19 @@ jobs:
             binding = next(row for row in bindings if row.get("active"))
             active_workflow_id = str(binding.get("n8n_workflow_id") or "")
             candidate_workflow_id = os.environ.get("CANDIDATE_WORKFLOW_ID", "").strip()
+            candidate_id = os.environ.get("CANDIDATE_ID", "").strip()
+            if candidate_id:
+                suffix = f"validation {candidate_id}"
+                matches = [
+                    row for row in n8n_client.get_workflows()
+                    if str(row.get("name") or "").endswith(suffix)
+                ]
+                assert matches, "validation candidate workflow not found"
+                matches.sort(
+                    key=lambda row: str(row.get("updatedAt") or row.get("createdAt") or ""),
+                    reverse=True,
+                )
+                candidate_workflow_id = str(matches[0].get("id") or "")
             workflow_id = candidate_workflow_id or active_workflow_id
             assert workflow_id, "active binding has no n8n workflow"
 
