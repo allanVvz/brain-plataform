@@ -256,6 +256,7 @@ def test_two_step_model_requests_use_provider_compatible_structured_output():
     assert "turn_understanding_invalid_branch" in validator_code
     assert "const understanding={contract_version:\"turn_understanding_v1\"" in validator_code
     assert "conversation_brief" in reply_code
+    assert "evidence_chunk_ids:{type:'array',items:{type:'string'}}}}}" in reply_code
     assert "It is fine to ask nothing" in reply_code
     assert "claims and citations only for factual commercial statements" in reply_code
 
