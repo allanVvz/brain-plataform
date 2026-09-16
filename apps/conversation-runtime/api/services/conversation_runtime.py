@@ -1603,7 +1603,14 @@ def decide_agentic(
             or response.proof.get("delivery_authorized") is False
             or response.proof.get("repair_required") is True
         ):
-            raise RuntimeError("conversation reply proof failed")
+            proof_errors = [
+                str(value)
+                for key in ("errors", "gating_errors", "model_proposal_errors")
+                for value in (response.proof.get(key) or [])
+                if value
+            ]
+            diagnostic = ",".join(dict.fromkeys(proof_errors)) or "invalid_proof"
+            raise RuntimeError(f"conversation reply proof failed:{diagnostic}")
         accepted = list(
             resolved_understanding.resolution_proof.get("accepted_facts") or []
         )

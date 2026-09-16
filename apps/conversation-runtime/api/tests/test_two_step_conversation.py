@@ -189,6 +189,46 @@ def test_final_reply_reuses_resolved_facts_and_never_requests_repair(monkeypatch
     assert response.proof["execution_strategy"] == "interpret_then_respond"
 
 
+def test_two_step_proof_failure_preserves_sanitized_reason(monkeypatch):
+    original = _context()
+    resolved = ResolvedUnderstandingV1(
+        understanding=_understanding(),
+        context=original,
+        prospective_state={"facts_by_key": {}},
+        resolution_proof={"valid": True, "accepted_facts": []},
+    )
+
+    monkeypatch.setattr(
+        graph_agent_runtime_v3,
+        "decide",
+        lambda _context, *, model_observation: (
+            ConversationDecision(
+                intent="answer_question", route="SDR", confidence=1,
+                lead_stage="engajado",
+            ),
+            AgentResponse(
+                reply_text="Ainda preciso confirmar.", role="SDR", cart_state={},
+                proof={
+                    "valid": False,
+                    "delivery_authorized": False,
+                    "errors": ["claim_without_evidence:stock"],
+                },
+            ),
+        ),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="conversation reply proof failed:claim_without_evidence:stock",
+    ):
+        conversation_runtime.decide_agentic(
+            original,
+            resolved_understanding=resolved,
+            conversation_reply=ConversationReplyV1(reply="Ainda preciso confirmar."),
+            model_observation={"token_usage": {"model_calls": 2}},
+        )
+
+
 def test_template_routes_sdr_two_step_without_semantic_repair_and_fails_safe():
     workflow = json.loads(TEMPLATE.read_text(encoding="utf-8"))
     connections = workflow["connections"]
@@ -261,6 +301,7 @@ def test_two_step_model_requests_use_provider_compatible_structured_output():
     assert "Set contract_version to conversation_reply_v1" in reply_code
     assert "exactly these top-level keys" in reply_code
     assert "claims and citations only for factual commercial statements" in reply_code
+    assert "cannot be guaranteed, or still needs confirmation is not a commercial claim" in reply_code
     assert "Each claim is exactly {claim_type, value, evidence_node_ids, evidence_chunk_ids}" in reply_code
     assert "value is always an object, never text, number, list, or null" in reply_code
     assert "use an object with a text property containing the factual statement" in reply_code
