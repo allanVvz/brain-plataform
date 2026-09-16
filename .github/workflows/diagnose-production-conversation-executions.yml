@@ -131,8 +131,29 @@ jobs:
                                 parsed_contract = None
                             if isinstance(parsed_contract, dict):
                                 questions = parsed_contract.get("customer_questions")
+                                facts = parsed_contract.get("facts")
+                                branches = parsed_contract.get("branch_selections")
+                                confirmation = parsed_contract.get("confirmation")
+                                observation = parsed_contract.get("interaction_observation")
                                 contract_shape = {
                                     "keys": sorted(str(key) for key in parsed_contract),
+                                    "facts_type": type(facts).__name__,
+                                    "facts": [
+                                        {"keys": sorted(str(key) for key in fact)}
+                                        for fact in facts if isinstance(fact, dict)
+                                    ] if isinstance(facts, list) else [],
+                                    "branch_selections_type": type(branches).__name__,
+                                    "branch_selections": [
+                                        {
+                                            "keys": sorted(str(key) for key in branch),
+                                            "action": branch.get("action"),
+                                            "anchor_type": type(branch.get("branch_anchor_node_id")).__name__,
+                                        }
+                                        for branch in branches if isinstance(branch, dict)
+                                    ] if isinstance(branches, list) else [],
+                                    "confirmation_type": type(confirmation).__name__,
+                                    "confirmation_state": confirmation.get("state") if isinstance(confirmation, dict) else None,
+                                    "confirmation_keys": sorted(str(key) for key in confirmation) if isinstance(confirmation, dict) else [],
                                     "customer_questions_type": type(questions).__name__,
                                     "customer_questions": [
                                         {
@@ -147,6 +168,10 @@ jobs:
                                         for question in questions
                                         if isinstance(question, dict)
                                     ] if isinstance(questions, list) else [],
+                                    "interaction_observation_type": type(observation).__name__,
+                                    "interaction_observation_kind": observation.get("kind") if isinstance(observation, dict) else None,
+                                    "interaction_observation_keys": sorted(str(key) for key in observation) if isinstance(observation, dict) else [],
+                                    "interaction_observation_confidence_type": type(observation.get("confidence")).__name__ if isinstance(observation, dict) else None,
                                 }
                         nodes.append({
                             "name": name,
