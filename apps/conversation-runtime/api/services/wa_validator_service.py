@@ -82,18 +82,26 @@ def _validated_candidate_webhook_url(
     if not url:
         return None
     parsed = urlparse(url)
-    if parsed.scheme != "https" or not parsed.netloc or parsed.query or parsed.fragment:
-        raise ValueError("candidate webhook must be an HTTPS URL without query or fragment")
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.query or parsed.fragment:
+        raise ValueError("candidate webhook must be an HTTP(S) URL without query or fragment")
     origins = {
         item.strip().rstrip("/")
         for item in (os.environ.get("N8N_VALIDATOR_ALLOWED_ORIGINS") or "").split(",")
         if item.strip()
     }
     reference = urlparse(str(reference_url or "").strip())
+    same_binding_origin = (
+        reference.scheme in {"http", "https"}
+        and reference.netloc
+        and parsed.scheme == reference.scheme
+        and parsed.netloc == reference.netloc
+    )
     if reference.scheme == "https" and reference.netloc:
         origins.add(f"{reference.scheme}://{reference.netloc}")
     origin = f"{parsed.scheme}://{parsed.netloc}"
-    if not origins or origin not in origins:
+    if (parsed.scheme != "https" and not same_binding_origin) or (
+        not same_binding_origin and (not origins or origin not in origins)
+    ):
         raise ValueError("candidate webhook origin is not authorized for validator runs")
     if not parsed.path.startswith("/webhook/"):
         raise ValueError("candidate webhook must use an n8n production webhook path")

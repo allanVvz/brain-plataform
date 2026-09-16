@@ -25,10 +25,14 @@ def test_candidate_webhook_requires_declared_n8n_origin(monkeypatch):
     assert wa_validator_service._validated_candidate_webhook_url(
         url, reference_url="https://n8n.example.test/webhook/live"
     ) == url
-    with pytest.raises(ValueError, match="HTTPS"):
+    with pytest.raises(ValueError, match="not authorized"):
         wa_validator_service._validated_candidate_webhook_url(
             "http://n8n.example.test/webhook/qa-candidate"
         )
+    assert wa_validator_service._validated_candidate_webhook_url(
+        "http://n8n.internal/webhook/qa-candidate",
+        reference_url="http://n8n.internal/webhook/live",
+    ) == "http://n8n.internal/webhook/qa-candidate"
 
 
 def _audit_inputs(*, conversation_mode: str) -> dict:
