@@ -21,6 +21,7 @@ PUBLIC_EXACT_PATHS = {
     "/webhooks/whatsapp/status",
     "/internal/whatsapp/outbound-result",
     "/internal/v1/conversations/context",
+    "/internal/v1/conversations/resolve-understanding",
     "/internal/v1/conversations/decide",
     "/internal/v1/conversations/commit",
     "/internal/v1/conversations/fail-safe-handoff",
