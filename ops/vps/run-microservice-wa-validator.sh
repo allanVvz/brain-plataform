@@ -11,7 +11,7 @@ CANDIDATE_WEBHOOK_URL="${6:-}"
 STATE_FILE="$ROOT_DIR/.deploy/microservices/slots.json"
 MANIFEST="$ROOT_DIR/ops/microservices/release-manifest.json"
 
-[[ "$MODE" == "--dry-run" || "$MODE" == "--run" || "$MODE" == "--inspect" ]] || { echo "invalid mode" >&2; exit 2; }
+[[ "$MODE" == "--dry-run" || "$MODE" == "--run" || "$MODE" == "--run-source" || "$MODE" == "--inspect" ]] || { echo "invalid mode" >&2; exit 2; }
 [[ "$PERSONA_SLUG" =~ ^(aurora|tock-fatal|vz-lupas)$ ]] || { echo "invalid persona slug" >&2; exit 2; }
 [[ "$FLOW_ID" =~ ^[a-z0-9_]{2,100}$ ]] || { echo "invalid flow id" >&2; exit 2; }
 [[ "$INITIAL_STATE" == "cold" || "$INITIAL_STATE" == "known_name" ]] || { echo "invalid initial state" >&2; exit 2; }
@@ -107,12 +107,15 @@ fi
 
 validator_cid="$(docker ps -aq --filter "name=^/${validator_name}$" | head -n 1)"
 validator_was_running=false
+source_validator_created=false
 if [[ -n "$validator_cid" ]]; then
   validator_was_running="$(docker inspect -f '{{.State.Running}}' "$validator_cid")"
 fi
 cleanup() {
   local status="$?"
-  if [[ "$validator_was_running" != "true" ]]; then
+  if [[ "$MODE" == "--run-source" && "$source_validator_created" == "true" ]]; then
+    docker rm -f "$validator_name" >/dev/null 2>&1 || true
+  elif [[ "$validator_was_running" != "true" ]]; then
     docker stop -t 120 "$validator_name" >/dev/null || true
   fi
   if [[ "$runner_was_running" != "true" ]]; then
@@ -131,19 +134,31 @@ until [[ "$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{els
   sleep 3
 done
 
-if [[ "$validator_was_running" != "true" ]]; then
+if [[ "$MODE" == "--run-source" ]]; then
+  [[ "$validator_was_running" != "true" ]] || { echo "source validator requires an idle validator worker" >&2; exit 1; }
+  source_service="$ROOT_DIR/apps/conversation-runtime/api/services/wa_validator_service.py"
+  source_profile="$ROOT_DIR/apps/conversation-runtime/api/evaluation/wa_validator_customer_profiles.json"
+  [[ -s "$source_service" && -s "$source_profile" ]] || { echo "source validator files missing" >&2; exit 1; }
+  "${COMPOSE[@]}" create --no-build "$validator_service" >/dev/null
+  source_validator_created=true
+  docker cp "$source_service" "$validator_name:/app/services/wa_validator_service.py"
+  docker cp "$source_profile" "$validator_name:/app/evaluation/wa_validator_customer_profiles.json"
+  docker start "$validator_name" >/dev/null
+elif [[ "$validator_was_running" != "true" ]]; then
   "${COMPOSE[@]}" up -d --no-deps "$validator_service" >/dev/null
 fi
 [[ "$(docker inspect -f '{{.State.Running}}' "$validator_name")" == "true" ]] || { echo "validator worker failed to start" >&2; exit 1; }
 
-session_output="$(docker exec "$runtime_name" python -c 'import sys; from services import wa_validator_service as w; generated=w.generate_script(persona_slug=sys.argv[1], flow_id=sys.argv[2], target_contact="production-lifecycle", initial_state=sys.argv[3], validation_target_url=sys.argv[4] or None); session_id=generated["session_id"]; w.enqueue_session_direct(session_id); print("WA_VALIDATOR_SESSION_ID=" + session_id)' "$PERSONA_SLUG" "$FLOW_ID" "$INITIAL_STATE" "$CANDIDATE_WEBHOOK_URL")"
+session_container="$runtime_name"
+[[ "$MODE" == "--run-source" ]] && session_container="$validator_name"
+session_output="$(docker exec "$session_container" python -c 'import sys; from services import wa_validator_service as w; generated=w.generate_script(persona_slug=sys.argv[1], flow_id=sys.argv[2], target_contact="production-lifecycle", initial_state=sys.argv[3], validation_target_url=sys.argv[4] or None); session_id=generated["session_id"]; w.enqueue_session_direct(session_id); print("WA_VALIDATOR_SESSION_ID=" + session_id)' "$PERSONA_SLUG" "$FLOW_ID" "$INITIAL_STATE" "$CANDIDATE_WEBHOOK_URL")"
 printf '%s\n' "$session_output"
 session_id="$(printf '%s\n' "$session_output" | sed -n 's/^WA_VALIDATOR_SESSION_ID=//p' | tail -n 1)"
 [[ "$session_id" =~ ^[A-Za-z0-9_-]{8,160}$ ]] || { echo "invalid validator session id" >&2; exit 1; }
 
 deadline=$((SECONDS + 900))
 while (( SECONDS < deadline )); do
-  summary="$(docker exec "$runtime_name" python -c 'import json,sys; from services import wa_validator_service as w; s=w.get_session(sys.argv[1]); o=s.get("output") or {}; print(json.dumps({"status":s.get("status"),"technical_pass":o.get("technical_pass",s.get("technical_pass")),"quality_pass":o.get("quality_pass",s.get("quality_pass")),"quality_scope":o.get("quality_scope",s.get("quality_scope")),"turn_count":len(o.get("conversation") or []),"error":s.get("error")}, ensure_ascii=True, sort_keys=True))' "$session_id")"
+  summary="$(docker exec "$session_container" python -c 'import json,sys; from services import wa_validator_service as w; s=w.get_session(sys.argv[1]); o=s.get("output") or {}; print(json.dumps({"status":s.get("status"),"technical_pass":o.get("technical_pass",s.get("technical_pass")),"quality_pass":o.get("quality_pass",s.get("quality_pass")),"quality_scope":o.get("quality_scope",s.get("quality_scope")),"turn_count":len(o.get("conversation") or []),"error":s.get("error")}, ensure_ascii=True, sort_keys=True))' "$session_id")"
   printf 'WA_VALIDATOR_STATUS=%s\n' "$summary"
   status="$(printf '%s' "$summary" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status") or "")')"
   if [[ "$status" == "done" ]]; then
