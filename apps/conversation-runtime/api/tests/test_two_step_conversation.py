@@ -262,6 +262,8 @@ def test_two_step_model_requests_use_provider_compatible_structured_output():
     assert "exactly these top-level keys" in reply_code
     assert "claims and citations only for factual commercial statements" in reply_code
     assert "Each claim is exactly {claim_type, value, evidence_node_ids, evidence_chunk_ids}" in reply_code
+    assert "value is always an object, never text, number, list, or null" in reply_code
+    assert "use an object with a text property containing the factual statement" in reply_code
     assert "Never copy policy, metadata, or any other field from retrieved context into a claim" in reply_code
 
 
