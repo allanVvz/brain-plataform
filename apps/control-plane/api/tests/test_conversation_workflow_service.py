@@ -89,6 +89,29 @@ def test_structured_output_capability_is_declared_not_inferred():
     assert "includes('deepseek')" not in str(workflow)
 
 
+def test_validation_candidate_uses_same_template_with_isolated_webhook_and_no_binding_mutation(monkeypatch):
+    calls = {}
+    _silence_events(monkeypatch)
+    monkeypatch.setattr(
+        deepseek_n8n_service.n8n_client, "create_workflow",
+        lambda workflow: calls.update({"workflow": workflow}) or {"id": "candidate-1"},
+    )
+    monkeypatch.setattr(
+        deepseek_n8n_service.n8n_client, "activate_workflow",
+        lambda workflow_id: calls.setdefault("activated", workflow_id),
+    )
+    result = deepseek_n8n_service.provision_validation_candidate(
+        {"id": "p-1", "slug": "generic", "name": "Generic", "config": {}},
+        {"n8n_credential_id": "cred-1", **MODEL_BINDING},
+        candidate_id="qa-12345678",
+    )
+    inbound = next(node for node in calls["workflow"]["nodes"] if node["id"] == "inbound")
+    assert inbound["parameters"]["path"] == "generic/validation/qa-12345678"
+    assert calls["workflow"]["meta"]["binding"]["validation_candidate_id"] == "qa-12345678"
+    assert result["webhook_path"] == "generic/validation/qa-12345678"
+    assert calls["activated"] == "candidate-1"
+
+
 def test_unknown_structured_output_capability_is_rejected():
     with pytest.raises(ValueError, match="structured_output_mode"):
         deepseek_n8n_service._workflow_for_persona(

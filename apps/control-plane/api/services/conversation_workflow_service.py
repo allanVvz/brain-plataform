@@ -136,6 +136,7 @@ def _workflow_for_persona(
     credential_id: str,
     credential_name: str,
     model_binding: dict[str, Any] | None = None,
+    validation_candidate_id: str | None = None,
 ) -> dict[str, Any]:
     slug = str(persona.get("slug") or "").strip()
     if not slug:
@@ -172,6 +173,21 @@ def _workflow_for_persona(
     }.items():
         serialized = serialized.replace(placeholder, value)
     workflow = json.loads(serialized)
+    candidate_id = str(validation_candidate_id or "").strip()
+    if candidate_id:
+        if not re.fullmatch(r"[a-z0-9-]{8,80}", candidate_id):
+            raise ValueError("invalid validation candidate id")
+        webhook_path = f"{slug}/validation/{candidate_id}"
+        inbound = next(
+            (node for node in workflow.get("nodes") or [] if node.get("id") == "inbound"),
+            None,
+        )
+        if not inbound:
+            raise ValueError("conversation workflow is missing canonical inbound node")
+        inbound.setdefault("parameters", {})["path"] = webhook_path
+        workflow["name"] = f"{workflow['name']} · validation {candidate_id}"
+    else:
+        webhook_path = f"{slug}/conversation"
     workflow["active"] = False
     for node in _credential_bound_nodes(workflow):
         node["credentials"] = {
@@ -194,10 +210,45 @@ def _workflow_for_persona(
         "model": model,
         "endpoint": endpoint,
         "structured_output_mode": structured_output_mode,
+        "validation_candidate_id": candidate_id or None,
+        "webhook_path": webhook_path,
     }
     _validate_workflow_topology(workflow)
     _assert_no_placeholders(workflow)
     return workflow
+
+
+def provision_validation_candidate(
+    persona: dict[str, Any], model_config: dict[str, Any], *, candidate_id: str,
+) -> dict[str, Any]:
+    """Create an isolated active n8n workflow without changing a binding."""
+    credential_id = str(model_config.get("n8n_credential_id") or "")
+    if not credential_id:
+        raise RuntimeError("Modelo de conversa nao provisionado para esta persona")
+    workflow = _workflow_for_persona(
+        persona,
+        credential_id=credential_id,
+        credential_name=f"Brain Conversation Model â€” {persona.get('slug') or ''}",
+        model_binding=model_config,
+        validation_candidate_id=candidate_id,
+    )
+    created = n8n_client.create_workflow(workflow)
+    workflow_id = str(created.get("id") or "")
+    if not workflow_id:
+        raise RuntimeError("n8n nao retornou um workflow candidato")
+    try:
+        n8n_client.activate_workflow(workflow_id)
+    except Exception:
+        n8n_client.deactivate_workflow(workflow_id)
+        raise
+    binding = workflow.get("meta", {}).get("binding") or {}
+    return {
+        "workflow_id": workflow_id,
+        "candidate_id": candidate_id,
+        "webhook_path": binding["webhook_path"],
+        "workflow_checksum": _workflow_checksum(workflow),
+        "active": True,
+    }
 
 
 def provision(
