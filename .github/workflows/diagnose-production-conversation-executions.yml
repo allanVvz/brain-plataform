@@ -57,7 +57,12 @@ jobs:
             state_file=.deploy/microservices/slots.json
             slot="$(python3 -c 'import json; print(json.load(open(".deploy/microservices/slots.json", encoding="utf-8"))["control-plane"]["active"])')"
             container="brain-ai-control-plane-${slot}-1"
-            docker exec -i -e PERSONA_SLUG="$PERSONA_SLUG" -e EXECUTION_LIMIT="$EXECUTION_LIMIT" -e CANDIDATE_WORKFLOW_ID="$CANDIDATE_WORKFLOW_ID" "$container" python - <<'PY'
+            docker exec -i \
+              -e PERSONA_SLUG="$PERSONA_SLUG" \
+              -e EXECUTION_LIMIT="$EXECUTION_LIMIT" \
+              -e CANDIDATE_WORKFLOW_ID="$CANDIDATE_WORKFLOW_ID" \
+              -e CANDIDATE_ID="$CANDIDATE_ID" \
+              "$container" python - <<'PY'
             import json
             import os
             from services import n8n_client, supabase_client
