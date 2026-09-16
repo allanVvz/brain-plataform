@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Optional
+from urllib.parse import urlparse
 
 from services import (
     agents_service,
@@ -71,6 +72,27 @@ _WA_RUNNER_URL = (os.environ.get("WA_VALIDATOR_RUNNER_URL") or "").rstrip("/")
 _BRAIN_API_URL = os.environ.get("BRAIN_API_URL", "http://localhost:8080")
 _CUSTOMER_PROFILES_PATH = _API_DIR / "evaluation" / "wa_validator_customer_profiles.json"
 _SDR_FLOW_CORPUS_PATH = _API_DIR / "evaluation" / "sdr_flow_cases.json"
+
+
+def _validated_candidate_webhook_url(value: str | None) -> str | None:
+    """Accept an explicit, allow-listed n8n candidate webhook for QA only."""
+    url = str(value or "").strip()
+    if not url:
+        return None
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or not parsed.netloc or parsed.query or parsed.fragment:
+        raise ValueError("candidate webhook must be an HTTPS URL without query or fragment")
+    origins = {
+        item.strip().rstrip("/")
+        for item in (os.environ.get("N8N_VALIDATOR_ALLOWED_ORIGINS") or "").split(",")
+        if item.strip()
+    }
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    if not origins or origin not in origins:
+        raise ValueError("candidate webhook origin is not authorized for validator runs")
+    if not parsed.path.startswith("/webhook/"):
+        raise ValueError("candidate webhook must use an n8n production webhook path")
+    return url
 
 # WA Validator sessions live in Supabase, not a plain in-process dict.
 # Confirmed live 2026-08-08: production runs GUNICORN_WORKERS=2, so a
@@ -1107,6 +1129,7 @@ def generate_script(
     model: str = _MODEL_DEFAULT,
     initial_state: str | None = None,
     publication_id: str | None = None,
+    validation_target_url: str | None = None,
 ) -> dict:
     persona = supabase_client.get_persona(persona_slug)
     if not persona:
@@ -1214,6 +1237,9 @@ def generate_script(
         )
     routing = supabase_client.get_persona_routing(persona_slug) or {}
     conversation_mode = _resolve_conversation_mode(persona_id, routing)
+    candidate_webhook_url = _validated_candidate_webhook_url(validation_target_url)
+    if candidate_webhook_url and conversation_mode != "n8n_agents":
+        raise ValueError("candidate webhook validation requires n8n_agents mode")
 
     session_id = str(uuid.uuid4())
     script = {
@@ -1240,6 +1266,7 @@ def generate_script(
             "graph_checksum": graph_checksum,
             "publication_id": (v3_publication or {}).get("id"),
             "initial_state": resolved_initial_state,
+            "validation_target_url": candidate_webhook_url,
         },
         "target": target_contact,
         "target_phone": target_phone or None,
@@ -2873,6 +2900,11 @@ async def run_session_direct(
         or os.environ.get("N8N_CONVERSATION_TEST_URL")
         or ""
     ).strip()
+    candidate_webhook_url = _validated_candidate_webhook_url(
+        (script.get("meta") or {}).get("validation_target_url")
+    )
+    if candidate_webhook_url:
+        workflow_url = candidate_webhook_url
     if conversation_mode == "n8n_agents" and not workflow_url:
         raise ValueError("Workflow n8n_agents ativo não configurado")
     driver = script.get("driver") or {}

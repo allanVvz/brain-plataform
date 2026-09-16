@@ -41,6 +41,7 @@ class GenerateScriptRequest(BaseModel):
     # between the two per generation, so repeated runs cover both).
     initial_state: str | None = None
     publication_id: str | None = None
+    validation_target_url: str | None = None
 
 
 class RunRequest(BaseModel):
@@ -117,6 +118,7 @@ def generate_script(request: Request, body: GenerateScriptRequest):
             model=body.model,
             initial_state=body.initial_state,
             publication_id=body.publication_id,
+            validation_target_url=body.validation_target_url,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
