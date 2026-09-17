@@ -151,7 +151,6 @@ jobs:
                        interesse_produto = NULL,
                        ultima_mensagem = NULL,
                        handoff_level = 'none',
-                       ai_paused = false,
                        updated_at = now()
                  WHERE id=${LEAD_REF};
               ELSE
