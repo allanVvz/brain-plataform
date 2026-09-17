@@ -8,6 +8,7 @@ FLOW_ID="${3:?flow id required}"
 INITIAL_STATE="${4:-cold}"
 SESSION_ID="${5:-}"
 CANDIDATE_WEBHOOK_URL="${6:-}"
+VALIDATOR_TIMEOUT_SECONDS="${WA_VALIDATOR_TIMEOUT_SECONDS:-900}"
 STATE_FILE="$ROOT_DIR/.deploy/microservices/slots.json"
 MANIFEST="$ROOT_DIR/ops/microservices/release-manifest.json"
 
@@ -15,6 +16,7 @@ MANIFEST="$ROOT_DIR/ops/microservices/release-manifest.json"
 [[ "$PERSONA_SLUG" =~ ^(aurora|tock-fatal|vz-lupas)$ ]] || { echo "invalid persona slug" >&2; exit 2; }
 [[ "$FLOW_ID" =~ ^[a-z0-9_]{2,100}$ ]] || { echo "invalid flow id" >&2; exit 2; }
 [[ "$INITIAL_STATE" == "cold" || "$INITIAL_STATE" == "known_name" ]] || { echo "invalid initial state" >&2; exit 2; }
+[[ "$VALIDATOR_TIMEOUT_SECONDS" =~ ^[0-9]+$ && "$VALIDATOR_TIMEOUT_SECONDS" -ge 60 ]] || { echo "invalid validator timeout" >&2; exit 2; }
 if [[ "$MODE" == "--inspect" ]]; then
   [[ "$SESSION_ID" =~ ^[A-Za-z0-9_-]{8,160}$ ]] || { echo "valid session id required for inspect" >&2; exit 2; }
 fi
@@ -39,8 +41,9 @@ validator_service="runtime-validator-${slot}"
 manifest_value() {
   python3 -c 'import json,sys; data=json.load(open(sys.argv[1], encoding="utf-8")); print(data[sys.argv[2]] if sys.argv[2] != "service" else data["services"][sys.argv[3]][sys.argv[4]])' "$MANIFEST" "$@"
 }
-export BRAIN_CONTRACTS_VERSION="$(manifest_value contracts_version)"
-export REQUIRED_SCHEMA_VERSION="$(manifest_value schema_version)"
+export BRAIN_CONTRACTS_VERSION="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1], encoding="utf-8")); s=d["services"]["conversation-runtime"]; print(s.get("contracts_version") or d["contracts_version"])' "$MANIFEST")"
+export BRAIN_CONTRACTS_SHA="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1], encoding="utf-8")); s=d["services"]["conversation-runtime"]; print(s.get("contracts_checksum") or d.get("contracts_checksum") or "")' "$MANIFEST")"
+export REQUIRED_SCHEMA_VERSION="$(manifest_value service conversation-runtime required_schema_version)"
 export CURRENT_SCHEMA_VERSION="$REQUIRED_SCHEMA_VERSION"
 export GATEWAY_SHA="$(manifest_value service gateway sha)"
 export GATEWAY_DIGEST="$(manifest_value service gateway digest)"
@@ -211,7 +214,7 @@ printf '%s\n' "$session_output"
 session_id="$(printf '%s\n' "$session_output" | sed -n 's/^WA_VALIDATOR_SESSION_ID=//p' | tail -n 1)"
 [[ "$session_id" =~ ^[A-Za-z0-9_-]{8,160}$ ]] || { echo "invalid validator session id" >&2; exit 1; }
 
-deadline=$((SECONDS + 900))
+deadline=$((SECONDS + VALIDATOR_TIMEOUT_SECONDS))
 while (( SECONDS < deadline )); do
   summary="$(docker exec "$session_container" python -c 'import json,sys; from services import wa_validator_service as w; s=w.get_session(sys.argv[1]); o=s.get("output") or {}; print(json.dumps({"status":s.get("status"),"technical_pass":o.get("technical_pass",s.get("technical_pass")),"quality_pass":o.get("quality_pass",s.get("quality_pass")),"quality_scope":o.get("quality_scope",s.get("quality_scope")),"turn_count":len(o.get("conversation") or []),"error":s.get("error")}, ensure_ascii=True, sort_keys=True))' "$session_id")"
   printf 'WA_VALIDATOR_STATUS=%s\n' "$summary"

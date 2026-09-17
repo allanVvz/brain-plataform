@@ -9,6 +9,7 @@ import time
 import unicodedata
 from datetime import datetime, timezone
 from typing import Any, Literal
+from uuid import NAMESPACE_URL, uuid5
 
 logger = logging.getLogger("conversation_runtime")
 
@@ -41,6 +42,58 @@ from services.deterministic_sdr import (
     catalog_from_graph,
 )
 from services.deterministic_appointment import DeterministicAppointment
+
+
+CONVERSATION_FAILURE_EVENT = "conversation.failure_observed"
+CONVERSATION_SUCCESS_EVENT = "conversation.decision_committed"
+
+
+def consecutive_conversation_failures(lead_ref: int) -> int:
+    """Count the leading failure events since the latest committed success."""
+    rows = supabase_client.list_system_events(
+        entity_type="lead",
+        entity_id=str(lead_ref),
+        event_types=[CONVERSATION_FAILURE_EVENT, CONVERSATION_SUCCESS_EVENT],
+        limit=20,
+    )
+    count = 0
+    seen_inbounds: set[str] = set()
+    for row in rows:
+        event_type = str(row.get("event_type") or "")
+        if event_type == CONVERSATION_SUCCESS_EVENT:
+            break
+        payload = row.get("payload") or {}
+        inbound_id = str(payload.get("inbound_buffer_id") or payload.get("buffer_id") or row.get("id") or "")
+        if inbound_id and inbound_id not in seen_inbounds:
+            seen_inbounds.add(inbound_id)
+            count += 1
+    return count
+
+
+def record_conversation_failure(
+    *, lead_ref: int, inbound_buffer_id: str, persona_id: str | None,
+    kind: str, reason: str,
+) -> int:
+    """Idempotently record one failed inbound and return the current streak."""
+    event_id = str(uuid5(NAMESPACE_URL, f"brain-ai:conversation.failure:{inbound_buffer_id}"))
+    existing = supabase_client.list_system_events(
+        entity_type="lead", entity_id=str(lead_ref),
+        event_types=[CONVERSATION_FAILURE_EVENT], limit=20,
+    )
+    if not any(str((row.get("payload") or {}).get("inbound_buffer_id") or "") == inbound_buffer_id for row in existing):
+        supabase_client.insert_event({
+            "id": event_id,
+            "event_type": CONVERSATION_FAILURE_EVENT,
+            "entity_type": "lead",
+            "entity_id": str(lead_ref),
+            "persona_id": persona_id,
+            "payload": {
+                "inbound_buffer_id": inbound_buffer_id,
+                "kind": kind,
+                "reason": reason,
+            },
+        }, level="warning", source="services.conversation_runtime")
+    return consecutive_conversation_failures(lead_ref)
 
 
 def emit_turn_event(
@@ -192,6 +245,12 @@ def _sync_lead_audience_memberships_for_turn(
         *([turn_envelope["active_branch_node_id"]] if turn_envelope.get("active_branch_node_id") else []),
         *(turn_envelope.get("active_branch_node_ids") or []),
         *(model_proposal.get("cited_node_ids") or []),
+        *(turn_envelope.get("proof_result", {}).get("mentioned_node_ids") or []),
+        *(
+            signal.get("audience_node_id")
+            for signal in turn_envelope.get("proof_result", {}).get("audience_signals") or []
+            if isinstance(signal, dict) and signal.get("audience_node_id")
+        ),
     ]
     if not candidate_node_ids:
         return
@@ -1566,6 +1625,10 @@ def decide_agentic(
             cited_chunk_ids=conversation_reply.cited_chunk_ids,
             reply=conversation_reply.reply,
             handoff_requested=conversation_reply.handoff_requested,
+            knowledge_gap=conversation_reply.knowledge_gap,
+            failure_streak_before_turn=int(
+                resolved_understanding.conversation_brief.get("failure_streak_before_turn") or 0
+            ),
         )
         usage = (model_observation or {}).get("token_usage") or {}
         model_observation = {
@@ -1622,6 +1685,13 @@ def decide_agentic(
                 "reply_contract": "conversation_reply_v1",
                 "execution_strategy": "interpret_then_respond",
                 "semantic_repairs": 0,
+                "mentioned_node_ids": list(
+                    resolved_understanding.understanding.mentioned_node_ids
+                ),
+                "audience_signals": [
+                    signal.model_dump(mode="json")
+                    for signal in resolved_understanding.understanding.audience_signals
+                ],
             },
         })
     observation = model_observation or {}
@@ -1674,6 +1744,13 @@ def resolve_understanding(
 ) -> ResolvedUnderstandingV1:
     started = time.monotonic()
     resolved = graph_agent_runtime_v3.resolve_understanding(context, understanding)
+    if lead_ref is not None:
+        resolved = resolved.model_copy(update={
+            "conversation_brief": {
+                **resolved.conversation_brief,
+                "failure_streak_before_turn": consecutive_conversation_failures(int(lead_ref)),
+            }
+        })
     usage = token_usage or {}
     emit_turn_event(
         agent_name="conversation.understanding_llm_call",

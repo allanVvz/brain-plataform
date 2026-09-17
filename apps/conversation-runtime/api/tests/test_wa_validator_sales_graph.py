@@ -13,6 +13,7 @@ if str(API_ROOT) not in sys.path:
 from services import (
     graph_agent_runtime_v3,
     graph_bundle,
+    graph_proof_checker_v3,
     validator_sofia_insights,
     wa_validator_service,
 )
@@ -68,6 +69,60 @@ def _v36_publication() -> dict:
         "checksum": document["checksum"],
         "document_json": document,
     }
+
+
+def test_v36_price_catalog_and_validator_cover_cheapest_retail_question():
+    publication = _v36_publication()
+    document = publication["document_json"]
+    contract = document["branch_contracts"]["audience:tock-retail"]
+    catalog = graph_proof_checker_v3.published_retail_price_catalog(
+        document, contract["closure_node_ids"],
+    )
+    assert len(catalog) >= 70
+    assert catalog[0]["amount"] == 22.9
+    assert catalog[0]["currency"] == "BRL"
+
+    script = wa_validator_service._semantic_sales_script(
+        publication=publication, flow_id="sdr_sales_price_comparison"
+    )
+    opening = script["driver"]["opening"]
+    assert "mais barato" in opening["text"]
+    assert opening["expected_price_comparison"]["minimum_amount"] == 22.9
+    assert opening["expected_evidence_node_ids"]
+
+
+def test_v37_price_products_resolve_to_price_opportunity_audience():
+    publication = _v36_publication()
+    document = publication["document_json"]
+    draft = json.loads(
+        (
+            REPO_ROOT / "data" / "graph_bundles" / "tock-fatal"
+            / "price-opportunity-v37.DRAFT.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert draft["status"] == "pending_validation"
+    assert draft["publication_allowed"] is False
+    assert len(draft["nodes"]) == 12
+    assert all(node["node_type"] == "faq" for node in draft["nodes"])
+    assert all(node["status"] == "pending_validation" for node in draft["nodes"])
+    document = {**document, "edges": [*(document.get("edges") or []), *draft["edges"]]}
+    retail_contract = document["branch_contracts"]["audience:tock-retail"]
+    catalog = graph_proof_checker_v3.published_retail_price_catalog(
+        document, retail_contract["closure_node_ids"],
+    )
+    minimum_by_group = {}
+    for row in catalog:
+        group = row["product_group_node_id"]
+        minimum_by_group[group] = min(minimum_by_group.get(group, row["amount"]), row["amount"])
+    expected_targets = {
+        row["product_node_id"] for row in catalog
+        if row["amount"] == minimum_by_group[row["product_group_node_id"]]
+    }
+    assert {edge["target"] for edge in draft["edges"]} == expected_targets
+    for edge in draft["edges"]:
+        assert graph_agent_runtime_v3.resolve_audience_node_ids(
+            document, [edge["target"]],
+        ) == ["audience:tock-ctx-preco-oportunidade"]
 
 
 def test_sales_semantic_scripts_select_distinct_graph_branches():

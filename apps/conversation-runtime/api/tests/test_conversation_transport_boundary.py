@@ -2,6 +2,31 @@ from brain_contracts import TechnicalConversationFailureV1
 from routes import conversations
 
 
+def test_success_event_resets_consecutive_failure_streak(monkeypatch):
+    monkeypatch.setattr(
+        conversations.conversation_runtime.supabase_client,
+        "list_system_events",
+        lambda **_kwargs: [
+            {"event_type": "conversation.failure_observed", "payload": {"inbound_buffer_id": "new"}},
+            {"event_type": "conversation.decision_committed", "payload": {"inbound_buffer_id": "ok"}},
+            {"event_type": "conversation.failure_observed", "payload": {"inbound_buffer_id": "old"}},
+        ],
+    )
+    assert conversations.conversation_runtime.consecutive_conversation_failures(42) == 1
+
+
+def test_duplicate_failure_event_counts_once(monkeypatch):
+    monkeypatch.setattr(
+        conversations.conversation_runtime.supabase_client,
+        "list_system_events",
+        lambda **_kwargs: [
+            {"event_type": "conversation.failure_observed", "payload": {"inbound_buffer_id": "same"}},
+            {"event_type": "conversation.failure_observed", "payload": {"inbound_buffer_id": "same"}},
+        ],
+    )
+    assert conversations.conversation_runtime.consecutive_conversation_failures(42) == 1
+
+
 def test_technical_failure_uses_transport_owned_buffer(monkeypatch):
     calls = []
     monkeypatch.setattr(
@@ -52,14 +77,23 @@ def test_technical_failure_uses_transport_owned_buffer(monkeypatch):
     assert calls == [
         "internal-token",
         ("44444444-4444-4444-8444-444444444444", 42, "graph unavailable"),
-        ("handoff", 42),
     ]
     assert result["technical_failure"] is True
-    assert result["ai_paused"] is True
+    assert result["status"] == "technical_failure_unconfirmed"
+    assert result["ai_paused"] is False
+    assert result["handoff"] is False
 
 
-def test_duplicate_technical_failure_reuses_terminalization_and_handoff_event(monkeypatch):
+def test_second_consecutive_failure_handoffs_and_duplicate_reuses_events(monkeypatch):
     inserted = []
+    prior = {
+        "id": "prior-failure", "event_type": "conversation.failure_observed",
+        "payload": {"inbound_buffer_id": "prior-inbound"},
+    }
+    current = {
+        "id": "current-failure", "event_type": "conversation.failure_observed",
+        "payload": {"inbound_buffer_id": "44444444-4444-4444-8444-444444444444"},
+    }
     monkeypatch.setattr(
         conversations.transport_client,
         "quarantine_inbound_technical_failure",
@@ -78,7 +112,11 @@ def test_duplicate_technical_failure_reuses_terminalization_and_handoff_event(mo
     monkeypatch.setattr(
         conversations.conversation_runtime.supabase_client,
         "list_system_events",
-        lambda **kwargs: [{"id": "existing-event"}],
+        lambda **kwargs: (
+            [current, prior]
+            if kwargs.get("entity_type") == "lead"
+            else [{"id": "existing-event"}]
+        ),
     )
     monkeypatch.setattr(
         conversations.conversation_runtime.supabase_client,
@@ -100,5 +138,7 @@ def test_duplicate_technical_failure_reuses_terminalization_and_handoff_event(mo
         )
     )
     assert result["status"] == "technical_handoff"
+    assert result["handoff"] is True
+    assert result["ai_paused"] is True
     assert result["terminalization_status"] == "dead_letter"
     assert inserted == []

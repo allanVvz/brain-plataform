@@ -38,14 +38,14 @@ jobs:
     environment: production
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: Synchronize approved validator control
+      - name: Synchronize validator runner only
         uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
-          source: ops/vps/run-microservice-wa-validator.sh,apps/conversation-runtime/api/services/wa_validator_service.py,apps/conversation-runtime/api/evaluation/wa_validator_customer_profiles.json
+          source: ops/vps/run-microservice-wa-validator.sh
           target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           overwrite: true
           timeout: 90s

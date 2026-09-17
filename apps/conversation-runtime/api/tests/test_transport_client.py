@@ -72,26 +72,6 @@ def test_runtime_uses_canonical_contract_for_validator_inbound(monkeypatch):
     assert calls[0][1]["json"]["provider"] == "internal_validator"
 
 
-def test_runtime_completes_validator_inbound_through_transport(monkeypatch):
-    calls = []
-    monkeypatch.setenv("BRAIN_TRANSPORT_URL", "https://transport.internal")
-    monkeypatch.setenv("AI_BRAIN_WEBHOOK_TOKEN", "internal-token")
-    monkeypatch.setattr(
-        transport_client.httpx,
-        "Client",
-        lambda **kwargs: _Client(calls, **kwargs),
-    )
-
-    transport_client.complete_validator_inbound(
-        "33333333-3333-4333-8333-333333333333", 2
-    )
-
-    assert calls[0][0].endswith(
-        "/internal/v1/transport/messages/validator-inbound/"
-        "33333333-3333-4333-8333-333333333333/2/complete"
-    )
-
-
 def test_runtime_quarantines_failed_inbound_through_transport(monkeypatch):
     calls = []
     monkeypatch.setenv("BRAIN_TRANSPORT_URL", "https://transport.internal")

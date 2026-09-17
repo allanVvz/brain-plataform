@@ -49,11 +49,12 @@ def test_fail_safe_persists_structured_n8n_node_diagnostic(monkeypatch):
         x_webhook_token="token",
     )
 
-    assert result["status"] == "technical_handoff"
-    assert result["handoff"] is True
-    assert handoffs == [41]
+    assert result["status"] == "technical_failure_unconfirmed"
+    assert result["handoff"] is False
+    assert handoffs == []
     assert [event[0]["event_type"] for event in events] == [
-        "conversation.technical_handoff",
+        "conversation.failure_observed",
+        "conversation.technical_failure",
     ]
-    assert events[0][0]["payload"]["diagnostic"]["failed_node"] == "DeepSeek agentic reply"
-    assert events[0][0]["payload"]["diagnostic"]["http_code"] == 400
+    assert events[1][0]["payload"]["diagnostic"]["failed_node"] == "DeepSeek agentic reply"
+    assert events[1][0]["payload"]["diagnostic"]["http_code"] == 400

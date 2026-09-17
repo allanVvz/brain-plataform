@@ -20,6 +20,7 @@ MONOREPO_REPOSITORY = "allanVvz/brain-plataform"
 SHA = re.compile(r"^[0-9a-f]{40}$")
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 MONOREPO_CONTRACT_VERSION = re.compile(r"^3\.[0-9]+\.[0-9]+$")
+CONTRACT_CONSUMERS = {"control-plane", "conversation-runtime", "transport"}
 
 
 def _require(condition: bool, message: str) -> None:
@@ -61,6 +62,7 @@ def validate(path: Path, *, verify_checkout_artifacts: bool = True) -> dict:
     if monorepo_release:
         _require(bool(DIGEST.fullmatch(str(manifest.get("contracts_checksum", "")))),
                  "monorepo manifest requires contracts_checksum")
+    consumer_contracts: set[tuple[str, str]] = set()
     for name, repository in EXPECTED_SERVICES.items():
         item = services[name]
         _require(isinstance(item, dict), f"services.{name} must be an object")
@@ -68,16 +70,30 @@ def validate(path: Path, *, verify_checkout_artifacts: bool = True) -> dict:
         _require(item.get("repository") == expected_repository, f"unexpected repository for {name}")
         _require(bool(SHA.fullmatch(str(item.get("sha", "")))), f"invalid SHA for {name}")
         _require(bool(DIGEST.fullmatch(str(item.get("digest", "")))), f"invalid digest for {name}")
+        service_contracts_version = str(item.get("contracts_version") or contracts_version)
+        _require(
+            service_contracts_version in {"1.0.0", "1.1.0"}
+            or bool(MONOREPO_CONTRACT_VERSION.fullmatch(service_contracts_version)),
+            f"invalid contracts_version for {name}",
+        )
+        service_contracts_checksum = str(
+            item.get("contracts_checksum") or manifest.get("contracts_checksum") or ""
+        )
+        if service_contracts_version.startswith("3."):
+            _require(bool(DIGEST.fullmatch(service_contracts_checksum)),
+                     f"invalid contracts_checksum for {name}")
+        if name in CONTRACT_CONSUMERS:
+            consumer_contracts.add((service_contracts_version, service_contracts_checksum))
         required_schema = item.get("required_schema_version")
         _require(isinstance(required_schema, int) and 131 <= required_schema <= manifest["schema_version"],
                  f"invalid required_schema_version for {name}")
-    _require(services["gateway"]["sha"] == manifest["source_sha"],
-             "gateway SHA must equal source_sha")
-    if monorepo_release:
-        _require(
-            all(item["sha"] == manifest["source_sha"] for item in services.values()),
-            "every monorepo service SHA must equal source_sha",
-        )
+    _require(
+        len(consumer_contracts) == 1,
+        "brain-contracts version/checksum mismatch between active contract consumers",
+    )
+    # source_sha identifies the manifest revision. Service provenance is
+    # intentionally independent: unchanged services keep their prior SHA and
+    # digest during a compatible single-service release.
 
     if verify_checkout_artifacts:
         route_map = ROOT / "ops/microservices/route-map.json"

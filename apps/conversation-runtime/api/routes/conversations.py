@@ -329,27 +329,44 @@ def _terminalize_technical_failure(
     except Exception as exc:  # The webhook must still receive canonical JSON.
         failures.append(f"terminalization:{type(exc).__name__}")
     try:
-        conversation_runtime.supabase_client.handoff_whatsapp_lead(body.lead_ref)
+        failure_streak = conversation_runtime.record_conversation_failure(
+            lead_ref=body.lead_ref,
+            inbound_buffer_id=body.buffer_id,
+            persona_id=str(lead.get("persona_id") or "") or None,
+            kind="technical_failure",
+            reason=body.reason,
+        )
     except Exception as exc:
-        failures.append(f"handoff:{type(exc).__name__}")
+        failures.append(f"failure_streak:{type(exc).__name__}")
+        failure_streak = 2  # fail safe when audit state itself is unavailable
+    handoff_required = failure_streak >= 2
+    if handoff_required:
+        try:
+            conversation_runtime.supabase_client.handoff_whatsapp_lead(body.lead_ref)
+        except Exception as exc:
+            failures.append(f"handoff:{type(exc).__name__}")
     try:
         event_id = str(
             uuid5(
                 NAMESPACE_URL,
-                f"brain-ai:conversation.technical_handoff:{body.buffer_id}",
+                f"brain-ai:conversation.technical_{'handoff' if handoff_required else 'failure'}:{body.buffer_id}",
             )
+        )
+        audit_event_type = (
+            "conversation.technical_handoff"
+            if handoff_required else "conversation.technical_failure"
         )
         existing = conversation_runtime.supabase_client.list_system_events(
             entity_type="lead_buffer",
             entity_id=body.buffer_id,
-            event_types=["conversation.technical_handoff"],
+            event_types=[audit_event_type],
             limit=1,
         )
         if not existing:
             inserted = conversation_runtime.supabase_client.insert_event(
                 {
                     "id": event_id,
-                    "event_type": "conversation.technical_handoff",
+                    "event_type": audit_event_type,
                     "entity_type": "lead_buffer",
                     "entity_id": body.buffer_id,
                     "persona_id": lead.get("persona_id"),
@@ -363,11 +380,11 @@ def _terminalize_technical_failure(
                 existing = conversation_runtime.supabase_client.list_system_events(
                     entity_type="lead_buffer",
                     entity_id=body.buffer_id,
-                    event_types=["conversation.technical_handoff"],
+                    event_types=[audit_event_type],
                     limit=1,
                 )
                 if not existing:
-                    raise RuntimeError("technical handoff audit was not persisted")
+                    raise RuntimeError("technical failure audit was not persisted")
         conversation_runtime.emit_turn_event(
             agent_name="conversation.error",
             trace_id=body.buffer_id,
@@ -375,19 +392,27 @@ def _terminalize_technical_failure(
             persona_id=lead.get("persona_id"),
             status="error",
             error_msg=body.reason,
-            metadata={"conversation_id": body.lead_ref, "step": body.stage},
+            metadata={
+                "conversation_id": body.lead_ref,
+                "step": body.stage,
+                "failure_streak": failure_streak,
+                "handoff_required": handoff_required,
+            },
         )
     except Exception as exc:
         failures.append(f"audit:{type(exc).__name__}")
     confirmed = not failures
     return CanonicalConversationResultV1(
         ok=False,
-        status="technical_handoff" if confirmed else "technical_failure_unconfirmed",
+        status=(
+            "technical_handoff" if confirmed and handoff_required
+            else "technical_failure_unconfirmed"
+        ),
         correlation_id=body.correlation_id,
         buffer_id=body.buffer_id,
         technical_failure=True,
-        handoff=confirmed,
-        ai_paused=confirmed,
+        handoff=confirmed and handoff_required,
+        ai_paused=confirmed and handoff_required,
         outbound_enqueued=False,
         terminalization_status=terminalization.get("status"),
         error=";".join(failures) or None,

@@ -248,6 +248,80 @@ def test_agentic_proof_discards_invalid_question_metadata_without_blocking_reply
     ]
 
 
+def test_price_comparison_is_derived_from_published_offer_and_faq():
+    document = {
+        "branch_anchors": ["audience:retail"],
+        "nodes": [
+            {"id": "audience:retail", "node_type": "audience", "status": "validated", "data": {}},
+            {"id": "group:tops", "node_type": "product_group", "status": "validated", "title": "Tops", "data": {}},
+            {"id": "product:one", "node_type": "product", "status": "validated", "title": "Produto 1", "data": {}},
+            {"id": "offer:one", "node_type": "offer", "status": "validated", "data": {"channel": "varejo", "status": "validated", "price": {"amount": 19.9, "currency": "BRL"}}},
+            {"id": "faq:one-price", "node_type": "faq", "status": "approved", "data": {"claims": [{"claim_type": "price", "policy": "published", "evidence_node_ids": ["faq:one-price"]}], "sources": [{"node_id": "offer:one"}]}},
+        ],
+        "edges": [
+            {"source": "group:tops", "target": "product:one", "relation_type": "contains"},
+            {"source": "offer:one", "target": "product:one", "relation_type": "about_product"},
+        ],
+    }
+    closure = {node["id"] for node in document["nodes"]}
+    catalog = graph_proof_checker_v3.published_retail_price_catalog(document, closure)
+    assert catalog == [{
+        "product_node_id": "product:one", "product_title": "Produto 1",
+        "product_group_node_id": "group:tops", "product_group_title": "Tops",
+        "amount": 19.9, "currency": "BRL", "evidence_node_id": "faq:one-price",
+    }]
+
+    proof = graph_proof_checker_v3.check(
+        publication={"status": "active", "checksum": "graph-checksum", "document_json": document},
+        contract={
+            "branch_path_checksum": "checksum:retail", "closure_node_ids": sorted(closure),
+            "fields": [], "questions": [],
+            "claims": [{"claim_type": "price", "policy": "published", "evidence_node_ids": ["faq:one-price"]}],
+        },
+        ledger={"graph_checksum": "graph-checksum", "facts": {}},
+        proposal={
+            "reply": "A opção de menor preço é o Produto 1, por R$ 19,90.",
+            "branch_action": "keep", "branch_anchor_node_id": "audience:retail",
+            "branch_path_checksum": "checksum:retail", "extracted_facts": [],
+            "claims": [{
+                "claim_type": "price_comparison",
+                "value": {"items": [{"product_node_id": "product:one", "amount": 19.9, "currency": "BRL"}]},
+                "evidence_node_ids": ["faq:one-price"], "evidence_chunk_ids": [],
+            }],
+        },
+        message="qual é o mais barato?", source_message_id="inbound:price",
+        package_node_ids={"faq:one-price"}, package_chunk_ids=set(),
+        active_branch_node_id="audience:retail", active_branch_node_ids=["audience:retail"],
+        branch_selection_allowed=False, branch_switch_allowed=False,
+    )
+    assert proof["valid"] is True
+
+
+def test_price_comparison_rejects_a_model_invented_amount():
+    document = {
+        "branch_anchors": ["audience:retail"],
+        "nodes": [
+            {"id": "audience:retail", "node_type": "audience", "status": "validated", "data": {}},
+            {"id": "product:one", "node_type": "product", "status": "validated", "title": "Produto 1", "data": {}},
+            {"id": "offer:one", "node_type": "offer", "status": "validated", "data": {"channel": "varejo", "status": "validated", "price": {"amount": 19.9, "currency": "BRL"}}},
+            {"id": "faq:one-price", "node_type": "faq", "status": "approved", "data": {"claims": [{"claim_type": "price", "policy": "published", "evidence_node_ids": ["faq:one-price"]}], "sources": [{"node_id": "offer:one"}]}},
+        ],
+        "edges": [{"source": "offer:one", "target": "product:one", "relation_type": "about_product"}],
+    }
+    closure = {node["id"] for node in document["nodes"]}
+    proof = graph_proof_checker_v3.check(
+        publication={"status": "active", "checksum": "graph-checksum", "document_json": document},
+        contract={"branch_path_checksum": "checksum:retail", "closure_node_ids": sorted(closure), "fields": [], "questions": [], "claims": [{"claim_type": "price", "policy": "published", "evidence_node_ids": ["faq:one-price"]}]},
+        ledger={"graph_checksum": "graph-checksum", "facts": {}},
+        proposal={"reply": "Custa R$ 1,00.", "branch_action": "keep", "branch_anchor_node_id": "audience:retail", "branch_path_checksum": "checksum:retail", "extracted_facts": [], "claims": [{"claim_type": "price_comparison", "value": {"items": [{"product_node_id": "product:one", "amount": 1, "currency": "BRL"}]}, "evidence_node_ids": ["faq:one-price"], "evidence_chunk_ids": []}]},
+        message="qual é o mais barato?", source_message_id="inbound:price",
+        package_node_ids={"faq:one-price"}, package_chunk_ids=set(),
+        active_branch_node_id="audience:retail", active_branch_node_ids=["audience:retail"],
+        branch_selection_allowed=False, branch_switch_allowed=False,
+    )
+    assert "price_comparison_value_mismatch" in proof["errors"]
+
+
 def test_runtime_rejects_question_for_a_fact_resolved_in_the_same_turn():
     rejected = graph_agent_runtime_v3._rejected_qualification_question_id(
         "q:purchase-profile", {"q:sales-readiness", "q:fulfillment"},

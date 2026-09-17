@@ -709,8 +709,9 @@ Se nao aparece no grafo, esta incompleto.
   em metadata antiga, e apenas compatibilidade de armazenamento e nao autoriza
   despacho para webhook n8n.
 - Toda execucao agentic usa `interpret_then_respond`. `single_pass` e repair
-  semantico nao sao caminhos produtivos. JSON/modelo/proof invalido gera handoff
-  tecnico da lead, sem terceira chamada e sem fallback publico fabricado.
+  semantico nao sao caminhos produtivos. A primeira falha JSON/modelo/proof e
+  terminalizada e auditada sem pausa; duas falhas consecutivas geram um unico
+  handoff. Um turno bem-sucedido zera a sequencia.
 - Control plane, conversation runtime e transport usam imagens, health,
   rollback e roles de banco independentes; nenhum importa codigo de outro.
 - Contratos entre servicos vem somente de `brain-contracts` em versao exata.
@@ -736,10 +737,34 @@ Ordem para release compativel:
 marcar `migration` ou `breaking_queue_contract`. Worker compativel usa drain
 limitado no proprio workflow e rollback se nao drenar.
 
-Antes do passo 3, confira se o manifesto (`ops/microservices/release-manifest.json`)
-aponta para o build atual. Se `source_sha` estiver velho, renderize um novo com
-`ops/microservices/render-monorepo-release-manifest.py` usando os digests do build
-correspondente -- deployar por manifesto velho reinstala imagem antiga.
+Antes do passo 3, confira se a entrada do servico afetado no manifesto aponta
+para o SHA e digest do build atual. Renderize a atualizacao incremental com
+`ops/microservices/render-monorepo-release-manifest.py --base-manifest ...`;
+entradas dos demais servicos devem permanecer byte a byte iguais.
 
 O preflight exige backup data-only com menos de 26h quando o impacto e
 `migration`: `bash ops/vps/backup.sh`.
+
+## 29. Release compativel deve permanecer simples
+
+- Uma mudanca compativel em um servico constroi e promove somente esse servico.
+- O manifesto preserva `sha`, digest, contrato e schema por servico; SHAs iguais
+  entre servicos nao sao requisito de release.
+- Runtime-only executa exatamente um build, um candidate isolado, um cutover e
+  um canario WA interno. Gateway, control-plane e transport nao reiniciam.
+- Candidate inicia no slot inativo sem consumidores de fila. Readiness e teste
+  interno acontecem antes do cutover; workers drenam por no maximo 45 segundos.
+- Falha antes do cutover nao altera trafego. Falha no canario posterior restaura
+  automaticamente rota, workers, slot e digest anteriores.
+- GraphBundle-only e dashboard-only nao constroem imagens nem executam rollout
+  na VPS.
+- `servico + sha` e a chave de deduplicacao. Disparos repetidos reutilizam a
+  imagem imutavel e produzem no maximo uma promocao efetiva.
+- Suites amplas sao nightly ou advisory. O gate compativel contem contratos
+  compartilhados, testes do componente e um canario do caminho real.
+- Migration e quebra de contrato de fila sao as unicas classes que permitem
+  coordenacao ampliada, declarada antes do rollout.
+- No primeiro sinal de redeploy corretivo, terceiro comando emergencial,
+  sincronizacao manual de codigo na VPS ou deploy de servico nao afetado, parar
+  a operacao e corrigir o pipeline. Complexidade operacional e defeito, nao
+  procedimento normal.

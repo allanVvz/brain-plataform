@@ -335,10 +335,83 @@ def aggregate_required_field_count(
 
 
 def _claim_policy(contract: dict[str, Any], claim_type: str) -> list[dict[str, Any]]:
+    policy_type = "price" if claim_type == "price_comparison" else claim_type
     return [
         policy for policy in contract.get("claims") or []
-        if str(policy.get("claim_type") or policy.get("type") or "other") == claim_type
+        if str(policy.get("claim_type") or policy.get("type") or "other") == policy_type
     ]
+
+
+def published_retail_price_catalog(
+    document: dict[str, Any], closure_node_ids: list[str] | set[str],
+) -> list[dict[str, Any]]:
+    """Build a deterministic comparison view from validated graph facts.
+
+    Offers own the amount, ``about_product`` owns product identity, and an
+    approved price FAQ supplies the evidence node already authorized by the
+    branch claim contract. No customer or persona vocabulary is hardcoded.
+    """
+    nodes = list(document.get("nodes") or [])
+    node_by_id = document.get("node_by_id") or {
+        str(node.get("id")): node for node in nodes if node.get("id")
+    }
+    closure = {str(value) for value in closure_node_ids or []}
+    product_by_offer: dict[str, str] = {}
+    group_by_product: dict[str, str] = {}
+    for edge in document.get("edges") or []:
+        source = str(edge.get("source") or "")
+        target = str(edge.get("target") or "")
+        if edge.get("relation_type") == "about_product" and (
+            node_by_id.get(source) or {}
+        ).get("node_type") == "offer":
+            product_by_offer[source] = target
+        if edge.get("relation_type") in {"contains", "product_group_has_product"} and (
+            node_by_id.get(source) or {}
+        ).get("node_type") == "product_group":
+            group_by_product[target] = source
+    faq_by_offer: dict[str, str] = {}
+    for node in nodes:
+        if node.get("node_type") != "faq" or str(node.get("status") or "") not in {"approved", "validated"}:
+            continue
+        data = node.get("data") or {}
+        if not any(
+            str(claim.get("claim_type") or "") == "price"
+            for claim in data.get("claims") or [] if isinstance(claim, dict)
+        ):
+            continue
+        for source in data.get("sources") or []:
+            if isinstance(source, dict) and str(source.get("node_id") or "").startswith("offer:"):
+                faq_by_offer[str(source["node_id"])] = str(node.get("id"))
+    rows: list[dict[str, Any]] = []
+    for offer_id, product_id in product_by_offer.items():
+        offer = node_by_id.get(offer_id) or {}
+        data = offer.get("data") or {}
+        price = data.get("price") or {}
+        faq_id = faq_by_offer.get(offer_id)
+        if (
+            str(offer.get("status") or data.get("status") or "") not in {"approved", "validated"}
+            or str(data.get("channel") or "").lower() != "varejo"
+            or not faq_id
+            or (closure and (offer_id not in closure or faq_id not in closure))
+        ):
+            continue
+        try:
+            amount = float(price["amount"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        product = node_by_id.get(product_id) or {}
+        group_id = group_by_product.get(product_id)
+        group = node_by_id.get(group_id) or {}
+        rows.append({
+            "product_node_id": product_id,
+            "product_title": str(product.get("title") or product_id),
+            "product_group_node_id": group_id,
+            "product_group_title": str(group.get("title") or group_id or ""),
+            "amount": amount,
+            "currency": str(price.get("currency") or "BRL"),
+            "evidence_node_id": faq_id,
+        })
+    return sorted(rows, key=lambda row: (row["amount"], row["product_title"], row["product_node_id"]))
 
 
 def handoff_rule_matches(
@@ -778,6 +851,40 @@ def check(
         evidence_nodes = set(claim.get("evidence_node_ids") or [])
         evidence_chunks = set(claim.get("evidence_chunk_ids") or [])
         policies = _claim_policy(contract, claim_type)
+        if claim_type == "price_comparison":
+            value = claim.get("value") or {}
+            items = value.get("items") if isinstance(value, dict) else None
+            if not isinstance(items, list) or not items:
+                errors.append("price_comparison_without_items")
+            else:
+                amounts: list[float] = []
+                catalog = {
+                    row["product_node_id"]: row
+                    for row in published_retail_price_catalog(document, closure)
+                }
+                for item in items:
+                    if not isinstance(item, dict) or not item.get("product_node_id"):
+                        errors.append("price_comparison_invalid_item")
+                        continue
+                    product_id = str(item["product_node_id"])
+                    published = catalog.get(product_id)
+                    if not published:
+                        errors.append("price_comparison_product_not_published")
+                        continue
+                    try:
+                        amounts.append(float(item["amount"]))
+                    except (KeyError, TypeError, ValueError):
+                        errors.append("price_comparison_invalid_amount")
+                        continue
+                    if (
+                        float(item["amount"]) != published["amount"]
+                        or str(item.get("currency") or "") != published["currency"]
+                    ):
+                        errors.append("price_comparison_value_mismatch")
+                    if published["evidence_node_id"] not in evidence_nodes:
+                        errors.append("price_comparison_items_without_evidence")
+                if amounts != sorted(amounts):
+                    errors.append("price_comparison_not_ascending")
         if not policies:
             errors.append(f"claim_not_authorized:{claim_type}")
         if not evidence_nodes and not evidence_chunks:
@@ -833,7 +940,11 @@ def check(
             rule, facts=facts, qualification_complete=not missing
         ) for rule in handoff_rules
     )
-    if proposal.get("handoff_requested") is True and not handoff_required:
+    repeated_gap_handoff = bool(
+        proposal.get("knowledge_gap") is True
+        and int(proposal.get("failure_streak_before_turn") or 0) >= 1
+    )
+    if proposal.get("handoff_requested") is True and not (handoff_required or repeated_gap_handoff):
         errors.append("handoff_not_authorized")
     # Routing is server-owned. A model may request an authorized handoff, but
     # omitting the flag can never keep a terminal qualification on the SDR

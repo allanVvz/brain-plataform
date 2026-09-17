@@ -1,0 +1,137 @@
+{
+  "document_type": "graph_patch_v1",
+  "persona_slug": "tock-fatal",
+  "base_version": 36,
+  "target_version": 37,
+  "status": "pending_validation",
+  "publication_allowed": false,
+  "source": "operator_request_price_opportunity_2026-09-17",
+  "notes": "Inactive authoring delta. It must be compiled into a full GraphBundle and reviewed before publication.",
+  "nodes": [
+    {
+      "id": "faq:tock-price-opportunity-cheapest-catalog",
+      "node_type": "faq",
+      "slug": "price-opportunity-cheapest-catalog",
+      "title": "Quais são as opções mais baratas?",
+      "summary": "Posso comparar os preços de varejo publicados e mostrar primeiro as opções de menor valor disponíveis no catálogo.",
+      "status": "pending_validation",
+      "metadata": {"intent_family": "price_comparison", "comparison_scope": "retail_catalog", "ranking": "price_ascending", "source": "operator_request_price_opportunity_2026-09-17"}
+    },
+    {
+      "id": "faq:tock-price-opportunity-cheapest-group",
+      "node_type": "faq",
+      "slug": "price-opportunity-cheapest-group",
+      "title": "Qual é a opção mais barata desta categoria?",
+      "summary": "Quando a categoria estiver clara, compare somente os preços publicados daquele grupo e apresente as opções empatadas no menor valor.",
+      "status": "pending_validation",
+      "metadata": {"intent_family": "price_comparison", "comparison_scope": "mentioned_product_group", "ranking": "price_ascending", "source": "operator_request_price_opportunity_2026-09-17"}
+    },
+    {
+      "id": "faq:tock-price-opportunity-budget",
+      "node_type": "faq",
+      "slug": "price-opportunity-budget",
+      "title": "O que tem dentro do meu orçamento?",
+      "summary": "Use apenas preços de varejo publicados e apresente os produtos cujo valor não ultrapasse o orçamento informado pelo cliente.",
+      "status": "pending_validation",
+      "metadata": {"intent_family": "budget_filter", "comparison_scope": "authorized_retail_products", "source": "operator_request_price_opportunity_2026-09-17"}
+    },
+    {
+      "id": "faq:tock-price-opportunity-compare-mentioned",
+      "node_type": "faq",
+      "slug": "price-opportunity-compare-mentioned",
+      "title": "Qual compensa mais entre estas opções?",
+      "summary": "Compare somente os produtos mencionados e explique preço e características publicadas, deixando a escolha com o cliente.",
+      "status": "pending_validation",
+      "metadata": {"intent_family": "product_comparison", "comparison_scope": "mentioned_products", "source": "operator_request_price_opportunity_2026-09-17"}
+    },
+    {
+      "id": "faq:tock-price-opportunity-cost-benefit",
+      "node_type": "faq",
+      "slug": "price-opportunity-cost-benefit",
+      "title": "Qual tem melhor custo-benefício?",
+      "summary": "Explique as diferenças usando preço e características publicadas. Não invente qualidade, durabilidade, composição ou economia futura.",
+      "status": "pending_validation",
+      "metadata": {"intent_family": "cost_benefit", "comparison_scope": "authorized_products", "source": "operator_request_price_opportunity_2026-09-17"}
+    },
+    {
+      "id": "faq:tock-price-opportunity-promotion",
+      "node_type": "faq",
+      "slug": "price-opportunity-promotion",
+      "title": "Tem promoção ou oferta?",
+      "summary": "Informe somente promoções e ofertas publicadas no galho atual. Se não houver evidência vigente, diga que não consegue confirmar uma promoção agora.",
+      "status": "pending_validation",
+      "metadata": {"intent_family": "promotion", "source": "operator_request_price_opportunity_2026-09-17"}
+    },
+    {
+      "id": "faq:tock-price-opportunity-price-unavailable",
+      "node_type": "faq",
+      "slug": "price-opportunity-price-unavailable",
+      "title": "E quando o preço não está publicado?",
+      "summary": "Diga de forma breve que não consegue confirmar o valor. Não invente preço e continue ajudando com as informações disponíveis.",
+      "status": "pending_validation",
+      "metadata": {"intent_family": "knowledge_gap", "source": "operator_request_price_opportunity_2026-09-17"}
+    },
+    {
+      "id": "faq:tock-price-opportunity-ambiguous-category",
+      "node_type": "faq",
+      "slug": "price-opportunity-ambiguous-category",
+      "title": "Mais barato de qual tipo de peça?",
+      "summary": "Se o catálogo for amplo demais para uma comparação útil, responda com opções gerais ou pergunte naturalmente qual categoria interessa; não bloqueie a conversa.",
+      "status": "pending_validation",
+      "metadata": {"intent_family": "comparison_scope", "source": "operator_request_price_opportunity_2026-09-17"}
+    },
+    {
+      "id": "faq:tock-price-opportunity-no-match",
+      "node_type": "faq",
+      "slug": "price-opportunity-no-match",
+      "title": "Não encontrei opção nesse valor",
+      "summary": "Informe que não encontrou produto publicado dentro do limite solicitado e ofereça mostrar a opção mais próxima, sem afirmar estoque.",
+      "status": "pending_validation",
+      "metadata": {"intent_family": "budget_no_match", "source": "operator_request_price_opportunity_2026-09-17"}
+    },
+    {
+      "id": "faq:tock-price-opportunity-retail-wholesale",
+      "node_type": "faq",
+      "slug": "price-opportunity-retail-wholesale",
+      "title": "O preço é de varejo ou atacado?",
+      "summary": "No varejo, use os preços publicados. No atacado, não verbalize valor numérico e explique que a equipe confirma a condição vigente.",
+      "status": "pending_validation",
+      "metadata": {"intent_family": "channel_price", "source": "operator_request_price_opportunity_2026-09-17"}
+    },
+    {
+      "id": "faq:tock-price-opportunity-stock-variant",
+      "node_type": "faq",
+      "slug": "price-opportunity-stock-variant",
+      "title": "A opção mais barata tem meu tamanho ou cor?",
+      "summary": "Preço publicado não confirma estoque, tamanho ou cor. Informe somente variantes comprovadas e deixe claro quando a disponibilidade precisa ser confirmada.",
+      "status": "pending_validation",
+      "metadata": {"intent_family": "stock_variant", "source": "operator_request_price_opportunity_2026-09-17"}
+    },
+    {
+      "id": "faq:tock-price-opportunity-tied-options",
+      "node_type": "faq",
+      "slug": "price-opportunity-tied-options",
+      "title": "Há mais de uma opção no menor preço?",
+      "summary": "Quando houver empate no menor preço publicado, apresente todas as opções empatadas relevantes em vez de escolher uma arbitrariamente.",
+      "status": "pending_validation",
+      "metadata": {"intent_family": "price_tie", "ranking": "price_ascending", "source": "operator_request_price_opportunity_2026-09-17"}
+    }
+  ],
+  "edges": [
+    {"id": "edge:price-opportunity:ribana-lisa", "source": "audience:tock-ctx-preco-oportunidade", "target": "product:tock-blusas-bodies-camisas-e-partes-de-cima-blusa-em-ribana", "relation_type": "contains", "weight": 1, "metadata": {"active": true, "selection": "lowest_published_retail_price_in_group", "price": {"amount": 22.9, "currency": "BRL"}}},
+    {"id": "edge:price-opportunity:ribana-listrada", "source": "audience:tock-ctx-preco-oportunidade", "target": "product:tock-blusas-bodies-camisas-e-partes-de-cima-blusa-em-ribana-1", "relation_type": "contains", "weight": 1, "metadata": {"active": true, "selection": "lowest_published_retail_price_in_group", "price": {"amount": 22.9, "currency": "BRL"}}},
+    {"id": "edge:price-opportunity:legging-suplex", "source": "audience:tock-ctx-preco-oportunidade", "target": "product:tock-calcas-leggings-shorts-e-partes-de-baixo-legging-suplex", "relation_type": "contains", "weight": 1, "metadata": {"active": true, "selection": "lowest_published_retail_price_in_group", "price": {"amount": 22.9, "currency": "BRL"}}},
+    {"id": "edge:price-opportunity:bota-courino", "source": "audience:tock-ctx-preco-oportunidade", "target": "product:tock-calcados-bota-courino", "relation_type": "contains", "weight": 1, "metadata": {"active": true, "selection": "lowest_published_retail_price_in_group", "price": {"amount": 99.9, "currency": "BRL"}}},
+    {"id": "edge:price-opportunity:tenis", "source": "audience:tock-ctx-preco-oportunidade", "target": "product:tock-calcados-tenis-vans-adidas-nike-asics", "relation_type": "contains", "weight": 1, "metadata": {"active": true, "selection": "lowest_published_retail_price_in_group", "price": {"amount": 99.9, "currency": "BRL"}}},
+    {"id": "edge:price-opportunity:casaco-modal-plus", "source": "audience:tock-ctx-preco-oportunidade", "target": "product:tock-casacos-jaquetas-cardigans-e-sobreposicoes-casaco-em-modal-plus-size", "relation_type": "contains", "weight": 1, "metadata": {"active": true, "selection": "lowest_published_retail_price_in_group", "price": {"amount": 59.9, "currency": "BRL"}}},
+    {"id": "edge:price-opportunity:oculos", "source": "audience:tock-ctx-preco-oportunidade", "target": "product:tock-infantil-masculino-e-acessorios-oculos-de-sol", "relation_type": "contains", "weight": 1, "metadata": {"active": true, "selection": "lowest_published_retail_price_in_group", "price": {"amount": 29.9, "currency": "BRL"}}},
+    {"id": "edge:price-opportunity:vestido-fecho", "source": "audience:tock-ctx-preco-oportunidade", "target": "product:tock-vestidos-vestido-canelado-com-fecho", "relation_type": "contains", "weight": 1, "metadata": {"active": true, "selection": "lowest_published_retail_price_in_group", "price": {"amount": 79.9, "currency": "BRL"}}},
+    {"id": "edge:price-opportunity:vestido-decote-quadrado", "source": "audience:tock-ctx-preco-oportunidade", "target": "product:tock-vestidos-vestido-decote-quadrado", "relation_type": "contains", "weight": 1, "metadata": {"active": true, "selection": "lowest_published_retail_price_in_group", "price": {"amount": 79.9, "currency": "BRL"}}},
+    {"id": "edge:price-opportunity:vestido-gola-quadrada", "source": "audience:tock-ctx-preco-oportunidade", "target": "product:tock-vestidos-vestido-gola-quadrada", "relation_type": "contains", "weight": 1, "metadata": {"active": true, "selection": "lowest_published_retail_price_in_group", "price": {"amount": 79.9, "currency": "BRL"}}},
+    {"id": "edge:price-opportunity:conjunto-camisa-colete", "source": "audience:tock-ctx-preco-oportunidade", "target": "product:tock-conjuntos-conjunto-camisa-e-colete", "relation_type": "contains", "weight": 1, "metadata": {"active": true, "selection": "lowest_published_retail_price_in_group", "price": {"amount": 99.9, "currency": "BRL"}}},
+    {"id": "edge:price-opportunity:conjunto-canelado", "source": "audience:tock-ctx-preco-oportunidade", "target": "product:tock-conjuntos-conjunto-canelado", "relation_type": "contains", "weight": 1, "metadata": {"active": true, "selection": "lowest_published_retail_price_in_group", "price": {"amount": 99.9, "currency": "BRL"}}},
+    {"id": "edge:price-opportunity:conjunto-suede", "source": "audience:tock-ctx-preco-oportunidade", "target": "product:tock-conjuntos-conjunto-em-suede", "relation_type": "contains", "weight": 1, "metadata": {"active": true, "selection": "lowest_published_retail_price_in_group", "price": {"amount": 99.9, "currency": "BRL"}}}
+  ],
+  "faq_parent_node_id": "audience:tock-ctx-preco-oportunidade",
+  "required_runtime_capabilities": ["price_comparison", "audience_signals", "mentioned_node_ids"]
+}

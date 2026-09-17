@@ -63,15 +63,15 @@ def _fixture_document() -> dict[str, Any]:
         "edges": [
             {
                 "source": "product_group:test-group", "target": "product:test-blusa",
-                "relation_type": "product_group_has_product",
+                "relation_type": "contains",
             },
             {
                 "source": "audience:test-price-sensitive", "target": "product_group:test-group",
-                "relation_type": "audience_has_product_group",
+                "relation_type": "contains",
             },
             {
                 "source": "audience:test-direct", "target": "product:test-blusa-direct",
-                "relation_type": "offers_product",
+                "relation_type": "contains",
             },
         ],
     }
@@ -100,11 +100,14 @@ def test_resolves_audience_from_product_group_node_directly():
     ) == ["audience:test-price-sensitive"]
 
 
-def test_unknown_or_unrelated_node_ids_resolve_to_nothing():
+def test_unknown_node_resolves_to_nothing_and_explicit_audience_resolves_itself():
     document = _fixture_document()
     assert graph_agent_runtime_v3.resolve_audience_node_ids(
-        document, ["node-not-in-document", "audience:test-direct"],
+        document, ["node-not-in-document"],
     ) == []
+    assert graph_agent_runtime_v3.resolve_audience_node_ids(
+        document, ["audience:test-direct"],
+    ) == ["audience:test-direct"]
 
 
 # ── sync_lead_audience_memberships: DB-facing, exercised against fakes ───

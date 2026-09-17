@@ -4,8 +4,10 @@ on:
     inputs:
       manifest_sha: {description: Commit containing the immutable release manifest, required: true}
       manifest_path: {description: Release manifest path, required: true, default: ops/microservices/release-manifest.json}
-      action: {description: Safe default is dry-run; deploy requires environment approvals, type: choice, options: [dry-run, deploy], default: dry-run}
+      action: {description: Safe default is dry-run; deploy and rollback require environment approvals, type: choice, options: [dry-run, deploy, rollback], default: dry-run}
       services: {description: Comma-separated affected services without spaces, required: true, default: conversation-runtime}
+      canary_persona_slug: {description: Persona for the internal direct runtime canary, required: false}
+      canary_flow_id: {description: WA Validator flow for the runtime canary, required: false}
 permissions:
   contents: read
 jobs:
@@ -28,20 +30,26 @@ jobs:
     with: {service: control-plane, manifest_sha: "${{ inputs.manifest_sha }}", manifest_path: "${{ inputs.manifest_path }}", action: "${{ inputs.action }}"}
     secrets: inherit
   runtime:
-    needs: [validate, control-plane]
-    if: ${{ always() && needs.validate.result == 'success' && (needs.control-plane.result == 'success' || needs.control-plane.result == 'skipped') && contains(format(',{0},', inputs.services), ',conversation-runtime,') }}
+    needs: validate
+    if: ${{ contains(format(',{0},', inputs.services), ',conversation-runtime,') }}
     uses: ./.github/workflows/_deploy-microservice.yml
-    with: {service: conversation-runtime, manifest_sha: "${{ inputs.manifest_sha }}", manifest_path: "${{ inputs.manifest_path }}", action: "${{ inputs.action }}"}
+    with:
+      service: conversation-runtime
+      manifest_sha: "${{ inputs.manifest_sha }}"
+      manifest_path: "${{ inputs.manifest_path }}"
+      action: "${{ inputs.action }}"
+      canary_persona_slug: "${{ inputs.canary_persona_slug }}"
+      canary_flow_id: "${{ inputs.canary_flow_id }}"
     secrets: inherit
   transport:
-    needs: [validate, runtime]
-    if: ${{ always() && needs.validate.result == 'success' && (needs.runtime.result == 'success' || needs.runtime.result == 'skipped') && contains(format(',{0},', inputs.services), ',transport,') }}
+    needs: validate
+    if: ${{ contains(format(',{0},', inputs.services), ',transport,') }}
     uses: ./.github/workflows/_deploy-microservice.yml
     with: {service: transport, manifest_sha: "${{ inputs.manifest_sha }}", manifest_path: "${{ inputs.manifest_path }}", action: "${{ inputs.action }}"}
     secrets: inherit
   gateway:
-    needs: [validate, control-plane, runtime, transport]
-    if: ${{ always() && needs.validate.result == 'success' && (needs.control-plane.result == 'success' || needs.control-plane.result == 'skipped') && (needs.runtime.result == 'success' || needs.runtime.result == 'skipped') && (needs.transport.result == 'success' || needs.transport.result == 'skipped') && contains(format(',{0},', inputs.services), ',gateway,') }}
+    needs: validate
+    if: ${{ contains(format(',{0},', inputs.services), ',gateway,') }}
     uses: ./.github/workflows/_deploy-microservice.yml
     with: {service: gateway, manifest_sha: "${{ inputs.manifest_sha }}", manifest_path: "${{ inputs.manifest_path }}", action: "${{ inputs.action }}"}
     secrets: inherit

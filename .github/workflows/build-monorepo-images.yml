@@ -2,6 +2,10 @@ name: Build monorepo service images
 
 on:
   workflow_dispatch:
+    inputs:
+      services:
+        description: Comma-separated services to build; must match the changed paths
+        required: true
   pull_request:
     paths: ["apps/**", "packages/**", ".github/workflows/build-monorepo-images.yml"]
   push:
@@ -11,6 +15,10 @@ on:
 permissions:
   contents: read
   packages: write
+
+concurrency:
+  group: build-services-${{ github.sha }}
+  cancel-in-progress: false
 
 jobs:
   detect:
@@ -29,19 +37,16 @@ jobs:
         run: |
           set -Eeuo pipefail
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            echo 'apps=["gateway","control-plane","conversation-runtime","transport"]' >> "$GITHUB_OUTPUT"
+            apps="$(printf '%s' '${{ inputs.services }}' | jq -Rc 'split(",") | map(select(length > 0))')"
+            python -c 'import json,sys; allowed={"gateway","control-plane","conversation-runtime","transport"}; values=json.loads(sys.argv[1]); assert values and len(values)==len(set(values)) and set(values)<=allowed' "$apps"
+            echo "apps=$apps" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           base="$BEFORE_SHA"
           if [ "$EVENT_NAME" = "pull_request" ]; then base="$BASE_SHA"; fi
           files="$(git diff --name-only "$base" "$GITHUB_SHA")"
-          if grep -Eq '^packages/|^\.github/workflows/build-monorepo-images\.yml$' <<<"$files"; then
-            apps='["gateway","control-plane","conversation-runtime","transport"]'
-          else
-            apps="$(for app in gateway control-plane conversation-runtime transport; do
-              if grep -q "^apps/$app/" <<<"$files"; then printf '%s\n' "$app"; fi
-            done | jq -Rsc 'split("\n") | map(select(length > 0))')"
-          fi
+          mapfile -t changed_paths <<<"$files"
+          apps="$(python ops/microservices/affected-services.py "${changed_paths[@]}")"
           echo "apps=$apps" >> "$GITHUB_OUTPUT"
 
   boundaries:
@@ -73,8 +78,23 @@ jobs:
           registry: ghcr.io
           username: ${{ secrets.GHCR_USERNAME }}
           password: ${{ secrets.GHCR_TOKEN }}
+      - name: Reuse an existing immutable service revision
+        id: existing
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          digest="$(docker buildx imagetools inspect \
+            "ghcr.io/allanvvz/brain-${{ matrix.app }}:${{ github.sha }}" \
+            --format '{{json .Manifest.Digest}}' 2>/dev/null | tr -d '"' || true)"
+          if [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
       - uses: docker/build-push-action@v6
         id: build
+        if: github.event_name == 'pull_request' || steps.existing.outputs.found != 'true'
         with:
           context: .
           file: apps/${{ matrix.app }}/Dockerfile
@@ -91,7 +111,10 @@ jobs:
         shell: bash
         run: |
           mkdir -p image-digest
-          printf '%s\n' '${{ steps.build.outputs.digest }}' > "image-digest/${{ matrix.app }}.txt"
+          digest='${{ steps.existing.outputs.digest }}'
+          [[ -n "$digest" ]] || digest='${{ steps.build.outputs.digest }}'
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          printf '%s\n' "$digest" > "image-digest/${{ matrix.app }}.txt"
       - uses: actions/upload-artifact@v4
         if: github.event_name != 'pull_request'
         with:

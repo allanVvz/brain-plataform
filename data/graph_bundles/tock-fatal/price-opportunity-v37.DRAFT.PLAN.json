@@ -1,0 +1,25 @@
+{
+  "plan_version": "1.0",
+  "approval_scope": "publication_plan",
+  "disposition": "awaiting_compilation_and_approval",
+  "publication_allowed": false,
+  "base_version": 36,
+  "next_version": 37,
+  "source_document": "price-opportunity-v37.DRAFT.json",
+  "branches_affected": ["audience:tock-retail"],
+  "audiences_affected": ["audience:tock-ctx-preco-oportunidade"],
+  "summary": {
+    "faq_nodes_proposed": 12,
+    "audience_product_edges_proposed": 13,
+    "runtime_capabilities_required": ["price_comparison", "audience_signals", "mentioned_node_ids"]
+  },
+  "validation_required": [
+    "compile_full_graphbundle",
+    "verify_relative_lowest_price_per_product_group",
+    "verify_retail_price_evidence",
+    "verify_wholesale_numeric_price_suppression",
+    "run_internal_wa_validator",
+    "human_review"
+  ],
+  "activation_requires_separate_authorization": true
+}

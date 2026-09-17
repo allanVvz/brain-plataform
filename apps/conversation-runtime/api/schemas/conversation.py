@@ -183,7 +183,7 @@ class ExtractedFact(StrictModel):
 
 
 class CommercialClaim(StrictModel):
-    claim_type: str = Field(pattern="^(price|availability|schedule|stock|duration|service_detail|other)$")
+    claim_type: str = Field(pattern="^(price|price_comparison|availability|schedule|stock|duration|service_detail|other)$")
     value: dict[str, Any] = Field(default_factory=dict)
     evidence_node_ids: list[str] = Field(default_factory=list)
     evidence_chunk_ids: list[str] = Field(default_factory=list)
@@ -216,6 +216,12 @@ class CustomerQuestion(StrictModel):
     evidence_span: str = ""
 
 
+class AudienceSignal(StrictModel):
+    audience_node_id: str = Field(min_length=1)
+    evidence_span: str = Field(min_length=1)
+    confidence: float = Field(default=0.0, ge=0, le=1)
+
+
 class TurnUnderstandingV1(StrictModel):
     """Semantic reading of one inbound, with no customer-facing language."""
 
@@ -227,6 +233,8 @@ class TurnUnderstandingV1(StrictModel):
     )
     confirmation: UnderstandingConfirmation = Field(default_factory=UnderstandingConfirmation)
     customer_questions: list[CustomerQuestion] = Field(default_factory=list)
+    mentioned_node_ids: list[str] = Field(default_factory=list)
+    audience_signals: list[AudienceSignal] = Field(default_factory=list)
     interaction_observation: InteractionObservation = Field(
         default_factory=InteractionObservation
     )
@@ -242,6 +250,7 @@ class ConversationReplyV1(StrictModel):
     cited_node_ids: list[str] = Field(default_factory=list)
     cited_chunk_ids: list[str] = Field(default_factory=list)
     handoff_requested: bool = False
+    knowledge_gap: bool = False
 
 
 class ConversationProposal(StrictModel):
@@ -265,6 +274,8 @@ class ConversationProposal(StrictModel):
     images: list[dict[str, str]] = Field(default_factory=list, max_length=3)
     qualification_complete: bool = False
     handoff_requested: bool = False
+    knowledge_gap: bool = False
+    failure_streak_before_turn: int = Field(default=0, ge=0)
 
 
 class ConversationContext(StrictModel):

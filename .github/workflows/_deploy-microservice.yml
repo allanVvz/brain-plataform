@@ -6,6 +6,8 @@ on:
       manifest_sha: {required: true, type: string}
       manifest_path: {required: true, type: string}
       action: {required: true, type: string}
+      canary_persona_slug: {required: false, type: string, default: ""}
+      canary_flow_id: {required: false, type: string, default: ""}
     secrets:
       VPS_HOST: {required: true}
       VPS_USER: {required: true}
@@ -41,25 +43,30 @@ jobs:
         uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
         env:
           AUDIT_ROOT: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
-          ALLOW_PENDING_MICROSERVICE_DIGESTS: "true"
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
-          command_timeout: 10m
-          envs: AUDIT_ROOT,ALLOW_PENDING_MICROSERVICE_DIGESTS
-          script_path: ops/vps/validate-production-release.sh
+          command_timeout: 3m
+          envs: AUDIT_ROOT
+          script: |
+            set -Eeuo pipefail
+            cd "$AUDIT_ROOT"
+            bash ops/vps/rollout-microservices.sh status
 
   mutate:
     needs: production-preflight
     if: inputs.action != 'dry-run'
     environment: production-${{ inputs.service }}
+    concurrency:
+      group: deploy-${{ inputs.service }}-${{ inputs.manifest_sha }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with: {ref: "${{ inputs.manifest_sha }}"}
-      - name: Synchronize approved release controls
+      - name: Synchronize service release controls
         uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -67,7 +74,7 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
           timeout: 120s
-          source: docker-compose.yml,infra/Caddyfile,infra/caddy-dynamic,infra/microservices,ops/microservices,ops/vps/deploy-microservice-blue-green.sh,ops/vps/rollout-microservices.sh,ops/vps/validate-production-release.sh,${{ inputs.manifest_path }}
+          source: ops/microservices/route-map.json,ops/microservices/render-active-routes.py,ops/microservices/validate-release-manifest.py,ops/vps/deploy-microservice-blue-green.sh,ops/vps/run-microservice-wa-validator.sh,${{ inputs.manifest_path }}
           target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           overwrite: true
       - name: Deploy or rollback one service by immutable digest
@@ -75,20 +82,42 @@ jobs:
         env:
           GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          CANARY_PERSONA_SLUG: ${{ inputs.canary_persona_slug }}
+          CANARY_FLOW_ID: ${{ inputs.canary_flow_id }}
+          WA_VALIDATOR_TIMEOUT_SECONDS: "300"
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
           command_timeout: 15m
-          envs: GHCR_USERNAME,GHCR_TOKEN
+          envs: GHCR_USERNAME,GHCR_TOKEN,CANARY_PERSONA_SLUG,CANARY_FLOW_ID,WA_VALIDATOR_TIMEOUT_SECONDS
           script: |
             set -Eeuo pipefail
             cd "${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}"
             if [[ -n "${GHCR_TOKEN:-}" ]]; then
               printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
             fi
+            # Validate the exact controls and manifest just synchronized by
+            # this approved job before any container or route mutation.
+            bash ops/vps/deploy-microservice-blue-green.sh \
+              "${{ inputs.manifest_path }}" "${{ inputs.service }}" --dry-run
             mode=--apply
             [[ "${{ inputs.action }}" == "rollback" ]] && mode=--rollback
             bash ops/vps/deploy-microservice-blue-green.sh \
               "${{ inputs.manifest_path }}" "${{ inputs.service }}" "$mode"
+            if [[ "${{ inputs.action }}" == "deploy" && "${{ inputs.service }}" == "conversation-runtime" ]]; then
+              [[ -n "$CANARY_PERSONA_SLUG" && -n "$CANARY_FLOW_ID" ]] || {
+                echo "runtime deploy requires an internal WA canary profile" >&2
+                bash ops/vps/deploy-microservice-blue-green.sh \
+                  "${{ inputs.manifest_path }}" conversation-runtime --rollback
+                exit 1
+              }
+              if ! bash ops/vps/run-microservice-wa-validator.sh \
+                --run "$CANARY_PERSONA_SLUG" "$CANARY_FLOW_ID" cold; then
+                echo "runtime canary failed; rolling back automatically" >&2
+                bash ops/vps/deploy-microservice-blue-green.sh \
+                  "${{ inputs.manifest_path }}" conversation-runtime --rollback
+                exit 1
+              fi
+            fi

@@ -47,6 +47,7 @@ _NAME_COLLECTING_FLOWS = {
     "sdr_reativacao_pos_handoff",
     "sdr_sales_retail", "sdr_sales_reseller", "sdr_sales_branch_switch",
     "sdr_sales_knowledge_gap", "sdr_sales_freight",
+    "sdr_sales_price_comparison",
     "sdr_sales_photo_available", "sdr_sales_photo_unavailable",
 }
 
@@ -387,6 +388,9 @@ _FLOWS = {
     "sdr_sales_freight": (
         "Frete sem valor publicado: informação fica para confirmação humana."
     ),
+    "sdr_sales_price_comparison": (
+        "Compara os menores preços de varejo publicados sem bloquear a qualificação."
+    ),
     "sdr_sales_photo_available": (
         "Foto de produto com asset aprovado: oferta usa a evidência exata."
     ),
@@ -431,6 +435,7 @@ _FLOW_BUSINESS_MODELS: dict[str, set[str]] = {
     "sdr_sales_branch_switch": {"sales"},
     "sdr_sales_knowledge_gap": {"sales"},
     "sdr_sales_freight": {"sales"},
+    "sdr_sales_price_comparison": {"sales"},
     "sdr_sales_photo_available": {"sales"},
     "sdr_sales_photo_unavailable": {"sales"},
 }
@@ -930,6 +935,29 @@ def _semantic_sales_script(
                 r"\b(?:atendente|especialista|pessoa\s+da\s+equipe|equipe)\b",
             ],
             "forbidden_reply_patterns": [r"R\$\s*\d", r"\b\d+\s*dias?\b"],
+        })
+    elif flow_id == "sdr_sales_price_comparison":
+        catalog = graph_proof_checker_v3.published_retail_price_catalog(
+            document, contract.get("closure_node_ids") or [],
+        )
+        if not catalog:
+            raise ValueError("Grafo sales não possui preços varejistas comparáveis")
+        minimum = catalog[0]["amount"]
+        cheapest = [row for row in catalog if row["amount"] == minimum]
+        amount_pattern = str(f"{minimum:.2f}").replace(".", r"[,.]")
+        opening.update({
+            "text": "Oi! É para uso próprio. O que vocês têm de mais barato?",
+            "expected_evidence_node_ids": [row["evidence_node_id"] for row in cheapest],
+            "required_reply_patterns": [
+                *opening["required_reply_patterns"],
+                rf"R\$\s*{amount_pattern}",
+            ],
+            "forbidden_reply_patterns": [r"\b(?:não posso|não consigo)\s+(?:comparar|informar)\b"],
+            "expected_price_comparison": {
+                "minimum_amount": minimum,
+                "currency": cheapest[0]["currency"],
+                "product_node_ids": [row["product_node_id"] for row in cheapest],
+            },
         })
     required_fields = [
         str(field.get("key") or "") for field in contract.get("fields") or []

@@ -28,8 +28,13 @@ manifest_value() {
   python3 -c 'import json,sys; data=json.load(open(sys.argv[1], encoding="utf-8")); print(data[sys.argv[2]] if sys.argv[2] != "service" else data["services"][sys.argv[3]][sys.argv[4]])' "$MANIFEST" "$@"
 }
 
-export BRAIN_CONTRACTS_VERSION="$(manifest_value contracts_version)"
-export REQUIRED_SCHEMA_VERSION="$(manifest_value schema_version)"
+service_value_or_global() {
+  python3 -c 'import json,sys; d=json.load(open(sys.argv[1], encoding="utf-8")); s=d["services"][sys.argv[2]]; print(s.get(sys.argv[3]) or d[sys.argv[4]])' "$MANIFEST" "$SERVICE" "$1" "$2"
+}
+
+export BRAIN_CONTRACTS_VERSION="$(service_value_or_global contracts_version contracts_version)"
+export BRAIN_CONTRACTS_SHA="$(service_value_or_global contracts_checksum contracts_checksum)"
+export REQUIRED_SCHEMA_VERSION="$(manifest_value service "$SERVICE" required_schema_version)"
 export CURRENT_SCHEMA_VERSION="$REQUIRED_SCHEMA_VERSION"
 export GATEWAY_SHA="$(manifest_value service gateway sha)"
 export GATEWAY_DIGEST="$(manifest_value service gateway digest)"
@@ -95,21 +100,34 @@ if [[ "$active" =~ ^(blue|green)$ && "$active" != "$target" ]]; then
 fi
 
 activated=false
+mutation_started=false
+candidate_started=false
+routes_staged=false
 state_backup="$STATE_DIR/slots.previous-${SERVICE}.json"
+public_route_backup="$STATE_DIR/public-upstream.previous-${SERVICE}.caddy"
+internal_route_backup="$STATE_DIR/internal-upstreams.previous-${SERVICE}.caddy"
+release_key="$(manifest_value service "$SERVICE" sha)-$(manifest_value service "$SERVICE" digest)"
+release_record="$STATE_DIR/releases/$SERVICE/$release_key.json"
 rollback_on_error() {
   local code=$?
   trap - ERR
   set +e
-  if [[ "$activated" == "true" ]]; then
+  if [[ "$mutation_started" == "true" ]]; then
     echo "deployment failed after cutover; restoring service=$SERVICE slot=$active" >&2
-    cp "$STATE_DIR/public-upstream.previous.caddy" "$CADDY_DIR/public-upstream.caddy"
-    cp "$STATE_DIR/internal-upstreams.previous.caddy" "$CADDY_DIR/internal-upstreams.caddy"
-    cp "$state_backup" "$STATE_FILE"
-    "${COMPOSE[@]}" exec -T caddy caddy reload --config /etc/caddy/Caddyfile
+    if [[ "$routes_staged" == "true" ]]; then
+      cp "$public_route_backup" "$CADDY_DIR/public-upstream.caddy"
+      cp "$internal_route_backup" "$CADDY_DIR/internal-upstreams.caddy"
+      cp "$state_backup" "$STATE_FILE"
+      "${COMPOSE[@]}" exec -T caddy caddy reload --config /etc/caddy/Caddyfile
+    fi
     if [[ ${#old_services[@]} -gt 0 ]]; then
       "${COMPOSE[@]}" start "${old_services[@]}"
     fi
     "${COMPOSE[@]}" stop -t 45 "${target_services[@]}"
+  elif [[ "$candidate_started" == "true" ]]; then
+    # A failed isolated candidate never received traffic, but it must not be
+    # left running and mistaken for a promotable slot on the next release.
+    "${COMPOSE[@]}" stop -t 45 "$target_service"
   fi
   exit "$code"
 }
@@ -118,6 +136,11 @@ trap rollback_on_error ERR
 echo "service=$SERVICE action=$ACTION active=${active:-none} target=$target manifest=$(basename "$MANIFEST")"
 if [[ "$ACTION" == "--dry-run" ]]; then
   "${COMPOSE[@]}" config --quiet
+  exit 0
+fi
+
+if [[ "$ACTION" == "--apply" && -s "$release_record" ]]; then
+  echo "release already promoted service=$SERVICE key=$release_key"
   exit 0
 fi
 
@@ -134,41 +157,6 @@ mkdir -p "$STATE_DIR" "$CADDY_DIR"
 if [[ ! -s "$STATE_FILE" ]]; then
   printf '%s\n' '{"gateway":{"active":"legacy","previous":null}}' > "$STATE_FILE"
 fi
-
-# The split services depend on the private :8090 listener. Older production
-# releases can have a valid active Caddyfile that predates that listener even
-# though the generated internal-upstreams file is already current. Install the
-# approved base config atomically before waiting on gateway readiness, while
-# preserving the current public-upstream file (and therefore legacy traffic).
-install_active_caddy_config() {
-  local approved="$ROOT_DIR/infra/Caddyfile"
-  local active="$CADDY_DIR/Caddyfile"
-  local previous="$STATE_DIR/Caddyfile.previous"
-  local candidate
-
-  [[ -s "$approved" ]] || { echo "missing approved Caddyfile: $approved" >&2; return 1; }
-  [[ -s "$active" ]] || { echo "missing active Caddyfile: $active" >&2; return 1; }
-  cmp -s "$approved" "$active" && return 0
-
-  cp "$active" "$previous"
-  candidate="$(mktemp "$CADDY_DIR/.Caddyfile.microservice.XXXXXX")"
-  cp "$approved" "$candidate"
-  chmod 0644 "$candidate"
-  mv -f "$candidate" "$active"
-
-  if ! "${COMPOSE[@]}" exec -T caddy caddy validate --config /etc/caddy/Caddyfile; then
-    cp "$previous" "$active"
-    return 1
-  fi
-  if ! "${COMPOSE[@]}" exec -T caddy caddy reload --config /etc/caddy/Caddyfile; then
-    cp "$previous" "$active"
-    "${COMPOSE[@]}" exec -T caddy caddy reload --config /etc/caddy/Caddyfile || true
-    return 1
-  fi
-  echo "installed approved Caddy base config; public upstream unchanged"
-}
-
-install_active_caddy_config
 
 pull_candidate_images() {
   local pull_attempt
@@ -200,14 +188,11 @@ if [[ "$ACTION" == "--rollback" ]]; then
   fi
 else
   pull_candidate_images
-  if [[ -s "$ROOT_DIR/.deploy/control/claims-paused.json" && ${#target_services[@]} -gt 1 ]]; then
-    "${COMPOSE[@]}" up -d --no-deps --force-recreate "$target_service"
-    "${COMPOSE[@]}" stop -t 120 "${target_services[@]:1}" >/dev/null 2>&1 || true
-    workers_paused=true
-  else
-    "${COMPOSE[@]}" up -d --no-deps --force-recreate "${target_services[@]}"
-    workers_paused=false
-  fi
+  # A candidate is isolated: only its HTTP API starts before validation.
+  # Queue consumers move once, immediately before the route cutover.
+  "${COMPOSE[@]}" up -d --no-deps --force-recreate "$target_service"
+  candidate_started=true
+  workers_paused=false
 fi
 
 deadline=$((SECONDS + 180))
@@ -215,10 +200,39 @@ until [[ "$("${COMPOSE[@]}" ps --format json "$target_service" | python3 -c 'imp
   (( SECONDS < deadline )) || { echo "readiness timeout for $target_service" >&2; exit 1; }
   sleep 3
 done
-if [[ "${workers_paused:-false}" != "true" ]]; then
+
+expected_sha="$(manifest_value service "$SERVICE" sha)"
+if [[ "$ACTION" == "--rollback" ]]; then
+  "${COMPOSE[@]}" exec -T "$target_service" python -c \
+    'import json,re,urllib.request; p=json.load(urllib.request.urlopen("http://127.0.0.1:8080/health/ready", timeout=5)); assert p["status"]=="ready" and re.fullmatch(r"[0-9a-f]{40}", p["source_sha"])'
+else
+  "${COMPOSE[@]}" exec -T "$target_service" python -c \
+    'import json,sys,urllib.request; p=json.load(urllib.request.urlopen("http://127.0.0.1:8080/health/ready", timeout=5)); assert p["status"]=="ready" and p["source_sha"]==sys.argv[1]' \
+    "$expected_sha"
+fi
+
+if [[ "$ACTION" == "--apply" && "$SERVICE" == "conversation-runtime" ]]; then
+  # Candidate-only contract smoke: execute the exact image through its private
+  # listener before any worker starts or public route changes.
+  "${COMPOSE[@]}" exec -T "$target_service" python -c \
+    'import json,urllib.request; p=json.load(urllib.request.urlopen("http://127.0.0.1:8080/openapi.json", timeout=5))["paths"]; required={"/internal/v1/conversations/resolve-understanding","/internal/v1/conversations/execute-agentic"}; assert required <= set(p), sorted(required-set(p))'
+fi
+
+# Move only this service's consumers. The old consumers receive at most the
+# documented 45 second drain; no global claim pause is used.
+# Candidates remain parallel. Only the shared route/state promotion is locked,
+# preventing two services from overwriting each other's slot update.
+exec 9>"$STATE_DIR/cutover.lock"
+flock -w 120 9
+mutation_started=true
+if [[ ${#old_services[@]} -gt 1 ]]; then
+  "${COMPOSE[@]}" stop -t 45 "${old_services[@]:1}"
+fi
+if [[ ${#target_services[@]} -gt 1 ]]; then
+  "${COMPOSE[@]}" up -d --no-deps --force-recreate "${target_services[@]:1}"
   for candidate_service in "${target_services[@]:1}"; do
     [[ "$("${COMPOSE[@]}" ps --status running --services "$candidate_service")" == "$candidate_service" ]] || {
-      echo "worker group failed to remain running: $candidate_service" >&2
+      echo "worker group failed to start: $candidate_service" >&2
       exit 1
     }
   done
@@ -240,15 +254,16 @@ PY
 
 rendered="$STATE_DIR/caddy-candidate-${SERVICE}"
 python3 "$ROOT_DIR/ops/microservices/render-active-routes.py" "$candidate" "$rendered"
-cp "$CADDY_DIR/public-upstream.caddy" "$STATE_DIR/public-upstream.previous.caddy" 2>/dev/null || true
-cp "$CADDY_DIR/internal-upstreams.caddy" "$STATE_DIR/internal-upstreams.previous.caddy" 2>/dev/null || true
+cp "$CADDY_DIR/public-upstream.caddy" "$public_route_backup" 2>/dev/null || true
+cp "$CADDY_DIR/internal-upstreams.caddy" "$internal_route_backup" 2>/dev/null || true
 cp "$STATE_FILE" "$state_backup"
 cp "$rendered/public-upstream.caddy" "$CADDY_DIR/public-upstream.caddy"
 cp "$rendered/internal-upstreams.caddy" "$CADDY_DIR/internal-upstreams.caddy"
+routes_staged=true
 
 if ! "${COMPOSE[@]}" exec -T caddy caddy validate --config /etc/caddy/Caddyfile; then
-  cp "$STATE_DIR/public-upstream.previous.caddy" "$CADDY_DIR/public-upstream.caddy" 2>/dev/null || true
-  cp "$STATE_DIR/internal-upstreams.previous.caddy" "$CADDY_DIR/internal-upstreams.caddy" 2>/dev/null || true
+  cp "$public_route_backup" "$CADDY_DIR/public-upstream.caddy" 2>/dev/null || true
+  cp "$internal_route_backup" "$CADDY_DIR/internal-upstreams.caddy" 2>/dev/null || true
   exit 1
 fi
 "${COMPOSE[@]}" exec -T caddy caddy reload --config /etc/caddy/Caddyfile
@@ -256,7 +271,14 @@ activated=true
 mv "$candidate" "$STATE_FILE"
 
 if [[ ${#old_services[@]} -gt 0 ]]; then
-  "${COMPOSE[@]}" stop -t 45 "${old_services[@]}"
+  "${COMPOSE[@]}" stop -t 45 "${old_services[0]}"
 fi
+if [[ "$ACTION" == "--apply" ]]; then
+  mkdir -p "$(dirname "$release_record")"
+  printf '%s\n' "{\"service\":\"$SERVICE\",\"sha\":\"$expected_sha\",\"digest\":\"$(manifest_value service "$SERVICE" digest)\",\"slot\":\"$target\"}" > "$release_record"
+else
+  rm -f "$release_record"
+fi
+flock -u 9
 trap - ERR
 echo "activated service=$SERVICE slot=$target; previous=${active:-none} workers_paused=${workers_paused:-false}"
