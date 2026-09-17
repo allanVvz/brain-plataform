@@ -206,7 +206,7 @@ fi
 
 session_container="$runtime_name"
 [[ "$MODE" == "--run-source" ]] && session_container="$validator_name"
-session_output="$(docker exec "$session_container" python -c 'import sys; from services import wa_validator_service as w; generated=w.generate_script(persona_slug=sys.argv[1], flow_id=sys.argv[2], target_contact="production-lifecycle", initial_state=sys.argv[3], validation_target_url=sys.argv[4] or None); session_id=generated["session_id"]; w.enqueue_session_direct(session_id); print("WA_VALIDATOR_SESSION_ID=" + session_id)' "$PERSONA_SLUG" "$FLOW_ID" "$INITIAL_STATE" "$CANDIDATE_WEBHOOK_URL")"
+session_output="$(docker exec "$session_container" python -c 'import sys; from services import wa_validator_service as w; generated=w.generate_script(persona_slug=sys.argv[1], flow_id=sys.argv[2], target_contact="production-lifecycle", initial_state=sys.argv[3]); session_id=generated["session_id"]; w.enqueue_session_direct(session_id); print("WA_VALIDATOR_SESSION_ID=" + session_id)' "$PERSONA_SLUG" "$FLOW_ID" "$INITIAL_STATE")"
 printf '%s\n' "$session_output"
 session_id="$(printf '%s\n' "$session_output" | sed -n 's/^WA_VALIDATOR_SESSION_ID=//p' | tail -n 1)"
 [[ "$session_id" =~ ^[A-Za-z0-9_-]{8,160}$ ]] || { echo "invalid validator session id" >&2; exit 1; }

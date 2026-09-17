@@ -116,6 +116,8 @@ def test_validator_uses_only_active_runtime_validator_and_stops_it_after_run():
     assert 'docker stop -t 120 "$runner_cid"' in script
     assert "runner_deadline=$((SECONDS + 120))" in script
     assert "WA_VALIDATOR_RESULT=passed" in script
+    assert "validation_target_url" not in script
+    assert "enqueue_session_direct(session_id)" in script
     assert "options: [dry-run, run, run-source, inspect]" in workflow
     assert '[[ "$VALIDATOR_ACTION" == "inspect" ]] && mode=--inspect' in workflow
     assert "WA_VALIDATOR_INSPECTION=" in script
