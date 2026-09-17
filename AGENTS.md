@@ -33,6 +33,11 @@ usar uma stack Docker local para implementar, auditar ou testar este projeto.
   Uma limpeza aprovada continua exigindo escopo exato, dry-run, lock local e
   confirmacao de que a lead nao possui buffer em processamento/proof antes do
   commit.
+- Consentimentos e eventos de auditoria imutaveis nao sao "historico de
+  conversa" e nao podem ser apagados por uma limpeza operacional. Se eles
+  impedirem a exclusao fisica da lead, o dry-run deve bloquear antes de mutar;
+  anonimização ou mudanca de retencao exige uma decisao legal e migration
+  autorizadas separadamente.
 
 ### Auditoria
 1. Confirmar SHA, release, health/readiness e o estado operacional no escopo da

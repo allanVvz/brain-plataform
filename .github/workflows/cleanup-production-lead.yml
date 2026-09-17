@@ -84,7 +84,7 @@ jobs:
               'assets',(SELECT count(*) FROM public.assets WHERE lead_id=${LEAD_REF})
             );" | "${psql[@]}")"
             echo "LEAD_CLEANUP_AUDIT=$audit"
-            python3 -c 'import json,sys; row=json.loads(sys.argv[1]); assert row["target_count"] == 1, row; assert row["persona_slug"] == sys.argv[2], row; assert row["name_matches"] is True, row; assert row["active_buffers"] == 0, row' "$audit" "$PERSONA_SLUG"
+            python3 -c 'import json,sys; row=json.loads(sys.argv[1]); assert row["target_count"] == 1, row; assert row["persona_slug"] == sys.argv[2], row; assert row["name_matches"] is True, row; assert row["active_buffers"] == 0, row; assert row["contact_consents"] == 0, "lead deletion blocked by immutable contact consents: " + json.dumps(row, sort_keys=True)' "$audit" "$PERSONA_SLUG"
             [[ "$CLEANUP_ACTION" == apply ]] || { echo "LEAD_CLEANUP_DRY_RUN=passed"; exit 0; }
 
             printf '%s\n' "
@@ -120,7 +120,6 @@ jobs:
             DELETE FROM public.messages WHERE lead_id=${LEAD_REF};
             DELETE FROM public.lead_audience_memberships WHERE lead_id=${LEAD_REF};
             DELETE FROM public.campaign_recipients WHERE lead_id=${LEAD_REF};
-            DELETE FROM public.contact_consents WHERE lead_id=${LEAD_REF};
             UPDATE public.lead_import_rows SET lead_id=NULL WHERE lead_id=${LEAD_REF};
             UPDATE public.assets SET lead_id=NULL WHERE lead_id=${LEAD_REF};
             DELETE FROM public.chat_history
