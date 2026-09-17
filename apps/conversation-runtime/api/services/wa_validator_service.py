@@ -2619,11 +2619,27 @@ def _semantic_turn_audit(
             or handoff_observed
         ),
     }
-    failures = [name for name, passed in criteria.items() if not passed]
+    # The model owns which eligible qualification question sounds natural.
+    # Whether this heuristic can map that question back to the narrow
+    # askable set is valuable audit data, but never a release/session gate:
+    # proof already enforces known facts, dependencies, branch isolation and
+    # exactly-once independently. Keep the raw observation permanently on
+    # the turn, while reserving failures for objective safety violations.
+    observations = [name for name, passed in criteria.items() if not passed]
+    non_blocking_observations = [
+        name for name in observations
+        if name == "question_semantically_askable"
+    ]
+    failures = [
+        name for name in observations
+        if name not in set(non_blocking_observations)
+    ]
     return {
         "passed": not failures,
         "criteria": criteria,
         "failures": failures,
+        "observations": observations,
+        "non_blocking_observations": non_blocking_observations,
         "asked_field": asked_field,
         "next_question_node_id": question_id,
         "first_missing_field": first_missing,
@@ -3337,6 +3353,34 @@ async def run_session_direct(
                             conversation_mode=conversation_mode,
                         )
                     turn["semantic_audit"] = audit
+                    # Persist every semantic observation, including advisory
+                    # ones. Sessions retain the full transcript as well, but
+                    # this event makes longitudinal audit/querying possible
+                    # without creating a new table or turning language into a
+                    # deployment gate.
+                    supabase_client.insert_event({
+                        "event_type": "wa_validator_semantic_audit_observed",
+                        "entity_type": "wa_validator_session",
+                        "entity_id": session_id,
+                        "source": "services.wa_validator_service",
+                        "level": (
+                            "warning" if audit.get("observations") else "info"
+                        ),
+                        "payload": {
+                            "session_id": session_id,
+                            "persona_slug": persona_slug,
+                            "turn_index": i,
+                            "criteria": audit.get("criteria") or {},
+                            "blocking_failures": audit.get("failures") or [],
+                            "observations": audit.get("observations") or [],
+                            "non_blocking_observations": (
+                                audit.get("non_blocking_observations") or []
+                            ),
+                            "asked_field": audit.get("asked_field"),
+                            "next_question_node_id": audit.get("next_question_node_id"),
+                            "correlation_id": correlation_id,
+                        },
+                    })
                     _session_update(
                         session_id,
                         output={

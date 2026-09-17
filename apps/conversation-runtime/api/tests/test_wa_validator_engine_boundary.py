@@ -107,13 +107,17 @@ def test_agentic_validator_accepts_any_askable_field_and_natural_wording():
     assert audit["criteria"]["question_semantically_askable"] is True
 
 
-def test_deterministic_validator_keeps_first_published_question_contract():
+def test_question_askability_is_audited_but_never_blocks_a_session():
     audit = wa_validator_service._semantic_turn_audit(
         **_audit_inputs(conversation_mode="deterministic")
     )
 
-    assert audit["passed"] is False
-    assert "question_semantically_askable" in audit["failures"]
+    assert audit["criteria"]["question_semantically_askable"] is False
+    assert audit["passed"] is True
+    assert audit["failures"] == []
+    assert audit["non_blocking_observations"] == [
+        "question_semantically_askable"
+    ]
 
 
 def test_agentic_validator_accepts_optional_collect_once_name_before_required_field():
