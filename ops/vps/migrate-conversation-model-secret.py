@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import os
+import argparse
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -112,20 +114,21 @@ def _api_key(row: dict[str, Any]) -> str:
     return value
 
 
-def _store(container: str, persona_slug: str, api_key: str) -> dict[str, Any]:
+def _store(container: str, persona_slug: str, api_key: str, model: str) -> dict[str, Any]:
     code = """
 import hashlib,json,sys
 from datetime import datetime,timezone
 from services import integration_service,secret_store,supabase_client
 payload=json.loads(sys.stdin.read())
-slug=payload['persona_slug']; secret=payload['api_key']
+slug=payload['persona_slug']; secret=payload['api_key']; model=payload['model']
 p=supabase_client.get_persona(slug) or {}
 c=supabase_client.get_persona_integration_connection(str(p.get('id') or ''),'deepseek') or {}
 cfg=dict(c.get('config_json') or {})
-integration_service.validate_deepseek(secret,model=str(cfg.get('model') or '') or None)
+integration_service.validate_deepseek(secret,model=model)
 for key in ('n8n_credential_id','n8n_workflow_id','conversation_webhook_path','workflow_checksum','workflow_template'):
     cfg.pop(key,None)
 cfg.update({
+  'model':model,
   'pipeline_contract':'conversation_agentic_v1',
   'runtime_version':'graph_agent_runtime_v3',
   'structured_output_mode':str(cfg.get('structured_output_mode') or 'json_object'),
@@ -139,9 +142,9 @@ supabase_client.save_persona_integration_connection({
 })
 saved=supabase_client.get_persona_integration_connection(str(p['id']),'deepseek') or {}
 verified=secret_store.decrypt_secret(saved.get('secret_ciphertext')) == secret
-print(json.dumps({'verified':verified,'pipeline_contract':(saved.get('config_json') or {}).get('pipeline_contract'),'legacy_ids_removed':not any((saved.get('config_json') or {}).get(k) for k in ('n8n_credential_id','n8n_workflow_id'))}))
+print(json.dumps({'verified':verified,'model':(saved.get('config_json') or {}).get('model'),'pipeline_contract':(saved.get('config_json') or {}).get('pipeline_contract'),'legacy_ids_removed':not any((saved.get('config_json') or {}).get(k) for k in ('n8n_credential_id','n8n_workflow_id'))}))
 """
-    payload = json.dumps({"persona_slug": persona_slug, "api_key": api_key})
+    payload = json.dumps({"persona_slug": persona_slug, "api_key": api_key, "model": model})
     result = _json_from_output(
         _run(["docker", "exec", "-i", container, "python", "-c", code], stdin=payload)
     )
@@ -151,13 +154,21 @@ print(json.dumps({'verified':verified,'pipeline_contract':(saved.get('config_jso
 
 
 def main() -> int:
-    if len(sys.argv) != 3 or sys.argv[1] not in {"--dry-run", "--apply"}:
-        raise SystemExit("usage: migrate-conversation-model-secret.py --dry-run|--apply PERSONA_SLUG")
-    mode, persona_slug = sys.argv[1:]
+    parser = argparse.ArgumentParser(description=__doc__)
+    mode_group = parser.add_mutually_exclusive_group(required=True)
+    mode_group.add_argument("--dry-run", dest="mode", action="store_const", const="--dry-run")
+    mode_group.add_argument("--apply", dest="mode", action="store_const", const="--apply")
+    parser.add_argument("persona_slug")
+    parser.add_argument("--model", help="provider model id to validate and persist")
+    args = parser.parse_args()
+    mode, persona_slug = args.mode, args.persona_slug
     if ROOT != Path("/opt/brain-ai") or not persona_slug.replace("-", "").isalnum():
         raise SystemExit("invalid production root or persona slug")
     container = _control_container()
     plan = _connection_plan(container, persona_slug)
+    model = str(args.model or plan["model"] or "").strip()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{1,127}", model):
+        raise SystemExit("invalid conversation model id")
     if plan["encrypted_secret"]:
         print("CONVERSATION_MODEL_SECRET already_migrated=true")
         return 0
@@ -165,7 +176,7 @@ def main() -> int:
     print(
         "CONVERSATION_MODEL_SECRET_PLAN "
         f"persona={persona_slug} enabled={str(plan['enabled']).lower()} "
-        f"model_declared={str(bool(plan['model'])).lower()} "
+        f"model={model} "
         f"structured_output_mode={plan['structured_output_mode'] or 'missing'}"
     )
     if mode == "--dry-run":
@@ -173,9 +184,10 @@ def main() -> int:
     if os.environ.get("CONVERSATION_SECRET_MIGRATION_AUTHORIZED") != "true":
         raise SystemExit("authorization marker missing")
     secret = _api_key(_export_credential(str(plan["credential_id"]), decrypted=True))
-    result = _store(container, persona_slug, secret)
+    result = _store(container, persona_slug, secret, model)
     print(
         "CONVERSATION_MODEL_SECRET_RESULT migrated=true verified=true "
+        f"model={result['model']} "
         f"pipeline_contract={result['pipeline_contract']} "
         f"legacy_ids_removed={str(result['legacy_ids_removed']).lower()}"
     )

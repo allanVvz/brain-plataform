@@ -23,3 +23,8 @@ def test_api_key_accepts_only_authorization_bearer():
     }) == "sk-secret"
     with pytest.raises(RuntimeError):
         MODULE._api_key({"data": {"name": "X-Key", "value": "sk-secret"}})
+
+
+def test_model_id_validation_accepts_the_provider_model_name():
+    assert MODULE.re.fullmatch(r"[a-z0-9][a-z0-9._-]{1,127}", "deepseek-flash")
+    assert not MODULE.re.fullmatch(r"[a-z0-9][a-z0-9._-]{1,127}", "deepseek flash")
