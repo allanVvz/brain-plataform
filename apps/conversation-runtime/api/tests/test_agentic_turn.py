@@ -9,6 +9,7 @@ from schemas.conversation import (
     ConversationContext,
     ConversationDecision,
     ResolvedUnderstandingV1,
+    TurnUnderstandingV1,
 )
 from services import agentic_turn, graph_agent_runtime_v3
 
@@ -168,7 +169,35 @@ def test_two_model_calls_resolve_facts_before_reply_and_commit_once(monkeypatch)
     assert captured["commit"]["expected_decision_owner"] == "n8n_agents"
     assert "warm, concise reply" in captured["reply_system"]
     assert "rather than guessing" in captured["reply_system"]
+    assert "claim_contract exactly" in captured["reply_system"]
     assert result["model_calls"] == 2
+
+
+def test_reply_claim_contract_exposes_only_graph_authorized_price_evidence():
+    resolved = ResolvedUnderstandingV1(
+        understanding=TurnUnderstandingV1(),
+        context=_context(),
+        prospective_state={},
+        conversation_brief={
+            "price_comparison_catalog": [{
+                "product_node_id": "product:lowest",
+                "amount": 29.9,
+                "currency": "BRL",
+                "evidence_node_id": "faq:lowest-price",
+                "unrelated": "must not reach the model contract",
+            }],
+        },
+    )
+
+    contract = agentic_turn._reply_claim_contract(resolved)
+
+    assert contract["claims_are_optional"] is True
+    assert contract["price_comparison"]["allowed_catalog"] == [{
+        "product_node_id": "product:lowest",
+        "amount": 29.9,
+        "currency": "BRL",
+        "evidence_node_id": "faq:lowest-price",
+    }]
 
 
 def test_non_literal_fact_evidence_fails_without_reply_call(monkeypatch):

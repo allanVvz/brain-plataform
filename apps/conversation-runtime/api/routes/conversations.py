@@ -185,6 +185,7 @@ def execute_agentic(
                 "execution_strategy": "interpret_then_respond",
                 "failed_node": str(stage)[:100],
                 "message": str(exc)[:1000],
+                "proposal_summary": getattr(exc, "diagnostic", {}),
             },
         )
         return _terminalize_technical_failure(command)
