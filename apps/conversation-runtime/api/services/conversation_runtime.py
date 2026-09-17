@@ -153,16 +153,16 @@ def _commit_graph_turn_and_outbox_or_raise(
     *, inbound_id: str | None, correlation_id: str, **payload: Any,
 ) -> dict:
     try:
-        return supabase_client.commit_graph_turn_and_outbox_v4(**payload)
+        return supabase_client.commit_graph_turn_and_outbox_v5(**payload)
     except Exception as exc:
         logger.exception(
-            "atomic conversation commit failed step=commit_graph_turn_and_outbox_v4 "
+            "atomic conversation commit failed step=commit_graph_turn_and_outbox_v5 "
             "inbound_id=%s correlation_id=%s",
             inbound_id,
             correlation_id,
         )
         raise ConversationCommitFailed(
-            failed_step="commit_graph_turn_and_outbox_v4",
+            failed_step="commit_graph_turn_and_outbox_v5",
             inbound_id=inbound_id,
             correlation_id=correlation_id,
             cause=exc,

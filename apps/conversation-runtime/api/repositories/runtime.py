@@ -2820,6 +2820,43 @@ def commit_graph_turn_and_outbox_v4(
     )
 
 
+def commit_graph_turn_and_outbox_v5(
+    *, turn: dict, outbound_buffer: dict | None,
+    outbound_message: dict | None, result_payload: dict,
+) -> dict:
+    """Commit through the replay-first RPC, with a rolling-schema fallback.
+
+    v5 serializes every canonical inbound before it reaches the v4 journey
+    transaction.  That is required even when the turn does not alter a
+    journey: a normal qualification answer must still be exactly-once.
+    """
+    payload = {
+        "p_turn": turn,
+        "p_outbound_buffer": outbound_buffer,
+        "p_outbound_message": outbound_message,
+        "p_result": result_payload,
+    }
+    try:
+        result = get_client().rpc("commit_graph_turn_and_outbox_v5", payload).execute()
+        value = getattr(result, "data", None)
+        if isinstance(value, list):
+            value = value[0] if value else {}
+        return value if isinstance(value, dict) else {}
+    except Exception as exc:
+        missing_rpc = (
+            str(getattr(exc, "code", "") or "") in {"PGRST202", "42883"}
+            or "could not find the function" in str(exc).casefold()
+        )
+        if not missing_rpc:
+            raise
+    return commit_graph_turn_and_outbox_v4(
+        turn=turn,
+        outbound_buffer=outbound_buffer,
+        outbound_message=outbound_message,
+        result_payload=result_payload,
+    )
+
+
 def audit_conversation_turn_v3(inbound_buffer_id: str) -> dict:
     result = get_client().rpc(
         "audit_conversation_turn_v3", {"p_inbound_id": inbound_buffer_id}
