@@ -42,6 +42,35 @@ def test_active_publication_is_not_a_shadow_session():
     assert graph_agent_runtime_v3._is_shadow_publication(active, None)
 
 
+def test_understanding_instruction_extracts_a_direct_free_text_answer(monkeypatch):
+    captured: dict = {}
+
+    def fake_call(_binding, *, system, **_kwargs):
+        captured["system"] = system
+        return ({"facts": [{"key": "unknown", "evidence_span": "para o dia a dia"}]}, {})
+
+    monkeypatch.setattr(
+        agentic_turn.conversation_runtime, "build_context", lambda **_kwargs: _context(),
+    )
+    monkeypatch.setattr(
+        agentic_turn.supabase_client, "get_lead_by_ref", lambda _lead_ref: {"persona_id": "persona-1"},
+    )
+    monkeypatch.setattr(
+        agentic_turn, "_model_binding",
+        lambda _persona_id: agentic_turn.ModelBinding("model", "https://model.invalid", "secret", "json_schema"),
+    )
+    monkeypatch.setattr(agentic_turn, "_call_json", fake_call)
+    with pytest.raises(agentic_turn.AgenticTurnError):
+        agentic_turn.execute(
+            persona_slug="fixture", lead_ref=1, message="para o dia a dia",
+            message_id="message-1", correlation_id="correlation-1",
+            phone_number_id=None, channel_binding_id="binding-1",
+            inbound_buffer_id="inbound-1",
+        )
+    assert "expected_answer_field_key" in captured["system"]
+    assert "free-text field" in captured["system"]
+
+
 def test_two_model_calls_resolve_facts_before_reply_and_commit_once(monkeypatch):
     context = _context()
     calls: list[str] = []
