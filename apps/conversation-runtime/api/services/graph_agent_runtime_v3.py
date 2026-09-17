@@ -2934,6 +2934,17 @@ def _journey_has_confirmed_conversion(
     )
 
 
+def _is_shadow_publication(
+    requested_publication: dict[str, Any], active_publication: dict[str, Any] | None,
+) -> bool:
+    """A named active publication retains canonical conversation state."""
+    if not active_publication:
+        return True
+    return str(requested_publication.get("id") or "") != str(
+        active_publication.get("id") or ""
+    )
+
+
 def build_context(
     *, persona_slug: str, lead_ref: int, message: str, message_id: str | None,
     publication_id: str | None = None,
@@ -2954,17 +2965,25 @@ def build_context(
         # Rolling-deploy compatibility while migration 114 is being applied.
         batch = {}
     context_batch_ms = round((time.perf_counter() - context_batch_started) * 1000, 3)
+    active_publication = batch.get("publication") or supabase_client.get_active_graph_publication(
+        str(persona["id"])
+    )
+    publication = active_publication
+    shadow_publication = False
     if publication_id:
-        # Validator shadow runs must not reuse the active-publication batch:
-        # its ledger/facts belong to another graph version.
-        batch = {}
         publication = supabase_client.get_graph_publication_by_id(publication_id)
         if not publication or str(publication.get("persona_id") or "") != str(persona["id"]):
             raise PermissionError("publication does not belong to requested persona")
         if publication.get("status") not in {"compiled", "active"}:
             raise RuntimeError("shadow GraphRAG publication is not compiled")
-    else:
-        publication = batch.get("publication") or supabase_client.get_active_graph_publication(str(persona["id"]))
+        # The validator records the active publication ID as part of its
+        # evidence.  That is not a shadow run: resetting the batch here made
+        # every later validator turn look like a new conversation and caused
+        # a second journey to be opened.  Only a distinct, compiled candidate
+        # is isolated from the active ledger/journey.
+        shadow_publication = _is_shadow_publication(publication, active_publication)
+        if shadow_publication:
+            batch = {}
     if not publication:
         raise RuntimeError("active GraphRAG v3 publication not found")
     document = publication.get("document_json") or {}
@@ -2976,22 +2995,23 @@ def build_context(
     shared_memory = shared_lead_memory.project_shared_lead_memory(
         batch=batch, document=document, messages=messages,
     )
-    # A shadow session is a clean synthetic conversation against one compiled
-    # candidate. Never import active-publication ledger/fact state into it.
-    ledger = None if publication_id else (batch.get("ledger") or None)
+    # A compiled candidate is a clean synthetic conversation. The active
+    # publication, even when named explicitly by the validator, retains its
+    # canonical ledger and journey across turns.
+    ledger = None if shadow_publication else (batch.get("ledger") or None)
     if ledger:
         ledger["facts_by_key"] = _facts_by_key(batch.get("facts") or [])
-    ledger = ledger or (None if publication_id else supabase_client.get_conversation_ledger(str(persona["id"]), lead_ref)) or {
+    ledger = ledger or (None if shadow_publication else supabase_client.get_conversation_ledger(str(persona["id"]), lead_ref)) or {
         "active_branch_node_id": None, "publication_id": publication["id"],
         "graph_checksum": publication["checksum"], "revision": 0,
         "asked_question_node_ids": [], "facts": {}, "facts_by_key": {},
     }
-    journey = ({} if publication_id else batch.get("journey")) or (None if publication_id else supabase_client.get_current_conversation_journey(
+    journey = ({} if shadow_publication else batch.get("journey")) or (None if shadow_publication else supabase_client.get_current_conversation_journey(
         str(persona["id"]), lead_ref,
     )) or {}
     latest_journey: dict[str, Any] = {}
     if not journey:
-        latest_journey = ({} if publication_id else supabase_client.get_latest_conversation_journey(
+        latest_journey = ({} if shadow_publication else supabase_client.get_latest_conversation_journey(
             str(persona["id"]), lead_ref,
         )) or {}
         if latest_journey and latest_journey.get("is_current") is False:

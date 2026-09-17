@@ -32,6 +32,16 @@ def _context() -> ConversationContext:
     )
 
 
+def test_active_publication_is_not_a_shadow_session():
+    active = {"id": "publication-active"}
+
+    assert not graph_agent_runtime_v3._is_shadow_publication(active, active)
+    assert graph_agent_runtime_v3._is_shadow_publication(
+        {"id": "publication-candidate"}, active,
+    )
+    assert graph_agent_runtime_v3._is_shadow_publication(active, None)
+
+
 def test_two_model_calls_resolve_facts_before_reply_and_commit_once(monkeypatch):
     context = _context()
     calls: list[str] = []
