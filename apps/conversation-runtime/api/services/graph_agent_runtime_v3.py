@@ -4030,6 +4030,37 @@ def _context_scoped_to_understanding_branch(
     })
 
 
+def _resolved_commercial_interests(
+    *, context: ConversationContext, understanding: TurnUnderstandingV1,
+) -> list[dict[str, Any]]:
+    """Apply literal product observations to the one observational fact.
+
+    This is intentionally a small set merge, not a cart: it has no price,
+    availability, inventory or generated customer language.
+    """
+    document = _turn_publication(context).get("document_json") or {}
+    nodes = document.get("node_by_id") or {}
+    active = {
+        str(item.get("product_node_id")): dict(item)
+        for item in context.shared_memory.commercial_interests
+        if isinstance(item, dict) and item.get("product_node_id")
+    }
+    for ref in understanding.commercial_product_references:
+        product_id = ref.product_node_id
+        if ref.intent == "remove":
+            active.pop(product_id, None)
+            continue
+        node = nodes.get(product_id) or {}
+        active[product_id] = {
+            "product_node_id": product_id,
+            "title": str(node.get("title") or active.get(product_id, {}).get("title") or product_id),
+            "quantity": ref.quantity,
+            "intent": ref.intent,
+            "evidence_span": ref.evidence_span,
+        }
+    return list(active.values())
+
+
 def resolve_understanding(
     context: ConversationContext,
     understanding: TurnUnderstandingV1,
@@ -4161,6 +4192,33 @@ def resolve_understanding(
     ):
         errors = proof.get("errors") or ["understanding_proof_invalid"]
         raise RuntimeError("understanding proof failed: " + "; ".join(map(str, errors)))
+
+    commercial_interests = _resolved_commercial_interests(
+        context=focused_context, understanding=understanding,
+    )
+    if understanding.commercial_product_references:
+        persona_owner = next(
+            (card.id for card in focused_context.context_cards if card.node_type == "persona"),
+            f"persona:{focused_context.persona_slug}",
+        )
+        proof = {
+            **proof,
+            "accepted_facts": [
+                *(proof.get("accepted_facts") or []),
+                {
+                    "field_key": "commercial_interests",
+                    "owner_node_id": persona_owner,
+                    "status": "known",
+                    "value": {"products": commercial_interests},
+                    "source_message_id": _source_message_id(focused_context.messages),
+                    "evidence_span": "; ".join(
+                        ref.evidence_span for ref in understanding.commercial_product_references
+                    ),
+                    "confidence": 1.0,
+                    "metadata": {"observational": True, "source": "commercial_memory_v1"},
+                },
+            ],
+        }
 
     prospective_state = dict(response.cart_state or {})
     active_branch = str(prospective_state.get("active_branch_node_id") or "") or None
@@ -4295,6 +4353,7 @@ def resolve_understanding(
             prospective_state.get("asked_question_node_ids") or []
         ),
         "recent_messages": recent_messages,
+        "commercial_interests": commercial_interests,
         "authorized_nodes": authorized_nodes,
         "authorized_chunks": authorized_chunks,
         "price_comparison_catalog": (

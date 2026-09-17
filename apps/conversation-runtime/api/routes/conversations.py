@@ -324,12 +324,61 @@ def _terminalize_technical_failure(
     failures: list[str] = []
     terminalization: dict[str, Any] = {}
     try:
-        terminalization = transport_client.quarantine_inbound_technical_failure(
-            body.buffer_id, body.lead_ref, body.reason
+        # Determine the recovery level before committing its outbound.  The
+        # commit itself is a successful atomic decision and therefore records
+        # a success event; persist this failure again afterwards so the next
+        # canonical inbound still sees the consecutive streak.
+        failure_streak = conversation_runtime.record_conversation_failure(
+            lead_ref=body.lead_ref,
+            inbound_buffer_id=body.buffer_id,
+            persona_id=str(lead.get("persona_id") or "") or None,
+            kind="technical_failure",
+            reason=body.reason,
         )
-    except Exception as exc:  # The webhook must still receive canonical JSON.
-        failures.append(f"terminalization:{type(exc).__name__}")
-    try:
+        persona = conversation_runtime.supabase_client.get_persona_by_id(
+            str(lead.get("persona_id") or "")
+        ) or {}
+        context = conversation_runtime.build_context(
+            persona_slug=str(persona.get("slug") or ""), lead_ref=body.lead_ref,
+            message="[technical recovery]", message_id=body.buffer_id,
+            trace_id=body.buffer_id,
+        )
+        publication = conversation_runtime.supabase_client.get_graph_publication_by_id(
+            str(context.publication_id or "")
+        ) or {}
+        nodes = (publication.get("document_json") or {}).get("nodes") or []
+        policy = next((
+            (node.get("data") or {}).get("technical_recovery")
+            for node in nodes if node.get("node_type") == "persona"
+            and (node.get("data") or {}).get("technical_recovery")
+        ), {}) or {}
+        recovery = policy.get("second_failure" if failure_streak >= 2 else "first_failure") or {}
+        text = str(recovery.get("text") or "").strip()
+        if not text:
+            raise RuntimeError("published technical recovery text is unavailable")
+        handoff_required = failure_streak >= 2
+        decision = ConversationDecision(
+            classifier="graph_technical_recovery_v1",
+            intent="technical_handoff" if handoff_required else "technical_clarification",
+            route="HUMAN" if handoff_required else "SDR", confidence=1,
+            lead_stage=str(lead.get("stage") or "novo"),
+            handoff_reason="consecutive_technical_failures" if handoff_required else None,
+        )
+        response = AgentResponse(
+            reply_text=text, role=decision.route, cart_state=context.cart,
+            handoff_required=handoff_required,
+            proof={"valid": True, "delivery_authorized": True,
+                   "technical_recovery": {"streak": failure_streak, "policy": "published"}},
+        )
+        recovery_result = conversation_runtime.commit(
+            lead_ref=body.lead_ref, context=context, decision=decision, response=response,
+            correlation_id=body.correlation_id, phone_number_id=None,
+            channel_binding_id=str(lead.get("channel_binding_id") or ""),
+            inbound_buffer_id=body.buffer_id, expected_decision_owner="n8n_agents",
+        )
+        # The same deterministic event is intentionally reasserted after the
+        # success-shaped atomic recovery commit, so it remains the leading
+        # event for the next inbound without duplicating its audit record.
         failure_streak = conversation_runtime.record_conversation_failure(
             lead_ref=body.lead_ref,
             inbound_buffer_id=body.buffer_id,
@@ -339,13 +388,14 @@ def _terminalize_technical_failure(
         )
     except Exception as exc:
         failures.append(f"failure_streak:{type(exc).__name__}")
-        failure_streak = 2  # fail safe when audit state itself is unavailable
+        # If the immutable failure event was already written, retain its
+        # known level even when the later recovery preparation is unavailable.
+        # Only an unavailable audit state itself uses the conservative level.
+        failure_streak = (
+            int(locals()["failure_streak"])
+            if "failure_streak" in locals() else 2
+        )
     handoff_required = failure_streak >= 2
-    if handoff_required:
-        try:
-            conversation_runtime.supabase_client.handoff_whatsapp_lead(body.lead_ref)
-        except Exception as exc:
-            failures.append(f"handoff:{type(exc).__name__}")
     try:
         event_id = str(
             uuid5(
@@ -414,7 +464,7 @@ def _terminalize_technical_failure(
         technical_failure=True,
         handoff=confirmed and handoff_required,
         ai_paused=confirmed and handoff_required,
-        outbound_enqueued=False,
+        outbound_enqueued=bool((locals().get("recovery_result") or {}).get("outbound_id")),
         terminalization_status=terminalization.get("status"),
         error=";".join(failures) or None,
     ).model_dump(mode="json")

@@ -146,6 +146,28 @@ def _outcomes(batch: dict[str, Any]) -> list[dict[str, Any]]:
     return list(values if values is not None else batch.get("journeys") or [])
 
 
+def _commercial_interests(facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Project the single composite observational fact without leaking claims."""
+    current = [
+        row for row in facts
+        if _text(row.get("field_key")) == "commercial_interests"
+        and row.get("status") == "known"
+    ]
+    if not current:
+        return []
+    value = current[-1].get("value", current[-1].get("value_json"))
+    refs = value.get("products") if isinstance(value, dict) else value
+    if not isinstance(refs, list):
+        return []
+    return [
+        {
+            key: item[key] for key in ("product_node_id", "title", "quantity", "intent")
+            if key in item
+        }
+        for item in refs if isinstance(item, dict) and item.get("product_node_id")
+    ]
+
+
 def project_shared_lead_memory(
     *, batch: dict[str, Any], document: dict[str, Any], messages: list[dict[str, Any]],
 ) -> SharedLeadMemory:
@@ -164,6 +186,7 @@ def project_shared_lead_memory(
         pending_items=_pending_items(profile, historical, current),
         recent_messages=_bounded_messages(messages),
         agent_activity=_agent_activity(list(batch.get("agent_activity") or [])),
+        commercial_interests=_commercial_interests(facts),
         policy_version=POLICY_VERSION,
     )
 

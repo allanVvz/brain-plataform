@@ -973,7 +973,11 @@ def check(
     gating_errors = [
         error for error in errors
         if error.startswith(hard_prefixes)
-        or error in {"premature_final_confirmation", "handoff_not_authorized"}
+        # Premature-confirmation language is an auditable quality concern,
+        # not evidence of a cross-persona/commercial safety violation.  The
+        # reply remains deliverable and the published qualification state is
+        # still kept pending.
+        or error in {"handoff_not_authorized"}
     ]
     repair_only = bool(gating_errors) and all(
         "outside_package" in error for error in gating_errors

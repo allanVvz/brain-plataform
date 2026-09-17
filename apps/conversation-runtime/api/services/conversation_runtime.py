@@ -3055,8 +3055,9 @@ def commit(
         else:
             supabase_client.update_lead(lead_ref, lead_update)
 
-    supabase_client.insert_event(
-        {
+    if not response.proof.get("technical_recovery"):
+        supabase_client.insert_event(
+            {
             "event_type": "conversation.decision_committed",
             "entity_type": "lead",
             "entity_id": str(lead_ref),
@@ -3073,9 +3074,9 @@ def commit(
                 "outbound_buffer_id": (buffer or {}).get("id"),
                 "qualification": qualification,
             },
-        },
-        source="conversation_runtime",
-    )
+            },
+            source="conversation_runtime",
+        )
     _turn_token_usage = response.token_usage or {}
     _turn_cost_usd = model_pricing.estimate_cost_usd(
         _turn_token_usage.get("model"),

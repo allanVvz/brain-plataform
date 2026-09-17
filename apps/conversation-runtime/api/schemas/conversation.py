@@ -168,6 +168,9 @@ class SharedLeadMemory(StrictModel):
     pending_items: list[dict[str, Any]] = Field(default_factory=list)
     recent_messages: list[dict[str, Any]] = Field(default_factory=list)
     agent_activity: list[dict[str, Any]] = Field(default_factory=list)
+    # Active, persona-scoped product references only. Prices, stock and prose
+    # are deliberately excluded: those remain graph-published evidence.
+    commercial_interests: list[dict[str, Any]] = Field(default_factory=list)
     policy_version: str = "shared_lead_memory_v1"
 
 
@@ -222,6 +225,15 @@ class AudienceSignal(StrictModel):
     confidence: float = Field(default=0.0, ge=0, le=1)
 
 
+class CommercialProductReference(StrictModel):
+    """A customer-supported product memory mutation, never a public claim."""
+
+    product_node_id: str = Field(min_length=1)
+    intent: str = Field(pattern="^(select|remove|resume|quoted)$")
+    quantity: int | None = Field(default=None, ge=1)
+    evidence_span: str = Field(min_length=1)
+
+
 class TurnUnderstandingV1(StrictModel):
     """Semantic reading of one inbound, with no customer-facing language."""
 
@@ -235,6 +247,9 @@ class TurnUnderstandingV1(StrictModel):
     customer_questions: list[CustomerQuestion] = Field(default_factory=list)
     mentioned_node_ids: list[str] = Field(default_factory=list)
     audience_signals: list[AudienceSignal] = Field(default_factory=list)
+    commercial_product_references: list[CommercialProductReference] = Field(
+        default_factory=list
+    )
     # Runtime-only observations recorded while normalizing otherwise valid
     # model output. They are never requested from the model and must not turn
     # an optional audience classification into a failed customer turn.
