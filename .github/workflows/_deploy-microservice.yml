@@ -100,6 +100,12 @@ jobs:
             fi
             # Validate the exact controls and manifest just synchronized by
             # this approved job before any container or route mutation.
+            if [[ "${{ inputs.action }}" == "deploy" && "${{ inputs.service }}" == "conversation-runtime" ]]; then
+              [[ -n "$CANARY_PERSONA_SLUG" && -n "$CANARY_FLOW_ID" ]] || {
+                echo "runtime deploy requires an internal WA canary profile" >&2
+                exit 1
+              }
+            fi
             bash ops/vps/deploy-microservice-blue-green.sh \
               "${{ inputs.manifest_path }}" "${{ inputs.service }}" --dry-run
             mode=--apply
@@ -107,12 +113,6 @@ jobs:
             bash ops/vps/deploy-microservice-blue-green.sh \
               "${{ inputs.manifest_path }}" "${{ inputs.service }}" "$mode"
             if [[ "${{ inputs.action }}" == "deploy" && "${{ inputs.service }}" == "conversation-runtime" ]]; then
-              [[ -n "$CANARY_PERSONA_SLUG" && -n "$CANARY_FLOW_ID" ]] || {
-                echo "runtime deploy requires an internal WA canary profile" >&2
-                bash ops/vps/deploy-microservice-blue-green.sh \
-                  "${{ inputs.manifest_path }}" conversation-runtime --rollback
-                exit 1
-              }
               if ! bash ops/vps/run-microservice-wa-validator.sh \
                 --run "$CANARY_PERSONA_SLUG" "$CANARY_FLOW_ID" cold; then
                 echo "runtime canary failed; rolling back automatically" >&2

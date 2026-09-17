@@ -23,11 +23,10 @@ def test_candidate_starts_api_before_workers_and_drains_for_45_seconds():
     assert 'stop -t 45 "$target_service"' in script
     assert 'flock -w 120 9' in script
     assert 'public-upstream.previous-${SERVICE}.caddy' in script
-    # Readiness is established exactly once by the Docker healthcheck. The
-    # rollout then checks immutable provenance without a second HTTP request.
     assert 'os.environ["SOURCE_SHA"] == sys.argv[1]' in script
     assert 'urllib.request.urlopen("http://127.0.0.1:8080/health/ready"' not in script
     assert 'from main import app; p=app.openapi()["paths"]' in script
+    assert "supports_semantic_validator_flow" in script
 
 
 def test_rollout_has_service_sha_digest_deduplication_and_automatic_rollback():
@@ -43,6 +42,11 @@ def test_rollout_has_service_sha_digest_deduplication_and_automatic_rollback():
     assert workflow.index("Synchronize service release controls") < workflow.index(
         "Validate the exact controls and manifest"
     )
+    canary_profile_check = workflow.index(
+        "runtime deploy requires an internal WA canary profile"
+    )
+    deploy_call = workflow.index('"${{ inputs.service }}" "$mode"')
+    assert canary_profile_check < deploy_call
 
 
 def test_integrated_release_has_no_artificial_service_serial_chain():

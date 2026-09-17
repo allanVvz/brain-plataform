@@ -221,6 +221,13 @@ if [[ "$ACTION" == "--apply" && "$SERVICE" == "conversation-runtime" ]]; then
   # HTTP listener has already been proven by the container healthcheck above.
   "${COMPOSE[@]}" exec -T "$target_service" python -c \
     'from main import app; p=app.openapi()["paths"]; required={"/internal/v1/conversations/resolve-understanding","/internal/v1/conversations/execute-agentic"}; assert required <= set(p), sorted(required-set(p))'
+  # Reject an unknown graph-validator profile while the slot is still
+  # isolated. The post-cutover canary must never be the first place that
+  # discovers a mistyped or unsupported flow id.
+  [[ -n "${CANARY_FLOW_ID:-}" ]] || { echo "runtime candidate requires CANARY_FLOW_ID" >&2; exit 1; }
+  "${COMPOSE[@]}" exec -T "$target_service" python -c \
+    'import sys; from services.wa_validator_service import supports_semantic_validator_flow; assert supports_semantic_validator_flow(sys.argv[1]), "unsupported semantic validator flow: " + sys.argv[1]' \
+    "$CANARY_FLOW_ID"
 fi
 
 # Move only this service's consumers. The old consumers receive at most the

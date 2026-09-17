@@ -51,6 +51,25 @@ _NAME_COLLECTING_FLOWS = {
     "sdr_sales_photo_available", "sdr_sales_photo_unavailable",
 }
 
+# The release candidate and the generator share this registry. Keeping it
+# central prevents a canary ID from falling through to the obsolete
+# deterministic corpus after the slot has already received traffic.
+SEMANTIC_APPOINTMENT_FLOWS = frozenset({
+    "sdr_qualificacao_carro", "sdr_troca_servico", "sdr_multiplos_servicos",
+    "sdr_reativacao_pos_handoff",
+})
+SEMANTIC_SALES_FLOWS = frozenset({
+    "sdr_sales_retail", "sdr_sales_reseller", "sdr_sales_branch_switch",
+    "sdr_sales_knowledge_gap", "sdr_sales_freight",
+    "sdr_sales_price_comparison",
+    "sdr_sales_photo_available", "sdr_sales_photo_unavailable",
+})
+
+
+def supports_semantic_validator_flow(flow_id: str) -> bool:
+    """Whether a flow has a graph-driven validator, safe for candidate checks."""
+    return flow_id in SEMANTIC_APPOINTMENT_FLOWS | SEMANTIC_SALES_FLOWS
+
 _MODEL_DEFAULT = "none"
 AVAILABLE_MODELS = {
     "none": "Determinístico — sem modelo",
@@ -1220,15 +1239,8 @@ def generate_script(
         ),
         None,
     )
-    semantic_appointment_flow = flow_id in {
-        "sdr_qualificacao_carro", "sdr_troca_servico", "sdr_multiplos_servicos",
-        "sdr_reativacao_pos_handoff",
-    }
-    semantic_sales_flow = flow_id in {
-        "sdr_sales_retail", "sdr_sales_reseller", "sdr_sales_branch_switch",
-        "sdr_sales_knowledge_gap", "sdr_sales_freight",
-        "sdr_sales_photo_available", "sdr_sales_photo_unavailable",
-    }
+    semantic_appointment_flow = flow_id in SEMANTIC_APPOINTMENT_FLOWS
+    semantic_sales_flow = flow_id in SEMANTIC_SALES_FLOWS
     if business_model == "appointment" and semantic_appointment_flow and not v3_publication:
         raise ValueError(
             "Fluxos de agendamento exigem publicação Graph v3 ativa; "

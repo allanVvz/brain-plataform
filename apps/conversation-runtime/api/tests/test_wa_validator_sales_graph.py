@@ -72,6 +72,9 @@ def _v36_publication() -> dict:
 
 
 def test_v36_price_catalog_and_validator_cover_cheapest_retail_question():
+    assert wa_validator_service.supports_semantic_validator_flow(
+        "sdr_sales_price_comparison"
+    )
     publication = _v36_publication()
     document = publication["document_json"]
     contract = document["branch_contracts"]["audience:tock-retail"]
