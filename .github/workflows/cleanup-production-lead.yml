@@ -8,6 +8,11 @@ on:
         type: choice
         options: [dry-run, apply]
         default: dry-run
+      scope:
+        description: Conversation preserves the lead and immutable consent; lead removes the lead only when no immutable consent exists
+        type: choice
+        options: [conversation, lead]
+        default: conversation
       persona_slug:
         description: Persona that owns the lead
         type: choice
@@ -37,6 +42,7 @@ jobs:
         env:
           VPS_APP_DIR: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           CLEANUP_ACTION: ${{ inputs.action }}
+          CLEANUP_SCOPE: ${{ inputs.scope }}
           PERSONA_SLUG: ${{ inputs.persona_slug }}
           LEAD_REF: ${{ inputs.lead_ref }}
           EXPECTED_NAME: ${{ inputs.expected_name }}
@@ -45,12 +51,13 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
-          envs: VPS_APP_DIR,CLEANUP_ACTION,PERSONA_SLUG,LEAD_REF,EXPECTED_NAME
+          envs: VPS_APP_DIR,CLEANUP_ACTION,CLEANUP_SCOPE,PERSONA_SLUG,LEAD_REF,EXPECTED_NAME
           command_timeout: 10m
           script: |
             set -Eeuo pipefail
             cd "$VPS_APP_DIR"
             [[ "$CLEANUP_ACTION" == dry-run || "$CLEANUP_ACTION" == apply ]]
+            [[ "$CLEANUP_SCOPE" == conversation || "$CLEANUP_SCOPE" == lead ]]
             [[ "$LEAD_REF" =~ ^[1-9][0-9]*$ ]]
             [[ "$PERSONA_SLUG" =~ ^[a-z0-9-]+$ ]]
             [[ -n "$EXPECTED_NAME" && ${#EXPECTED_NAME} -le 120 ]]
@@ -67,6 +74,7 @@ jobs:
             )
             SELECT jsonb_build_object(
               'lead_ref',${LEAD_REF},
+              'scope','${CLEANUP_SCOPE}',
               'target_count',(SELECT count(*) FROM target),
               'persona_slug',(SELECT persona_slug FROM target),
               'name',(SELECT name FROM target),
@@ -81,10 +89,13 @@ jobs:
               'memberships',(SELECT count(*) FROM public.lead_audience_memberships WHERE lead_id=${LEAD_REF}),
               'campaign_recipients',(SELECT count(*) FROM public.campaign_recipients WHERE lead_id=${LEAD_REF}),
               'contact_consents',(SELECT count(*) FROM public.contact_consents WHERE lead_id=${LEAD_REF}),
-              'assets',(SELECT count(*) FROM public.assets WHERE lead_id=${LEAD_REF})
+              'assets',(SELECT count(*) FROM public.assets WHERE lead_id=${LEAD_REF}),
+              'conversation_metadata_keys',(SELECT coalesce(jsonb_agg(key ORDER BY key), '[]'::jsonb)
+                FROM jsonb_object_keys(coalesce((SELECT metadata FROM target), '{}'::jsonb)) AS key
+                WHERE key IN ('conversation_state','conversation_runtime','qualification','handoff_reason','commercial_note_projection','lp_image_upload_previous_handoff_level'))
             );" | "${psql[@]}")"
             echo "LEAD_CLEANUP_AUDIT=$audit"
-            python3 -c 'import json,sys; row=json.loads(sys.argv[1]); assert row["target_count"] == 1, row; assert row["persona_slug"] == sys.argv[2], row; assert row["name_matches"] is True, row; assert row["active_buffers"] == 0, row; assert row["contact_consents"] == 0, "lead deletion blocked by immutable contact consents: " + json.dumps(row, sort_keys=True)' "$audit" "$PERSONA_SLUG"
+            python3 -c 'import json,sys; row=json.loads(sys.argv[1]); scope=sys.argv[3]; assert row["target_count"] == 1, row; assert row["persona_slug"] == sys.argv[2], row; assert row["name_matches"] is True, row; assert row["active_buffers"] == 0, row; assert scope != "lead" or row["contact_consents"] == 0, "lead deletion blocked by immutable contact consents: " + json.dumps(row, sort_keys=True)' "$audit" "$PERSONA_SLUG" "$CLEANUP_SCOPE"
             [[ "$CLEANUP_ACTION" == apply ]] || { echo "LEAD_CLEANUP_DRY_RUN=passed"; exit 0; }
 
             printf '%s\n' "
@@ -118,18 +129,35 @@ jobs:
             DELETE FROM public.conversation_journeys WHERE lead_ref=${LEAD_REF};
             DELETE FROM public.lead_buffer WHERE lead_ref=${LEAD_REF};
             DELETE FROM public.messages WHERE lead_id=${LEAD_REF};
-            DELETE FROM public.lead_audience_memberships WHERE lead_id=${LEAD_REF};
-            DELETE FROM public.campaign_recipients WHERE lead_id=${LEAD_REF};
-            UPDATE public.lead_import_rows SET lead_id=NULL WHERE lead_id=${LEAD_REF};
-            UPDATE public.assets SET lead_id=NULL WHERE lead_id=${LEAD_REF};
             DELETE FROM public.chat_history
              WHERE session_id='${LEAD_REF}' OR session_id='${PERSONA_SLUG}:${LEAD_REF}';
-            DELETE FROM public.system_events
-             WHERE (entity_type='lead' AND entity_id::text='${LEAD_REF}')
-                OR payload->>'lead_ref'='${LEAD_REF}';
-            DELETE FROM public.leads WHERE id=${LEAD_REF};
+            DO \$\$
+            BEGIN
+              IF '${CLEANUP_SCOPE}' = 'conversation' THEN
+                UPDATE public.leads
+                   SET metadata = coalesce(metadata, '{}'::jsonb)
+                         - ARRAY['conversation_state','conversation_runtime','qualification','handoff_reason','commercial_note_projection','lp_image_upload_previous_handoff_level'],
+                       stage = 'novo',
+                       interesse_produto = NULL,
+                       ultima_mensagem = NULL,
+                       handoff_level = 'none',
+                       ai_paused = false,
+                       updated_at = now()
+                 WHERE id=${LEAD_REF};
+              ELSE
+                DELETE FROM public.lead_audience_memberships WHERE lead_id=${LEAD_REF};
+                DELETE FROM public.campaign_recipients WHERE lead_id=${LEAD_REF};
+                UPDATE public.lead_import_rows SET lead_id=NULL WHERE lead_id=${LEAD_REF};
+                UPDATE public.assets SET lead_id=NULL WHERE lead_id=${LEAD_REF};
+                DELETE FROM public.system_events
+                 WHERE (entity_type='lead' AND entity_id::text='${LEAD_REF}')
+                    OR payload->>'lead_ref'='${LEAD_REF}';
+                DELETE FROM public.leads WHERE id=${LEAD_REF};
+              END IF;
+            END \$\$;
             COMMIT;
             " | "${psql[@]}"
-            remaining="$(printf '%s\n' "SELECT count(*) FROM public.leads WHERE id=${LEAD_REF};" | "${psql[@]}")"
-            [[ "$remaining" == 0 ]]
-            echo "LEAD_CLEANUP_APPLY=passed lead_ref=$LEAD_REF persona_slug=$PERSONA_SLUG claim_scope=transactional"
+            remaining="$(printf '%s\n' "SELECT jsonb_build_object('lead_count',count(*),'messages',(SELECT count(*) FROM public.messages WHERE lead_id=${LEAD_REF}),'buffers',(SELECT count(*) FROM public.lead_buffer WHERE lead_ref=${LEAD_REF}),'ledgers',(SELECT count(*) FROM public.conversation_ledgers WHERE lead_ref=${LEAD_REF}),'conversation_metadata_keys',(SELECT coalesce(jsonb_agg(key ORDER BY key), '[]'::jsonb) FROM jsonb_object_keys(coalesce((SELECT metadata FROM public.leads WHERE id=${LEAD_REF}), '{}'::jsonb)) AS key WHERE key IN ('conversation_state','conversation_runtime','qualification','handoff_reason','commercial_note_projection','lp_image_upload_previous_handoff_level')));" | "${psql[@]}")"
+            echo "LEAD_CLEANUP_REMAINING=$remaining"
+            python3 -c 'import json,sys; row=json.loads(sys.argv[1]); scope=sys.argv[2]; assert row["messages"] == row["buffers"] == row["ledgers"] == 0, row; assert row["conversation_metadata_keys"] == [], row; assert (row["lead_count"] == 1) if scope == "conversation" else (row["lead_count"] == 0), row' "$remaining" "$CLEANUP_SCOPE"
+            echo "LEAD_CLEANUP_APPLY=passed scope=$CLEANUP_SCOPE lead_ref=$LEAD_REF persona_slug=$PERSONA_SLUG claim_scope=transactional"

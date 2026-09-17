@@ -192,6 +192,17 @@ só de entendimento registrado.
 
 ## Estado do roadmap
 
+### Evolucao planejada — retencao e soft delete de leads
+
+**A fazer, sem migration nesta etapa.** A limpeza operacional de conversa deve
+preservar o lead, a identidade, consentimentos imutaveis e vinculos comerciais;
+ela remove somente o historico e o estado derivados da conversa. A exclusao
+definitiva de lead sera substituida por soft delete quando houver decisao de
+retencao aprovada: marca de arquivamento, escopo de visibilidade, trilha de
+auditoria, prazo de retencao, anonimization posterior e rollback. A proposta
+deve reutilizar o schema existente quando possivel; qualquer nova tabela ou
+migration requer desenho, revisao legal e autorizacao especifica.
+
 | # | Item | Estado | Agente |
 |---|---|---|---|
 | P0 | Reduzir memoria e complexidade da recuperacao conversacional | **em aberto - incidente produtivo confirmado em 2026-08-24: `/internal/conversations/context` e `/internal/conversations/decide` carregam nodes, edges e projecoes legacy em volume excessivo por turno; a API atingiu o limite de 1,5 GiB e workers Gunicorn foram encerrados por OOM, deixando inbounds em `dead_letter` sem resposta. O hotfix tornou o coercion compativel com `semantic_type`/JSON Schema nullable em lista; ainda falta limitar a recuperacao a publicacao ativa, top-k RAG e consultas em lotes/server-side, sem reconstruir o grafo completo no runtime. Preservar proof sem reescrita e exactly-once.** | `runtime-rag` |
