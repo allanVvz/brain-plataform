@@ -116,7 +116,7 @@ def test_validator_uses_only_active_runtime_validator_and_stops_it_after_run():
     assert 'docker stop -t 120 "$runner_cid"' in script
     assert "runner_deadline=$((SECONDS + 120))" in script
     assert "WA_VALIDATOR_RESULT=passed" in script
-    assert "options: [dry-run, run, inspect]" in workflow
+    assert "options: [dry-run, run, run-source, inspect]" in workflow
     assert '[[ "$VALIDATOR_ACTION" == "inspect" ]] && mode=--inspect' in workflow
     assert "WA_VALIDATOR_INSPECTION=" in script
     assert "WA_VALIDATOR_INSPECT_RESULT=passed" in script
@@ -157,33 +157,21 @@ def test_legacy_runtime_retirement_requires_microservice_cutover_and_pause():
     assert "(( used < 40 ))" in script
 
 
-def test_n8n_workflow_management_runs_in_active_control_plane_slot():
-    workflow = (
-        ROOT / ".github" / "workflows" / "manage-production-conversation-workflow.yml"
-    ).read_text()
-    assert '.deploy/microservices/slots.json' in workflow
-    assert '["control-plane"]["active"]' in workflow
-    assert 'control_service="control-plane-$control_slot"' in workflow
-    assert 'infra/microservices/docker-compose.blue-green.yml' in workflow
-    assert 'queue_drained|candidate_healthy' in workflow
-    assert "options: [tock-fatal, aurora, vz-lupas, aurora-vz-lupas]" in workflow
-    assert "options: [audit, dry-run, resync]" in workflow
-    assert 'aurora-vz-lupas) personas=(aurora vz-lupas)' in workflow
-    assert 'resync_args=("${personas[@]}")' in workflow
-    assert 'python scripts/resync_graph_agent_workflows.py "${resync_args[@]}"' in workflow
-    assert 'before_records+=("$record")' in workflow
-    assert 'after_records+=("$record")' in workflow
-    assert 'validate_group "$OPERATION-before" "${before_records[@]}"' in workflow
-    assert 'validate_group after "${after_records[@]}"' in workflow
-    assert '"binding_id", "active_binding_count"' in workflow
-    assert 'record["active_binding_count"] == 1' in workflow
-    assert 'record["active_publication_id"]' in workflow
-    assert 'record["foreign_persona_hits"] == []' in workflow
-    assert 'record["live_checksum"] == record["candidate_checksum"]' in workflow
-    assert 'record["binding_pipeline_contract"] == "conversation_v3"' in workflow
-    assert 'len({record[key] for record in records}) == len(records)' in workflow
-    assert 'N8N_RESYNC_DRY_RUN=passed' in workflow
-    assert 'active_api_service' not in workflow
+def test_productive_conversation_has_no_n8n_workflow_management_entrypoint():
+    retired = ROOT / ".github" / "workflows" / "manage-production-conversation-workflow.yml"
+    assert not retired.exists()
+
+    service = (
+        ROOT
+        / "apps"
+        / "control-plane"
+        / "api"
+        / "services"
+        / "conversation_workflow_service.py"
+    ).read_text(encoding="utf-8")
+    assert "retired" in service.lower()
+    assert "transport calls runtime directly" in service
+    assert "raise RuntimeError(_RETIRED)" in service
 
 
 def test_control_plane_and_transport_receive_internal_n8n_endpoint_in_both_slots():
@@ -245,7 +233,7 @@ def test_wa_validator_release_gate_reads_terminal_pass_fields_from_output():
     assert 'o.get("quality_scope",s.get("quality_scope"))' in script
 
 
-def test_split_validator_allows_one_bounded_model_repair():
+def test_two_stage_validator_requires_exactly_two_calls_and_no_model_repair():
     source = (
         ROOT
         / "apps"
@@ -255,15 +243,16 @@ def test_split_validator_allows_one_bounded_model_repair():
         / "wa_validator_service.py"
     ).read_text(encoding="utf-8")
 
-    assert 'int(audit.get("model_calls") or 0) > 2' in source
-    assert 'audit.get("deterministic_branch_match") and int(audit.get("model_calls") or 0) > 1' not in source
+    assert 'int(audit.get("model_calls") or 0) != 2' in source
+    assert 'model_calls = max(1, int(audit.get("model_calls") or 0))' in source
+    assert "possible repair round" not in source
 
 
-def test_n8n_template_change_rebuilds_runtime_and_control_plane_images():
+def test_historical_n8n_template_is_not_a_productive_image_dependency():
     workflow = (ROOT / ".github" / "workflows" / "build-monorepo-images.yml").read_text()
 
-    assert "^apps/conversation-runtime/n8n/" in workflow
-    assert 'apps=\'["control-plane","conversation-runtime"]\'' in workflow
+    assert "^apps/conversation-runtime/n8n/" not in workflow
+    assert "persona-conversation-template.json" not in workflow
 
 
 def test_control_plane_n8n_credential_sync_is_redacted_and_authorized():
@@ -413,7 +402,7 @@ def test_microservice_mutation_syncs_manifest_checksum_inputs():
     workflow = (ROOT / ".github/workflows/_deploy-microservice.yml").read_text(encoding="utf-8")
     mutate = workflow.split("  mutate:", 1)[1]
     assert "ops/microservices" in mutate
-    assert "apps/conversation-runtime/n8n/persona-conversation-template.json" in mutate
+    assert "apps/conversation-runtime/n8n/persona-conversation-template.json" not in mutate
 
 
 def test_service_env_bootstrap_never_distributes_universal_database_secrets():

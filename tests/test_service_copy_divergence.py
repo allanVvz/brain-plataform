@@ -273,6 +273,10 @@ DIVERGENT_BASELINE: tuple[tuple[str, str], ...] = (
     ("control-plane", "graph_json_v2_validator.py"),
     ("control-plane", "integration_service.py"),
     ("control-plane", "kb_intake_service.py"),
+    # Productive control-plane retains only the redacted legacy adapter needed
+    # to audit and retire historical workflows. The monolith is frozen and is
+    # not a source for conversation provisioning.
+    ("control-plane", "n8n_client.py"),
     # Ported from the monolith with a real implementation change (uses
     # brain_contracts.catalog_media for group/offer/asset resolution instead
     # of the monolith's inline edge walk) as part of the graph-backed catalog

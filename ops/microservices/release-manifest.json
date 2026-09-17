@@ -1,37 +1,36 @@
 {
-  "source_sha": "aff20bad0de8a56df02ff612b87d7273044eb60c",
-  "contracts_version": "3.1.0",
-  "contracts_checksum": "sha256:795c9143a02317d0adaeb409a6a98ab4c2b20331098530b996f777c03a8e0e75",
-  "schema_version": 132,
+  "source_sha": "a126d1301d268c55c1f0199367a22de35c0f32dd",
+  "contracts_version": "3.2.0",
+  "contracts_checksum": "sha256:4fef73451747a4b482067a0a50b9c239f0a50d778ff0d5d82ea99fdf211270e4",
+  "schema_version": 140,
   "route_map_checksum": "sha256:0146765a3fed6f690566d212fee29d1a324183ce2106429bf52f891403fd5c64",
-  "n8n_checksum": "sha256:eb5cbfc2015fb93f41d1d80f229eeee8d54c0da8d9346ed859f7578a7bab2f88",
   "services": {
     "gateway": {
       "repository": "allanVvz/brain-plataform",
-      "sha": "aff20bad0de8a56df02ff612b87d7273044eb60c",
-      "digest": "sha256:3ca48eba3a9389cafc2c0c0158a00599f0031f2eb2e1b226354b53965ceab237",
-      "required_schema_version": 132,
+      "sha": "a126d1301d268c55c1f0199367a22de35c0f32dd",
+      "digest": "sha256:8aad9c69801343624df2e4f74492832ba84047c19dc0c601445b454a76e87dd0",
+      "required_schema_version": 140,
       "build_context": "apps/gateway"
     },
     "control-plane": {
       "repository": "allanVvz/brain-plataform",
-      "sha": "aff20bad0de8a56df02ff612b87d7273044eb60c",
-      "digest": "sha256:5262e38b44f5000df4086cfb4f5acb671b6a86815e98c6ace6280067963f5a03",
-      "required_schema_version": 132,
+      "sha": "a126d1301d268c55c1f0199367a22de35c0f32dd",
+      "digest": "sha256:f27570c985bc98d231aa1cbc5aea227cea2a3850d1d1134f26aef7f64ec255a2",
+      "required_schema_version": 140,
       "build_context": "apps/control-plane"
     },
     "conversation-runtime": {
       "repository": "allanVvz/brain-plataform",
-      "sha": "aff20bad0de8a56df02ff612b87d7273044eb60c",
-      "digest": "sha256:e08b710da39793798c0e83d4be0e9ee00216333486efb2a689d3f4c8005ac3e9",
-      "required_schema_version": 132,
+      "sha": "a126d1301d268c55c1f0199367a22de35c0f32dd",
+      "digest": "sha256:1478ec5fb51b3be83b2513bb8ffe6f6d719ab633776283b4e967445b25191f3b",
+      "required_schema_version": 140,
       "build_context": "apps/conversation-runtime"
     },
     "transport": {
       "repository": "allanVvz/brain-plataform",
-      "sha": "aff20bad0de8a56df02ff612b87d7273044eb60c",
-      "digest": "sha256:ad6b2f6062a79a6ea6092308ebc1802d3263ab39bde152548326e6f53cf7e7b6",
-      "required_schema_version": 132,
+      "sha": "a126d1301d268c55c1f0199367a22de35c0f32dd",
+      "digest": "sha256:692de212e4340cf215d223c7e32024b58b1664896924ea3d253b334393d56386",
+      "required_schema_version": 140,
       "build_context": "apps/transport"
     }
   }

@@ -21,7 +21,7 @@ def test_every_service_requires_the_manifest_schema_version() -> None:
     )
 
     assert manifest["schema_version"] == 139
-    assert manifest["contracts_version"] == "3.1.0"
+    assert manifest["contracts_version"] == "3.2.0"
     assert {
         service["required_schema_version"]
         for service in manifest["services"].values()

@@ -1755,7 +1755,7 @@ async def _wait_for_reply_delivered(
 
     Confirmed live 2026-08-08: scripted steps advanced on a fixed sleep
     (capped at 3s) regardless of how long the real pipeline took, so on a
-    slower turn (branch retrieval + agentic model + possible repair round)
+    slower turn (branch retrieval + the two required model stages)
     the next script message could go out before the previous one's reply
     had landed. Several inbound messages for the same lead in flight at
     once then raced graph_agent_runtime_v3's optimistic ledger lock

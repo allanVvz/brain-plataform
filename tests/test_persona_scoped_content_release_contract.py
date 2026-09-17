@@ -35,7 +35,8 @@ def test_documents_keep_pause_and_publisher_scope_explicit():
     for document in (AGENTS, ROADMAP, RELEASE_GATES):
         assert "persona" in document.lower()
 
-    assert "Persona nova sem binding/workflow/transporte ja e inerte" in AGENTS
+    assert "Publicacao de GraphBundle e conteudo nunca pausa binding" in AGENTS
+    assert "Pausa global e excepcional" in AGENTS
     assert "GraphBundle" in ROADMAP
     assert "GraphBundle" in RELEASE_GATES
     assert "Personas não\nenvolvidas continuam operando" in ROADMAP
