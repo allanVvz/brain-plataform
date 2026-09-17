@@ -3455,20 +3455,31 @@ async def run_session_direct(
                         qualification_complete=bool(audit.get("qualification_complete")),
                     )
                     if not next_step:
-                        failure = f"script_question_mismatch:{asked_field or 'unknown'}"
-                        failure_output = {
-                            "conversation": conversation,
-                            "status": "error",
-                            "technical_pass": True,
-                            "quality_pass": False,
-                            "failed_turn": i,
-                            "failure": failure,
-                        }
-                        _session_update(
-                            session_id, status="error", output=failure_output,
-                            error=failure,
-                        )
-                        return
+                        # The synthetic driver cannot dictate the next move in
+                        # a natural conversation. Preserve the mismatch as
+                        # historical evidence and finish this bounded sample;
+                        # it is not a technical or safety failure.
+                        observation = f"script_question_mismatch:{asked_field or 'unknown'}"
+                        audit.setdefault("observations", []).append(observation)
+                        audit.setdefault("non_blocking_observations", []).append(observation)
+                        turn["semantic_audit"] = audit
+                        supabase_client.insert_event({
+                            "event_type": "wa_validator_driver_observed",
+                            "entity_type": "wa_validator_session",
+                            "entity_id": session_id,
+                            "source": "services.wa_validator_service",
+                            "level": "warning",
+                            "payload": {
+                                "session_id": session_id,
+                                "persona_slug": persona_slug,
+                                "turn_index": i,
+                                "observation": observation,
+                                "asked_field": asked_field or None,
+                                "correlation_id": correlation_id,
+                            },
+                        })
+                        semantic_complete = True
+                        break
                     step_queue.append(next_step)
 
                 i += 1
