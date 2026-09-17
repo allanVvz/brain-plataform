@@ -1647,6 +1647,15 @@ def decide_agentic(
             },
             "repair_attempt": 0,
             "execution_strategy": "interpret_then_respond",
+            # This catalog is a deterministic graph view already exposed to
+            # the reply model. Its FAQ nodes are authorized proof evidence
+            # even if the relevance budget did not render each as a card.
+            "authorized_price_catalog": list(
+                resolved_understanding.conversation_brief.get(
+                    "price_comparison_catalog"
+                )
+                or []
+            ),
             "token_usage": usage,
         }
         context = resolved_context

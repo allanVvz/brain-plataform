@@ -4832,6 +4832,11 @@ def _decide(
     # below) -- that's a different, intentional pre-selection/hallucination
     # gate, not a scoping bug.
     additional_fields = _active_contract_fields(document, active_ids_for_fields, contract)
+    authorized_price_evidence_ids = {
+        str(item.get("evidence_node_id") or "")
+        for item in observation.get("authorized_price_catalog") or []
+        if isinstance(item, dict) and item.get("evidence_node_id")
+    }
     proof = graph_proof_checker_v3.check(
         publication=publication, contract=contract, ledger=ledger,
         proposal=proposal.model_dump(mode="json"), message=next(
@@ -4840,7 +4845,7 @@ def _decide(
         ), source_message_id=_source_message_id(context.messages),
         package_node_ids={card.id for card in context.context_cards} | {
             str(value) for value in observation.get("repair_context_node_ids") or [] if value
-        } | persona_root_ids,
+        } | persona_root_ids | authorized_price_evidence_ids,
         package_chunk_ids={str(row.get("chunk_id") or row.get("id")) for row in context.rag_chunks} | {
             str(value) for value in observation.get("repair_context_chunk_ids") or [] if value
         },
@@ -4920,6 +4925,34 @@ def _decide(
             ],
         })
     repair_cards: list[dict[str, Any]] = []
+    if (
+        proof["repair_required"]
+        and observation.get("execution_strategy") == "interpret_then_respond"
+    ):
+        # Two-stage turns never run semantic repair. Invalid proof becomes the
+        # canonical technical handoff at the route boundary.
+        return ConversationDecision(
+            classifier="graph_proof_checker_v3",
+            intent="safety_handoff",
+            route=ConversationRoute.HUMAN,
+            confidence=0,
+            lead_stage=str(context.cart.get("_lead_stage") or "novo"),
+            handoff_reason="two_step_proof_failed",
+        ), AgentResponse(
+            reply_text=None,
+            role=ConversationRoute.HUMAN,
+            cart_state=context.cart,
+            handoff_required=True,
+            proposal=proposal,
+            proof={
+                **proof,
+                "valid": False,
+                "delivery_authorized": False,
+                "repair_required": False,
+                "semantic_repairs": 0,
+                "handoff_observable": True,
+            },
+        )
     if proof["repair_required"] and int(observation.get("repair_attempt") or 0) < 1:
         # A Phase-B/citation repair can be the turn's only repair call.  Fold
         # question eligibility into that same package so a question whose

@@ -153,6 +153,14 @@ def test_final_reply_reuses_resolved_facts_and_never_requests_repair(monkeypatch
         understanding=understanding,
         context=original,
         prospective_state={"facts_by_key": {}},
+        conversation_brief={
+            "price_comparison_catalog": [{
+                "product_node_id": "product:lowest",
+                "amount": 29.9,
+                "currency": "BRL",
+                "evidence_node_id": "faq:lowest-retail-price",
+            }],
+        },
         resolution_proof={"valid": True, "accepted_facts": [{
             "field_key": "retail_need", "owner_node_id": "audience:retail",
             "status": "known", "value": "dia-a-dia",
@@ -166,6 +174,7 @@ def test_final_reply_reuses_resolved_facts_and_never_requests_repair(monkeypatch
         assert model_observation["repair_attempt"] == 0
         assert model_observation["execution_strategy"] == "interpret_then_respond"
         assert model_observation["proposal"]["extracted_facts"] == []
+        assert model_observation["authorized_price_catalog"][0]["evidence_node_id"] == "faq:lowest-retail-price"
         return (
             ConversationDecision(
                 intent="collect_graph_fields", route="SDR", confidence=1,
