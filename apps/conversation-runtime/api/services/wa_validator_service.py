@@ -23,7 +23,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Optional
-from urllib.parse import urlparse
 
 from services import (
     agents_service,
@@ -33,7 +32,6 @@ from services import (
     graph_compiler_v3,
     graph_json_v2_store,
     graph_proof_checker_v3,
-    n8n_client,
     supabase_client,
     transport_client,
     validator_sofia_insights,
@@ -73,39 +71,6 @@ _BRAIN_API_URL = os.environ.get("BRAIN_API_URL", "http://localhost:8080")
 _CUSTOMER_PROFILES_PATH = _API_DIR / "evaluation" / "wa_validator_customer_profiles.json"
 _SDR_FLOW_CORPUS_PATH = _API_DIR / "evaluation" / "sdr_flow_cases.json"
 
-
-def _validated_candidate_webhook_url(
-    value: str | None, *, reference_url: str | None = None,
-) -> str | None:
-    """Accept an explicit, allow-listed n8n candidate webhook for QA only."""
-    url = str(value or "").strip()
-    if not url:
-        return None
-    parsed = urlparse(url)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.query or parsed.fragment:
-        raise ValueError("candidate webhook must be an HTTP(S) URL without query or fragment")
-    origins = {
-        item.strip().rstrip("/")
-        for item in (os.environ.get("N8N_VALIDATOR_ALLOWED_ORIGINS") or "").split(",")
-        if item.strip()
-    }
-    reference = urlparse(str(reference_url or "").strip())
-    same_binding_origin = (
-        reference.scheme in {"http", "https"}
-        and reference.netloc
-        and parsed.scheme == reference.scheme
-        and parsed.netloc == reference.netloc
-    )
-    if reference.scheme == "https" and reference.netloc:
-        origins.add(f"{reference.scheme}://{reference.netloc}")
-    origin = f"{parsed.scheme}://{parsed.netloc}"
-    if (parsed.scheme != "https" and not same_binding_origin) or (
-        not same_binding_origin and (not origins or origin not in origins)
-    ):
-        raise ValueError("candidate webhook origin is not authorized for validator runs")
-    if not parsed.path.startswith("/webhook/"):
-        raise ValueError("candidate webhook must use an n8n production webhook path")
-    return url
 
 # WA Validator sessions live in Supabase, not a plain in-process dict.
 # Confirmed live 2026-08-08: production runs GUNICORN_WORKERS=2, so a
@@ -158,9 +123,8 @@ def _terminalize_failed_validator_inbound(
     """Make a failed synthetic inbound terminal under Transport ownership.
 
     The validator owns neither ``lead_buffer`` nor the dispatch lifecycle.  A
-    failed proof used to return from the driver before its success-only
-    ``complete_validator_inbound`` call, leaving the canonical inbound in
-    ``processing`` indefinitely.  Preserve the complete non-secret
+    failed proof may leave the canonical inbound in ``processing``.
+    Preserve the complete non-secret
     diagnostic in the validator session, then ask Transport to dead-letter
     precisely that inbound so it cannot be claimed again.
     """
@@ -1162,7 +1126,6 @@ def generate_script(
     model: str = _MODEL_DEFAULT,
     initial_state: str | None = None,
     publication_id: str | None = None,
-    validation_target_url: str | None = None,
 ) -> dict:
     persona = supabase_client.get_persona(persona_slug)
     if not persona:
@@ -1270,25 +1233,6 @@ def generate_script(
         )
     routing = supabase_client.get_persona_routing(persona_slug) or {}
     conversation_mode = _resolve_conversation_mode(persona_id, routing)
-    binding = next(
-        (
-            row for row in supabase_client.get_workflow_bindings(persona_id)
-            if row.get("active", True)
-            and (row.get("metadata") or {}).get("decision_owner") in {"n8n_hybrid", "n8n_agents"}
-        ),
-        None,
-    )
-    binding_metadata = (binding or {}).get("metadata") or {}
-    candidate_webhook_url = _validated_candidate_webhook_url(
-        validation_target_url,
-        reference_url=(
-            binding_metadata.get("conversation_webhook_url")
-            or binding_metadata.get("webhook_url")
-        ),
-    )
-    if candidate_webhook_url and conversation_mode != "n8n_agents":
-        raise ValueError("candidate webhook validation requires n8n_agents mode")
-
     session_id = str(uuid.uuid4())
     script = {
         "meta": {
@@ -1305,7 +1249,7 @@ def generate_script(
             ),
             "conversation_mode": conversation_mode,
             "pipeline_contract": (
-                "conversation_v3"
+                "conversation_agentic_v1"
                 if (script_data.get("driver") or {}).get("mode") == "semantic_graph_v1"
                 else "conversation_v1"
             ),
@@ -1314,7 +1258,6 @@ def generate_script(
             "graph_checksum": graph_checksum,
             "publication_id": (v3_publication or {}).get("id"),
             "initial_state": resolved_initial_state,
-            "validation_target_url": candidate_webhook_url,
         },
         "target": target_contact,
         "target_phone": target_phone or None,
@@ -2956,30 +2899,16 @@ async def run_session_direct(
         None,
     )
     binding_metadata = (binding or {}).get("metadata") or {}
-    workflow_url = str(
-        binding_metadata.get("conversation_webhook_url")
-        or binding_metadata.get("webhook_url")
-        or os.environ.get("N8N_CONVERSATION_TEST_URL")
-        or ""
-    ).strip()
-    candidate_webhook_url = _validated_candidate_webhook_url(
-        (script.get("meta") or {}).get("validation_target_url"),
-        reference_url=workflow_url,
-    )
-    if candidate_webhook_url:
-        workflow_url = candidate_webhook_url
-    if conversation_mode == "n8n_agents" and not workflow_url:
-        raise ValueError("Workflow n8n_agents ativo não configurado")
     driver = script.get("driver") or {}
     semantic_mode = driver.get("mode") == "semantic_graph_v1"
     pipeline_contract = (
-        str(binding_metadata.get("pipeline_contract") or "conversation_v3")
+        "conversation_agentic_v1"
         if conversation_mode == "n8n_agents"
         else "conversation_v1"
     )
-    if semantic_mode and pipeline_contract != "conversation_v3":
+    if semantic_mode and pipeline_contract != "conversation_agentic_v1":
         raise ValueError(
-            "Driver semântico exige pipeline_contract=conversation_v3 para "
+            "Driver semântico exige pipeline_contract=conversation_agentic_v1 para "
             "provar commit, proof e outbox por turno"
         )
     flow_id = session.get("flow_id", "")
@@ -3132,19 +3061,10 @@ async def run_session_direct(
                     "ts": ts_now,
                     "message_id": message_id,
                 })
-                # commit() claims the inbound message through the same
-                # durable lead_buffer row the real inbound webhooks create
-                # (claim_conversation_commit requires it to already exist),
-                # so the validator must go through the same atomic enqueue
-                # used in production rather than a bare message insert.
-                #
-                # A direct validation turn is invoked synchronously below;
-                # it must therefore be inert to the transport worker.  If it
-                # starts as ``buffered``, dispatch can claim it concurrently
-                # and the next validator turn also sees it as an unconsumed
-                # burst sibling, producing ``burst_superseded``.  Keep the
-                # canonical evidence row in a non-dispatchable state until
-                # the v3 audit proves the commit, then terminalize it below.
+                # Enqueue exactly as transport does for a real inbound.  The
+                # transport worker must claim this row and invoke runtime;
+                # internal_validator keeps the resulting outbound in a
+                # durable, non-provider sink.
                 envelope = transport_client.enqueue_validator_inbound(
                     inbound_id=message_id,
                     correlation_id=correlation_id,
@@ -3156,64 +3076,32 @@ async def run_session_direct(
                     received_at=ts_now,
                     message_type="text",
                     content={"text": text},
+                    publication_id=session.get("publication_id"),
                 )
                 buffer_uuid = str(envelope.get("buffer_id") or "")
                 _session_update(session_id, output={"conversation": list(conversation), "status": "running"})
                 turn_audit: dict | None = None
                 try:
-                    # Confirmed live 2026-08-08: hardcoding "conversation_v1"
-                    # here got n8n_agents steps rejected by the
-                    # workflow's own "pipeline contract mismatch" guard --
-                    # the deployed workflow expects whatever the binding
-                    # itself declares, exactly like real dispatch
-                    # (workers.whatsapp_dispatch_worker) already resolves it.
-                    event = {
-                            "persona_slug": persona_slug,
-                            "lead_ref": lead_ref,
-                            "buffer_id": buffer_uuid,
-                            "external_message_id": message_id,
-                            "correlation_id": correlation_id,
-                            "phone_number_id": None,
-                            "channel_binding_id": channel_binding_id,
-                            "message": text,
-                            "pipeline_contract": pipeline_contract,
-                            "decision_owner": conversation_mode,
-                        }
                     if conversation_mode == "n8n_agents":
-                        # Reuse the exact same client the real dispatch
-                        # worker uses (workers.whatsapp_dispatch_worker)
-                        # instead of a hand-rolled httpx call -- the
-                        # previous inline version built headers = {} even
-                        # when a token was configured, so it silently
-                        # never sent X-Webhook-Token at all.
-                        status, body = await asyncio.to_thread(
-                            n8n_client.send_to_webhook,
-                            workflow_url,
-                            event,
-                            secret=token or None,
-                            timeout=45.0,
-                            # send_to_webhook truncates its return value to
-                            # this many chars -- workers.whatsapp_dispatch_
-                            # worker only wants a short log preview, but this
-                            # caller parses the WHOLE body as JSON. Confirmed
-                            # live 2026-08-08: reusing the worker's 65_536
-                            # preview limit here truncated real
-                            # replies mid-string, turning a working turn into
-                            # a bogus JSONDecodeError. Large enough that no
-                            # realistic conversation turn is ever cut off.
-                            response_limit=5_000_000,
+                        turn_audit = await _wait_for_turn_audit_v3(
+                            buffer_uuid,
+                            max_wait_s=max(configured_wait, 45.0),
                         )
-                        if status >= 400:
-                            raise RuntimeError(
-                                f"n8n webhook returned HTTP {status}: {body[:500]}"
+                        committed_buffer = (
+                            supabase_client.get_whatsapp_buffer_by_idempotency(
+                                f"inbound:wa-validator:{message_id}"
                             )
-                        if not body.strip():
+                            or {}
+                        )
+                        data = (
+                            ((committed_buffer.get("payload") or {}).get("conversation_commit") or {})
+                            .get("result")
+                            or {}
+                        )
+                        if not data:
                             raise RuntimeError(
-                                f"n8n webhook returned HTTP {status} with an "
-                                "empty body -- the workflow likely isn't "
-                                "reaching its Respond to Webhook node"
+                                "Transport worker did not persist the canonical turn result"
                             )
-                        data = json.loads(body)
                     else:
                         data = conversation_runtime.execute_pipeline(
                             persona_slug=persona_slug,
@@ -3226,28 +3114,6 @@ async def run_session_direct(
                             inbound_buffer_id=event["buffer_id"],
                             publication_id=session.get("publication_id"),
                         )
-                    if pipeline_contract == "conversation_v3":
-                        turn_audit = await _wait_for_turn_audit_v3(
-                            buffer_uuid,
-                            max_wait_s=max(configured_wait, 45.0),
-                        )
-                        # When n8n acknowledged during the quiet-burst
-                        # window, use the canonical committed result rather
-                        # than the early acknowledgement body for dialogue
-                        # and proof validation.
-                        committed_buffer = (
-                            supabase_client.get_whatsapp_buffer_by_idempotency(
-                                f"inbound:wa-validator:{message_id}"
-                            )
-                            or {}
-                        )
-                        committed_result = (
-                            ((committed_buffer.get("payload") or {}).get("conversation_commit") or {})
-                            .get("result")
-                        )
-                        if isinstance(committed_result, dict) and committed_result:
-                            data = committed_result
-
                     reply: str = data.get("reply_text") or ""
                     turn: dict = {
                         "role": "bot",
@@ -3273,7 +3139,7 @@ async def run_session_direct(
                     else:
                         turn["text"] = "(sem resposta — agente não gerou reply)"
                         turn["timeout"] = True
-                    if pipeline_contract == "conversation_v3":
+                    if pipeline_contract == "conversation_agentic_v1":
                         audit = turn_audit or supabase_client.audit_conversation_turn_v3(buffer_uuid)
                         invariant_errors: list[str] = []
                         for key, expected in (
@@ -3292,17 +3158,12 @@ async def run_session_direct(
                             int(audit.get("prompt_tokens") or 0),
                             int(audit.get("prompt_estimated_tokens") or 0),
                         )
-                        # Token usage is aggregated across proposal and repair
-                        # calls. Keep the 24k ceiling per model call instead of
-                        # rejecting a valid repaired turn on its summed usage.
+                        # The two stages have independent budgets; the audit
+                        # records their aggregate without permitting a repair.
                         model_calls = max(1, int(audit.get("model_calls") or 0))
                         if prompt_tokens > 24_000 * model_calls:
                             invariant_errors.append(f"prompt_tokens={prompt_tokens}")
-                        # One proposal plus one bounded repair is allowed by
-                        # the canonical policy feedback contract. More than
-                        # two calls still fails closed regardless of how the
-                        # branch was resolved.
-                        if int(audit.get("model_calls") or 0) > 2:
+                        if int(audit.get("model_calls") or 0) != 2:
                             invariant_errors.append(f"model_calls={audit.get('model_calls')}")
                         turn["turn_audit"] = audit
                         if invariant_errors:
@@ -3310,11 +3171,6 @@ async def run_session_direct(
                                 "WA Validator turn invariant failed: "
                                 + ", ".join(invariant_errors)
                             )
-                        # The direct/internal driver, not the WhatsApp
-                        # dispatch worker, consumed this canonical inbound.
-                        # Only mark it terminal after the decision, proof and
-                        # outbox invariants above all passed.
-                        transport_client.complete_validator_inbound(session_id, i)
                 except Exception as exc:
                     tb = traceback.format_exc()
                     _log.error(

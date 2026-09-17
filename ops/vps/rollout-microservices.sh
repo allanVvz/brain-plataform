@@ -9,27 +9,21 @@
 # operator has to authorise.
 #
 #   bash ops/vps/rollout-microservices.sh status    # read-only, safe, start here
-#   bash ops/vps/rollout-microservices.sh prepare   # stop stale workers (needs pause)
-#   bash ops/vps/rollout-microservices.sh finish    # recreate workers, clear pause
+# Compatible releases go directly from this audit to the selective integrated
+# workflow. `prepare` and `finish` remain only for an explicitly classified
+# breaking rollout and require --breaking.
 #
 # The pause itself is deliberately NOT here. Pausing claims stops a live
 # customer-facing agent, so it stays an explicit operator action:
 #
 #   bash ops/vps/pause-worker-claims.sh '<reason>' --safety-pause
 #
-# Between `prepare` and `finish`, deploy through the sanctioned workflows --
-# `status` prints the exact dispatch lines for the services that are behind.
-#
-# Why `prepare` exists at all: validate-production-release.sh checks service
-# containers and worker containers with different rules. A service may carry a
-# pending digest and only warns (ALLOW_PENDING_MICROSERVICE_DIGESTS); a worker
-# has no such escape and passes only while it is stopped and claims are paused.
-# That asymmetry is what makes a runtime rollout look impossible until you know
-# it.
+# `status` prints the exact selective dispatch for services that are behind.
 set -Eeuo pipefail
 
 ROOT_DIR="${AUDIT_ROOT:-/opt/brain-ai}"
 MODE="${1:-status}"
+BREAKING_FLAG="${2:-}"
 MANIFEST="$ROOT_DIR/ops/microservices/release-manifest.json"
 SLOTS="$ROOT_DIR/.deploy/microservices/slots.json"
 PAUSE_MARKER="$ROOT_DIR/.deploy/control/claims-paused.json"
@@ -113,8 +107,8 @@ PY
 }
 
 behind=()
-# Running workers whose digest does not match the manifest. The preflight
-# fails on each of these unless it is stopped while claims are paused.
+# Running workers whose digest does not match the manifest. They are reported
+# for visibility; compatible blue/green preflight accepts them as pending.
 blocking=()
 for service in gateway control-plane conversation-runtime transport; do
   slot="$(slot_of "$service")"
@@ -143,6 +137,9 @@ for service in gateway control-plane conversation-runtime transport; do
     [[ -n "$(docker ps -q --filter "name=^/${name}$")" ]] || continue
     if [[ "$(running_digest "$name")" != "$want" ]]; then
       blocking+=("$name")
+      if [[ ! " ${behind[*]} " =~ " ${service} " ]]; then
+        behind+=("$service")
+      fi
     fi
   done
 done
@@ -153,36 +150,25 @@ printf '\nclaims: %s\n' "$pause_state"
 case "$MODE" in
   status)
     if [[ ${#blocking[@]} -gt 0 ]]; then
-      printf '\nworkers that fail the preflight until stopped (%d):\n' "${#blocking[@]}"
+      printf '\nworkers pending blue/green replacement (%d):\n' "${#blocking[@]}"
       printf '  %s\n' "${blocking[@]}"
     fi
     if [[ ${#behind[@]} -eq 0 && ${#blocking[@]} -eq 0 ]]; then
       echo "nothing to roll out."
       exit 0
     fi
+    services="$(IFS=,; echo "${behind[*]}")"
     echo
-    echo "to roll out:"
-    if ! paused; then
-      echo "  1. an operator authorises the pause (this script never does it):"
-      echo "     bash ops/vps/pause-worker-claims.sh 'rollout' --safety-pause"
-      echo "  2. bash ops/vps/rollout-microservices.sh prepare"
-    else
-      echo "  1. bash ops/vps/rollout-microservices.sh prepare"
-    fi
-    echo "  next, dispatch one workflow per service that is behind:"
-    for service in "${behind[@]}"; do
-      case "$service" in
-        control-plane) wf="Deploy control plane" ;;
-        conversation-runtime) wf="Deploy runtime" ;;
-        transport) wf="Deploy transport" ;;
-        gateway) wf="Deploy gateway" ;;
-      esac
-      printf '     gh workflow run "%s" --ref main -f manifest_sha=<sha> -f action=deploy\n' "$wf"
-    done
-    echo "  finally: bash ops/vps/rollout-microservices.sh finish"
+    echo "compatible blue/green rollout (no global pause):"
+    printf '  gh workflow run "Integrated microservice release" --ref main -f manifest_sha=<sha> -f action=deploy -f services=%s\n' "$services"
+    echo "  then re-run: bash ops/vps/rollout-microservices.sh status"
     ;;
 
   prepare)
+    [[ "$BREAKING_FLAG" == "--breaking" ]] || {
+      echo "refusing: prepare is reserved for an explicitly classified breaking rollout; pass --breaking." >&2
+      exit 1
+    }
     paused || {
       echo >&2
       echo "refusing: claims are not paused." >&2
@@ -206,6 +192,10 @@ case "$MODE" in
     ;;
 
   finish)
+    [[ "$BREAKING_FLAG" == "--breaking" ]] || {
+      echo "refusing: finish is reserved for an explicitly classified breaking rollout; pass --breaking." >&2
+      exit 1
+    }
     paused || {
       echo "refusing: claims are not paused; workers must be recreated before the pause is released." >&2
       exit 1
@@ -262,7 +252,7 @@ case "$MODE" in
     ;;
 
   *)
-    echo "usage: rollout-microservices.sh [status|prepare|finish]" >&2
+    echo "usage: rollout-microservices.sh status | prepare --breaking | finish --breaking" >&2
     exit 2
     ;;
 esac

@@ -39,7 +39,7 @@ def validate(path: Path, *, verify_checkout_artifacts: bool = True) -> dict:
     _require(isinstance(manifest, dict), "manifest must be an object")
     required = {
         "source_sha", "contracts_version", "schema_version",
-        "route_map_checksum", "n8n_checksum", "services",
+        "route_map_checksum", "services",
     }
     _require(required <= manifest.keys(), f"missing fields: {sorted(required - manifest.keys())}")
     _require(bool(SHA.fullmatch(str(manifest["source_sha"]))), "invalid source_sha")
@@ -53,7 +53,6 @@ def validate(path: Path, *, verify_checkout_artifacts: bool = True) -> dict:
              "schema_version must be at least 131")
     _require(bool(DIGEST.fullmatch(str(manifest["route_map_checksum"]))),
              "invalid route_map_checksum")
-    _require(bool(DIGEST.fullmatch(str(manifest["n8n_checksum"]))), "invalid n8n_checksum")
 
     services = manifest["services"]
     _require(isinstance(services, dict), "services must be an object")
@@ -82,9 +81,7 @@ def validate(path: Path, *, verify_checkout_artifacts: bool = True) -> dict:
 
     if verify_checkout_artifacts:
         route_map = ROOT / "ops/microservices/route-map.json"
-        n8n = ROOT / "apps/conversation-runtime/n8n/persona-conversation-template.json"
         _require(_checksum(route_map) == manifest["route_map_checksum"], "route map checksum drift")
-        _require(_checksum(n8n) == manifest["n8n_checksum"], "n8n checksum drift")
     return manifest
 
 

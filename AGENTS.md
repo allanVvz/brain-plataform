@@ -12,20 +12,22 @@ usar uma stack Docker local para implementar, auditar ou testar este projeto.
   `NEXT_PUBLIC_API_BASE_URL=/api-brain` e `API_INTERNAL_BASE_URL` aponta para o
   backend final aprovado.
 - Comecar qualquer operacao produtiva por auditoria read-only e dry-run.
-- Deploy, migration e limpeza exigem suas etapas explicitas de
-  revisao/autorizacao. Uma autorizacao nao implica as outras.
+- Um deploy compativel e reversivel exige uma unica autorizacao. Ela cobre
+  candidate, cutover atomico, verificacao e rollback automatico da mesma
+  release. Migration e limpeza destrutiva continuam exigindo autorizacoes
+  proprias e nunca sao implicadas pelo deploy.
 - Mudancas de conversa devem ser testadas somente pelo WA Validator
   direto/interno, sem WhatsApp real.
-- Aplicar pausa no menor escopo afetado pela operacao. Em release de
-  codigo/infra do runtime compartilhado, manter todos os transportes e IAs
-  pausados. Em publicacao de conteudo isolada por persona, pausar somente o
-  binding/IA da persona alvo quando ele existir; personas nao envolvidas
-  continuam operando. Persona nova sem binding/workflow/transporte ja e inerte
-  e nao exige pausar outras personas. So retomar o que foi pausado mediante
-  autorizacao explicita posterior.
-- Pausa global e excepcional: use-a somente quando uma operacao altera runtime
-  compartilhado, troca workers/imagens, aplica migration, ou nao pode ser
-  isolada por uma trava transacional. Limpeza de uma lead/conversa usa a trava
+- Publicacao de GraphBundle e conteudo nunca pausa binding, persona, IA ou
+  worker. Stage e validacao usam a publicacao candidata; ativacao e CAS e a
+  publicacao anterior continua ativa quando qualquer etapa falha.
+- Release compativel de API/runtime usa blue/green sem pausa. Release compativel
+  de worker para novos claims, drena o worker antigo por no maximo 45 segundos
+  e inicia o novo; webhooks continuam persistindo no buffer nesse intervalo.
+- Pausa global e excepcional: use-a somente para migration destrutiva, contrato
+  de fila incompativel sem dual compatibility ou incidente ativo comprovado de
+  duplicidade, persona errada ou outbound comercial sem proof. Falha de um
+  turno pausa no maximo a lead afetada. Limpeza de uma lead/conversa usa a trava
   do claim, lock da lead e checagem de trabalho em voo; ela nao pausa personas
   ou workers nao envolvidos.
 - Retencao e limpeza permanecem em dry-run ate autorizacao especifica. Nunca
@@ -41,13 +43,35 @@ usar uma stack Docker local para implementar, auditar ou testar este projeto.
 
 ### Auditoria
 1. Confirmar SHA, release, health/readiness e o estado operacional no escopo da
-   operacao via endpoints e scripts oficiais de producao. Release compartilhada
-   exige pausa global; publicacao de conteudo exige isolamento da persona alvo.
+   operacao via endpoints e scripts oficiais de producao. Readiness
+   conversacional deve provar uma transacao sintetica; health HTTP isolado nao
+   comprova que o caminho de decisao esta funcional.
 2. Executar dry-run da operacao solicitada e registrar contagens/IDs tecnicos
    nao secretos.
 3. Revisar o resultado antes de qualquer mutacao produtiva adicional.
 4. Para conversas, executar sessoes sinteticas diretas e comprovar proof,
    ledger, exactly-once e ausencia de outbound real.
+
+### Trava de simplicidade
+
+- Classificar a mudanca antes de testar ou publicar: `documentation`,
+  `dashboard`, `graph`, `service`, `worker` ou `migration`.
+- Uma mudanca normal tem um dono, um workflow, uma imagem ou publicacao, uma
+  verificacao e um rollback. Graph-only nao constroi imagem, nao sincroniza n8n
+  e nao reinicia servico; dashboard nao toca VPS; um servico compativel nao
+  dispara release dos demais.
+- Nunca fazer deploy para diagnosticar. O mesmo digest deve passar no candidate
+  isolado da VPS antes do unico cutover produtivo.
+- Necessidade de segundo redeploy corretivo, edicao manual de container/VPS,
+  terceiro comando emergencial ou deploy de servico nao afetado e uma regressao
+  arquitetural: interromper, preservar evidencias e corrigir o pipeline. Nao
+  continuar empilhando deploys.
+- Graph/content deve concluir em menos de 3 minutos e release compativel de um
+  servico em menos de 8 minutos no p95. Ultrapassar a classe de impacto ou esses
+  limites repetidamente bloqueia a release, nao justifica mais burocracia.
+- Suites amplas ficam em nightly/advisory. O gate de uma release executa apenas
+  contratos compartilhados, testes do componente afetado e um canario preciso
+  do caminho real quando a conversa mudou.
 
 ## Regras de negocio - Grafos
 
@@ -618,8 +642,9 @@ Se nao aparece no grafo, esta incompleto.
 - O E2E deve provar o caminho completo nos dois lados da conversa. Status
   `sent` ou `delivered` do provider nao substitui a mensagem persistida no
   destino.
-- O agente de transporte deve permanecer pausado. A IA alvo so pode ser
-  retomada depois dessa confirmacao.
+- O WA Validator usa o worker real com provider `internal_validator` e sink
+  interno, sem outbound ao WhatsApp. Ele pode atravessar binding comercial
+  pausado porque nao envia ao cliente; nao pausar o transporte para QA.
 - Cada inbound canonico pode gerar no maximo uma decisao e um outbound.
   Duplicidade, cascata, contexto da persona errada ou confirmacao indevida de
   preco/data/horario interrompem novos envios e exigem auditoria em `/logs`.
@@ -628,12 +653,13 @@ Se nao aparece no grafo, esta incompleto.
 - O relatorio deve registrar IDs tecnicos nao secretos, direcoes, timestamps,
   status HTTP, latencias, versao/checksum do grafo, estado das IAs e screenshots.
 
-## 26. Template n8n reproduzivel e backend sem hardcoded
+## 26. Runtime conversacional unico e backend sem hardcoded
 
-- `apps/conversation-runtime/n8n/persona-conversation-template.json` e a unica fonte
-  provisionavel para workflows de conversa `n8n_agents`.
-- O mesmo template deve atender qualquer persona sem fork de nodes ou codigo.
-  Provisionamento substitui somente binding tecnico, webhook e credencial.
+- `apps/conversation-runtime` e a unica fonte produtiva da decisao de conversa.
+  Templates n8n antigos sao fixtures de auditoria e nao sao provisionaveis.
+- O mesmo executor `interpret_then_respond` atende qualquer persona sem fork de
+  nodes ou codigo. Binding fornece somente identidade e configuracao tecnica;
+  a credencial do modelo fica cifrada na integracao existente da persona.
 - Exports com nome de persona sao fixtures/legado de auditoria; nunca sao fonte
   de runtime ou provisionamento.
 - Prompt comercial, servicos, produtos, precos, campos, politicas e copy vem de
@@ -658,7 +684,7 @@ Se nao aparece no grafo, esta incompleto.
 - Cada campo obrigatorio comum ou presente em `product.data.booking.required_fields`
   deve ter uma pergunta nao vazia no mapa da Persona.
 - `field_questions` garante cobertura de autoria e identidade auditavel; nao e
-  roteiro no modo `n8n_agents`. Nesse modo o modelo pode escolher qualquer
+  roteiro no modo agentic. Nesse modo o modelo pode escolher qualquer
   campo ainda perguntavel cujas dependencias estejam satisfeitas, e
   `missing_fields` mede somente completude.
 - Somente o motor `deterministic`, quando escolhido explicitamente pelo
@@ -677,19 +703,21 @@ Se nao aparece no grafo, esta incompleto.
   Implementacoes em `api/services` e repositorios congelados sao apenas
   referencia/compatibilidade e nunca podem ser copiadas de volta para o
   microsservico.
-- Mudancas no motor `n8n_agents` nao podem introduzir composicao deterministica
-  de FAQ, pergunta, resumo terminal ou fallback publico. Toda alteracao de
-  runtime exige o teste-canario da fronteira entre engines.
+- O conversation runtime e a unica autoridade da decisao agentic. O transport
+  chama seu endpoint interno; n8n nao executa modelo, proof, commit nem
+  fail-safe no caminho sincrono. O valor legado `n8n_agents`, enquanto existir
+  em metadata antiga, e apenas compatibilidade de armazenamento e nao autoriza
+  despacho para webhook n8n.
+- Toda execucao agentic usa `interpret_then_respond`. `single_pass` e repair
+  semantico nao sao caminhos produtivos. JSON/modelo/proof invalido gera handoff
+  tecnico da lead, sem terceira chamada e sem fallback publico fabricado.
 - Control plane, conversation runtime e transport usam imagens, health,
   rollback e roles de banco independentes; nenhum importa codigo de outro.
 - Contratos entre servicos vem somente de `brain-contracts` em versao exata.
 - Deploy de servico nunca executa migration e readiness falha abaixo de
   `REQUIRED_SCHEMA_VERSION`.
-- Antes do cutover inicial, release compartilhada continua exigindo pausa
-  global. A janela de ate 8 horas, migrations, troca de trafego, limpeza e
-  retomada exigem autorizacoes explicitas e separadas.
-- Depois da prova produtiva registrada, release compativel usa blue/green sem
-  pausa; falha de GraphBundle pausa somente a persona alvo.
+- Cutover compativel usa dual compatibility, candidate e blue/green sem pausa.
+  Falha de GraphBundle mantem a publicacao anterior e nao pausa a persona.
 
 ## Rollout de microsservicos
 
@@ -697,13 +725,16 @@ Comece sempre por `bash ops/vps/rollout-microservices.sh status` (somente
 leitura). Ele compara o manifesto com o que roda, mostra o estado da pausa e
 imprime a sequencia exata.
 
-Ordem completa:
+Ordem para release compativel:
 
-1. **operador** autoriza a pausa -- `bash ops/vps/pause-worker-claims.sh '<motivo>' --safety-pause`
-2. `bash ops/vps/rollout-microservices.sh prepare` (para os workers estritos)
-3. `gh workflow run "Deploy <servico>" --ref main -f manifest_sha=<sha> -f action=deploy`
-4. `bash ops/vps/rollout-microservices.sh finish` (sobe os workers, limpa a pausa)
-5. `status` de novo para confirmar
+1. `bash ops/vps/rollout-microservices.sh status`
+2. validar o digest candidato na VPS sem trafego real
+3. `gh workflow run "Integrated microservice release" --ref main -f manifest_sha=<sha> -f action=deploy -f services=<lista-sem-espacos>`
+4. `bash ops/vps/rollout-microservices.sh status`
+
+`prepare`/`finish` e pausa global sao permitidos somente quando o classificador
+marcar `migration` ou `breaking_queue_contract`. Worker compativel usa drain
+limitado no proprio workflow e rollback se nao drenar.
 
 Antes do passo 3, confira se o manifesto (`ops/microservices/release-manifest.json`)
 aponta para o build atual. Se `source_sha` estiver velho, renderize um novo com

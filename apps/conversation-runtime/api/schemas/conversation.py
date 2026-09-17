@@ -272,8 +272,8 @@ class ConversationContext(StrictModel):
     agent_slug: str
     agent_role: str = "sdr"
     execution_strategy: str = Field(
-        default="single_pass",
-        pattern="^(single_pass|interpret_then_respond)$",
+        default="interpret_then_respond",
+        pattern="^interpret_then_respond$",
     )
     graph_version: int = Field(ge=1)
     graph_checksum: str = Field(min_length=1)

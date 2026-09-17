@@ -6,7 +6,7 @@ import os
 import traceback
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from services import auth_service, wa_validator_service
 
 logger = logging.getLogger("wa_validator")
@@ -31,6 +31,7 @@ def _assert_session_access(request: Request, session_id: str) -> dict:
 
 
 class GenerateScriptRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     persona_slug: str
     flow_id: str
     target_contact: str
@@ -41,7 +42,6 @@ class GenerateScriptRequest(BaseModel):
     # between the two per generation, so repeated runs cover both).
     initial_state: str | None = None
     publication_id: str | None = None
-    validation_target_url: str | None = None
 
 
 class RunRequest(BaseModel):
@@ -118,7 +118,6 @@ def generate_script(request: Request, body: GenerateScriptRequest):
             model=body.model,
             initial_state=body.initial_state,
             publication_id=body.publication_id,
-            validation_target_url=body.validation_target_url,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))

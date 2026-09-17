@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import time
 from datetime import datetime, timezone
@@ -10,8 +11,12 @@ import gspread
 import httpx
 from google.oauth2.service_account import Credentials
 
-from services import conversation_workflow_service, n8n_client, secret_store, supabase_client
+from services import secret_store, supabase_client
 from utils.tls import get_ca_bundle_path
+
+
+def _fingerprint(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
 
 CATALOG: list[dict[str, Any]] = [
     {
@@ -57,7 +62,7 @@ CATALOG: list[dict[str, Any]] = [
     {
         "service": "deepseek",
         "label": "DeepSeek",
-        "description": "Modelo do workflow conversacional n8n da persona.",
+        "description": "Modelo das duas etapas conversacionais no runtime da persona.",
         "scope": "persona",
         "requires_credentials": True,
         "user_managed": True,
@@ -666,18 +671,14 @@ def save_persona_integration(
         if not secret_value:
             raise IntegrationValidationError("DeepSeek api_key is required.")
         validate_deepseek(secret_value, model=model_binding.get("model"))
-        persona = supabase_client.get_persona_by_id(persona_id) or {}
-        try:
-            config_json = conversation_workflow_service.provision(
-                persona=persona,
-                api_key=secret_value,
-                previous_config=existing.get("config_json") or {},
-                model_binding=model_binding,
-            )
-        except Exception as exc:
-            raise IntegrationValidationError(
-                f"DeepSeek/n8n provisioning failed: {exc}"
-            ) from exc
+        # The credential belongs to the conversation runtime. It is encrypted
+        # in the existing integration row; n8n no longer owns the only copy.
+        config_json = {
+            **model_binding,
+            "pipeline_contract": "conversation_agentic_v1",
+            "runtime_version": "graph_agent_runtime_v3",
+            "fingerprint": _fingerprint(secret_value),
+        }
         supabase_client.save_persona_integration_connection(
             {
                 "persona_id": persona_id,
@@ -686,7 +687,7 @@ def save_persona_integration(
                 "enabled": True,
                 "status": "connected",
                 "config_json": config_json,
-                "secret_ciphertext": None,
+                "secret_ciphertext": secret_store.encrypt_secret(secret_value),
                 "last_validated_at": _utcnow(),
                 "last_error": None,
             }
@@ -745,50 +746,32 @@ def validate_persona_integration(
         or {}
     )
     if service == "deepseek":
-        ok, latency = n8n_client.ping()
-        if not existing.get("enabled") or not (
-            existing.get("config_json") or {}
-        ).get("n8n_credential_id"):
-            raise IntegrationValidationError("DeepSeek is not provisioned in n8n.")
-        if not ok:
-            raise IntegrationValidationError("n8n is unavailable.")
-        wiring = conversation_workflow_service.check_workflow_wiring(existing.get("config_json") or {})
-        if not wiring["ok"]:
-            existing["status"] = "error"
-            existing["last_error"] = wiring["reason"]
-            existing["last_validated_at"] = _utcnow()
-            supabase_client.save_persona_integration_connection(existing)
-            supabase_client.insert_event(
-                {
-                    "event_type": "deepseek.workflow_wiring_invalid",
-                    "entity_type": "persona",
-                    "entity_id": persona_id,
-                    "persona_id": persona_id,
-                    "payload": {
-                        "reason": wiring["reason"],
-                        "diagnostics": wiring.get("diagnostics") or {},
-                    },
-                },
-                level="error",
-                source="services.integration_service",
+        if not existing.get("enabled"):
+            raise IntegrationValidationError("DeepSeek is not enabled for this persona.")
+        secret_value = secret_store.decrypt_secret(existing.get("secret_ciphertext"))
+        if not secret_value:
+            raise IntegrationValidationError(
+                "Save the conversation model credential again for runtime ownership."
             )
-            raise IntegrationValidationError(wiring["reason"])
+        config = existing.get("config_json") or {}
+        started = time.monotonic()
+        validate_deepseek(secret_value, model=config.get("model"))
+        latency = int((time.monotonic() - started) * 1000)
         existing["last_validated_at"] = _utcnow()
         existing["status"] = "connected"
         existing["last_error"] = None
         supabase_client.save_persona_integration_connection(existing)
         state = get_persona_integration_state(persona_id, service)
         state["response_ms"] = latency
-        state["workflow_diagnostics"] = wiring.get("diagnostics") or {}
         supabase_client.insert_event(
             {
-                "event_type": "deepseek.workflow_wiring_valid",
+                "event_type": "deepseek.runtime_binding_valid",
                 "entity_type": "persona",
                 "entity_id": persona_id,
                 "persona_id": persona_id,
                 "payload": {
                     "response_ms": latency,
-                    "diagnostics": wiring.get("diagnostics") or {},
+                    "structured_output_mode": config.get("structured_output_mode"),
                 },
             },
             source="services.integration_service",
@@ -832,12 +815,6 @@ def delete_persona_credentials(
 ) -> dict[str, Any]:
     if not is_user_managed(service):
         raise KeyError(service)
-    if service == "deepseek":
-        existing = (
-            supabase_client.get_persona_integration_connection(persona_id, service)
-            or {}
-        )
-        conversation_workflow_service.revoke(existing.get("config_json") or {})
     supabase_client.save_persona_integration_connection(
         {
             "persona_id": persona_id,

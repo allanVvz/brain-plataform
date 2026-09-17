@@ -1420,3 +1420,29 @@ demanda. Nenhum deles re-deriva o projeto do zero.
    compará-lo com `proof_result.accepted_facts`. "O modelo não propôs" e "algo
    rejeitou" levam a correções opostas; inferir o mecanismo de um campo de saída
    é o que produziu os dois diagnósticos errados de 2026-09-05.
+# P0 atual — runtime agentic direto e release graciosa
+
+Esta secao substitui orientacoes historicas conflitantes abaixo. O objetivo e
+remover o n8n do caminho sincrono, provar o caminho real na VPS antes do
+cutover e tornar complexidade excessiva uma falha de arquitetura.
+
+- **Runtime:** `transport -> conversation-runtime` executa entendimento,
+  resolucao/RAG, resposta, proof e commit. N8n deixa de ser autoridade de
+  conversa; `single_pass` e repair semantico sao aposentados.
+- **GraphBundle:** compile, stage, WA targeted na publicacao candidata e
+  ativacao CAS. Zero imagem, zero resync n8n e zero pausa.
+- **Servico compativel:** um digest, um candidate, um workflow seletivo e um
+  cutover blue/green. API nao pausa; worker usa drain limitado a 45 segundos.
+- **WA exact-path:** inbound sintetico persistido, claim do worker real,
+  candidate runtime, proof/ledger/commit e sink interno. Nunca WhatsApp real.
+- **Gates:** testes proporcionais por impacto. Suites amplas sao nightly; status
+  HTTP, `sent`, execucao n8n `success` e texto amigavel nao substituem estado
+  persistido.
+- **Trava:** segundo redeploy corretivo, edicao manual de container/VPS ou
+  release de servico nao afetado aborta e replaneja; nao se diagnostica por
+  deploy.
+
+Metas de aceite: graph-only abaixo de 3 minutos sem pausa; servico compativel
+abaixo de 8 minutos no p95; zero repair; um inbound/decisao/proof/commit e no
+maximo um outbound; todo fato aceito presente no ledger antes do outbound;
+rollback automatico para o digest/publicacao anterior.

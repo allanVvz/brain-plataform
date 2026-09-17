@@ -48,6 +48,33 @@ def execute_inbound(payload: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def execute_agentic_inbound(payload: dict[str, Any]) -> dict[str, Any]:
+    """Execute the graph-owned two-stage turn directly in conversation-runtime."""
+    base_url, token = _configuration()
+    try:
+        with httpx.Client(timeout=135, verify=get_ca_bundle_path()) as client:
+            response = client.post(
+                base_url + "/internal/v1/conversations/execute-agentic",
+                json=payload,
+                headers={"X-Webhook-Token": token},
+            )
+    except httpx.HTTPError as exc:
+        raise RuntimeError("conversation runtime is unavailable") from exc
+    if response.status_code >= 400:
+        raise RuntimeError(
+            f"conversation runtime returned HTTP {response.status_code}"
+        )
+    try:
+        result = response.json()
+    except ValueError as exc:
+        raise RuntimeError("conversation runtime returned an invalid response") from exc
+    if not isinstance(result, dict) or not any(
+        key in result for key in ("ok", "technical_failure", "handoff", "message_id")
+    ):
+        raise RuntimeError("conversation runtime returned an invalid result contract")
+    return result
+
+
 def authorize_catalog_response(response_buffer_id: str, persona_id: str) -> dict:
     base_url, token = _configuration()
     with httpx.Client(timeout=15, verify=get_ca_bundle_path()) as client:

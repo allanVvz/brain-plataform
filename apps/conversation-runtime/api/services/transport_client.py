@@ -66,13 +66,6 @@ def enqueue_validator_inbound(**payload: Any) -> dict:
     )
 
 
-def complete_validator_inbound(session_id: str, turn: int) -> dict:
-    return _post(
-        f"/internal/v1/transport/messages/validator-inbound/{session_id}/{turn}/complete",
-        {},
-    )
-
-
 def quarantine_inbound_technical_failure(
     buffer_id: str, lead_ref: int, error: str
 ) -> dict:

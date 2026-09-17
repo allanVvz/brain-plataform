@@ -56,7 +56,7 @@ def _understanding() -> TurnUnderstandingV1:
     )
 
 
-def test_two_step_contracts_are_strict_and_decision_keeps_single_pass_compatibility():
+def test_two_step_contracts_are_strict_and_single_pass_is_rejected():
     with pytest.raises(ValidationError):
         TurnUnderstandingV1.model_validate({
             "contract_version": "turn_understanding_v1",
@@ -68,10 +68,8 @@ def test_two_step_contracts_are_strict_and_decision_keeps_single_pass_compatibil
             "reply": "not allowed in understanding",
         })
 
-    context = _context(strategy="single_pass")
-    assert DecisionRequest(context=context, model_observation={"proposal": {}})
     with pytest.raises(ValidationError):
-        DecisionRequest(context=context)
+        _context(strategy="single_pass")
 
     with pytest.raises(ValidationError):
         TurnUnderstandingV1(
@@ -106,7 +104,7 @@ def test_compiler_publishes_role_strategy_and_rejects_unknown_strategy():
             "graph_json_node_id": "persona:generic",
             "agent_role": "sdr",
             "conversation_policy": {"execution_strategy_by_role": {
-                "sdr": "interpret_then_respond", "default": "single_pass",
+                "sdr": "interpret_then_respond", "default": "interpret_then_respond",
             }},
         },
     }
@@ -133,12 +131,12 @@ def test_compiler_publishes_role_strategy_and_rejects_unknown_strategy():
     root["metadata"]["agent_role"] = "closer"
     root["metadata"]["conversation_policy"]["execution_strategy_by_role"][
         "closer"
-    ] = "single_pass"
+    ] = "interpret_then_respond"
     closer_document = graph_compiler_v3.compile_graph(
         persona=persona, node_rows=[root, branch], edge_rows=[relation]
     )
     assert closer_document["agent_role"] == "closer"
-    assert closer_document["execution_strategy"] == "single_pass"
+    assert closer_document["execution_strategy"] == "interpret_then_respond"
 
     root["metadata"]["agent_role"] = "sdr"
     root["metadata"]["conversation_policy"]["execution_strategy_by_role"]["sdr"] = "unknown"

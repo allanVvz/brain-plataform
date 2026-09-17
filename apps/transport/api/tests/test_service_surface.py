@@ -45,7 +45,6 @@ def test_service_identity_and_readiness_surface():
     assert "/internal/v1/transport/messages/outbound" in paths
     assert "/internal/v1/transport/messages/validator-media" in paths
     assert "/internal/v1/transport/messages/validator-inbound" in paths
-    assert "/internal/v1/transport/messages/validator-inbound/{session_id}/{turn}/complete" in paths
     assert "/internal/v1/transport/messages/inbound/{buffer_id}/technical-failure" in paths
     assert "/internal/v1/transport/whatsapp/evolution/provision" in paths
     assert "/internal/v1/transport/whatsapp/evolution/action" in paths
@@ -113,36 +112,10 @@ def test_validator_inbound_is_persisted_and_completed_by_transport(monkeypatch):
     persisted = calls[1][1]
     assert created["deduplicated"] is False
     assert persisted["buffer"]["direction"] == "inbound"
-    assert persisted["buffer"]["status"] == "waiting_human"
+    assert persisted["buffer"]["status"] == "buffered"
+    assert persisted["buffer"]["payload"]["validation_transport"] is True
     assert persisted["buffer"]["idempotency_key"] == f"inbound:wa-validator:{inbound_id}"
     assert persisted["message"]["metadata"]["provider"] == "wa-validator"
-
-    row = {
-        "id": "44444444-4444-4444-8444-444444444444",
-        "direction": "inbound",
-        "external_message_id": inbound_id,
-        "payload": {"sender": "wa-validator"},
-    }
-    monkeypatch.setattr(
-        messages.supabase_client,
-        "get_whatsapp_buffer_by_idempotency",
-        lambda key: calls.append(("lookup", key)) or row,
-    )
-    monkeypatch.setattr(
-        messages.supabase_client,
-        "complete_whatsapp_buffer",
-        lambda buffer_id, status: calls.append(("complete", (buffer_id, status))),
-    )
-
-    completed = messages.complete_validator_inbound_internal(
-        session_id, 2, "internal-token"
-    )
-
-    assert completed["status"] == "sent"
-    assert calls[-1] == (
-        "complete", ("44444444-4444-4444-8444-444444444444", "sent")
-    )
-
 
 def test_runtime_technical_failure_is_terminalized_by_transport(monkeypatch):
     from routes import messages

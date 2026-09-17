@@ -6,7 +6,6 @@ safe to run more than one instance because leasing uses SKIP LOCKED.
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 import socket
@@ -120,6 +119,10 @@ class WhatsAppDispatchWorker(BaseWorker):
 
     def _dispatch_inbound(self, row: dict[str, Any]) -> None:
         payload = row.get("payload") or {}
+        is_internal_validation = bool(
+            payload.get("validation_transport") is True
+            and payload.get("sender") == "wa-validator"
+        )
         persona = supabase_client.get_persona_by_id(row["persona_id"])
         if not persona:
             raise RuntimeError("persona for inbound buffer no longer exists")
@@ -184,7 +187,7 @@ class WhatsAppDispatchWorker(BaseWorker):
         if (
             binding_metadata.get("safety_paused")
             or binding.get("connection_status") == "safety_paused"
-        ):
+        ) and not is_internal_validation:
             if row.get("lead_ref"):
                 supabase_client.handoff_whatsapp_lead(int(row["lead_ref"]))
             supabase_client.complete_whatsapp_buffer(
@@ -245,55 +248,56 @@ class WhatsAppDispatchWorker(BaseWorker):
             )
             return
         if decision_owner == "n8n_agents":
-            if not self._begin_attempt(row, "decision"):
-                return
-            webhook_url = str(
-                binding_metadata.get("conversation_webhook_url") or ""
-            ).strip()
-            if not webhook_url:
-                raise RuntimeError("n8n_agents conversation webhook is not configured")
-            token = (os.environ.get("AI_BRAIN_WEBHOOK_TOKEN") or "").strip()
-            status, body = n8n_client.send_to_webhook(
-                webhook_url,
-                {
-                    "buffer_id": row["id"],
-                    "lead_ref": row.get("lead_ref"),
-                    "persona_id": row["persona_id"],
-                    "persona_slug": persona["slug"],
-                    "phone_number_id": row["whatsapp_phone_number_id"],
-                    "channel_binding_id": row.get("channel_binding_id"),
-                    "external_message_id": row.get("external_message_id"),
-                    "correlation_id": row.get("correlation_id"),
-                    "message": payload.get("text") or "",
-                    "pipeline_contract": binding_metadata.get("pipeline_contract") or "conversation_v3",
-                    "decision_owner": "n8n_agents",
-                },
-                secret=token or None,
-                timeout=45.0,
-                # Defense-in-depth only -- the real fix is that /internal/
-                # conversations/commit now returns a small, trimmed envelope
-                # (see conversation_runtime.dispatch_result_envelope), so
-                # this limit should never be the thing standing between a
-                # successful commit and a readable response. Kept well above
-                # the trimmed envelope's realistic size, not raised to
-                # "big enough to swallow the old bug" (confirmed live
-                # 2026-08-10: the untrimmed response measured 80438 bytes).
-                response_limit=262_144,
-            )
-            if not 200 <= status < 300:
-                raise RuntimeError(f"n8n conversation returned HTTP {status}")
+            # ``n8n_agents`` is retained only as a database-compatible value
+            # during cutover. n8n is no longer in the synchronous decision
+            # path; runtime owns both model calls, proof and commit.
             try:
-                n8n_result = json.loads(body)
-            except Exception:
-                n8n_result = None
-            if not isinstance(n8n_result, dict) or not any(
-                key in n8n_result
-                for key in ("ok", "technical_failure", "handoff", "message_id")
-            ):
-                raise RuntimeError(
-                    "n8n conversation returned an invalid result contract"
+                runtime_result = runtime_client.execute_agentic_inbound({
+                    "persona_slug": persona["slug"],
+                    "lead_ref": int(row["lead_ref"]),
+                    "message": str(payload.get("text") or ""),
+                    "message_id": row.get("external_message_id"),
+                    "correlation_id": str(row.get("correlation_id") or row["id"]),
+                    "phone_number_id": row.get("whatsapp_phone_number_id"),
+                    "channel_binding_id": row.get("channel_binding_id"),
+                    "inbound_buffer_id": row["id"],
+                    "provider": (
+                        "internal_validator"
+                        if payload.get("validation_transport") is True
+                        else "evolution"
+                        if binding.get("provider") == "evolution_baileys"
+                        else binding.get("provider")
+                    ),
+                    "publication_id": (
+                        payload.get("publication_id")
+                        if payload.get("validation_transport") is True
+                        else None
+                    ),
+                })
+            except Exception as exc:
+                reason = f"runtime_agentic_unavailable:{type(exc).__name__}"
+                supabase_client.terminalize_inbound_technical_failure(
+                    str(row["id"]),
+                    lead_ref=int(row["lead_ref"]),
+                    error=reason,
                 )
-            if n8n_result.get("technical_failure"):
+                supabase_client.handoff_whatsapp_lead(int(row["lead_ref"]))
+                event_emitter.emit(
+                    "whatsapp.inbound_decision_failed",
+                    entity_type="lead",
+                    entity_id=str(row.get("lead_ref") or ""),
+                    persona_id=row["persona_id"],
+                    payload={
+                        "correlation_id": row.get("correlation_id"),
+                        "buffer_id": row.get("id"),
+                        "pipeline_contract": "conversation_agentic_v1",
+                        "failure_class": type(exc).__name__,
+                    },
+                    level="error",
+                    source="workers.whatsapp",
+                )
+                return
+            if runtime_result.get("technical_failure"):
                 event_emitter.emit(
                     "whatsapp.inbound_decision_failed",
                     entity_type="lead",
@@ -308,7 +312,7 @@ class WhatsAppDispatchWorker(BaseWorker):
                     source="workers.whatsapp",
                 )
                 return
-            if n8n_result.get("burst_superseded"):
+            if runtime_result.get("burst_superseded"):
                 event_emitter.emit(
                     "whatsapp.inbound_burst_superseded",
                     entity_type="lead", entity_id=str(row.get("lead_ref") or ""),
@@ -317,7 +321,7 @@ class WhatsAppDispatchWorker(BaseWorker):
                     source="workers.whatsapp",
                 )
                 return
-            if not n8n_result.get("handoff"):
+            if not runtime_result.get("handoff"):
                 supabase_client.complete_whatsapp_buffer(row["id"], "sent")
             event_emitter.emit(
                 "whatsapp.inbound_dispatched",
@@ -327,9 +331,9 @@ class WhatsAppDispatchWorker(BaseWorker):
                 payload={
                     "correlation_id": row.get("correlation_id"),
                     "queue_wait_ms": _queue_wait_ms(row),
-                    "conversation_mode": "n8n_agents",
-                    "pipeline_contract": binding_metadata.get("pipeline_contract") or "conversation_v3",
-                    "handoff": bool(n8n_result.get("handoff")),
+                    "conversation_mode": "runtime_agentic",
+                    "pipeline_contract": "conversation_agentic_v1",
+                    "handoff": bool(runtime_result.get("handoff")),
                 },
                 source="workers.whatsapp",
             )

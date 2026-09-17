@@ -27,6 +27,7 @@ class CanonicalInboundEnvelope(ContractModel):
     received_at: datetime
     message_type: str = Field(min_length=1)
     content: dict[str, Any]
+    publication_id: UUID | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -42,6 +43,12 @@ class CanonicalInboundEnvelope(ContractModel):
         normalized["contract_version"] = version
         normalized.setdefault("canonical_inbound_id", normalized.get("inbound_id"))
         return normalized
+
+    @model_validator(mode="after")
+    def _staged_publication_is_validator_only(self) -> "CanonicalInboundEnvelope":
+        if self.publication_id and self.provider != "internal_validator":
+            raise ValueError("publication_id is restricted to internal_validator")
+        return self
 
 
 class PublishedGraphContext(ContractModel):
@@ -129,6 +136,36 @@ class TechnicalConversationFailureV1(ContractModel):
             elif isinstance(item, (int, float, bool)) or item is None:
                 sanitized[key] = item
         return sanitized
+
+
+class ExecuteAgenticTurnV1(ContractModel):
+    """Private transport-to-runtime command for one canonical inbound."""
+
+    contract_version: Literal["execute_agentic_turn_v1"] = "execute_agentic_turn_v1"
+    persona_slug: str = Field(min_length=1)
+    lead_ref: int = Field(gt=0)
+    message: str = Field(min_length=1)
+    message_id: str | None = None
+    correlation_id: str = Field(min_length=1)
+    phone_number_id: str | None = None
+    channel_binding_id: str = Field(min_length=1)
+    inbound_buffer_id: str = Field(min_length=1)
+    provider: Literal["meta_cloud", "evolution", "internal_validator"] | None = None
+    publication_id: str | None = None
+
+    @field_validator("message")
+    @classmethod
+    def _message_not_blank(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("message must not be blank")
+        return normalized
+
+    @model_validator(mode="after")
+    def _staged_publication_is_validator_only(self) -> "ExecuteAgenticTurnV1":
+        if self.publication_id and self.provider != "internal_validator":
+            raise ValueError("publication_id is restricted to internal_validator")
+        return self
 
 
 class CanonicalConversationResultV1(ContractModel):

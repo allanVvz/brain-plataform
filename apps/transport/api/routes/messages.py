@@ -282,7 +282,12 @@ def enqueue_validator_inbound_internal(
     body: CanonicalInboundEnvelope,
     x_webhook_token: str | None = Header(None, alias="X-Webhook-Token"),
 ) -> dict:
-    """Persist one inert synthetic inbound under transport ownership."""
+    """Persist one synthetic inbound for the real dispatch worker.
+
+    The provider and validation marker make the resulting outbound an internal
+    sink.  The row itself remains otherwise identical to a production inbound,
+    so the validator exercises claim, runtime, proof and commit end to end.
+    """
     internal_auth.authorize_webhook_token(x_webhook_token)
     if body.provider != "internal_validator":
         raise HTTPException(422, "Provider invalido para validacao interna")
@@ -305,9 +310,15 @@ def enqueue_validator_inbound_internal(
             "whatsapp_phone_number_id": None,
             "external_message_id": inbound_id,
             "direction": "inbound",
-            "payload": {"text": text, "sender": "wa-validator"},
-            # A direct validation turn is consumed synchronously by runtime.
-            "status": "waiting_human",
+            "payload": {
+                "text": text,
+                "sender": "wa-validator",
+                "validation_transport": True,
+                "publication_id": (
+                    str(body.publication_id) if body.publication_id else None
+                ),
+            },
+            "status": "buffered",
             "batch_key": f"{body.persona_id}:{lead_ref}",
             "idempotency_key": _validator_inbound_key(inbound_id),
             "correlation_id": body.correlation_id,
@@ -332,32 +343,6 @@ def enqueue_validator_inbound_internal(
             "created_at": body.received_at.isoformat(),
         },
     )
-
-
-@internal_router.post("/validator-inbound/{session_id}/{turn}/complete")
-def complete_validator_inbound_internal(
-    session_id: UUID,
-    turn: int,
-    x_webhook_token: str | None = Header(None, alias="X-Webhook-Token"),
-) -> dict:
-    """Terminalize only the exact synthetic inbound created by the validator."""
-    internal_auth.authorize_webhook_token(x_webhook_token)
-    if turn < 0:
-        raise HTTPException(422, "Turno invalido")
-    inbound_id = f"validator:{session_id}:{turn}"
-    row = supabase_client.get_whatsapp_buffer_by_idempotency(
-        _validator_inbound_key(inbound_id)
-    ) or {}
-    payload = row.get("payload") or {}
-    if (
-        not row.get("id")
-        or row.get("direction") != "inbound"
-        or row.get("external_message_id") != inbound_id
-        or payload.get("sender") != "wa-validator"
-    ):
-        raise HTTPException(404, "Inbound de validacao nao encontrado")
-    supabase_client.complete_whatsapp_buffer(str(row["id"]), "sent")
-    return {"ok": True, "buffer_id": str(row["id"]), "status": "sent"}
 
 
 @internal_router.post("/inbound/{buffer_id}/technical-failure")

@@ -5,6 +5,7 @@ on:
       manifest_sha: {description: Commit containing the immutable release manifest, required: true}
       manifest_path: {description: Release manifest path, required: true, default: ops/microservices/release-manifest.json}
       action: {description: Safe default is dry-run; deploy requires environment approvals, type: choice, options: [dry-run, deploy], default: dry-run}
+      services: {description: Comma-separated affected services without spaces, required: true, default: conversation-runtime}
 permissions:
   contents: read
 jobs:
@@ -14,25 +15,33 @@ jobs:
       - uses: actions/checkout@v4
         with: {ref: "${{ inputs.manifest_sha }}"}
       - run: python ops/microservices/validate-release-manifest.py "${{ inputs.manifest_path }}"
+      - name: Validate affected service set
+        env: {AFFECTED_SERVICES: "${{ inputs.services }}"}
+        run: |
+          python -c 'import os; allowed={"control-plane","conversation-runtime","transport","gateway"}; raw=os.environ["AFFECTED_SERVICES"]; items=raw.split(","); assert raw==",".join(items) and all(item and item==item.strip() for item in items) and len(items)==len(set(items)) and set(items)<=allowed, f"invalid affected services: {raw}"'
       - run: python -m json.tool ops/microservices/route-map.json >/dev/null
       - run: python ops/microservices/validate-route-map.py
   control-plane:
     needs: validate
+    if: ${{ contains(format(',{0},', inputs.services), ',control-plane,') }}
     uses: ./.github/workflows/_deploy-microservice.yml
     with: {service: control-plane, manifest_sha: "${{ inputs.manifest_sha }}", manifest_path: "${{ inputs.manifest_path }}", action: "${{ inputs.action }}"}
     secrets: inherit
   runtime:
-    needs: control-plane
+    needs: [validate, control-plane]
+    if: ${{ always() && needs.validate.result == 'success' && (needs.control-plane.result == 'success' || needs.control-plane.result == 'skipped') && contains(format(',{0},', inputs.services), ',conversation-runtime,') }}
     uses: ./.github/workflows/_deploy-microservice.yml
     with: {service: conversation-runtime, manifest_sha: "${{ inputs.manifest_sha }}", manifest_path: "${{ inputs.manifest_path }}", action: "${{ inputs.action }}"}
     secrets: inherit
   transport:
-    needs: runtime
+    needs: [validate, runtime]
+    if: ${{ always() && needs.validate.result == 'success' && (needs.runtime.result == 'success' || needs.runtime.result == 'skipped') && contains(format(',{0},', inputs.services), ',transport,') }}
     uses: ./.github/workflows/_deploy-microservice.yml
     with: {service: transport, manifest_sha: "${{ inputs.manifest_sha }}", manifest_path: "${{ inputs.manifest_path }}", action: "${{ inputs.action }}"}
     secrets: inherit
   gateway:
-    needs: transport
+    needs: [validate, control-plane, runtime, transport]
+    if: ${{ always() && needs.validate.result == 'success' && (needs.control-plane.result == 'success' || needs.control-plane.result == 'skipped') && (needs.runtime.result == 'success' || needs.runtime.result == 'skipped') && (needs.transport.result == 'success' || needs.transport.result == 'skipped') && contains(format(',{0},', inputs.services), ',gateway,') }}
     uses: ./.github/workflows/_deploy-microservice.yml
     with: {service: gateway, manifest_sha: "${{ inputs.manifest_sha }}", manifest_path: "${{ inputs.manifest_path }}", action: "${{ inputs.action }}"}
     secrets: inherit

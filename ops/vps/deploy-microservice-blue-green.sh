@@ -15,6 +15,7 @@ case "$SERVICE" in
   gateway|control-plane|conversation-runtime|transport) ;;
   *) echo "unknown service: $SERVICE" >&2; exit 2 ;;
 esac
+
 case "$ACTION" in
   --dry-run|--apply|--rollback) ;;
   *) echo "unknown action: $ACTION" >&2; exit 2 ;;
@@ -81,6 +82,37 @@ case "$SERVICE" in
     target_services=("$target_service" "transport-dispatch-$target" "transport-media-$target")
     ;;
 esac
+
+old_services=()
+if [[ "$active" =~ ^(blue|green)$ && "$active" != "$target" ]]; then
+  old_services=("$compose_service-$active")
+  case "$SERVICE" in
+    control-plane) old_services+=("control-plane-knowledge-$active" "control-plane-integrations-$active" "control-plane-validator-$active") ;;
+    conversation-runtime) old_services+=("runtime-conversation-$active" "runtime-validator-$active") ;;
+    transport) old_services+=("transport-dispatch-$active" "transport-media-$active") ;;
+  esac
+fi
+
+activated=false
+state_backup="$STATE_DIR/slots.previous-${SERVICE}.json"
+rollback_on_error() {
+  local code=$?
+  trap - ERR
+  set +e
+  if [[ "$activated" == "true" ]]; then
+    echo "deployment failed after cutover; restoring service=$SERVICE slot=$active" >&2
+    cp "$STATE_DIR/public-upstream.previous.caddy" "$CADDY_DIR/public-upstream.caddy"
+    cp "$STATE_DIR/internal-upstreams.previous.caddy" "$CADDY_DIR/internal-upstreams.caddy"
+    cp "$state_backup" "$STATE_FILE"
+    "${COMPOSE[@]}" exec -T caddy caddy reload --config /etc/caddy/Caddyfile
+    if [[ ${#old_services[@]} -gt 0 ]]; then
+      "${COMPOSE[@]}" start "${old_services[@]}"
+    fi
+    "${COMPOSE[@]}" stop -t 45 "${target_services[@]}"
+  fi
+  exit "$code"
+}
+trap rollback_on_error ERR
 
 echo "service=$SERVICE action=$ACTION active=${active:-none} target=$target manifest=$(basename "$MANIFEST")"
 if [[ "$ACTION" == "--dry-run" ]]; then
@@ -203,6 +235,7 @@ rendered="$STATE_DIR/caddy-candidate-${SERVICE}"
 python3 "$ROOT_DIR/ops/microservices/render-active-routes.py" "$candidate" "$rendered"
 cp "$CADDY_DIR/public-upstream.caddy" "$STATE_DIR/public-upstream.previous.caddy" 2>/dev/null || true
 cp "$CADDY_DIR/internal-upstreams.caddy" "$STATE_DIR/internal-upstreams.previous.caddy" 2>/dev/null || true
+cp "$STATE_FILE" "$state_backup"
 cp "$rendered/public-upstream.caddy" "$CADDY_DIR/public-upstream.caddy"
 cp "$rendered/internal-upstreams.caddy" "$CADDY_DIR/internal-upstreams.caddy"
 
@@ -212,15 +245,11 @@ if ! "${COMPOSE[@]}" exec -T caddy caddy validate --config /etc/caddy/Caddyfile;
   exit 1
 fi
 "${COMPOSE[@]}" exec -T caddy caddy reload --config /etc/caddy/Caddyfile
+activated=true
 mv "$candidate" "$STATE_FILE"
 
-if [[ "$active" =~ ^(blue|green)$ && "$active" != "$target" ]]; then
-  old_services=("$compose_service-$active")
-  case "$SERVICE" in
-    control-plane) old_services+=("control-plane-knowledge-$active" "control-plane-integrations-$active" "control-plane-validator-$active") ;;
-    conversation-runtime) old_services+=("runtime-conversation-$active" "runtime-validator-$active") ;;
-    transport) old_services+=("transport-dispatch-$active" "transport-media-$active") ;;
-  esac
-  "${COMPOSE[@]}" stop -t 120 "${old_services[@]}"
+if [[ ${#old_services[@]} -gt 0 ]]; then
+  "${COMPOSE[@]}" stop -t 45 "${old_services[@]}"
 fi
+trap - ERR
 echo "activated service=$SERVICE slot=$target; previous=${active:-none} workers_paused=${workers_paused:-false}"

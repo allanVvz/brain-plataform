@@ -3390,7 +3390,7 @@ def build_context(
     return ConversationContext(
         persona_slug=persona_slug, agent_slug=str((persona.get("config") or {}).get("agent_slug") or "agent"),
         agent_role=str(document.get("agent_role") or "sdr"),
-        execution_strategy=str(document.get("execution_strategy") or "single_pass"),
+        execution_strategy=str(document.get("execution_strategy") or "interpret_then_respond"),
         graph_version=int(publication["version"]), graph_checksum=publication["checksum"],
         messages=_project_recent_messages(messages), cart={**((lead.get("metadata") or {}).get("conversation_state") or {}),
                                       "facts": ledger.get("facts") or {},

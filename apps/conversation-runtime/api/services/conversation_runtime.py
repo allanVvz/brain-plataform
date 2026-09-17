@@ -3060,14 +3060,11 @@ def commit(
 # needs. commit()'s in-process return value stays untouched (execute_pipeline
 # and the stored dedup payload both still get knowledge_context/proof/
 # graph_turn/qualification for internal use) -- this only trims what crosses
-# the wire back through n8n's "Return canonical result" node, which echoes
-# whatever the commit HTTP call returned via `{{$json}}`. Confirmed live
-# 2026-08-10: that echo regularly exceeded 64KB (one real turn measured
-# 80438 bytes) because it carried the full graph_contract/RAG chunks/proof
-# ledger, got silently truncated by the dispatch worker's response_limit,
-# and the resulting invalid JSON was misread as a failed turn -- forcing a
-# false safety-violation handoff on an otherwise-successful commit.
+# the wire back to Transport.  Keep the envelope small and stable even when
+# internal graph/RAG/proof evidence is large.
 _DISPATCH_ENVELOPE_OPTIONAL_KEYS = (
+    "status",
+    "buffer_id",
     "message_id",
     "outbound_buffer_id",
     "reply_text",
@@ -3077,13 +3074,17 @@ _DISPATCH_ENVELOPE_OPTIONAL_KEYS = (
     "deduplicated",
     "burst_superseded",
     "commit_state",
+    "pipeline_contract",
+    "execution_strategy",
+    "model_calls",
+    "outbound_enqueued",
 )
 
 
 def dispatch_result_envelope(
     result: dict[str, Any], *, correlation_id: str
 ) -> dict[str, Any]:
-    """Minimal, small, always-parseable contract for the n8n webhook caller.
+    """Minimal, small, always-parseable contract for the Transport caller.
 
     Only what `whatsapp_dispatch_worker._dispatch_inbound` actually reads
     (`ok`/`handoff`/`technical_failure`) plus enough identifiers and the

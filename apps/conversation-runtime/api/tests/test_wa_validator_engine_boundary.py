@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 
 API_ROOT = Path(__file__).resolve().parents[1]
@@ -11,28 +12,17 @@ if str(API_ROOT) not in sys.path:
     sys.path.insert(0, str(API_ROOT))
 
 from services import wa_validator_service
+from routes.wa_validator import GenerateScriptRequest
 
 
-def test_candidate_webhook_requires_declared_n8n_origin(monkeypatch):
-    url = "https://n8n.example.test/webhook/qa-candidate"
-    monkeypatch.delenv("N8N_VALIDATOR_ALLOWED_ORIGINS", raising=False)
-    with pytest.raises(ValueError, match="not authorized"):
-        wa_validator_service._validated_candidate_webhook_url(url)
-
-    monkeypatch.setenv("N8N_VALIDATOR_ALLOWED_ORIGINS", "https://n8n.example.test")
-    assert wa_validator_service._validated_candidate_webhook_url(url) == url
-    monkeypatch.delenv("N8N_VALIDATOR_ALLOWED_ORIGINS", raising=False)
-    assert wa_validator_service._validated_candidate_webhook_url(
-        url, reference_url="https://n8n.example.test/webhook/live"
-    ) == url
-    with pytest.raises(ValueError, match="not authorized"):
-        wa_validator_service._validated_candidate_webhook_url(
-            "http://n8n.example.test/webhook/qa-candidate"
-        )
-    assert wa_validator_service._validated_candidate_webhook_url(
-        "http://n8n.internal/webhook/qa-candidate",
-        reference_url="http://n8n.internal/webhook/live",
-    ) == "http://n8n.internal/webhook/qa-candidate"
+def test_validator_request_rejects_retired_n8n_candidate_webhook():
+    with pytest.raises(ValidationError):
+        GenerateScriptRequest.model_validate({
+            "persona_slug": "fixture-persona",
+            "flow_id": "sdr_sales_retail",
+            "target_contact": "internal",
+            "validation_target_url": "https://n8n.example.test/webhook/qa-candidate",
+        })
 
 
 def _audit_inputs(*, conversation_mode: str) -> dict:

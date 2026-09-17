@@ -28,7 +28,7 @@ _local_embedding_model_name: str | None = None
 CONTRACT_DOCUMENT = Path(__file__).resolve().parents[1] / "contracts" / "graph-agent-runtime-v3.md"
 PUBLISHED_STATUSES = {"approved", "active", "validated", "ativo", "embedded"}
 FACT_STATUSES = {"known", "unknown", "declined", "needs_confirmation", "invalid"}
-EXECUTION_STRATEGIES = {"single_pass", "interpret_then_respond"}
+EXECUTION_STRATEGIES = {"interpret_then_respond"}
 TURN_CONTEXT_NODE_LIMIT = 48
 TURN_CONTEXT_CHUNK_NODE_LIMIT = 12
 STRUCTURAL_RELATIONS = {"contains"}
@@ -809,7 +809,7 @@ def compile_graph(
     execution_strategy = str(
         strategies_by_role.get(agent_role)
         or strategies_by_role.get("default")
-        or "single_pass"
+        or "interpret_then_respond"
     )
     if execution_strategy not in EXECUTION_STRATEGIES:
         errors.append(

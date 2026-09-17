@@ -47,7 +47,6 @@ def render(*, source_sha: str, digests: dict[str, str], schema_version: int) -> 
         "contracts_checksum": package_checksum,
         "schema_version": schema_version,
         "route_map_checksum": checksum(ROOT / "ops/microservices/route-map.json"),
-        "n8n_checksum": checksum(ROOT / "apps/conversation-runtime/n8n/persona-conversation-template.json"),
         "services": {
             name: {
                 "repository": "allanVvz/brain-plataform",

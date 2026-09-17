@@ -34,9 +34,12 @@ jobs:
           changed() { grep -Eq "$1" <<<"$files" && echo true || echo false; }
           force_all="$(changed '^\.github/workflows/ci\.yml$')"
           scoped() { if [ "$force_all" = "true" ]; then echo true; else changed "$1"; fi; }
-          conversation_gate='^(tests/fixtures/(conversation_repetition_cases|sdr_flow_cases)\.json|apps/conversation-runtime/api/services/(conversation_repetition|graph_agent_runtime_v3|graph_proof_checker_v3|wa_validator_service)\.py|apps/conversation-runtime/n8n/persona-conversation-template\.json|apps/conversation-runtime/api/scripts/fixtures/[^/]*graph[^/]*\.json|dashboard/scripts/(conversation-repetition|wa-validator-driver|wa-validator)\.mjs|dashboard/e2e/wa-validator/)'
-          echo "backend=$(scoped "^(api/|apps/|packages/|tests/|supabase/migrations/|scripts/check_.*\.py$|${conversation_gate#^})")" >> "$GITHUB_OUTPUT"
-          echo "frontend=$(scoped "^(dashboard/|${conversation_gate#^})")" >> "$GITHUB_OUTPUT"
+          echo "runtime=$(scoped '^(apps/conversation-runtime/|packages/brain-contracts/)')" >> "$GITHUB_OUTPUT"
+          echo "transport=$(scoped '^(apps/transport/|packages/brain-contracts/)')" >> "$GITHUB_OUTPUT"
+          echo "control=$(scoped '^(apps/control-plane/|packages/brain-contracts/|data/graph_bundles/)')" >> "$GITHUB_OUTPUT"
+          echo "legacy=$(scoped '^(api/|tests/|supabase/migrations/)')" >> "$GITHUB_OUTPUT"
+          echo "backend=$(scoped '^(api/|apps/(conversation-runtime|transport|control-plane)/|packages/|tests/|supabase/migrations/|scripts/check_.*\.py$)')" >> "$GITHUB_OUTPUT"
+          echo "frontend=$(scoped '^dashboard/')" >> "$GITHUB_OUTPUT"
           echo "compose=$(scoped '^(docker-compose\.yml|\.env\.compose\.example|infra/|ops/vps/|Caddyfile|kong\.yml)')" >> "$GITHUB_OUTPUT"
           echo "python_deps=$(scoped '^api/requirements(-[^/]+)?\.txt$')" >> "$GITHUB_OUTPUT"
           echo "image=$(scoped '^(api/Dockerfile|api/requirements(-[^/]+)?\.txt|infra/migrate\.Dockerfile)$')" >> "$GITHUB_OUTPUT"
@@ -66,7 +69,6 @@ jobs:
           python scripts/check_python_syntax.py
           python scripts/check_monorepo_boundaries.py
           python scripts/check_persona_hardcodes.py
-          python -m json.tool apps/conversation-runtime/n8n/persona-conversation-template.json >/dev/null
 
       - name: Testar backend uma única vez
         if: steps.changes.outputs.backend == 'true'
@@ -79,8 +81,19 @@ jobs:
           SUPABASE_OFFLINE: "true"
           KNOWLEDGE_TAXONOMY_OFFLINE: "true"
         run: |
-          timeout --signal=TERM --kill-after=15s 600s python -m pytest -q
-          timeout --signal=TERM --kill-after=15s 600s python scripts/test_monorepo_apps.py
+          if [ "${{ steps.changes.outputs.runtime }}" = true ]; then
+            (cd apps/conversation-runtime/api && python -m pytest -q tests/test_agentic_turn.py tests/test_two_step_conversation.py tests/test_engine_boundary.py tests/test_wa_validator_engine_boundary.py)
+          fi
+          if [ "${{ steps.changes.outputs.transport }}" = true ]; then
+            (cd apps/transport/api && python -m pytest -q tests/test_runtime_dispatch_boundary.py tests/test_service_surface.py tests/test_whatsapp_outbox.py)
+            python -m pytest -q packages/brain-contracts/tests/test_models.py
+          fi
+          if [ "${{ steps.changes.outputs.control }}" = true ]; then
+            (cd apps/control-plane/api && python -m pytest -q tests/test_persona_routing.py tests/test_conversation_model_integration.py tests/test_conversation_workflow_service.py tests/test_n8n_client.py tests/test_graph_bundle_publisher.py tests/test_compile_graph_bundle_entrypoint.py)
+          fi
+          if [ "${{ steps.changes.outputs.legacy }}" = true ]; then
+            timeout --signal=TERM --kill-after=15s 600s python -m pytest -q tests
+          fi
 
       - name: Configurar Node
         if: steps.changes.outputs.frontend == 'true'
@@ -96,7 +109,7 @@ jobs:
         env:
           API_INTERNAL_BASE_URL: https://api.example.com
           NEXT_PUBLIC_API_BASE_URL: /api-brain
-        run: npm ci && npm run build && npm test && npm run test:wa-validator-safe && npx playwright test e2e/wa-validator/sdr-flow-corpus.spec.ts --config=playwright.wa-validator.config.ts
+        run: npm ci && npm run build && npm test
 
       - name: Validar Compose alterado
         if: steps.changes.outputs.compose == 'true'

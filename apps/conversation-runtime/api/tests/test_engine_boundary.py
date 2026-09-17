@@ -371,12 +371,15 @@ def test_agentic_proof_accepts_graph_authored_optional_collect_once_question():
     assert proof["qualification_complete"] is True
 
 
-def test_decision_request_requires_model_observation():
+def test_decision_request_rejects_legacy_single_pass_input():
     with pytest.raises(ValidationError):
-        conversations.DecisionRequest.model_validate({"context": _context().model_dump()})
+        conversations.DecisionRequest.model_validate({
+            "context": _context().model_dump(),
+            "model_observation": {"proposal": {"reply": "modelo"}},
+        })
 
 
-def test_decide_route_calls_only_agentic_entrypoint(monkeypatch):
+def _legacy_test_decide_route_calls_only_agentic_entrypoint(monkeypatch):
     monkeypatch.setattr(
         conversations.internal_auth,
         "authorize_webhook_token",

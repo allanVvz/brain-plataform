@@ -8,15 +8,14 @@ Compiler: `graph-compiler-v3.6.5`
 
 `apps/conversation-runtime` e a unica fonte produtiva. O dashboard grava a
 escolha em `workflow_bindings.metadata.decision_owner`: `deterministic` entra
-somente por `/internal/v1/conversations/execute`; `n8n_agents` entra somente por
-`/context`, `/resolve-understanding`, `/decide` e `/commit`. `/decide` exige
-`model_observation` no modo compatível `single_pass`, ou o par
-`ResolvedUnderstandingV1` + `ConversationReplyV1` em
-`interpret_then_respond`.
+por `/internal/v1/conversations/execute`; o modo agentic entra por
+`/internal/v1/conversations/execute-agentic`. O valor historico `n8n_agents`
+permanece temporariamente na metadata por compatibilidade do banco, mas o
+transport chama o runtime diretamente e nunca um webhook n8n.
 `/commit` confere o owner persistido e falha fechado se o outro motor tentar
 publicar.
 
-No modo `n8n_agents`, a reply fundamentada do modelo e preservada byte a byte.
+No modo agentic, a reply fundamentada do modelo e preservada byte a byte.
 FAQs aprovadas e escopadas sao candidatos do prompt; o backend nao escolhe uma
 resposta unica. A metadata de proxima pergunta pode apontar para qualquer campo
 ainda perguntavel com dependencias satisfeitas. `missing_fields` mede apenas
@@ -27,19 +26,19 @@ Os hard gates agentic ficam restritos a checksum/publicacao, isolamento de
 persona/agente, evidencia de claims comerciais, confirmacao insegura de
 preco/data/horario e exactly-once. Em `interpret_then_respond`, JSON invalido,
 falha de qualquer modelo ou proof invalido gera handoff observavel e pausa da
-IA, sem chamada de reparo nem fallback publico fabricado. `single_pass`
-permanece como compatibilidade por papel. O teste-canario de fronteira e
-obrigatorio em toda mudanca.
+IA, sem chamada de reparo nem fallback publico fabricado. `single_pass` nao e
+uma estrategia produtiva. O canario exato e proporcional ao componente
+alterado; suites amplas permanecem nightly/advisory.
 
 A integracao do modelo declara `structured_output_mode` como capacidade
 tecnica (`json_object` ou `json_schema`). O provisionamento nao infere
-capacidade pelo nome do modelo, endpoint ou persona. Cada node que chama o
-modelo declara `meta.credential_binding=conversation_model` e seu
-`model_call_stage`; IDs de nodes nao fazem parte do contrato de credenciais.
+capacidade pelo nome do modelo, endpoint ou persona. O runtime usa essa
+capacidade nas duas chamadas; nomes de provider, modelo e endpoint nunca
+decidem a capacidade.
 
 Descricoes historicas abaixo sobre FAQ unica, primeira pergunta, resumo
 terminal, escada publicada ou fallback textual aplicam-se somente ao motor
-`deterministic` e nao sao normativas para `n8n_agents`.
+`deterministic` e nao sao normativas para o executor agentic.
 
 Este Markdown faz parte da proveniência de cada publicação. O compilador grava
 seu caminho e checksum no Graph JSON; qualquer alteração deliberada neste

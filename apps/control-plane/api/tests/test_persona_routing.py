@@ -112,7 +112,7 @@ def test_routing_readiness_blocks_legacy_deterministic_without_v3(monkeypatch):
     ]
 
 
-def test_routing_readiness_accepts_complete_n8n_v3(monkeypatch):
+def test_routing_readiness_accepts_runtime_agentic_binding(monkeypatch):
     from routes import personas
 
     monkeypatch.setattr(
@@ -128,9 +128,13 @@ def test_routing_readiness_accepts_complete_n8n_v3(monkeypatch):
     monkeypatch.setattr(
         personas.supabase_client,
         "get_persona_integration_connection",
-        lambda *_args: {
-            "enabled": True,
-            "config_json": {"n8n_credential_id": "cred-1"},
+            lambda *_args: {
+                "enabled": True,
+                "secret_ciphertext": "encrypted",
+                "config_json": {
+                    "structured_output_mode": "json_object",
+                    "pipeline_contract": "conversation_agentic_v1",
+                },
         },
     )
     readiness = personas._routing_readiness(
@@ -139,10 +143,10 @@ def test_routing_readiness_accepts_complete_n8n_v3(monkeypatch):
             "id": "binding-1",
             "active": True,
             "connection_status": "connected",
-            "n8n_workflow_id": "wf-1",
+            "n8n_workflow_id": None,
             "metadata": {
                 "decision_owner": "n8n_agents",
-                "pipeline_contract": "conversation_v3",
+                "pipeline_contract": "conversation_agentic_v1",
                 "runtime_version": "graph_agent_runtime_v3",
             },
         },
@@ -188,11 +192,6 @@ def test_update_routing_accepts_orquestrador_without_requiring_deepseek(monkeypa
 
     monkeypatch.setattr(personas.supabase_client, "get_persona_integration_connection", _boom)
 
-    def _boom_resync(*_a, **_k):
-        raise AssertionError("orquestrador must not resync an n8n workflow")
-
-    monkeypatch.setattr(personas.conversation_workflow_service, "resync_workflow_for_persona", _boom_resync)
-
     body = personas.RoutingUpdate(conversation_mode="orquestrador")
     personas.update_routing("aurora", body, _admin_request())
 
@@ -214,7 +213,7 @@ def test_update_routing_rejects_unknown_conversation_mode(monkeypatch):
         assert exc.status_code == 400
 
 
-def test_update_routing_n8n_agents_resyncs_the_live_workflow(monkeypatch):
+def _legacy_update_routing_n8n_agents_resyncs_the_live_workflow(monkeypatch):
     """Regression test: switching to n8n_agents used to only update
     workflow_bindings metadata (webhook url / workflow id) — it never
     rebuilt or republished the actual n8n workflow content, which had to be
@@ -273,7 +272,7 @@ def test_update_routing_n8n_agents_resyncs_the_live_workflow(monkeypatch):
     assert resynced[0][1]["n8n_workflow_id"] == "wf-1"
 
 
-def test_update_routing_auto_creates_the_workflow_when_credential_exists_but_workflow_is_missing(monkeypatch):
+def _legacy_update_routing_auto_creates_the_workflow_when_credential_exists_but_workflow_is_missing(monkeypatch):
     """Regression test for the exact bug found live: baita-conveniencia had
     a DeepSeek credential already provisioned (enabled, connected) but no
     n8n_workflow_id — switching to n8n_agents in the UI errored with
@@ -354,17 +353,61 @@ def test_update_routing_still_rejects_n8n_agents_with_no_credential_at_all(monke
         lambda _id, _service: None,
     )
 
-    def _boom(*_a, **_k):
-        raise AssertionError("must not attempt to resync without a credential")
-
-    monkeypatch.setattr(personas.conversation_workflow_service, "resync_workflow_for_persona", _boom)
-
     body = personas.RoutingUpdate(conversation_mode="n8n_agents")
     try:
         personas.update_routing("aurora", body, _admin_request())
         raise AssertionError("expected HTTPException")
     except HTTPException as exc:
         assert exc.status_code == 409
+
+
+def test_update_routing_agentic_points_binding_to_runtime_without_n8n(monkeypatch):
+    from routes import personas
+
+    routing = _routing_row()
+    updates = []
+    monkeypatch.setattr(personas.auth_service, "is_admin", lambda _user: True)
+    monkeypatch.setattr(personas.supabase_client, "get_persona_routing", lambda _slug: routing)
+    monkeypatch.setattr(
+        personas.supabase_client, "get_workflow_bindings",
+        lambda _id: [{
+            "id": "binding-1", "active": True,
+            "metadata": {"conversation_webhook_url": "https://n8n.invalid/old"},
+        }],
+    )
+    monkeypatch.setattr(
+        personas.supabase_client, "update_workflow_binding",
+        lambda binding_id, update: updates.append((binding_id, update)),
+    )
+    monkeypatch.setattr(personas.supabase_client, "update_persona_routing", lambda _slug, _payload: routing)
+    monkeypatch.setattr(personas.supabase_client, "insert_event", lambda *a, **k: None)
+    monkeypatch.setattr(
+        personas.supabase_client, "get_persona_integration_connection",
+        lambda _id, _service: {
+            "enabled": True,
+            "secret_ciphertext": "encrypted",
+            "config_json": {
+                "model": "fixture-model", "reply_source": "fixture-model",
+                "structured_output_mode": "json_object",
+                "pipeline_contract": "conversation_agentic_v1",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        personas.supabase_client, "get_active_graph_publication",
+        lambda _persona_id: {"id": "publication-1"},
+    )
+
+    personas.update_routing(
+        "aurora", personas.RoutingUpdate(conversation_mode="n8n_agents"),
+        _admin_request(),
+    )
+
+    update = updates[0][1]
+    assert update["n8n_workflow_id"] is None
+    assert update["metadata"]["pipeline_contract"] == "conversation_agentic_v1"
+    assert update["metadata"]["structured_output_mode"] == "json_object"
+    assert "conversation_webhook_url" not in update["metadata"]
 
 
 def test_update_routing_has_no_persona_wide_automation_field():

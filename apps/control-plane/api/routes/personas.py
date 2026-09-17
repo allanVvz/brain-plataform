@@ -1,5 +1,4 @@
 import logging
-import os
 import secrets
 import time
 from typing import Optional
@@ -10,7 +9,7 @@ from pydantic import BaseModel, ConfigDict
 
 from schemas.persona import PersonaCreate, PersonaUpdate
 from services import public_site
-from services import auth_service, conversation_workflow_service, supabase_client, vault_sync
+from services import auth_service, supabase_client, vault_sync
 
 router = APIRouter(prefix="/personas", tags=["personas"])
 logger = logging.getLogger("personas")
@@ -95,12 +94,14 @@ def _routing_readiness(
         integration_config = integration.get("config_json") or {}
         if not integration.get("enabled"):
             blocked_reasons.append("deepseek_integration_disabled")
-        if not integration_config.get("n8n_credential_id"):
-            blocked_reasons.append("deepseek_n8n_credential_missing")
-        if not live_binding.get("n8n_workflow_id"):
-            blocked_reasons.append("n8n_workflow_missing")
-        if metadata.get("pipeline_contract") != "conversation_v3":
-            blocked_reasons.append("conversation_v3_contract_missing")
+        if not integration.get("secret_ciphertext"):
+            blocked_reasons.append("conversation_model_secret_missing")
+        if integration_config.get("structured_output_mode") not in {
+            "json_object", "json_schema",
+        }:
+            blocked_reasons.append("structured_output_mode_missing")
+        if metadata.get("pipeline_contract") != "conversation_agentic_v1":
+            blocked_reasons.append("conversation_agentic_v1_contract_missing")
         if metadata.get("runtime_version") != "graph_agent_runtime_v3":
             blocked_reasons.append("graph_agent_runtime_v3_missing")
     else:
@@ -343,10 +344,10 @@ def update_routing(slug: str, body: RoutingUpdate, request: Request):
                 or {}
             )
             deepseek_config = dict(integration.get("config_json") or {})
-            if not integration.get("enabled") or not deepseek_config.get("n8n_credential_id"):
+            if not integration.get("enabled") or not integration.get("secret_ciphertext"):
                 raise HTTPException(
                     409,
-                    "Configure a chave DeepSeek da persona em Ferramentas antes de ativar o n8n.",
+                    "Salve a chave do modelo para uso pelo conversation runtime.",
                 )
             # Build (or rebuild) the live n8n workflow *before* pointing the
             # binding at it, so switching to n8n_agents always ends with a
@@ -354,44 +355,26 @@ def update_routing(slug: str, body: RoutingUpdate, request: Request):
             # first time this persona is ever switched, when no workflow
             # exists yet. The credential is reused as-is; it's the only
             # place the raw DeepSeek key still lives once saved.
-            full_persona = supabase_client.get_persona(slug) or current
             if not supabase_client.get_active_graph_publication(str(current.get("id") or "")):
                 raise HTTPException(
                     409,
                     "Ative uma publicacao GraphRAG v3 consistente antes de ativar o modelo.",
                 )
-            deepseek_config = conversation_workflow_service.resync_workflow_for_persona(
-                full_persona, deepseek_config,
-            )
-            workflow_check = conversation_workflow_service.check_workflow_wiring(
-                deepseek_config
-            )
             supabase_client.insert_event(
                 {
-                    "event_type": (
-                        "n8n.workflow_validation.succeeded"
-                        if workflow_check["ok"]
-                        else "n8n.workflow_validation.failed"
-                    ),
+                    "event_type": "conversation.runtime_agentic.enabled",
                     "entity_type": "persona",
                     "entity_id": str(current.get("id") or slug),
                     "persona_id": current.get("id"),
                     "payload": {
                         "persona_slug": slug,
-                        "reason": workflow_check.get("reason"),
-                        "diagnostics": workflow_check.get("diagnostics") or {},
+                        "pipeline_contract": "conversation_agentic_v1",
+                        "structured_output_mode": deepseek_config.get("structured_output_mode"),
                     },
                 },
-                level="info" if workflow_check["ok"] else "error",
+                level="info",
                 source="routes.personas",
             )
-            if not workflow_check["ok"]:
-                raise HTTPException(409, workflow_check["reason"])
-            supabase_client.save_persona_integration_connection({
-                "persona_id": current.get("id"),
-                "service": "deepseek",
-                "config_json": deepseek_config,
-            })
         for binding in supabase_client.get_workflow_bindings(current.get("id")):
             if not binding.get("id") or not binding.get("active"):
                 continue
@@ -400,71 +383,30 @@ def update_routing(slug: str, body: RoutingUpdate, request: Request):
                 "conversation_mode": conversation_mode,
                 "decision_owner": conversation_mode,
                 "pipeline_contract": (
-                    deepseek_config.get("pipeline_contract") or "conversation_v3"
+                    deepseek_config.get("pipeline_contract") or "conversation_agentic_v1"
                     if conversation_mode == "n8n_agents" else "conversation_v1"
                 ),
                 "transport_mode": "provider_direct",
             }
             binding_update: dict = {"metadata": metadata}
             if conversation_mode == "n8n_agents":
-                n8n_base = str(os.environ.get("N8N_BASE_URL") or "").rstrip("/")
-                webhook_path = str(
-                    deepseek_config.get("conversation_webhook_path") or ""
-                ).strip("/")
-                if not n8n_base or not webhook_path:
-                    raise HTTPException(409, "Endpoint interno do n8n nao configurado.")
-                metadata["conversation_webhook_url"] = (
-                    f"{n8n_base}/webhook/{webhook_path}"
-                )
+                metadata.pop("conversation_webhook_url", None)
                 metadata["runtime_version"] = (
                     deepseek_config.get("runtime_version")
                     or "graph_agent_runtime_v3"
                 )
                 metadata["model"] = deepseek_config.get("model")
                 metadata["reply_source"] = deepseek_config.get("reply_source")
-                binding_update["n8n_workflow_id"] = deepseek_config["n8n_workflow_id"]
+                metadata["structured_output_mode"] = deepseek_config.get("structured_output_mode")
+                binding_update["n8n_workflow_id"] = None
             else:
                 metadata.pop("conversation_webhook_url", None)
                 metadata.pop("runtime_version", None)
                 binding_update["n8n_workflow_id"] = None
-            updated_binding = supabase_client.update_workflow_binding(
+            supabase_client.update_workflow_binding(
                 str(binding["id"]),
                 binding_update,
             )
-            if conversation_mode == "n8n_agents":
-                effective_binding = updated_binding or {
-                    **binding,
-                    **binding_update,
-                    "persona_id": binding.get("persona_id") or current.get("id"),
-                    "metadata": metadata,
-                }
-                binding_check = conversation_workflow_service.check_binding(
-                    persona=full_persona,
-                    binding=effective_binding,
-                    model_config=deepseek_config,
-                    n8n_base_url=n8n_base,
-                )
-                supabase_client.insert_event(
-                    {
-                        "event_type": (
-                            "n8n.binding_validation.succeeded"
-                            if binding_check["ok"]
-                            else "n8n.binding_validation.failed"
-                        ),
-                        "entity_type": "workflow_binding",
-                        "entity_id": str(binding["id"]),
-                        "persona_id": current.get("id"),
-                        "payload": {
-                            "persona_slug": slug,
-                            "reason": binding_check.get("reason"),
-                            "diagnostics": binding_check.get("diagnostics") or {},
-                        },
-                    },
-                    level="info" if binding_check["ok"] else "error",
-                    source="routes.personas",
-                )
-                if not binding_check["ok"]:
-                    raise HTTPException(409, binding_check["reason"])
         if payload:
             supabase_client.update_persona_routing(slug, payload)
         supabase_client.insert_event(

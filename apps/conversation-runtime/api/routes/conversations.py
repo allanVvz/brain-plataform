@@ -7,9 +7,10 @@ from uuid import NAMESPACE_URL, uuid5
 from fastapi import APIRouter, Header, HTTPException
 from brain_contracts import (
     CanonicalConversationResultV1,
+    ExecuteAgenticTurnV1,
     TechnicalConversationFailureV1,
 )
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, field_validator
 
 from schemas.conversation import (
     AgentResponse,
@@ -20,7 +21,7 @@ from schemas.conversation import (
     StrictModel,
     TurnUnderstandingV1,
 )
-from services import conversation_runtime, internal_auth, transport_client
+from services import agentic_turn, conversation_runtime, internal_auth, transport_client
 from services import supabase_client
 
 
@@ -75,34 +76,14 @@ class ContextRequest(StrictModel):
 
 class DecisionRequest(StrictModel):
     context: ConversationContext
-    model_observation: dict | None = None
-    resolved_understanding: ResolvedUnderstandingV1 | None = None
-    conversation_reply: ConversationReplyV1 | None = None
+    resolved_understanding: ResolvedUnderstandingV1
+    conversation_reply: ConversationReplyV1
+    token_usage: dict = Field(default_factory=dict)
     trace_id: str | None = None
     # ConversationContext carries no lead identity of its own (by design --
     # /decide reasons only from context + model_observation) -- forwarded
     # separately, purely for observability logging (lead_id column).
     lead_ref: int | None = None
-
-    @model_validator(mode="after")
-    def require_one_decision_input(self) -> "DecisionRequest":
-        single_pass = self.model_observation is not None
-        two_step = (
-            self.resolved_understanding is not None
-            and self.conversation_reply is not None
-        )
-        if not single_pass and not two_step:
-            raise ValueError(
-                "model_observation or resolved understanding + reply is required"
-            )
-        if (self.resolved_understanding is None) != (
-            self.conversation_reply is None
-        ):
-            raise ValueError(
-                "resolved_understanding and conversation_reply are required together"
-            )
-        return self
-
 
 class ResolveUnderstandingRequest(StrictModel):
     context: ConversationContext
@@ -151,6 +132,7 @@ class ExecuteRequest(StrictModel):
         return normalized
 
 
+
 @router.post("/execute")
 def execute(
     body: ExecuteRequest,
@@ -176,6 +158,38 @@ def execute(
         raise HTTPException(409, str(exc)) from exc
 
 
+@router.post("/execute-agentic")
+def execute_agentic(
+    body: ExecuteAgenticTurnV1,
+    x_webhook_token: str | None = Header(None, alias="X-Webhook-Token"),
+) -> dict:
+    """Execute one two-stage turn and always return a canonical envelope."""
+    internal_auth.authorize_webhook_token(x_webhook_token)
+    try:
+        result = agentic_turn.execute(
+            **body.model_dump(exclude={"contract_version"})
+        )
+        return conversation_runtime.dispatch_result_envelope(
+            result, correlation_id=body.correlation_id
+        )
+    except Exception as exc:  # every failed stage terminalizes exactly once
+        stage = getattr(exc, "stage", None) or type(exc).__name__
+        command = TechnicalConversationFailureV1(
+            lead_ref=body.lead_ref,
+            buffer_id=body.inbound_buffer_id,
+            correlation_id=body.correlation_id,
+            stage=str(stage)[:100],
+            reason=f"agentic_turn_failed:{stage}"[:1000],
+            diagnostic={
+                "workflow_template": "runtime_agentic_v1",
+                "execution_strategy": "interpret_then_respond",
+                "failed_node": str(stage)[:100],
+                "message": str(exc)[:1000],
+            },
+        )
+        return _terminalize_technical_failure(command)
+
+
 @router.post("/context", response_model=ConversationContext)
 def context(
     body: ContextRequest,
@@ -199,7 +213,7 @@ def decide(
     try:
         decision, response = conversation_runtime.decide_agentic(
             body.context,
-            model_observation=body.model_observation,
+            model_observation={"token_usage": body.token_usage},
             resolved_understanding=body.resolved_understanding,
             conversation_reply=body.conversation_reply,
             trace_id=body.trace_id,
