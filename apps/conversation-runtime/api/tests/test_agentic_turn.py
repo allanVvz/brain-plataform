@@ -94,7 +94,7 @@ def test_two_model_calls_resolve_facts_before_reply_and_commit_once(monkeypatch)
         ),
     )
 
-    def fake_call(_binding, *, stage, **_kwargs):
+    def fake_call(_binding, *, stage, **kwargs):
         calls.append(stage)
         if stage == "understanding_model":
             return ({
@@ -108,6 +108,7 @@ def test_two_model_calls_resolve_facts_before_reply_and_commit_once(monkeypatch)
                 "customer_questions": [],
                 "interaction_observation": {"kind": "continue_current"},
             }, {"prompt_tokens": 10, "completion_tokens": 5})
+        captured["reply_system"] = kwargs["system"]
         return ({
             "contract_version": "conversation_reply_v1",
             "reply": "Entendi. O que voce procura?",
@@ -165,6 +166,8 @@ def test_two_model_calls_resolve_facts_before_reply_and_commit_once(monkeypatch)
     assert captured["understanding"].facts[0].owner_node_id == "audience:retail"
     assert captured["commit"]["inbound_buffer_id"] == "buffer-1"
     assert captured["commit"]["expected_decision_owner"] == "n8n_agents"
+    assert "marks a requested commercial fact as unsupported" in captured["reply_system"]
+    assert "request the published handoff" in captured["reply_system"]
     assert result["model_calls"] == 2
 
 
