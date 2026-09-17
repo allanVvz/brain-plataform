@@ -2623,12 +2623,23 @@ def _semantic_turn_audit(
     # Whether this heuristic can map that question back to the narrow
     # askable set is valuable audit data, but never a release/session gate:
     # proof already enforces known facts, dependencies, branch isolation and
-    # exactly-once independently. Keep the raw observation permanently on
-    # the turn, while reserving failures for objective safety violations.
+    # exactly-once independently.
+    #
+    # Likewise, required/forbidden reply patterns are scenario-authored
+    # regular expressions. They are useful historical signals, but cannot
+    # judge a natural answer more strictly than the graph proof that already
+    # authorized its claims. In particular, a phrasing variation must not
+    # roll back a technically sound runtime release. Keep them on every turn
+    # as observations; objective proof, persistence and exactly-once failures
+    # remain release gates.
     observations = [name for name, passed in criteria.items() if not passed]
     non_blocking_observations = [
         name for name in observations
-        if name == "question_semantically_askable"
+        if name in {
+            "question_semantically_askable",
+            "required_reply_content",
+            "forbidden_reply_content_absent",
+        }
     ]
     failures = [
         name for name in observations

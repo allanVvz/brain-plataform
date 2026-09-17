@@ -120,6 +120,25 @@ def test_question_askability_is_audited_but_never_blocks_a_session():
     ]
 
 
+def test_reply_pattern_variations_are_audited_without_blocking_a_proved_turn():
+    inputs = _audit_inputs(conversation_mode="n8n_agents")
+    inputs["customer_step"].update({
+        "required_reply_patterns": [r"\\bfrase\\s+literal\\b"],
+        "forbidden_reply_patterns": [r"dia a dia"],
+    })
+
+    audit = wa_validator_service._semantic_turn_audit(**inputs)
+
+    assert audit["criteria"]["required_reply_content"] is False
+    assert audit["criteria"]["forbidden_reply_content_absent"] is False
+    assert audit["passed"] is True
+    assert audit["failures"] == []
+    assert audit["non_blocking_observations"] == [
+        "required_reply_content",
+        "forbidden_reply_content_absent",
+    ]
+
+
 def test_agentic_validator_accepts_optional_collect_once_name_before_required_field():
     inputs = _audit_inputs(conversation_mode="n8n_agents")
     name_field = inputs["contract"]["fields"][0]
