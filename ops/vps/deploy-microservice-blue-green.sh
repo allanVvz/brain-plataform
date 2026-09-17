@@ -83,6 +83,14 @@ print(((data.get(service) or {}).get("slots") or {}).get(slot, {}).get(field, ""
 PY
 }
 
+read_active_manifest_release() {
+  python3 - "$ROOT_DIR/ops/microservices/release-manifest.json" "$SERVICE" "$1" <<'PY'
+import json, sys
+manifest, service, field = sys.argv[1:]
+print((json.load(open(manifest, encoding="utf-8")).get("services", {}).get(service, {}) or {}).get(field, ""))
+PY
+}
+
 set_slot_provenance() {
   local slot="$1" sha="$2" digest="$3" image_var sha_var
   [[ "$slot" =~ ^(blue|green)$ ]] || return 0
@@ -217,6 +225,25 @@ if [[ "$active" =~ ^(blue|green)$ ]]; then
   set_slot_provenance "$active" "$active_release_sha" "$active_release_digest"
 fi
 
+target_release_sha="$(manifest_value service "$SERVICE" sha)"
+target_release_digest="$(manifest_value service "$SERVICE" digest)"
+if [[ "$ACTION" == "--rollback" ]]; then
+  target_release_sha="$(read_slot_release "$target" sha)"
+  target_release_digest="$(read_slot_release "$target" digest)"
+  # A failed legacy rollback could have recorded the candidate in both slots.
+  # The approved active manifest is the safe recovery source in that case;
+  # normal rollbacks use the distinct immutable provenance stored per slot.
+  if [[ ! "$target_release_sha" =~ ^[0-9a-f]{40}$ || ! "$target_release_digest" =~ ^sha256:[0-9a-f]{64}$ || ( "$target_release_sha" == "$active_release_sha" && "$target_release_digest" == "$active_release_digest" ) ]]; then
+    target_release_sha="$(read_active_manifest_release sha)"
+    target_release_digest="$(read_active_manifest_release digest)"
+  fi
+  [[ "$target_release_sha" =~ ^[0-9a-f]{40}$ && "$target_release_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+    echo "cannot establish immutable provenance for rollback target $SERVICE slot=$target" >&2
+    exit 1
+  }
+  set_slot_provenance "$target" "$target_release_sha" "$target_release_digest"
+fi
+
 pull_candidate_images() {
   local pull_attempt
   for pull_attempt in 1 2 3 4; do
@@ -260,7 +287,7 @@ until [[ "$("${COMPOSE[@]}" ps --format json "$target_service" | python3 -c 'imp
   sleep 3
 done
 
-expected_sha="$(manifest_value service "$SERVICE" sha)"
+expected_sha="$target_release_sha"
 # Docker's healthcheck is the candidate's real readiness probe. Do not issue a
 # second HTTP probe here: it duplicates the contract and may travel through a
 # container-specific auth path even though the healthcheck already proved the
@@ -314,7 +341,7 @@ fi
 # empty slot.
 candidate="$STATE_DIR/slots.${SERVICE}.candidate.json"
 python3 - "$STATE_FILE" "$candidate" "$SERVICE" "$target" "$active" \
-  "$active_release_sha" "$active_release_digest" "$expected_sha" "$(manifest_value service "$SERVICE" digest)" <<'PY'
+  "$active_release_sha" "$active_release_digest" "$target_release_sha" "$target_release_digest" <<'PY'
 import json, sys
 (
     source, target_path, service, target_slot, old_slot,
