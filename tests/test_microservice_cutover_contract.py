@@ -412,13 +412,31 @@ def test_service_env_bootstrap_never_distributes_universal_database_secrets():
     assert 'role="brain_control_plane"' in bootstrap
     assert 'role="brain_runtime"' in bootstrap
     assert 'role="brain_transport"' in bootstrap
-    assert 'TRANSPORT = COMMON | {\n    # The transport dispatch worker invokes' in bootstrap
+    assert 'TRANSPORT = COMMON | {\n    # N8N_BASE_URL remains temporarily available' in bootstrap
     assert '    "N8N_BASE_URL",' in bootstrap
     assert '    "AI_BRAIN_SECRETS_KEY",' in bootstrap
+    assert '"AI_BRAIN_SECRETS_KEY"}' in bootstrap
+    assert "if check_only:" in bootstrap
     assert "def current_schema_version" in bootstrap
     assert "return str(max(versions))" in bootstrap
     assert '"SERVICE_ROLE_KEY"' not in bootstrap
     assert '"POSTGRES_PASSWORD"' not in bootstrap
+
+
+def test_compatible_deploy_validates_then_refreshes_service_environments():
+    deploy = (ROOT / "ops/vps/deploy-microservice-blue-green.sh").read_text(encoding="utf-8")
+    check = 'bootstrap-service-envs.py" --check'
+    apply = 'bootstrap-service-envs.py"'
+
+    assert check in deploy
+    assert deploy.index(check) < deploy.index('if [[ "$ACTION" == "--dry-run" ]]')
+    apply_block = deploy.split('if [[ "$ACTION" == "--apply" ]]', 1)[1]
+    assert apply in apply_block
+    assert apply_block.index(apply) < apply_block.index('mkdir -p "$STATE_DIR"')
+
+    audit = (ROOT / "ops/vps/validate-production-release.sh").read_text(encoding="utf-8")
+    assert "conversation_secret_source" in audit
+    assert "AI_BRAIN_SECRETS_KEY missing from source environment" in audit
 
 
 def test_schema_apply_is_backup_restore_and_pause_gated():

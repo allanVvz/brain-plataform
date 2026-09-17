@@ -50,6 +50,12 @@ for required in \
   .env.microservices/transport.env; do
   check_file "$required" "production_config_$(basename "$required")"
 done
+if grep -q '^AI_BRAIN_SECRETS_KEY=.' "$ENV_FILE"; then
+  printf 'PASS\tconversation_secret_source\tconfigured\n'
+else
+  printf 'FAIL\tconversation_secret_source\tAI_BRAIN_SECRETS_KEY missing from source environment\n'
+  failed=1
+fi
 if [[ -n "${EXPECTED_RELEASE_SHA:-}" && -s .deploy/release-source-sha ]]; then
   installed_sha="$(tr -d '\r\n' < .deploy/release-source-sha)"
   if [[ "$installed_sha" == "$EXPECTED_RELEASE_SHA" ]]; then

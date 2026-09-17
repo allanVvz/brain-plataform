@@ -22,6 +22,7 @@ case "$ACTION" in
 esac
 
 python3 "$ROOT_DIR/ops/microservices/validate-release-manifest.py" "$MANIFEST"
+python3 "$ROOT_DIR/ops/microservices/bootstrap-service-envs.py" --check
 
 manifest_value() {
   python3 -c 'import json,sys; data=json.load(open(sys.argv[1], encoding="utf-8")); print(data[sys.argv[2]] if sys.argv[2] != "service" else data["services"][sys.argv[3]][sys.argv[4]])' "$MANIFEST" "$@"
@@ -123,6 +124,12 @@ fi
 for required in "$ENV_FILE" "$GATEWAY_ENV_FILE" "$CONTROL_PLANE_ENV_FILE" "$RUNTIME_ENV_FILE" "$TRANSPORT_ENV_FILE"; do
   [[ -s "$required" ]] || { echo "missing required environment file: $required" >&2; exit 1; }
 done
+if [[ "$ACTION" == "--apply" ]]; then
+  # Re-render least-privilege envs from the approved production source before
+  # the candidate starts. This prevents a compatible code release from using
+  # stale service allowlists while preserving the existing internal secret.
+  python3 "$ROOT_DIR/ops/microservices/bootstrap-service-envs.py"
+fi
 mkdir -p "$STATE_DIR" "$CADDY_DIR"
 if [[ ! -s "$STATE_FILE" ]]; then
   printf '%s\n' '{"gateway":{"active":"legacy","previous":null}}' > "$STATE_FILE"

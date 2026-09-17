@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import argparse
 import hashlib
 import hmac
 import json
@@ -48,10 +49,8 @@ RUNTIME = COMMON | {
     "GRAPH_RAG_LOCAL_EMBEDDING_MODEL", "INSECURE_LLM_SSL",
 }
 TRANSPORT = COMMON | {
-    # The transport dispatch worker invokes the canonical n8n conversation
-    # workflow for bindings owned by ``n8n_agents``.  Keep the internal n8n
-    # base URL in its least-privilege environment so direct-binding validation
-    # and dispatch agree on the same endpoint.
+    # N8N_BASE_URL remains temporarily available only for redacted audits of
+    # historical bindings; productive dispatch calls conversation-runtime.
     "N8N_BASE_URL",
     "AI_BRAIN_SECRETS_KEY",
     "META_WHATSAPP_ACCESS_TOKEN", "META_WHATSAPP_APP_SECRET", "META_WHATSAPP_VERIFY_TOKEN",
@@ -126,7 +125,7 @@ def write_env(name: str, allowed: set[str], source: dict[str, str], *, role: str
     print(f"configured {name}: keys={len(values)} role={role or 'none'}")
 
 
-def main() -> int:
+def main(*, check_only: bool = False) -> int:
     if not SOURCE.is_file():
         raise SystemExit(".env.compose is missing")
     source = parse_env(SOURCE)
@@ -136,13 +135,19 @@ def main() -> int:
     jwt_secret = source.get("JWT_SECRET", "")
     if len(jwt_secret) < 32:
         raise SystemExit("JWT_SECRET is missing or too short")
-    required = {"SUPABASE_URL", "AI_BRAIN_WEBHOOK_TOKEN"}
+    required = {"SUPABASE_URL", "AI_BRAIN_WEBHOOK_TOKEN", "AI_BRAIN_SECRETS_KEY"}
     missing = sorted(key for key in required if not source.get(key))
     if not (source.get("AI_BRAIN_AUTH_SECRET") or source.get("NEXTAUTH_SECRET")):
         missing.append("AI_BRAIN_AUTH_SECRET|NEXTAUTH_SECRET")
     if missing:
         raise SystemExit("missing source configuration keys: " + ", ".join(missing))
     schema_version = current_schema_version()
+    if check_only:
+        print(
+            "service environment source valid: "
+            f"schema={schema_version} runtime_secret_key=true"
+        )
+        return 0
     TARGET_DIR.mkdir(mode=0o700, exist_ok=True)
     os.chmod(TARGET_DIR, 0o700)
     internal_secret = existing_internal_secret() or secrets.token_urlsafe(48)
@@ -161,4 +166,10 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="validate the source without writing service environment files",
+    )
+    raise SystemExit(main(check_only=parser.parse_args().check))
