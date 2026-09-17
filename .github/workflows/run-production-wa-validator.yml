@@ -19,13 +19,10 @@ on:
       action:
         description: Validate prerequisites, run, or inspect one terminal session
         type: choice
-        options: [dry-run, run, run-source, inspect]
+        options: [dry-run, run, inspect]
         default: dry-run
       session_id:
         description: Existing terminal session UUID (required only for inspect)
-        required: false
-      candidate_webhook_url:
-        description: Allow-listed isolated n8n candidate webhook (run only)
         required: false
 
 permissions:
@@ -51,6 +48,8 @@ jobs:
           source: ops/vps/run-microservice-wa-validator.sh,apps/conversation-runtime/api/services/wa_validator_service.py,apps/conversation-runtime/api/evaluation/wa_validator_customer_profiles.json
           target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           overwrite: true
+          timeout: 90s
+          command_timeout: 10m
       - name: Run internal direct validation
         uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f # v1.2.2
         env:
@@ -60,21 +59,19 @@ jobs:
           INITIAL_STATE: ${{ inputs.initial_state }}
           VALIDATOR_ACTION: ${{ inputs.action }}
           VALIDATOR_SESSION_ID: ${{ inputs.session_id }}
-          VALIDATOR_CANDIDATE_WEBHOOK_URL: ${{ inputs.candidate_webhook_url }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
-          envs: VPS_APP_DIR,PERSONA_SLUG,FLOW_ID,INITIAL_STATE,VALIDATOR_ACTION,VALIDATOR_SESSION_ID,VALIDATOR_CANDIDATE_WEBHOOK_URL
+          envs: VPS_APP_DIR,PERSONA_SLUG,FLOW_ID,INITIAL_STATE,VALIDATOR_ACTION,VALIDATOR_SESSION_ID
           command_timeout: 20m
           script: |
             set -Eeuo pipefail
             cd "$VPS_APP_DIR"
             mode=--dry-run
             [[ "$VALIDATOR_ACTION" == "run" ]] && mode=--run
-            [[ "$VALIDATOR_ACTION" == "run-source" ]] && mode=--run-source
             [[ "$VALIDATOR_ACTION" == "inspect" ]] && mode=--inspect
             bash ops/vps/run-microservice-wa-validator.sh \
               "$mode" "$PERSONA_SLUG" "$FLOW_ID" "$INITIAL_STATE" \
-              "$VALIDATOR_SESSION_ID" "$VALIDATOR_CANDIDATE_WEBHOOK_URL"
+              "$VALIDATOR_SESSION_ID"
