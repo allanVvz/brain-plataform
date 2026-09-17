@@ -67,8 +67,8 @@ def test_understanding_instruction_extracts_a_direct_free_text_answer(monkeypatc
             phone_number_id=None, channel_binding_id="binding-1",
             inbound_buffer_id="inbound-1",
         )
-    assert "expected_answer_field_key" in captured["system"]
-    assert "free-text field" in captured["system"]
+    assert "Capture every stated fact" in captured["system"]
+    assert "audience_signals are optional" in captured["system"]
 
 
 def test_two_model_calls_resolve_facts_before_reply_and_commit_once(monkeypatch):
@@ -166,8 +166,8 @@ def test_two_model_calls_resolve_facts_before_reply_and_commit_once(monkeypatch)
     assert captured["understanding"].facts[0].owner_node_id == "audience:retail"
     assert captured["commit"]["inbound_buffer_id"] == "buffer-1"
     assert captured["commit"]["expected_decision_owner"] == "n8n_agents"
-    assert "marks a requested commercial fact as unsupported" in captured["reply_system"]
-    assert "request the published handoff" in captured["reply_system"]
+    assert "warm, concise reply" in captured["reply_system"]
+    assert "rather than guessing" in captured["reply_system"]
     assert result["model_calls"] == 2
 
 
@@ -196,6 +196,48 @@ def test_non_literal_fact_evidence_fails_without_reply_call(monkeypatch):
         assert exc.stage == "understanding_validation"
     else:
         raise AssertionError("invented evidence must fail closed")
+
+
+def test_unavailable_audience_signal_is_audited_without_blocking_valid_facts():
+    context = _context().model_copy(update={
+        "available_services": [{"branch_anchor_node_id": "audience:retail"}],
+    })
+
+    understanding = agentic_turn._read_understanding(
+        {
+            "contract_version": "turn_understanding_v1",
+            "facts": [{
+                "key": "profile", "value": "personal", "status": "known",
+                "evidence_span": "uso proprio", "confidence": 1,
+            }],
+            "branch_selections": [],
+            "confirmation": {"state": "none"},
+            "customer_questions": [],
+            "mentioned_node_ids": [],
+            "audience_signals": [
+                {
+                    "audience_node_id": "audience:retail",
+                    "evidence_span": "uso proprio", "confidence": 1,
+                },
+                {
+                    "audience_node_id": "audience:not-published",
+                    "evidence_span": "uso proprio", "confidence": 1,
+                },
+            ],
+            "interaction_observation": {"kind": "continue_current"},
+        },
+        context=context,
+        message="uso proprio",
+        message_id="message-1",
+    )
+
+    assert [signal.audience_node_id for signal in understanding.audience_signals] == [
+        "audience:retail"
+    ]
+    assert understanding.facts[0].field_key == "profile"
+    assert understanding.validation_observations == [
+        "ignored_unavailable_audience_signal:audience:not-published"
+    ]
 
 
 def test_staged_publication_is_internal_validator_only():

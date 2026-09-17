@@ -235,6 +235,10 @@ class TurnUnderstandingV1(StrictModel):
     customer_questions: list[CustomerQuestion] = Field(default_factory=list)
     mentioned_node_ids: list[str] = Field(default_factory=list)
     audience_signals: list[AudienceSignal] = Field(default_factory=list)
+    # Runtime-only observations recorded while normalizing otherwise valid
+    # model output. They are never requested from the model and must not turn
+    # an optional audience classification into a failed customer turn.
+    validation_observations: list[str] = Field(default_factory=list)
     interaction_observation: InteractionObservation = Field(
         default_factory=InteractionObservation
     )

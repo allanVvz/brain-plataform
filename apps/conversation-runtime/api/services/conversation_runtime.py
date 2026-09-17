@@ -1701,6 +1701,9 @@ def decide_agentic(
                     signal.model_dump(mode="json")
                     for signal in resolved_understanding.understanding.audience_signals
                 ],
+                "understanding_observations": list(
+                    resolved_understanding.understanding.validation_observations
+                ),
             },
         })
     observation = model_observation or {}
