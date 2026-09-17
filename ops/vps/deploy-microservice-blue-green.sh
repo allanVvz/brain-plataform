@@ -60,9 +60,47 @@ export TRANSPORT_ENV_FILE="${TRANSPORT_ENV_FILE:-$ROOT_DIR/.env.microservices/tr
 
 compose_service="${SERVICE/conversation-runtime/runtime}"
 
+service_repository() {
+  case "$1" in
+    gateway) printf '%s' 'ghcr.io/allanvvz/brain-gateway' ;;
+    control-plane) printf '%s' 'ghcr.io/allanvvz/brain-control-plane' ;;
+    conversation-runtime) printf '%s' 'ghcr.io/allanvvz/brain-conversation-runtime' ;;
+    transport) printf '%s' 'ghcr.io/allanvvz/brain-transport' ;;
+  esac
+}
+
 read_state() {
   local field="$1"
   python3 -c 'import json,sys; p=sys.argv[1]; data=json.load(open(p, encoding="utf-8")) if __import__("os").path.exists(p) else {}; value=data.get(sys.argv[2], {}); print(value.get(sys.argv[3], "") if isinstance(value, dict) else (value if sys.argv[3] == "active" else ""))' "$STATE_FILE" "$SERVICE" "$field"
+}
+
+read_slot_release() {
+  python3 - "$STATE_FILE" "$SERVICE" "$1" "$2" <<'PY'
+import json, os, sys
+path, service, slot, field = sys.argv[1:]
+data = json.load(open(path, encoding="utf-8")) if os.path.exists(path) else {}
+print(((data.get(service) or {}).get("slots") or {}).get(slot, {}).get(field, ""))
+PY
+}
+
+set_slot_provenance() {
+  local slot="$1" sha="$2" digest="$3" image_var sha_var
+  [[ "$slot" =~ ^(blue|green)$ ]] || return 0
+  [[ "$sha" =~ ^[0-9a-f]{40}$ && "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+  case "$SERVICE" in
+    gateway) image_var="GATEWAY_IMAGE_${slot^^}"; sha_var="GATEWAY_SHA" ;;
+    control-plane) image_var="CONTROL_PLANE_IMAGE_${slot^^}"; sha_var="CONTROL_PLANE_SHA" ;;
+    conversation-runtime) image_var="RUNTIME_IMAGE_${slot^^}"; sha_var="RUNTIME_SHA" ;;
+    transport) image_var="TRANSPORT_IMAGE_${slot^^}"; sha_var="TRANSPORT_SHA" ;;
+  esac
+  printf -v "$image_var" '%s@%s' "$(service_repository "$SERVICE")" "$digest"
+  export "$image_var"
+  # SOURCE_SHA is shared by the compose aliases for a service. It is only
+  # overridden for rollback, where the target is the prior active slot.
+  if [[ "$ACTION" == "--rollback" ]]; then
+    printf -v "$sha_var" '%s' "$sha"
+    export "$sha_var"
+  fi
 }
 
 active="$(read_state active)"
@@ -156,6 +194,27 @@ fi
 mkdir -p "$STATE_DIR" "$CADDY_DIR"
 if [[ ! -s "$STATE_FILE" ]]; then
   printf '%s\n' '{"gateway":{"active":"legacy","previous":null}}' > "$STATE_FILE"
+fi
+
+# A slot is a release, not merely a route colour. Seed provenance from the
+# active API once for older state files, then carry it with each promotion so
+# a rollback restores API and workers from the same immutable digest.
+active_release_sha=""
+active_release_digest=""
+if [[ "$active" =~ ^(blue|green)$ ]]; then
+  active_release_sha="$(read_slot_release "$active" sha)"
+  active_release_digest="$(read_slot_release "$active" digest)"
+  if [[ ! "$active_release_sha" =~ ^[0-9a-f]{40}$ || ! "$active_release_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    active_container="brain-ai-${compose_service}-${active}-1"
+    active_image="$(docker inspect -f '{{.Config.Image}}' "$active_container")"
+    active_release_digest="${active_image##*@}"
+    active_release_sha="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$active_container" | sed -n 's/^SOURCE_SHA=//p' | head -n 1)"
+  fi
+  [[ "$active_release_sha" =~ ^[0-9a-f]{40}$ && "$active_release_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+    echo "cannot establish immutable provenance for active $SERVICE slot=$active" >&2
+    exit 1
+  }
+  set_slot_provenance "$active" "$active_release_sha" "$active_release_digest"
 fi
 
 pull_candidate_images() {
@@ -254,11 +313,24 @@ fi
 # deploy workflows to move each other's candidate and strand routing on an
 # empty slot.
 candidate="$STATE_DIR/slots.${SERVICE}.candidate.json"
-python3 - "$STATE_FILE" "$candidate" "$SERVICE" "$target" "$active" <<'PY'
+python3 - "$STATE_FILE" "$candidate" "$SERVICE" "$target" "$active" \
+  "$active_release_sha" "$active_release_digest" "$expected_sha" "$(manifest_value service "$SERVICE" digest)" <<'PY'
 import json, sys
-source, target_path, service, target_slot, old_slot = sys.argv[1:]
+(
+    source, target_path, service, target_slot, old_slot,
+    old_sha, old_digest, new_sha, new_digest,
+) = sys.argv[1:]
 data = json.load(open(source, encoding="utf-8"))
-data[service] = {"active": target_slot, "previous": old_slot or None}
+entry = dict(data.get(service) or {})
+slots = dict(entry.get("slots") or {})
+if old_slot and old_sha and old_digest:
+    slots[old_slot] = {"sha": old_sha, "digest": old_digest}
+slots[target_slot] = {"sha": new_sha, "digest": new_digest}
+data[service] = {
+    "active": target_slot,
+    "previous": old_slot or None,
+    "slots": slots,
+}
 with open(target_path, "w", encoding="utf-8") as handle:
     json.dump(data, handle, indent=2, sort_keys=True)
     handle.write("\n")
