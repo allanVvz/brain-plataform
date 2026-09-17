@@ -204,20 +204,17 @@ if [[ ! -s "$STATE_FILE" ]]; then
   printf '%s\n' '{"gateway":{"active":"legacy","previous":null}}' > "$STATE_FILE"
 fi
 
-# A slot is a release, not merely a route colour. Seed provenance from the
-# active API once for older state files, then carry it with each promotion so
-# a rollback restores API and workers from the same immutable digest.
+# A slot is a release, not merely a route colour. The live API is the source
+# of truth for the active slot; state is retained for the inactive slot. This
+# detects an interrupted historical rollback before it can contaminate another
+# recovery with stale provenance.
 active_release_sha=""
 active_release_digest=""
 if [[ "$active" =~ ^(blue|green)$ ]]; then
-  active_release_sha="$(read_slot_release "$active" sha)"
-  active_release_digest="$(read_slot_release "$active" digest)"
-  if [[ ! "$active_release_sha" =~ ^[0-9a-f]{40}$ || ! "$active_release_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-    active_container="brain-ai-${compose_service}-${active}-1"
-    active_image="$(docker inspect -f '{{.Config.Image}}' "$active_container")"
-    active_release_digest="${active_image##*@}"
-    active_release_sha="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$active_container" | sed -n 's/^SOURCE_SHA=//p' | head -n 1)"
-  fi
+  active_container="brain-ai-${compose_service}-${active}-1"
+  active_image="$(docker inspect -f '{{.Config.Image}}' "$active_container")"
+  active_release_digest="${active_image##*@}"
+  active_release_sha="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$active_container" | sed -n 's/^SOURCE_SHA=//p' | head -n 1)"
   [[ "$active_release_sha" =~ ^[0-9a-f]{40}$ && "$active_release_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || {
     echo "cannot establish immutable provenance for active $SERVICE slot=$active" >&2
     exit 1
@@ -265,11 +262,11 @@ if [[ "$ACTION" == "--rollback" ]]; then
   # behaviour started every sidecar here, defeating the pause during a
   # recovery.
   if [[ -s "$ROOT_DIR/.deploy/control/claims-paused.json" && ${#target_services[@]} -gt 1 ]]; then
-    "${COMPOSE[@]}" start "$target_service"
+    "${COMPOSE[@]}" up -d --no-deps --force-recreate "$target_service"
     "${COMPOSE[@]}" stop -t 120 "${target_services[@]:1}" >/dev/null 2>&1 || true
     workers_paused=true
   else
-    "${COMPOSE[@]}" start "${target_services[@]}"
+    "${COMPOSE[@]}" up -d --no-deps --force-recreate "${target_services[@]}"
     workers_paused=false
   fi
 else
@@ -326,7 +323,7 @@ mutation_started=true
 if [[ ${#old_services[@]} -gt 1 ]]; then
   "${COMPOSE[@]}" stop -t 45 "${old_services[@]:1}"
 fi
-if [[ ${#target_services[@]} -gt 1 ]]; then
+if [[ "$ACTION" != "--rollback" && ${#target_services[@]} -gt 1 ]]; then
   "${COMPOSE[@]}" up -d --no-deps --force-recreate "${target_services[@]:1}"
   for candidate_service in "${target_services[@]:1}"; do
     [[ "$("${COMPOSE[@]}" ps --status running --services "$candidate_service")" == "$candidate_service" ]] || {

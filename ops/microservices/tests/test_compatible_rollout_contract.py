@@ -31,6 +31,7 @@ def test_candidate_starts_api_before_workers_and_drains_for_45_seconds():
     assert "read_active_manifest_release" in script
     assert "set_slot_provenance" in script
     assert '"slots": slots' in script
+    assert 'up -d --no-deps --force-recreate "${target_services[@]}"' in script
 
 
 def test_rollout_has_service_sha_digest_deduplication_and_automatic_rollback():
@@ -43,7 +44,7 @@ def test_rollout_has_service_sha_digest_deduplication_and_automatic_rollback():
     assert 'WA_VALIDATOR_TIMEOUT_SECONDS: "300"' in workflow
     assert "install_active_caddy_config" not in script
     assert "cannot establish immutable provenance" in script
-    assert "failed legacy rollback could have recorded the candidate in both slots" in script
+    assert "interrupted historical rollback" in script
     assert "rollout-microservices.sh status" in workflow
     assert workflow.index("Synchronize service release controls") < workflow.index(
         "Validate the exact controls and manifest"
