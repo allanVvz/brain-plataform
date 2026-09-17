@@ -23,8 +23,16 @@ usar uma stack Docker local para implementar, auditar ou testar este projeto.
   continuam operando. Persona nova sem binding/workflow/transporte ja e inerte
   e nao exige pausar outras personas. So retomar o que foi pausado mediante
   autorizacao explicita posterior.
+- Pausa global e excepcional: use-a somente quando uma operacao altera runtime
+  compartilhado, troca workers/imagens, aplica migration, ou nao pode ser
+  isolada por uma trava transacional. Limpeza de uma lead/conversa usa a trava
+  do claim, lock da lead e checagem de trabalho em voo; ela nao pausa personas
+  ou workers nao envolvidos.
 - Retencao e limpeza permanecem em dry-run ate autorizacao especifica. Nunca
   inferir permissao para apagar dados a partir de uma autorizacao de deploy.
+  Uma limpeza aprovada continua exigindo escopo exato, dry-run, lock local e
+  confirmacao de que a lead nao possui buffer em processamento/proof antes do
+  commit.
 
 ### Auditoria
 1. Confirmar SHA, release, health/readiness e o estado operacional no escopo da
