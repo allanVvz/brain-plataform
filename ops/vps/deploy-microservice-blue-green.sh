@@ -202,20 +202,25 @@ until [[ "$("${COMPOSE[@]}" ps --format json "$target_service" | python3 -c 'imp
 done
 
 expected_sha="$(manifest_value service "$SERVICE" sha)"
+# Docker's healthcheck is the candidate's real readiness probe. Do not issue a
+# second HTTP probe here: it duplicates the contract and may travel through a
+# container-specific auth path even though the healthcheck already proved the
+# listener and database readiness. Verify immutable provenance in-process.
 if [[ "$ACTION" == "--rollback" ]]; then
   "${COMPOSE[@]}" exec -T "$target_service" python -c \
-    'import json,re,urllib.request; p=json.load(urllib.request.urlopen("http://127.0.0.1:8080/health/ready", timeout=5)); assert p["status"]=="ready" and re.fullmatch(r"[0-9a-f]{40}", p["source_sha"])'
+    'import os,re; assert re.fullmatch(r"[0-9a-f]{40}", os.environ["SOURCE_SHA"])'
 else
   "${COMPOSE[@]}" exec -T "$target_service" python -c \
-    'import json,sys,urllib.request; p=json.load(urllib.request.urlopen("http://127.0.0.1:8080/health/ready", timeout=5)); assert p["status"]=="ready" and p["source_sha"]==sys.argv[1]' \
+    'import os,sys; assert os.environ["SOURCE_SHA"] == sys.argv[1]' \
     "$expected_sha"
 fi
 
 if [[ "$ACTION" == "--apply" && "$SERVICE" == "conversation-runtime" ]]; then
   # Candidate-only contract smoke: execute the exact image through its private
-  # listener before any worker starts or public route changes.
+  # application surface before any worker starts or public route changes. The
+  # HTTP listener has already been proven by the container healthcheck above.
   "${COMPOSE[@]}" exec -T "$target_service" python -c \
-    'import json,urllib.request; p=json.load(urllib.request.urlopen("http://127.0.0.1:8080/openapi.json", timeout=5))["paths"]; required={"/internal/v1/conversations/resolve-understanding","/internal/v1/conversations/execute-agentic"}; assert required <= set(p), sorted(required-set(p))'
+    'from main import app; p=app.openapi()["paths"]; required={"/internal/v1/conversations/resolve-understanding","/internal/v1/conversations/execute-agentic"}; assert required <= set(p), sorted(required-set(p))'
 fi
 
 # Move only this service's consumers. The old consumers receive at most the

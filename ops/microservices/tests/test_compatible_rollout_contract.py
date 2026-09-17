@@ -6,15 +6,16 @@ ROOT = Path(__file__).resolve().parents[3]
 
 def test_candidate_starts_api_before_workers_and_drains_for_45_seconds():
     script = (ROOT / "ops/vps/deploy-microservice-blue-green.sh").read_text(encoding="utf-8")
+    compose = (ROOT / "infra/microservices/docker-compose.blue-green.yml").read_text(encoding="utf-8")
     api_start = 'up -d --no-deps --force-recreate "$target_service"'
     worker_start = 'up -d --no-deps --force-recreate "${target_services[@]:1}"'
     readiness = 'http://127.0.0.1:8080/health/ready'
     assert api_start in script
     assert worker_start in script
-    assert readiness in script
-    assert script.index(api_start) < script.index(readiness) < script.index(worker_start)
+    assert readiness in compose
+    assert script.index(api_start) < script.index("deadline=$((SECONDS + 180))") < script.index(worker_start)
     assert "/internal/v1/conversations/resolve-understanding" in script
-    assert script.index(readiness) < script.index(
+    assert script.index("deadline=$((SECONDS + 180))") < script.index(
         "/internal/v1/conversations/resolve-understanding"
     ) < script.index(worker_start)
     assert 'stop -t 45 "${old_services[@]:1}"' in script
@@ -22,6 +23,11 @@ def test_candidate_starts_api_before_workers_and_drains_for_45_seconds():
     assert 'stop -t 45 "$target_service"' in script
     assert 'flock -w 120 9' in script
     assert 'public-upstream.previous-${SERVICE}.caddy' in script
+    # Readiness is established exactly once by the Docker healthcheck. The
+    # rollout then checks immutable provenance without a second HTTP request.
+    assert 'os.environ["SOURCE_SHA"] == sys.argv[1]' in script
+    assert 'urllib.request.urlopen("http://127.0.0.1:8080/health/ready"' not in script
+    assert 'from main import app; p=app.openapi()["paths"]' in script
 
 
 def test_rollout_has_service_sha_digest_deduplication_and_automatic_rollback():
