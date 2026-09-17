@@ -80,6 +80,8 @@ jobs:
               'name',(SELECT name FROM target),
               'name_matches',coalesce((SELECT position(lower('$(printf '%s' "$EXPECTED_NAME" | sed "s/'/''/g")') in lower(coalesce(name,'')))>0 FROM target),false),
               'messages',(SELECT count(*) FROM public.messages WHERE lead_id=${LEAD_REF}),
+              'immutable_consent_messages',(SELECT count(*) FROM public.messages m WHERE m.lead_id=${LEAD_REF} AND EXISTS (SELECT 1 FROM public.contact_consents c WHERE c.lead_id=${LEAD_REF} AND (c.request_message_id=m.id OR c.response_message_id=m.id))),
+              'deletable_messages',(SELECT count(*) FROM public.messages m WHERE m.lead_id=${LEAD_REF} AND NOT EXISTS (SELECT 1 FROM public.contact_consents c WHERE c.lead_id=${LEAD_REF} AND (c.request_message_id=m.id OR c.response_message_id=m.id))),
               'buffers',(SELECT count(*) FROM public.lead_buffer WHERE lead_ref=${LEAD_REF}),
               'active_buffers',(SELECT count(*) FROM public.lead_buffer WHERE lead_ref=${LEAD_REF} AND status IN ('processing','awaiting_proof')),
               'ledgers',(SELECT count(*) FROM ledgers),
@@ -128,7 +130,15 @@ jobs:
             DELETE FROM public.conversation_ledgers WHERE lead_ref=${LEAD_REF};
             DELETE FROM public.conversation_journeys WHERE lead_ref=${LEAD_REF};
             DELETE FROM public.lead_buffer WHERE lead_ref=${LEAD_REF};
-            DELETE FROM public.messages WHERE lead_id=${LEAD_REF};
+            -- Consent evidence is append-only. It is deliberately retained,
+            -- but is disconnected from all agent state by the deletions above.
+            DELETE FROM public.messages m
+             WHERE m.lead_id=${LEAD_REF}
+               AND NOT EXISTS (
+                 SELECT 1 FROM public.contact_consents c
+                  WHERE c.lead_id=${LEAD_REF}
+                    AND (c.request_message_id=m.id OR c.response_message_id=m.id)
+               );
             DELETE FROM public.chat_history
              WHERE session_id='${LEAD_REF}' OR session_id='${PERSONA_SLUG}:${LEAD_REF}';
             DO \$\$
@@ -157,7 +167,7 @@ jobs:
             END \$\$;
             COMMIT;
             " | "${psql[@]}"
-            remaining="$(printf '%s\n' "SELECT jsonb_build_object('lead_count',count(*),'messages',(SELECT count(*) FROM public.messages WHERE lead_id=${LEAD_REF}),'buffers',(SELECT count(*) FROM public.lead_buffer WHERE lead_ref=${LEAD_REF}),'ledgers',(SELECT count(*) FROM public.conversation_ledgers WHERE lead_ref=${LEAD_REF}),'conversation_metadata_keys',(SELECT coalesce(jsonb_agg(key ORDER BY key), '[]'::jsonb) FROM jsonb_object_keys(coalesce((SELECT metadata FROM public.leads WHERE id=${LEAD_REF}), '{}'::jsonb)) AS key WHERE key IN ('conversation_state','conversation_runtime','qualification','handoff_reason','commercial_note_projection','lp_image_upload_previous_handoff_level'))) FROM public.leads l WHERE l.id=${LEAD_REF};" | "${psql[@]}")"
+            remaining="$(printf '%s\n' "SELECT jsonb_build_object('lead_count',count(*),'messages',(SELECT count(*) FROM public.messages WHERE lead_id=${LEAD_REF}),'immutable_consent_messages',(SELECT count(*) FROM public.messages m WHERE m.lead_id=${LEAD_REF} AND EXISTS (SELECT 1 FROM public.contact_consents c WHERE c.lead_id=${LEAD_REF} AND (c.request_message_id=m.id OR c.response_message_id=m.id))),'buffers',(SELECT count(*) FROM public.lead_buffer WHERE lead_ref=${LEAD_REF}),'ledgers',(SELECT count(*) FROM public.conversation_ledgers WHERE lead_ref=${LEAD_REF}),'conversation_metadata_keys',(SELECT coalesce(jsonb_agg(key ORDER BY key), '[]'::jsonb) FROM jsonb_object_keys(coalesce((SELECT metadata FROM public.leads WHERE id=${LEAD_REF}), '{}'::jsonb)) AS key WHERE key IN ('conversation_state','conversation_runtime','qualification','handoff_reason','commercial_note_projection','lp_image_upload_previous_handoff_level'))) FROM public.leads l WHERE l.id=${LEAD_REF};" | "${psql[@]}")"
             echo "LEAD_CLEANUP_REMAINING=$remaining"
-            python3 -c 'import json,sys; row=json.loads(sys.argv[1]); scope=sys.argv[2]; assert row["messages"] == row["buffers"] == row["ledgers"] == 0, row; assert row["conversation_metadata_keys"] == [], row; assert (row["lead_count"] == 1) if scope == "conversation" else (row["lead_count"] == 0), row' "$remaining" "$CLEANUP_SCOPE"
+            python3 -c 'import json,sys; row=json.loads(sys.argv[1]); scope=sys.argv[2]; assert row["messages"] == row["immutable_consent_messages"], row; assert row["buffers"] == row["ledgers"] == 0, row; assert row["conversation_metadata_keys"] == [], row; assert (row["lead_count"] == 1) if scope == "conversation" else (row["lead_count"] == 0), row' "$remaining" "$CLEANUP_SCOPE"
             echo "LEAD_CLEANUP_APPLY=passed scope=$CLEANUP_SCOPE lead_ref=$LEAD_REF persona_slug=$PERSONA_SLUG claim_scope=transactional"
