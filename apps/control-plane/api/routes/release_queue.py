@@ -156,11 +156,15 @@ def reschedule_item(item_id: str, body: ItemOverrideBody, request: Request):
 def list_queue(
     request: Request,
     origin: str | None = Query(None, pattern="^(conversation|campaign|manual|proactive|system)$"),
+    persona_id: str | None = Query(None),
     status: str | None = Query(None, max_length=40), offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
 ):
     user = auth_service.current_user(request)
-    if auth_service.is_admin(user):
+    if persona_id:
+        auth_service.assert_persona_capability(request, "view", persona_id=persona_id)
+        scope = [persona_id]
+    elif auth_service.is_admin(user):
         scope = None
     else:
         scope = auth_service.allowed_persona_ids(request)

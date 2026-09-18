@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertCircle, CheckCircle2, RefreshCw, Send } from "lucide-react";
 import { api } from "@/lib/api";
+import { useGlobalPersona } from "@/lib/useGlobalPersona";
 
 type QueueAction = "pause" | "resume" | "reprocess" | "send-preview" | "reactivate";
 type QueueItem = {
@@ -65,6 +66,7 @@ function primaryAction(item: QueueItem): { action: QueueAction; label: string } 
 }
 
 export function ReleaseQueuePanel() {
+  const persona = useGlobalPersona();
   const [items, setItems] = useState<QueueItem[]>([]);
   const [origin, setOrigin] = useState("");
   const [status, setStatus] = useState("");
@@ -75,12 +77,17 @@ export function ReleaseQueuePanel() {
   const [error, setError] = useState("");
 
   const load = useCallback(async (offset = 0, append = false) => {
-    const result = await api.messagingQueue({ origin: origin || undefined, status: status || undefined, offset, limit: 50 });
+    if (!persona.id) {
+      setItems([]);
+      setNextOffset(null);
+      return;
+    }
+    const result = await api.messagingQueue({ personaId: persona.id, origin: origin || undefined, status: status || undefined, offset, limit: 50 });
     const rows = (result.items || []) as QueueItem[];
     setItems((current) => append ? [...current, ...rows] : rows);
     setNextOffset(result.next_offset ?? null);
     if (!append) setSelected([]);
-  }, [origin, status]);
+  }, [origin, persona.id, status]);
 
   useEffect(() => {
     load().catch((cause) => setError(cause?.message || "Falha ao carregar a fila."));
@@ -88,6 +95,9 @@ export function ReleaseQueuePanel() {
 
   const selectedItems = useMemo(() => items.filter((item) => selected.includes(item.id)), [items, selected]);
   const allSelected = items.length > 0 && selected.length === items.length;
+  const selectedActions = useMemo(() => ACTIONS.filter(({ value }) =>
+    selectedItems.length > 0 && selectedItems.every((item) => item.actions?.includes(value === "send-preview" ? "send_preview" : value)),
+  ), [selectedItems]);
 
   async function runAction(action: QueueAction, targets = selectedItems) {
     if (!targets.length) return;
@@ -140,11 +150,7 @@ export function ReleaseQueuePanel() {
           <option value="">Todos os estados</option>{STATES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select>
       </label>
-      <label className="min-w-44 text-xs text-obs-faint">Ação para selecionadas
-        <select aria-label="Ação para selecionadas" value="" disabled={!selectedItems.length || busy} onChange={(event) => { if (event.target.value) void runAction(event.target.value as QueueAction); }} className="mt-1 block w-full rounded-lg border border-obs-violet/30 bg-obs-panel px-3 py-2 text-sm text-obs-text disabled:opacity-40">
-          <option value="">Selecionar ação</option>{ACTIONS.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
-        </select>
-      </label>
+      {selectedActions.map(({ value, label }) => <button key={value} type="button" disabled={busy} onClick={() => void runAction(value)} className="rounded-lg border border-obs-violet/30 px-3 py-2 text-sm text-obs-text disabled:opacity-40">{label}</button>)}
       <button type="button" onClick={() => load().catch((cause) => setError(cause?.message || "Falha ao atualizar."))} className="flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-sm text-obs-subtle"><RefreshCw size={15} />Atualizar</button>
     </div>
 

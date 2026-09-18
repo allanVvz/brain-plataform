@@ -8,6 +8,10 @@ vi.mock("@/lib/api", () => ({
   api: { messagingQueue: mocks.queue, controlMessagingQueue: mocks.control },
 }));
 
+vi.mock("@/lib/useGlobalPersona", () => ({
+  useGlobalPersona: () => ({ id: "tock-persona", slug: "tock-fatal" }),
+}));
+
 describe("actionable message queue", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -28,8 +32,9 @@ describe("actionable message queue", () => {
     expect(screen.queryByText("Global")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Lead")).not.toBeInTheDocument();
     fireEvent.click(screen.getByLabelText("Selecionar mensagem"));
-    fireEvent.change(screen.getAllByRole("combobox")[2], { target: { value: "reprocess" } });
+    fireEvent.click(screen.getByRole("button", { name: "Gerar preview" }));
 
+    await waitFor(() => expect(mocks.queue).toHaveBeenCalledWith(expect.objectContaining({ personaId: "tock-persona" })));
     await waitFor(() => expect(mocks.control).toHaveBeenCalledWith("reprocess", { buffer_ids: ["technical-inbound"] }));
   });
 
