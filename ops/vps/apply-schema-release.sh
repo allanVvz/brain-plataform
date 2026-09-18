@@ -105,14 +105,25 @@ done < "$pending_files"
 
 [[ "$ACTION" == "--apply" ]] || exit 0
 
-python3 - <<'PY'
+# Additive migrations remain online.  A global claim pause is reserved for an
+# explicitly destructive or queue-incompatible schema operation; requiring it
+# for every additive index/RPC/grant release unnecessarily stops unrelated
+# personas and contradicts the blue/green release contract.
+requires_claim_pause=false
+if grep -Eiq '^[[:space:]]*(DROP[[:space:]]+TABLE|ALTER[[:space:]]+TABLE.+DROP[[:space:]]+COLUMN|ALTER[[:space:]]+TABLE.+ALTER[[:space:]]+COLUMN.+TYPE)' \
+  $(sed 's|^|supabase/migrations/|' "$pending_files"); then
+  requires_claim_pause=true
+fi
+if [[ "$requires_claim_pause" == true ]]; then
+  python3 - <<'PY'
 import json
 state = json.load(open('.deploy/control/claims-paused.json', encoding='utf-8'))
-assert state.get('paused') is True, 'global claims must remain paused'
+assert state.get('paused') is True, 'global claims must remain paused for destructive schema'
 PY
+fi
 
 if (( pending_count == 0 )); then
-  echo "schema_apply_complete current=$current_schema target=$target_schema pending=0 global_claims_paused=true"
+  echo "schema_apply_complete current=$current_schema target=$target_schema pending=0 global_claims_paused=$requires_claim_pause"
   exit 0
 fi
 
@@ -150,4 +161,4 @@ where not exists (
 SQL
 )"
 [[ "$missing_after" == "0" ]] || { echo "schema verification failed missing=$missing_after" >&2; exit 1; }
-echo "schema_apply_complete previous=$current_schema target=$target_schema applied=$pending_count backup=$backup_dir isolated_restore=true global_claims_paused=true"
+echo "schema_apply_complete previous=$current_schema target=$target_schema applied=$pending_count backup=$backup_dir isolated_restore=true global_claims_paused=$requires_claim_pause"
