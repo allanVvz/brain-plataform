@@ -21,10 +21,11 @@ describe("actionable message queue", () => {
     mocks.control.mockResolvedValue({ items: [{ result: "preview_gerado" }] });
   });
 
-  it("keeps global scope and generates a preview without asking for a reason", async () => {
+  it("uses the persona already selected by the dashboard and generates a preview without asking for a reason", async () => {
     render(<ReleaseQueuePanel />);
 
-    expect(await screen.findByText("Global")).toBeInTheDocument();
+    expect(await screen.findByText("Mensagens ativas da persona selecionada.", { exact: false })).toBeInTheDocument();
+    expect(screen.queryByText("Global")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Lead")).not.toBeInTheDocument();
     fireEvent.click(screen.getByLabelText("Selecionar mensagem"));
     fireEvent.change(screen.getAllByRole("combobox")[2], { target: { value: "reprocess" } });

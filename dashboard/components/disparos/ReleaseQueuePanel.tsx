@@ -126,19 +126,18 @@ export function ReleaseQueuePanel() {
   return <section className="flex flex-col gap-4">
     <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-obs-surface px-3 py-2 text-xs text-obs-subtle">
       <AlertCircle size={15} className="text-obs-violet" />
-      Fila global de mensagens ativas. Histórico e conversas já respondidas não aparecem aqui.
+      Mensagens ativas da persona selecionada. Histórico e conversas já respondidas não aparecem aqui.
     </div>
 
     <div className="flex flex-wrap items-end gap-2 rounded-xl border border-white/10 bg-obs-surface p-3">
-      <div className="mr-2 min-w-32 text-xs text-obs-faint"><span className="mb-1 block">Persona</span><span className="block rounded-lg bg-white/[0.04] px-3 py-2 text-sm text-obs-text">Global</span></div>
       <label className="min-w-40 text-xs text-obs-faint">Origem
         <select aria-label="Origem" value={origin} onChange={(event) => setOrigin(event.target.value)} className="mt-1 block w-full rounded-lg border border-white/10 bg-obs-panel px-3 py-2 text-sm text-obs-text">
-          <option value="">Todas</option>{Object.entries(ORIGINS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+          <option value="">Todas as origens</option>{Object.entries(ORIGINS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
         </select>
       </label>
       <label className="min-w-52 text-xs text-obs-faint">Estado
         <select aria-label="Estado" value={status} onChange={(event) => setStatus(event.target.value)} className="mt-1 block w-full rounded-lg border border-white/10 bg-obs-panel px-3 py-2 text-sm text-obs-text">
-          <option value="">Todos</option>{STATES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          <option value="">Todos os estados</option>{STATES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select>
       </label>
       <label className="min-w-44 text-xs text-obs-faint">Ação para selecionadas
