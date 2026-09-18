@@ -463,23 +463,13 @@ def reactivation_notice(lead_ref: int, *, reason: str) -> dict:
     if not text:
         return {"sent": False, "skipped": "no_published_copy"}
 
-    # One notice per resume, not per click: the key is the resume itself.
-    resumed_at = str(lead.get("updated_at") or "")[:19]
-    message_id = f"reactivation:{lead_ref}:{resumed_at}"
-    try:
-        from services import transport_client
-
-        result = transport_client.enqueue_outbound(
-            lead=lead, text=text, sender_type="agent",
-            message_id=message_id, correlation_id=message_id,
-            idempotency_key=message_id,
-            metadata={"reactivation_reason": reason, "automatic": True},
-        )
-    except Exception as exc:
-        # The AI is already resumed and the customer is not blocked by this.
-        logger.warning("reactivation_notice enqueue failed: %s", exc)
-        return {"sent": False, "skipped": "enqueue_failed"}
-    return {"sent": not result.get("deduplicated"), "message_id": message_id}
+    # The legacy reactivation block only carries strings.  It has no Copy/Rule
+    # node identity to prove, pin or revoke against the publication, so it
+    # cannot be admitted as an autonomous outbound.  The proactive publisher
+    # must use enqueue_proactive_with_proof_v1 with published node ids instead.
+    # Failing closed here prevents a resume from bypassing the unified queue.
+    logger.info("reactivation_notice held: published proactive proof nodes are required")
+    return {"sent": False, "skipped": "published_proactive_proof_required"}
 
 
 def _session_window_closed(lead: dict, window: dict) -> bool:

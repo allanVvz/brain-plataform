@@ -80,6 +80,7 @@ def test_current_pending_migrations_are_atomic_compatible():
             "137_canonical_asset_content_dedup.sql",
             "138_resume_binding_without_releasable_backlog.sql",
             "139_release_queue_microservice_grants.sql",
+            "145_actionable_message_queue_preview.sql",
         ]
     )
 

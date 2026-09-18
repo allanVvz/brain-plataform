@@ -220,73 +220,29 @@ def set_item_override(
 
 
 def list_unified_queue(
-    *, persona_ids: list[str] | None, persona_id: str | None = None,
-    lead_ref: int | None = None, origin: str | None = None,
+    *, persona_ids: list[str] | None, origin: str | None = None,
     status: str | None = None, offset: int = 0, limit: int = 50,
-    history: str | None = None,
 ) -> dict[str, Any]:
-    """Read the global queue from canonical lead_buffer, never from batches."""
-    query = supabase_client.get_client().table("lead_buffer").select("*")
-    if persona_id:
-        query = query.eq("persona_id", persona_id)
-    elif persona_ids is not None:
-        if not persona_ids:
-            return {"items": [], "next_offset": None, "timeline": [], "history": []}
-        query = query.in_("persona_id", persona_ids)
-    if lead_ref is not None:
-        query = query.eq("lead_ref", lead_ref)
-    if origin:
-        query = query.eq("message_origin", origin)
-    if status:
-        query = query.eq("status", status)
-    rows = _rows(query.order("created_at", desc=True).range(offset, offset + limit))
-    has_more = len(rows) > limit
-    rows = rows[:limit]
-    lead_refs = list({row.get("lead_ref") for row in rows if row.get("lead_ref") is not None})
-    persona_ids_for_rows = list({row.get("persona_id") for row in rows if row.get("persona_id")})
-    leads = {
-        row["id"]: row for row in _rows(
-            supabase_client.get_client().table("leads").select("id,nome,persona_id")
-            .in_("id", lead_refs)
-        )
-    } if lead_refs else {}
-    personas = {
-        row["id"]: row for row in _rows(
-            supabase_client.get_client().table("personas").select("id,name,slug")
-            .in_("id", persona_ids_for_rows)
-        )
-    } if persona_ids_for_rows else {}
-    buffer_ids = [str(row["id"]) for row in rows]
-    actions_by_buffer = _queue_actions(buffer_ids)
-    for row in rows:
-        payload = row.get("payload") or {}
-        row["preview"] = str(payload.get("text") or payload.get("caption") or "[sem texto]")[:240]
-        row["lead"] = leads.get(row.get("lead_ref"))
-        row["persona"] = personas.get(row.get("persona_id"))
-        row["origin"] = row.get("message_origin") or "conversation"
-        row["actions"] = actions_by_buffer.get(str(row["id"]), [])
+    """Return the global active projection from its database source of truth.
 
-    timeline: list[dict] = []
-    if lead_ref is not None and _lead_is_in_scope(lead_ref, persona_ids, persona_id):
-        # messages is the immutable user-visible projection; lead_buffer is
-        # included separately above for transient/retry/paused state.
-        timeline = _rows(
-            supabase_client.get_client().table("messages").select("*")
-            .eq("lead_id", lead_ref).order("created_at", desc=True).range(0, 199)
-        )
-        for message in timeline:
-            message["preview"] = str(message.get("content") or "[sem texto]")[:240]
-
-    event_history = _queue_history(
-        persona_ids=persona_ids, persona_id=persona_id, lead_ref=lead_ref,
-        reprocessed_only=history == "reprocessed", offset=offset, limit=limit,
-    ) if history else []
-    return {
-        "items": rows,
-        "next_offset": offset + limit if has_more else None,
-        "timeline": timeline,
-        "history": event_history,
-    }
+    The RPC calculates visibility before paging, so stale transcript rows can
+    never displace a real queued message.  Persona authorization is resolved
+    by the route and passed as an immutable allowed-id set.
+    """
+    if persona_ids == []:
+        return {"items": [], "next_offset": None}
+    data = supabase_client.get_client().rpc("list_actionable_message_queue_v1", {
+        "p_persona_ids": persona_ids,
+        "p_origin": origin,
+        "p_status": status,
+        "p_offset": offset,
+        "p_limit": limit,
+    }).execute().data
+    if isinstance(data, list):
+        data = data[0] if data else None
+    if not isinstance(data, dict):
+        raise HTTPException(502, "A fila operacional retornou uma resposta invalida.")
+    return data
 
 
 def _lead_is_in_scope(lead_ref: int, persona_ids: list[str] | None, persona_id: str | None) -> bool:
@@ -353,11 +309,11 @@ def _queue_history(
 
 
 def next_reprocessable_queue_item(lead_ref: int) -> dict | None:
-    """Return the earliest safe inbound candidate, never an outbound retry."""
+    """Return the earliest technical inbound that can create a fresh preview."""
     rows = _rows(
         supabase_client.get_client().table("lead_buffer").select("id,persona_id,status,direction,payload,created_at")
         .eq("lead_ref", lead_ref).eq("direction", "inbound")
-        .in_("status", ["received", "buffered", "retry"]).order("created_at").range(0, 49)
+        .eq("status", "waiting_human").order("created_at").range(0, 49)
     )
     for row in rows:
         payload = row.get("payload") or {}
@@ -369,19 +325,62 @@ def next_reprocessable_queue_item(lead_ref: int) -> dict | None:
             supabase_client.get_client().table("conversation_turn_proofs").select("id")
             .eq("canonical_inbound_id", str(row["id"])).limit(1).maybe_single()
         )
-        if not proof:
+        technical_event = _one(
+            supabase_client.get_client().table("system_events").select("id")
+            .eq("entity_type", "lead_buffer").eq("entity_id", str(row["id"]))
+            .in_("event_type", ["conversation.technical_failure", "conversation.technical_handoff"])
+            .limit(1).maybe_single()
+        )
+        if not proof and technical_event:
             return row
     return None
 
 
 def control_unified_queue(
-    *, buffer_ids: list[str], action: str, reason: str,
-    idempotency_key: str, actor_user_id: str | None,
+    *, buffer_ids: list[str], action: str, actor_user_id: str | None,
 ) -> dict[str, Any]:
-    return supabase_client.get_client().rpc("control_message_queue_v1", {
+    return supabase_client.get_client().rpc("control_message_queue_v2", {
         "p_buffer_ids": buffer_ids,
         "p_action": action,
-        "p_reason": reason,
-        "p_idempotency_key": idempotency_key,
         "p_actor_user_id": _uuid_or_none(actor_user_id),
     }).execute().data
+
+
+def generate_queue_previews(*, buffer_ids: list[str], actor_user_id: str | None) -> dict[str, Any]:
+    """Claim each technical inbound, then ask runtime for an inert preview."""
+    results: list[dict[str, Any]] = []
+    actor_id = _uuid_or_none(actor_user_id)
+    for buffer_id in buffer_ids:
+        claimed: dict[str, Any] | None = None
+        try:
+            value = supabase_client.get_client().rpc("claim_queue_preview_v1", {
+                "p_buffer_id": buffer_id, "p_actor_user_id": actor_id,
+            }).execute().data
+            claimed = value[0] if isinstance(value, list) and value else value
+            if not isinstance(claimed, dict):
+                raise RuntimeError("preview claim returned an invalid payload")
+            persona = _one(
+                supabase_client.get_client().table("personas").select("slug")
+                .eq("id", claimed["persona_id"]).maybe_single()
+            ) or {}
+            result = runtime_client.generate_queue_preview({
+                "persona_slug": persona.get("slug"), "lead_ref": claimed["lead_ref"],
+                "message": claimed.get("text"), "message_id": str(buffer_id),
+                # Older technical rows can predate inbound correlation ids.
+                # A stable synthetic identity preserves idempotency for that
+                # one canonical inbound without reviving an old delivery.
+                "correlation_id": claimed.get("correlation_id") or f"queue-preview:{buffer_id}",
+                "channel_binding_id": claimed.get("channel_binding_id"),
+                "inbound_buffer_id": str(buffer_id),
+            }, actor_user_id=actor_id)
+            results.append({"buffer_id": buffer_id, "result": "preview_gerado", "preview": result.get("reply_text")})
+        except Exception as exc:
+            if claimed:
+                try:
+                    supabase_client.get_client().rpc("release_queue_preview_claim_v1", {
+                        "p_buffer_id": buffer_id, "p_error": str(exc)[:1000],
+                    }).execute()
+                except Exception:
+                    pass
+            results.append({"buffer_id": buffer_id, "result": "bloqueado", "reason": str(exc)[:300]})
+    return {"items": results}

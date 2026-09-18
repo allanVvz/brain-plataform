@@ -361,12 +361,12 @@ export const api = {
     req<any>(`/messaging/release-queue/items/${encodeURIComponent(itemId)}/resume`, { method: "POST", body: JSON.stringify(body) }),
   rescheduleReleaseItem: (itemId: string, body: Record<string, unknown>) =>
     req<any>(`/messaging/release-queue/items/${encodeURIComponent(itemId)}/reschedule`, { method: "POST", body: JSON.stringify(body) }),
-  messagingQueue: (params: { persona_id?: string; lead_ref?: number; origin?: string; status?: string; history?: "all" | "reprocessed"; offset?: number; limit?: number }) => {
+  messagingQueue: (params: { origin?: string; status?: string; offset?: number; limit?: number }) => {
     const query = new URLSearchParams();
     Object.entries(params).forEach(([key, value]) => { if (value !== undefined && value !== "") query.set(key, String(value)); });
     return req<any>(`/messaging/queue?${query.toString()}`);
   },
-  controlMessagingQueue: (action: "pause" | "resume" | "reprocess", body: Record<string, unknown>) =>
+  controlMessagingQueue: (action: "pause" | "resume" | "reprocess" | "send-preview", body: Record<string, unknown>) =>
     req<any>(`/messaging/queue/${action}`, { method: "POST", body: JSON.stringify(body) }),
   updateLeadInfo: (leadRef: number, body: {
     nome?: string;

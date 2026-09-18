@@ -78,3 +78,20 @@ def test_manual_envelope_fetches_published_policy_when_not_pinned(monkeypatch):
     )
     assert envelope["buffer"]["message_origin"] == "manual"
     assert envelope["message"]["metadata"]["published_business_hours"] == policy
+
+
+def test_preview_envelope_remains_inert_until_operator_sends(monkeypatch):
+    policy = {
+        "timezone": "America/Sao_Paulo", "start": "08:00", "end": "20:00",
+        "graph_checksum": "sha256:published", "graph_version": 3,
+    }
+    monkeypatch.setattr(whatsapp_outbox, "resolve_lead_binding", lambda lead: {"id": "binding"})
+    monkeypatch.setattr(whatsapp_outbox, "_recipient_for_lead", lambda lead: "5511999999999")
+    monkeypatch.setattr(whatsapp_outbox, "_observe_duplicate_content", lambda **_: None)
+    envelope = whatsapp_outbox.prepare_outbound_envelope(
+        lead={"id": 7, "persona_id": "persona"}, text="preview", sender_type="agent",
+        message_id="preview:1", correlation_id="preview:1", initial_status="preview_ready",
+        metadata={"published_business_hours": policy},
+    )
+    assert envelope["buffer"]["status"] == "preview_ready"
+    assert envelope["buffer"]["payload"]["published_business_hours"] == policy

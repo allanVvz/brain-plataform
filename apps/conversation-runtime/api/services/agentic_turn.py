@@ -484,6 +484,7 @@ def execute(
     inbound_buffer_id: str,
     publication_id: str | None = None,
     provider: str | None = None,
+    preview_only: bool = False,
 ) -> dict[str, Any]:
     context = conversation_runtime.build_context(
         persona_slug=persona_slug,
@@ -624,6 +625,11 @@ def execute(
                 "cited_chunk_ids": reply.cited_chunk_ids,
             },
         ) from exc
+    if preview_only and not str(response.reply_text or "").strip():
+        # Do not spend the inbound proof on an operator action that cannot
+        # render anything.  The control plane releases its technical claim so
+        # the item remains actionable instead of disappearing from the queue.
+        raise AgenticTurnError("preview_unavailable", "the published policy produced no preview")
     result = conversation_runtime.commit(
         lead_ref=lead_ref,
         context=resolved.context,
@@ -636,6 +642,7 @@ def execute(
         # Database metadata keeps this historical value until a schema-neutral
         # rename is possible. It no longer means that n8n executes the turn.
         expected_decision_owner="n8n_agents",
+        outbound_initial_status="preview_ready" if preview_only else "awaiting_proof",
     )
     committed = {
         **result,
@@ -646,6 +653,7 @@ def execute(
         "pipeline_contract": "conversation_agentic_v1",
         "execution_strategy": "interpret_then_respond",
         "model_calls": 2,
+        "preview_ready": preview_only,
     }
     committed.setdefault(
         "outbound_enqueued",

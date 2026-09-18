@@ -172,8 +172,9 @@ def test_transport_repository_contains_only_the_reviewed_production_surface():
         for node in tree.body
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
-    assert len(functions) == 74
+    assert len(functions) == 75
     assert "terminalize_inbound_technical_failure" in functions
+    assert "enqueue_proactive_with_proof" in functions
     assert {
         "claim_conversation_commit",
         "enqueue_wa_validator_session",
@@ -336,6 +337,13 @@ def test_repeated_copy_is_observed_but_distinct_identity_is_enqueued(monkeypatch
     monkeypatch.setattr(
         whatsapp_outbox.supabase_client, "find_recent_duplicate_whatsapp_outbound",
         lambda **_kwargs: {"id": "old", "status": "sent"},
+    )
+    monkeypatch.setattr(
+        whatsapp_outbox.control_plane_client, "published_outbound_policy",
+        lambda _persona_id: {"published_business_hours": {
+            "timezone": "America/Sao_Paulo", "start": "08:00", "end": "20:00",
+            "graph_checksum": "sha256:published",
+        }},
     )
     monkeypatch.setattr(whatsapp_outbox.event_emitter, "emit", lambda *args, **kwargs: events.append((args, kwargs)))
     monkeypatch.setattr(

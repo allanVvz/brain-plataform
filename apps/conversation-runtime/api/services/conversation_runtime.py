@@ -2355,7 +2355,10 @@ def commit(
     inbound_buffer_id: str | None = None,
     expected_decision_owner: str | None = None,
     n8n_execution_id: str | None = None,
+    outbound_initial_status: str = "awaiting_proof",
 ) -> dict[str, Any]:
+    if outbound_initial_status not in {"awaiting_proof", "preview_ready"}:
+        raise ValueError("unsupported outbound initial status")
     if _reply_confirms_price_or_schedule(response.reply_text):
         if response.proposal is not None:
             authorized = bool(context.graph_contract.get("confirmation_required"))
@@ -2940,7 +2943,7 @@ def commit(
             prepared_outbound = transport_client.prepare_outbound(
                 lead=lead, text=response.reply_text, sender_type="agent",
                 message_id=message_id, correlation_id=message_id,
-                idempotency_key=message_id, initial_status="awaiting_proof",
+                idempotency_key=message_id, initial_status=outbound_initial_status,
                 metadata=outbound_metadata,
             )
         else:

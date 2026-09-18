@@ -132,6 +132,26 @@ class ExecuteRequest(StrictModel):
         return normalized
 
 
+class QueuePreviewRequest(StrictModel):
+    """One operator-requested, non-deliverable preview for a technical turn."""
+    persona_slug: str
+    lead_ref: int
+    message: str
+    message_id: str | None = None
+    correlation_id: str
+    phone_number_id: str | None = None
+    channel_binding_id: str
+    inbound_buffer_id: str
+
+    @field_validator("message")
+    @classmethod
+    def preview_message_must_not_be_blank(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("message must not be blank")
+        return normalized
+
+
 
 @router.post("/execute")
 def execute(
@@ -189,6 +209,27 @@ def execute_agentic(
             },
         )
         return _terminalize_technical_failure(command)
+
+
+@router.post("/queue-preview")
+def queue_preview(
+    body: QueuePreviewRequest,
+    x_webhook_token: str | None = Header(None, alias="X-Webhook-Token"),
+) -> dict:
+    """Generate a proof-gated reply preview without admitting provider send.
+
+    The control plane claims the technical inbound before calling this route.
+    Unlike the ordinary worker route, an operator retry failure is returned to
+    the queue and never creates another technical handoff cascade.
+    """
+    internal_auth.authorize_webhook_token(x_webhook_token)
+    try:
+        result = agentic_turn.execute(**body.model_dump(), preview_only=True)
+    except Exception as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return conversation_runtime.dispatch_result_envelope(
+        result, correlation_id=body.correlation_id
+    )
 
 
 @router.post("/context", response_model=ConversationContext)

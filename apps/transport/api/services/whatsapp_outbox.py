@@ -225,7 +225,10 @@ def prepare_outbound_envelope(
     campaign_scope: dict[str, Any] | None = None, message_origin: str | None = None,
 ) -> dict[str, Any]:
     """Validate routing and build the canonical DB envelope without writing it."""
-    if initial_status not in {"pending_send", "awaiting_proof"}:
+    # preview_ready is deliberately not claimable by the dispatch worker.  It
+    # holds the exact proof-authorized reply until an operator chooses
+    # "Enviar preview" from the actionable queue.
+    if initial_status not in {"pending_send", "awaiting_proof", "preview_ready"}:
         raise ValueError("invalid outbound initial status")
     binding = resolve_lead_binding(lead)
     _recipient_for_lead(lead)

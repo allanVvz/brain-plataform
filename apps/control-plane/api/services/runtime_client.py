@@ -152,3 +152,12 @@ def decorate_leads(
 def process_lead(payload: dict[str, Any], *, actor_user_id: str | None) -> dict:
     """Execute a synthetic lead event through the runtime-owned decision path."""
     return _post("/process", payload, actor_user_id=actor_user_id)
+
+
+def generate_queue_preview(payload: dict[str, Any], *, actor_user_id: str | None) -> dict:
+    """Ask runtime for one proof-gated reply that remains preview_ready."""
+    return _post(
+        "/internal/v1/conversations/queue-preview",
+        payload,
+        actor_user_id=actor_user_id,
+    )
