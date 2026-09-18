@@ -2159,6 +2159,107 @@ def _published_business_hours(context: ConversationContext) -> dict[str, Any] | 
     }
 
 
+def create_reactivation_preview(
+    *, persona_slug: str, lead_ref: int, source_buffer_id: str,
+    actor_user_id: str | None = None,
+) -> dict[str, Any]:
+    """Turn published proactive copy into a reviewable, independent envelope.
+
+    The caller never supplies wording, schedule or evidence. Those are read
+    together from the active GraphBundle so a graph change cleanly invalidates
+    the action instead of letting an old dashboard create unsupported copy.
+    Transport performs the final source/new-inbound/consent checks atomically.
+    """
+    persona = supabase_client.get_persona(persona_slug) or {}
+    lead = supabase_client.get_lead_by_ref(lead_ref) or {}
+    if not persona or not lead:
+        raise LookupError("persona or lead not found")
+    if str(lead.get("persona_id") or "") != str(persona.get("id") or ""):
+        raise PermissionError("lead does not belong to requested persona")
+    if str(lead.get("handoff_level") or "none") != "none":
+        raise RuntimeError("reactivation is blocked by human handoff")
+
+    publication = supabase_client.get_active_graph_publication(str(persona["id"])) or {}
+    document = publication.get("document_json") or {}
+    nodes = document.get("nodes") if isinstance(document, dict) else None
+    if not publication or not isinstance(nodes, list):
+        raise RuntimeError("active GraphBundle is unavailable for reactivation")
+    persona_node = next(
+        (node for node in nodes if isinstance(node, dict) and node.get("node_type") == "persona"),
+        None,
+    )
+    policy = ((persona_node or {}).get("data") or {}).get("conversation_policy") or {}
+    hours = policy.get("business_hours") if isinstance(policy, dict) else None
+    if not isinstance(hours, dict) or hours.get("enabled") is False:
+        raise RuntimeError("published reactivation policy is unavailable")
+    # Older published bundles called the same approved reactivation node
+    # ``morning_reactivation_copy_node_id``.  Keep that graph-data alias for
+    # one rolling release; no wording or node id is supplied by code.
+    copy_node_id = str(
+        hours.get("operator_reactivation_copy_node_id")
+        or hours.get("morning_reactivation_copy_node_id")
+        or ""
+    ).strip()
+    rule_node_id = str(hours.get("rule_node_id") or "").strip()
+    if not copy_node_id or not rule_node_id:
+        raise RuntimeError("published reactivation copy or rule is unavailable")
+    copy_node = next(
+        (node for node in nodes if isinstance(node, dict) and str(node.get("id") or "") == copy_node_id),
+        None,
+    )
+    rule_node = next(
+        (node for node in nodes if isinstance(node, dict) and str(node.get("id") or "") == rule_node_id),
+        None,
+    )
+    copy_data = (copy_node or {}).get("data") or {}
+    text = str(copy_data.get("content") or (copy_node or {}).get("summary") or "").strip()
+    if (
+        not text
+        or (copy_node or {}).get("node_type") != "copy"
+        or (copy_node or {}).get("status") not in {"validated", "approved"}
+        or (rule_node or {}).get("node_type") != "rule"
+    ):
+        raise RuntimeError("published reactivation evidence is invalid")
+
+    evidence_node_ids = [copy_node_id, rule_node_id]
+    identity = f"proactive-reactivation:{source_buffer_id}"
+    return transport_client.enqueue_reactivation_preview(
+        source_buffer_id=source_buffer_id,
+        lead=lead,
+        text=text,
+        message_id=identity,
+        correlation_id=identity,
+        idempotency_key=identity,
+        publication_id=str(publication["id"]),
+        evidence_node_ids=evidence_node_ids,
+        proof_result={
+            "valid": True,
+            "delivery_authorized": True,
+            "kind": "operator_requested_reactivation",
+            "publication_id": str(publication["id"]),
+            "graph_checksum": publication.get("checksum"),
+            "evidence_node_ids": evidence_node_ids,
+        },
+        model_proposal={
+            "kind": "published_proactive_copy",
+            "copy_node_id": copy_node_id,
+            "source_buffer_id": source_buffer_id,
+        },
+        metadata={
+            "published_business_hours": {
+                "timezone": hours.get("timezone"),
+                "start": hours.get("start"),
+                "end": hours.get("end"),
+                "graph_version": publication.get("version"),
+                "graph_checksum": publication.get("checksum"),
+                "publication_id": publication.get("id"),
+            },
+            "evidence_node_ids": evidence_node_ids,
+        },
+        actor_user_id=actor_user_id,
+    )
+
+
 def _cited_context_nodes(
     context: ConversationContext, decision: ConversationDecision
 ) -> list[dict[str, Any]]:

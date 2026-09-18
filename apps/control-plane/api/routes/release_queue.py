@@ -186,6 +186,10 @@ def _queue_action(action: str, body: QueueActionBody, request: Request):
         return release_queue_service.generate_queue_previews(
             buffer_ids=body.buffer_ids, actor_user_id=actor_user_id,
         )
+    if action == "reactivate":
+        return release_queue_service.generate_reactivation_previews(
+            buffer_ids=body.buffer_ids, actor_user_id=actor_user_id,
+        )
     return release_queue_service.control_unified_queue(
         buffer_ids=body.buffer_ids, action=action, actor_user_id=actor_user_id,
     )
@@ -209,6 +213,11 @@ def reprocess_queue(body: QueueActionBody, request: Request):
 @queue_router.post("/queue/send-preview")
 def send_preview_queue(body: QueueActionBody, request: Request):
     return _queue_action("send_preview", body, request)
+
+
+@queue_router.post("/queue/reactivate")
+def reactivate_queue(body: QueueActionBody, request: Request):
+    return _queue_action("reactivate", body, request)
 
 
 @queue_router.post("/queue/reprocess-next")

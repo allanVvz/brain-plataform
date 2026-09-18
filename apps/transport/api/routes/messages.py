@@ -63,6 +63,15 @@ class InternalCampaignOutboundBody(InternalOutboundBody):
     campaign_scope: dict[str, Any]
 
 
+class InternalReactivationPreviewBody(InternalOutboundBody):
+    source_buffer_id: UUID
+    publication_id: UUID
+    evidence_node_ids: list[str]
+    proof_result: dict[str, Any]
+    model_proposal: dict[str, Any] | None = None
+    message_origin: str = "proactive"
+
+
 class InternalValidatorMediaBody(BaseModel):
     session_id: str
     persona_id: str
@@ -259,6 +268,30 @@ def enqueue_outbound_internal(
     """Persist one idempotent runtime outbound under transport ownership."""
     internal_auth.authorize_webhook_token(x_webhook_token)
     return whatsapp_outbox.enqueue_outbound(**body.model_dump())
+
+
+@internal_router.post("/reactivation-preview")
+def enqueue_reactivation_preview_internal(
+    body: InternalReactivationPreviewBody,
+    x_webhook_token: str | None = Header(None, alias="X-Webhook-Token"),
+    x_brain_actor_id: str | None = Header(None, alias="X-Brain-Actor-Id"),
+) -> dict:
+    """Persist one new proactive preview; it cannot send until queue approval."""
+    internal_auth.authorize_webhook_token(x_webhook_token)
+    try:
+        return whatsapp_outbox.enqueue_reactivation_preview(
+            source_buffer_id=str(body.source_buffer_id), lead=body.lead, text=body.text,
+            message_id=body.message_id, correlation_id=body.correlation_id,
+            idempotency_key=body.idempotency_key, publication_id=str(body.publication_id),
+            evidence_node_ids=body.evidence_node_ids, proof_result=body.proof_result,
+            model_proposal=body.model_proposal, metadata=body.metadata,
+            actor_user_id=x_brain_actor_id,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("reactivation preview enqueue failed: %s", exc)
+        raise HTTPException(409, "Nao foi possivel criar o preview de reativacao.") from exc
 
 
 @internal_router.post("/validator-media")

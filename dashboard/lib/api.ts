@@ -366,7 +366,7 @@ export const api = {
     Object.entries(params).forEach(([key, value]) => { if (value !== undefined && value !== "") query.set(key, String(value)); });
     return req<any>(`/messaging/queue?${query.toString()}`);
   },
-  controlMessagingQueue: (action: "pause" | "resume" | "reprocess" | "send-preview", body: Record<string, unknown>) =>
+  controlMessagingQueue: (action: "pause" | "resume" | "reprocess" | "send-preview" | "reactivate", body: Record<string, unknown>) =>
     req<any>(`/messaging/queue/${action}`, { method: "POST", body: JSON.stringify(body) }),
   updateLeadInfo: (leadRef: number, body: {
     nome?: string;

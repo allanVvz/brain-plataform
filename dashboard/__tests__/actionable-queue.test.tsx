@@ -27,8 +27,23 @@ describe("actionable message queue", () => {
     expect(await screen.findByText("Global")).toBeInTheDocument();
     expect(screen.queryByLabelText("Lead")).not.toBeInTheDocument();
     fireEvent.click(screen.getByLabelText("Selecionar mensagem"));
-    fireEvent.change(screen.getByLabelText("Ação para selecionadas"), { target: { value: "reprocess" } });
+    fireEvent.change(screen.getAllByRole("combobox")[2], { target: { value: "reprocess" } });
 
     await waitFor(() => expect(mocks.control).toHaveBeenCalledWith("reprocess", { buffer_ids: ["technical-inbound"] }));
+  });
+
+  it("creates a separate reactivation preview from the inline action", async () => {
+    mocks.queue.mockResolvedValue({
+      items: [{
+        id: "sent-outbound", preview: "Posso ajudar?", queue_state: "awaiting_customer",
+        origin: "conversation", lead: { nome: "Teste" }, persona: { name: "Tock Fatal" },
+        actions: ["reactivate"],
+      }], next_offset: null,
+    });
+    render(<ReleaseQueuePanel />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Reativar cliente" }));
+
+    await waitFor(() => expect(mocks.control).toHaveBeenCalledWith("reactivate", { buffer_ids: ["sent-outbound"] }));
   });
 });

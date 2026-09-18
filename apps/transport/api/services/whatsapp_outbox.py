@@ -349,3 +349,30 @@ def enqueue_outbound(*, lead: dict[str, Any], text: str, sender_type: str,
                 "A chave idempotente ja pertence a outra mensagem.",
             )
     return {**envelope, "binding": binding}
+
+
+def enqueue_reactivation_preview(
+    *, source_buffer_id: str, lead: dict[str, Any], text: str, message_id: str,
+    correlation_id: str, idempotency_key: str, publication_id: str,
+    evidence_node_ids: list[str], proof_result: dict[str, Any],
+    model_proposal: dict[str, Any] | None = None, metadata: dict[str, Any] | None = None,
+    actor_user_id: str | None = None,
+) -> dict[str, Any]:
+    """Persist a proof-authorized reactivation as an operator-reviewable preview.
+
+    Delivery stays impossible until the queue's existing ``send_preview`` action
+    transitions this new row. The source outbound is eligibility context, never
+    an envelope to resend.
+    """
+    prepared = prepare_outbound_envelope(
+        lead=lead, text=text, sender_type="agent", message_id=message_id,
+        correlation_id=correlation_id, idempotency_key=idempotency_key,
+        initial_status="awaiting_proof", metadata=metadata,
+        message_origin="proactive",
+    )
+    return supabase_client.enqueue_reactivation_preview_with_proof(
+        source_buffer_id=source_buffer_id, buffer=prepared["buffer"],
+        message=prepared["message"], publication_id=publication_id,
+        evidence_node_ids=evidence_node_ids, proof_result=proof_result,
+        model_proposal=model_proposal, actor_user_id=actor_user_id,
+    )

@@ -384,3 +384,40 @@ def generate_queue_previews(*, buffer_ids: list[str], actor_user_id: str | None)
                     pass
             results.append({"buffer_id": buffer_id, "result": "bloqueado", "reason": str(exc)[:300]})
     return {"items": results}
+
+
+def generate_reactivation_previews(*, buffer_ids: list[str], actor_user_id: str | None) -> dict[str, Any]:
+    """Create one independent proactive preview for each delivered outbound.
+
+    Eligibility is deliberately checked again by transport in the final
+    transaction.  This read exists only to resolve the authorized persona slug
+    for runtime; it never authorizes a send from the dashboard.
+    """
+    results: list[dict[str, Any]] = []
+    for buffer_id in buffer_ids:
+        try:
+            source = _one(
+                supabase_client.get_client().table("lead_buffer")
+                .select("id,persona_id,lead_ref,direction,status")
+                .eq("id", buffer_id).maybe_single()
+            ) or {}
+            if source.get("direction") != "outbound" or source.get("status") not in {"sent", "delivered", "read"}:
+                raise RuntimeError("mensagem nao esta elegivel para reativacao")
+            persona = _one(
+                supabase_client.get_client().table("personas").select("slug")
+                .eq("id", source.get("persona_id")).maybe_single()
+            ) or {}
+            result = runtime_client.generate_reactivation_preview({
+                "persona_slug": persona.get("slug"),
+                "lead_ref": source.get("lead_ref"),
+                "source_buffer_id": str(buffer_id),
+            }, actor_user_id=actor_user_id)
+            results.append({
+                "buffer_id": buffer_id,
+                "result": "preview_reativacao_gerado",
+                "preview_buffer_id": result.get("buffer_id"),
+                "deduplicated": bool(result.get("deduplicated")),
+            })
+        except Exception as exc:
+            results.append({"buffer_id": buffer_id, "result": "bloqueado", "reason": str(exc)[:300]})
+    return {"items": results}

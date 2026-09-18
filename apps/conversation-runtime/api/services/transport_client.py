@@ -20,14 +20,17 @@ def _configuration() -> tuple[str, str]:
     return base_url, token
 
 
-def _post(path: str, payload: dict[str, Any]) -> dict:
+def _post(path: str, payload: dict[str, Any], *, actor_user_id: str | None = None) -> dict:
     base_url, token = _configuration()
     try:
         with httpx.Client(timeout=15, verify=get_ca_bundle_path()) as client:
+            headers = {"X-Webhook-Token": token}
+            if actor_user_id:
+                headers["X-Brain-Actor-Id"] = actor_user_id
             response = client.post(
                 base_url + path,
                 json=payload,
-                headers={"X-Webhook-Token": token},
+                headers=headers,
             )
     except httpx.HTTPError as exc:
         raise HTTPException(502, "Transport service is unavailable.") from exc
@@ -52,6 +55,13 @@ def prepare_outbound(**payload: Any) -> dict:
 
 def enqueue_outbound(**payload: Any) -> dict:
     return _post("/internal/v1/transport/messages/outbound", payload)
+
+
+def enqueue_reactivation_preview(*, actor_user_id: str | None = None, **payload: Any) -> dict:
+    return _post(
+        "/internal/v1/transport/messages/reactivation-preview", payload,
+        actor_user_id=actor_user_id,
+    )
 
 
 def store_validator_media(**payload: Any) -> dict:
