@@ -1,0 +1,103 @@
+{
+  "overlay_version": "1.0",
+  "base_publication": {
+    "publication_id": "134d5341-eea3-487b-882e-39a43d3e79db",
+    "version": 37,
+    "checksum": "sha256:ea463ef7295e4c1359f07beca555497ea4016d208a44009a3ef9616d50eab329"
+  },
+  "patch_nodes": [
+    {
+      "id": "persona:tock-fatal",
+      "patch": {
+        "data": {
+          "conversation_policy": {
+            "business_hours": {
+              "enabled": true,
+              "timezone": "America/Sao_Paulo",
+              "start": "08:00",
+              "end": "20:00",
+              "rule_node_id": "rule:tock-business-hours",
+              "after_hours_copy_node_id": "copy:tock-after-hours-notice",
+              "closing_copy_node_id": "copy:tock-closing-notice",
+              "morning_reactivation_copy_node_id": "copy:tock-morning-reactivation",
+              "after_hours_notice_max_per_closed_period": 1,
+              "closing_notice_minutes_before_end": 30,
+              "morning_reactivation_at": "08:00",
+              "reactivation_requires_no_new_inbound": true
+            }
+          }
+        }
+      }
+    }
+  ],
+  "upsert_nodes": [
+    {
+      "id": "rule:tock-business-hours",
+      "node_type": "rule",
+      "slug": "business-hours",
+      "title": "Janela operacional de mensagens",
+      "summary": "Toda saída da Tock Fatal respeita a janela diária publicada de 08:00 a 20:00 em America/Sao_Paulo; fora dela, a resposta normal permanece na fila.",
+      "status": "validated",
+      "data": {
+        "source": "unified_message_queue_operator_policy_2026-09-18",
+        "timezone": "America/Sao_Paulo",
+        "start": "08:00",
+        "end": "20:00",
+        "applies_to": ["ai_response", "campaign", "manual", "proactive"],
+        "validation_status": "validated"
+      }
+    },
+    {
+      "id": "copy:tock-after-hours-notice",
+      "node_type": "copy",
+      "slug": "after-hours-notice",
+      "title": "Aviso fora do horário",
+      "summary": "Recebemos sua mensagem. Nosso atendimento é das 8h às 20h e vamos responder assim que voltarmos.",
+      "status": "validated",
+      "data": {
+        "source": "unified_message_queue_operator_policy_2026-09-18",
+        "content": "Recebemos sua mensagem. Nosso atendimento é das 8h às 20h e vamos responder assim que voltarmos.",
+        "purpose": "after_hours_notice",
+        "validation_status": "validated"
+      }
+    },
+    {
+      "id": "copy:tock-closing-notice",
+      "node_type": "copy",
+      "slug": "closing-notice",
+      "title": "Aviso de encerramento",
+      "summary": "Nosso atendimento encerra às 20h. Se precisar, sua mensagem fica registrada para continuarmos na próxima abertura.",
+      "status": "validated",
+      "data": {
+        "source": "unified_message_queue_operator_policy_2026-09-18",
+        "content": "Nosso atendimento encerra às 20h. Se precisar, sua mensagem fica registrada para continuarmos na próxima abertura.",
+        "purpose": "closing_notice",
+        "validation_status": "validated"
+      }
+    },
+    {
+      "id": "copy:tock-morning-reactivation",
+      "node_type": "copy",
+      "slug": "morning-reactivation",
+      "title": "Reativação da manhã",
+      "summary": "Bom dia! Retomamos o atendimento e estamos por aqui para continuar quando você quiser.",
+      "status": "validated",
+      "data": {
+        "source": "unified_message_queue_operator_policy_2026-09-18",
+        "content": "Bom dia! Retomamos o atendimento e estamos por aqui para continuar quando você quiser.",
+        "purpose": "morning_reactivation",
+        "validation_status": "validated"
+      }
+    }
+  ],
+  "upsert_edges": [
+    {"id": "edge:tock-business-hours-persona", "source": "persona:tock-fatal", "target": "rule:tock-business-hours", "relation_type": "contains", "weight": 1.0, "metadata": {"active": true, "primary_tree": true}},
+    {"id": "edge:tock-after-hours-persona", "source": "persona:tock-fatal", "target": "copy:tock-after-hours-notice", "relation_type": "contains", "weight": 1.0, "metadata": {"active": true, "primary_tree": true}},
+    {"id": "edge:tock-closing-persona", "source": "persona:tock-fatal", "target": "copy:tock-closing-notice", "relation_type": "contains", "weight": 1.0, "metadata": {"active": true, "primary_tree": true}},
+    {"id": "edge:tock-reactivation-persona", "source": "persona:tock-fatal", "target": "copy:tock-morning-reactivation", "relation_type": "contains", "weight": 1.0, "metadata": {"active": true, "primary_tree": true}},
+    {"id": "edge:tock-business-hours-embed", "source": "rule:tock-business-hours", "target": "embed:tock-default", "relation_type": "visible_to_agent", "weight": 1.0, "metadata": {"active": true}},
+    {"id": "edge:tock-after-hours-embed", "source": "copy:tock-after-hours-notice", "target": "embed:tock-default", "relation_type": "visible_to_agent", "weight": 1.0, "metadata": {"active": true}},
+    {"id": "edge:tock-closing-embed", "source": "copy:tock-closing-notice", "target": "embed:tock-default", "relation_type": "visible_to_agent", "weight": 1.0, "metadata": {"active": true}},
+    {"id": "edge:tock-reactivation-embed", "source": "copy:tock-morning-reactivation", "target": "embed:tock-default", "relation_type": "visible_to_agent", "weight": 1.0, "metadata": {"active": true}}
+  ]
+}

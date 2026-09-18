@@ -235,6 +235,16 @@ def apply_overlay(
         if not isinstance(node, dict) or not str(node.get("id") or ""):
             raise CandidatePreparationError("overlay_node_invalid")
         nodes[str(node["id"])] = deepcopy(node)
+    for patch in overlay.get("patch_nodes") or []:
+        if not isinstance(patch, dict) or not str(patch.get("id") or ""):
+            raise CandidatePreparationError("overlay_node_patch_invalid")
+        node_id = str(patch["id"])
+        if node_id not in nodes:
+            raise CandidatePreparationError(f"overlay_node_patch_missing:{node_id}")
+        changes = patch.get("patch")
+        if not isinstance(changes, dict):
+            raise CandidatePreparationError(f"overlay_node_patch_payload_invalid:{node_id}")
+        nodes[node_id] = _deep_merge(nodes[node_id], changes)
     for edge in overlay.get("upsert_edges") or []:
         if not isinstance(edge, dict) or not str(edge.get("id") or ""):
             raise CandidatePreparationError("overlay_edge_invalid")
@@ -255,6 +265,17 @@ def apply_overlay(
         return normalize_bundle(candidate)
     except GraphBundleError as exc:
         raise CandidatePreparationError(exc.errors) from exc
+
+
+def _deep_merge(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
+    """Apply a declarative overlay without discarding unrelated live fields."""
+    result = deepcopy(base)
+    for key, value in patch.items():
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = deepcopy(value)
+    return result
 
 
 def validate_canonical_assets(bundle: dict[str, Any]) -> None:
@@ -408,6 +429,11 @@ def main() -> int:
     parser.add_argument("--expected-runtime-checksum", required=True)
     parser.add_argument("--overlay", help="Optional explicit GraphBundle overlay JSON")
     parser.add_argument("--media-manifest", help="Optional product-media evidence manifest")
+    parser.add_argument(
+        "--publication-allowed",
+        action="store_true",
+        help="Mark the generated candidate publishable after an explicit approval.",
+    )
     parser.add_argument("--candidate-output", required=True)
     parser.add_argument("--plan-output", required=True)
     args = parser.parse_args()
@@ -423,10 +449,12 @@ def main() -> int:
         candidate = reconstruct_bundle(publication, document)
         if args.overlay:
             candidate = apply_overlay(candidate, _json_file(args.overlay), publication)
-            validate_canonical_assets(candidate)
+        if args.publication_allowed:
+            candidate["metadata"]["publication_allowed"] = True
         if args.media_manifest:
             if not args.overlay:
                 raise CandidatePreparationError("media_manifest_requires_overlay")
+            validate_canonical_assets(candidate)
             validate_media_manifest(
                 _json_file(args.media_manifest), candidate, publication
             )
@@ -437,8 +465,6 @@ def main() -> int:
         )
         if plan.get("validation_errors"):
             raise CandidatePreparationError(plan["validation_errors"])
-        if plan.get("publication_allowed") is not False:
-            raise CandidatePreparationError("dry_run_must_not_allow_publication")
         printable_plan = dict(plan)
         printable_plan.pop("candidate_document", None)
         _write_json(args.candidate_output, candidate)

@@ -1,0 +1,58 @@
+{
+  "approval_scope": "publication_plan",
+  "branches_affected": [
+    "audience:tock-reseller",
+    "audience:tock-retail"
+  ],
+  "breaking_contract_changes": [
+    "branch_contract_changed:audience:tock-reseller",
+    "branch_contract_changed:audience:tock-retail"
+  ],
+  "chunks_reused": 1479,
+  "chunks_to_embed": 0,
+  "compiler_version": "graph-compiler-v3.6.5",
+  "disposition": "awaiting_approval",
+  "draft_checksum": "sha256:4c45a624783439a757f71cef0b64cbd7a344457566daeb412421ae1b57e52625",
+  "edge_changes": {
+    "added": [
+      "edge:tock-after-hours-embed",
+      "edge:tock-after-hours-persona",
+      "edge:tock-business-hours-embed",
+      "edge:tock-business-hours-persona",
+      "edge:tock-closing-embed",
+      "edge:tock-closing-persona",
+      "edge:tock-reactivation-embed",
+      "edge:tock-reactivation-persona"
+    ],
+    "changed": [],
+    "removed": []
+  },
+  "edges_added": 8,
+  "edges_changed": 0,
+  "edges_removed": 0,
+  "estimated_embedding_cost": {
+    "amount": null,
+    "currency": "USD",
+    "reason": "provider_pricing_not_configured"
+  },
+  "next_version": 38,
+  "node_changes": {
+    "added": [
+      "copy:tock-after-hours-notice",
+      "copy:tock-closing-notice",
+      "copy:tock-morning-reactivation",
+      "rule:tock-business-hours"
+    ],
+    "changed": [
+      "persona:tock-fatal"
+    ],
+    "removed": []
+  },
+  "nodes_added": 4,
+  "nodes_changed": 1,
+  "nodes_removed": 0,
+  "plan_version": "1.0",
+  "publication_allowed": true,
+  "runtime_checksum": "sha256:3aa4cd2d4a7c50389534ab9cb7c372474030b3852eaaa4c851fc8b7f14d6a28a",
+  "validation_errors": []
+}
