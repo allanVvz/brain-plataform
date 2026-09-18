@@ -1,5 +1,5 @@
 {
-  "source_sha": "2f63ca027d98189fa312f29f5f549c348a7f67d6",
+  "source_sha": "374b61d15cc9be5bb566d386fb38c688069efb3b",
   "contracts_version": "3.2.0",
   "contracts_checksum": "sha256:4fef73451747a4b482067a0a50b9c239f0a50d778ff0d5d82ea99fdf211270e4",
   "schema_version": 140,
@@ -21,8 +21,8 @@
     },
     "conversation-runtime": {
       "repository": "allanVvz/brain-plataform",
-      "sha": "2f63ca027d98189fa312f29f5f549c348a7f67d6",
-      "digest": "sha256:4680a48b8fc714959c9ee30a89792e697a9718f0c786636ccaa5323d564092eb",
+      "sha": "374b61d15cc9be5bb566d386fb38c688069efb3b",
+      "digest": "sha256:565a1cad5f6c4d5691f491de4e97b80c67b5c1210122da31f665c279a9eb2a7a",
       "required_schema_version": 140,
       "contracts_version": "3.2.0",
       "contracts_checksum": "sha256:4fef73451747a4b482067a0a50b9c239f0a50d778ff0d5d82ea99fdf211270e4",
