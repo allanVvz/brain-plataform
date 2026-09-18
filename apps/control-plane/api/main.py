@@ -5,7 +5,7 @@ from routes import (access, agent_harness, assets, audiences, auth, generation, 
                     graph_bundles, graph_documents, graph_projections,
                     health, integrations, internal_assets, kb, kb_intake, knowledge, logs,
                     marketing, menu, messaging_campaigns, personas, pipeline, portal,
-                    public_site_formats, qa_contract, release_queue)
+                    public_site_formats, qa_contract, release_queue, internal_outbound_policy)
 
 app = FastAPI(title="Brain Control Plane", version="1.0.0")
 app.middleware("http")(auth_middleware)
@@ -22,3 +22,4 @@ for router in (health.router, auth.router, access.router, portal.router,
     app.include_router(router)
 app.include_router(qa_contract.router, prefix="/api")
 app.include_router(site_blocks.router)
+app.include_router(internal_outbound_policy.router)
