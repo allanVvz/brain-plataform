@@ -126,7 +126,7 @@ export function ReleaseQueuePanel() {
   return <section className="flex flex-col gap-4">
     <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-obs-surface px-3 py-2 text-xs text-obs-subtle">
       <AlertCircle size={15} className="text-obs-violet" />
-      Mensagens ativas da persona selecionada. Histórico e conversas já respondidas não aparecem aqui.
+      Mensagens ativas. Histórico e conversas já respondidas não aparecem aqui.
     </div>
 
     <div className="flex flex-wrap items-end gap-2 rounded-xl border border-white/10 bg-obs-surface p-3">

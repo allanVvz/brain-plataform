@@ -21,10 +21,10 @@ describe("actionable message queue", () => {
     mocks.control.mockResolvedValue({ items: [{ result: "preview_gerado" }] });
   });
 
-  it("uses the persona already selected by the dashboard and generates a preview without asking for a reason", async () => {
+  it("removes the misleading global label and generates a preview without asking for a reason", async () => {
     render(<ReleaseQueuePanel />);
 
-    expect(await screen.findByText("Mensagens ativas da persona selecionada.", { exact: false })).toBeInTheDocument();
+    expect(await screen.findByText("Mensagens ativas.", { exact: false })).toBeInTheDocument();
     expect(screen.queryByText("Global")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Lead")).not.toBeInTheDocument();
     fireEvent.click(screen.getByLabelText("Selecionar mensagem"));
