@@ -8,12 +8,16 @@ vi.mock("@/lib/api", () => ({
   api: { messagingQueue: mocks.queue, controlMessagingQueue: mocks.control },
 }));
 
+vi.mock("@/lib/useGlobalPersona", () => ({
+  useGlobalPersona: () => ({ id: "tock-persona", slug: "tock-fatal" }),
+}));
+
 describe("actionable message queue", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.queue.mockResolvedValue({
       items: [{
-        id: "technical-inbound", preview: "oi", queue_state: "technical_failure",
+        id: "technical-inbound", persona_id: "tock-persona", preview: "oi", queue_state: "technical_failure",
         origin: "conversation", available_at: "2026-09-18T12:00:00.000Z",
         lead: { nome: "Teste" }, persona: { name: "Tock Fatal" }, actions: ["reprocess"],
       }], next_offset: null,
@@ -28,15 +32,16 @@ describe("actionable message queue", () => {
     expect(screen.queryByText("Global")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Lead")).not.toBeInTheDocument();
     fireEvent.click(screen.getByLabelText("Selecionar mensagem"));
-    fireEvent.change(screen.getAllByRole("combobox")[2], { target: { value: "reprocess" } });
+    fireEvent.click(screen.getByRole("button", { name: "Gerar preview" }));
 
+    await waitFor(() => expect(mocks.queue).toHaveBeenCalledWith(expect.objectContaining({ personaId: "tock-persona" })));
     await waitFor(() => expect(mocks.control).toHaveBeenCalledWith("reprocess", { buffer_ids: ["technical-inbound"] }));
   });
 
   it("creates a separate reactivation preview from the inline action", async () => {
     mocks.queue.mockResolvedValue({
       items: [{
-        id: "sent-outbound", preview: "Posso ajudar?", queue_state: "awaiting_customer",
+        id: "sent-outbound", persona_id: "tock-persona", preview: "Posso ajudar?", queue_state: "awaiting_customer",
         origin: "conversation", lead: { nome: "Teste" }, persona: { name: "Tock Fatal" },
         actions: ["reactivate"],
       }], next_offset: null,

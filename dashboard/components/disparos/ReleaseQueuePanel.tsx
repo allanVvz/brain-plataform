@@ -3,12 +3,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertCircle, CheckCircle2, RefreshCw, Send } from "lucide-react";
 import { api } from "@/lib/api";
+import { useGlobalPersona } from "@/lib/useGlobalPersona";
 
 type QueueAction = "pause" | "resume" | "reprocess" | "send-preview" | "reactivate";
 type QueueItem = {
   id: string;
   preview?: string | null;
   lead_ref?: number | null;
+  persona_id?: string | null;
   persona?: { name?: string; slug?: string } | null;
   lead?: { nome?: string | null; name?: string | null } | null;
   origin?: string | null;
@@ -65,6 +67,7 @@ function primaryAction(item: QueueItem): { action: QueueAction; label: string } 
 }
 
 export function ReleaseQueuePanel() {
+  const persona = useGlobalPersona();
   const [items, setItems] = useState<QueueItem[]>([]);
   const [origin, setOrigin] = useState("");
   const [status, setStatus] = useState("");
@@ -75,19 +78,30 @@ export function ReleaseQueuePanel() {
   const [error, setError] = useState("");
 
   const load = useCallback(async (offset = 0, append = false) => {
-    const result = await api.messagingQueue({ origin: origin || undefined, status: status || undefined, offset, limit: 50 });
+    if (!persona.id) {
+      setItems([]);
+      setNextOffset(null);
+      return;
+    }
+    const result = await api.messagingQueue({ personaId: persona.id, origin: origin || undefined, status: status || undefined, offset, limit: 50 });
     const rows = (result.items || []) as QueueItem[];
     setItems((current) => append ? [...current, ...rows] : rows);
     setNextOffset(result.next_offset ?? null);
     if (!append) setSelected([]);
-  }, [origin, status]);
+  }, [origin, persona.id, status]);
 
   useEffect(() => {
     load().catch((cause) => setError(cause?.message || "Falha ao carregar a fila."));
   }, [load]);
 
-  const selectedItems = useMemo(() => items.filter((item) => selected.includes(item.id)), [items, selected]);
-  const allSelected = items.length > 0 && selected.length === items.length;
+  // The current API deployment may still return an admin-wide page. Keep the
+  // dashboard fail-closed to the persona selected in the global selector.
+  const visibleItems = useMemo(() => items.filter((item) => item.persona_id === persona.id), [items, persona.id]);
+  const selectedItems = useMemo(() => visibleItems.filter((item) => selected.includes(item.id)), [visibleItems, selected]);
+  const allSelected = visibleItems.length > 0 && selectedItems.length === visibleItems.length;
+  const selectedActions = useMemo(() => ACTIONS.filter(({ value }) =>
+    selectedItems.length > 0 && selectedItems.every((item) => item.actions?.includes(value === "send-preview" ? "send_preview" : value)),
+  ), [selectedItems]);
 
   async function runAction(action: QueueAction, targets = selectedItems) {
     if (!targets.length) return;
@@ -140,11 +154,7 @@ export function ReleaseQueuePanel() {
           <option value="">Todos os estados</option>{STATES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select>
       </label>
-      <label className="min-w-44 text-xs text-obs-faint">Ação para selecionadas
-        <select aria-label="Ação para selecionadas" value="" disabled={!selectedItems.length || busy} onChange={(event) => { if (event.target.value) void runAction(event.target.value as QueueAction); }} className="mt-1 block w-full rounded-lg border border-obs-violet/30 bg-obs-panel px-3 py-2 text-sm text-obs-text disabled:opacity-40">
-          <option value="">Selecionar ação</option>{ACTIONS.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
-        </select>
-      </label>
+      {selectedActions.map(({ value, label }) => <button key={value} type="button" disabled={busy} onClick={() => void runAction(value)} className="rounded-lg border border-obs-violet/30 px-3 py-2 text-sm text-obs-text disabled:opacity-40">{label}</button>)}
       <button type="button" onClick={() => load().catch((cause) => setError(cause?.message || "Falha ao atualizar."))} className="flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-sm text-obs-subtle"><RefreshCw size={15} />Atualizar</button>
     </div>
 
@@ -154,10 +164,10 @@ export function ReleaseQueuePanel() {
     <div className="overflow-x-auto rounded-xl border border-white/10 bg-obs-surface">
       <table className="w-full min-w-[960px] text-left text-sm">
         <thead className="bg-white/[0.03] text-xs text-obs-faint"><tr>
-          <th className="w-12 p-3"><input aria-label="Selecionar todas" type="checkbox" checked={allSelected} onChange={(event) => setSelected(event.target.checked ? items.map((item) => item.id) : [])} /></th>
+          <th className="w-12 p-3"><input aria-label="Selecionar todas" type="checkbox" checked={allSelected} onChange={(event) => setSelected(event.target.checked ? visibleItems.map((item) => item.id) : [])} /></th>
           <th className="p-3">Mensagem</th><th className="p-3">Lead</th><th className="p-3">Origem</th><th className="p-3">Previsão</th><th className="p-3">Estado</th><th className="p-3 text-right">Ação</th>
         </tr></thead>
-        <tbody>{items.map((item) => {
+        <tbody>{visibleItems.map((item) => {
           const sent = item.queue_state === "awaiting_customer";
           const action = primaryAction(item);
           return <tr key={item.id} className={`border-t border-white/[0.06] ${sent ? "bg-emerald-500/[0.06]" : "bg-rose-500/[0.06]"}`}>
@@ -171,7 +181,7 @@ export function ReleaseQueuePanel() {
           </tr>;
         })}</tbody>
       </table>
-      {!items.length && <p className="p-10 text-center text-sm text-obs-subtle">Nenhuma mensagem ativa aguarda envio ou resposta da lead.</p>}
+      {!visibleItems.length && <p className="p-10 text-center text-sm text-obs-subtle">Nenhuma mensagem ativa aguarda envio ou resposta da lead.</p>}
     </div>
     {nextOffset !== null && <button type="button" onClick={() => load(nextOffset, true)} className="self-center rounded-lg border border-white/10 px-4 py-2 text-sm text-obs-text">Carregar mais</button>}
   </section>;
