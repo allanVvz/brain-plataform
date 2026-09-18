@@ -9,17 +9,17 @@ type DisparosTab = "campanhas" | "fila";
 
 const DISPAROS_TABS: Array<{ key: DisparosTab; label: string; icon: typeof Megaphone }> = [
   { key: "campanhas", label: "Campanhas", icon: Megaphone },
-  { key: "fila", label: "Fila de liberacao", icon: ListChecks },
+  { key: "fila", label: "Fila", icon: ListChecks },
 ];
 
 function tabFromLocation(): DisparosTab {
   if (typeof window === "undefined") return "campanhas";
   const candidate = new URLSearchParams(window.location.search).get("tab") || "";
-  return DISPAROS_TABS.some((tab) => tab.key === candidate) ? (candidate as DisparosTab) : "campanhas";
+  return DISPAROS_TABS.some((tab) => tab.key === candidate) ? (candidate as DisparosTab) : "fila";
 }
 
 export default function DisparosPage() {
-  const [activeTab, setActiveTab] = useState<DisparosTab>("campanhas");
+  const [activeTab, setActiveTab] = useState<DisparosTab>("fila");
 
   useEffect(() => {
     const sync = () => setActiveTab(tabFromLocation());
@@ -31,7 +31,7 @@ export default function DisparosPage() {
   function selectTab(tab: DisparosTab) {
     setActiveTab(tab);
     const url = new URL(window.location.href);
-    if (tab === "campanhas") url.searchParams.delete("tab");
+    if (tab === "fila") url.searchParams.delete("tab");
     else url.searchParams.set("tab", tab);
     window.history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`);
   }

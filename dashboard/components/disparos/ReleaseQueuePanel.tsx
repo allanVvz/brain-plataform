@@ -1,303 +1,113 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertCircle, Clock, Pause, Play, RefreshCw } from "lucide-react";
+import { AlertCircle, ChevronDown, ChevronUp, Pause, Play, RefreshCw, RotateCcw, X } from "lucide-react";
 import { api } from "@/lib/api";
 
-const SCOPE_LABEL: Record<string, string> = {
-  safety_paused_binding: "Canal pausado por seguranca",
-  deploy_pause: "Retomada de deploy",
+type QueueAction = "pause" | "resume" | "reprocess";
+type QueueItem = {
+  id: string; preview?: string | null; content?: string | null; lead_ref?: number | null; persona_id?: string | null;
+  persona?: { id?: string; name?: string; slug?: string } | null; lead?: { nome?: string | null; name?: string | null } | null;
+  origin?: string | null; status?: string | null; available_at?: string | null; created_at?: string | null;
+  attempt_count?: number | null; max_attempts?: number | null; last_error?: string | null;
+  graph_publication?: string | null; graph_rule?: string | null; publication?: string | null; rule?: string | null;
+  action_history?: Array<Record<string, unknown>>; history?: Array<Record<string, unknown>>; [key: string]: unknown;
 };
+type Persona = { id?: string; name?: string | null; slug?: string | null };
 
-const BATCH_STATUS_LABEL: Record<string, string> = {
-  releasing: "Registrando",
-  registered: "Agendado",
-  completed: "Concluido",
-  cancelled: "Cancelado",
+const ORIGINS: Record<string, string> = { conversation: "Resposta IA", campaign: "Campanha", manual: "Manual", proactive: "Aviso / reativação", system: "Operacional" };
+const STATES = ["buffered", "pending", "retry", "processing", "waiting_human", "paused", "sent", "delivered", "read", "dead_letter", "ignored", "reprocessed"];
+const formatDate = (value?: string | null) => {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const now = new Date();
+  const tomorrow = new Date(now);
+  tomorrow.setDate(now.getDate() + 1);
+  const clock = new Intl.DateTimeFormat("pt-BR", { timeStyle: "short" }).format(date);
+  if (date.toDateString() === now.toDateString()) return `Hoje às ${clock}`;
+  if (date.toDateString() === tomorrow.toDateString()) return `Amanhã às ${clock}`;
+  return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(date);
 };
-
-function MetricCard({ label, value, tone }: { label: string; value: string | number; tone: "green" | "amber" | "rose" | "violet" }) {
-  const colors = {
-    green: "text-emerald-300 bg-emerald-500/10 border-emerald-400/20",
-    amber: "text-amber-300 bg-amber-500/10 border-amber-400/20",
-    rose: "text-rose-300 bg-rose-500/10 border-rose-400/20",
-    violet: "text-obs-violet bg-obs-violet/10 border-obs-violet/25",
-  };
-  return (
-    <div className={`rounded-lg border px-4 py-3 ${colors[tone]}`}>
-      <p className="text-[10px] uppercase tracking-[0.16em] opacity-70">{label}</p>
-      <p className="mt-2 text-2xl font-semibold">{value}</p>
-    </div>
-  );
-}
-
-function Notice({ text, error }: { text: string; error?: boolean }) {
-  return (
-    <div className={`flex items-center gap-2 rounded-xl px-3 py-2 text-sm ${error ? "bg-obs-rose/10 text-obs-rose" : "bg-obs-amber/10 text-obs-amber"}`}>
-      <AlertCircle size={14} />{text}
-    </div>
-  );
-}
-
-function toLocalInputValue(iso: string | null | undefined): string {
-  if (!iso) return "";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "";
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
+const previewOf = (item: QueueItem) => item.preview || item.content || String(item.payload_preview || "Sem conteúdo disponível");
+const personaLabel = (persona?: Persona | null, fallback?: string | null) => persona?.name || persona?.slug || fallback || "Sem persona";
+const historyOf = (item: QueueItem) => item.action_history || item.history || (Array.isArray(item.actions) ? item.actions as Array<Record<string, unknown>> : []);
 
 export function ReleaseQueuePanel() {
-  const [personaId, setPersonaId] = useState("");
-  const [bindings, setBindings] = useState<any[]>([]);
-  const [batches, setBatches] = useState<any[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [selectedBindingId, setSelectedBindingId] = useState("");
-  const [reason, setReason] = useState("");
-  const [expandedId, setExpandedId] = useState("");
-  const [detail, setDetail] = useState<any>(null);
-  const [rescheduleDrafts, setRescheduleDrafts] = useState<Record<string, string>>({});
+  const [items, setItems] = useState<QueueItem[]>([]); const [personas, setPersonas] = useState<Persona[]>([]);
+  const [personaId, setPersonaId] = useState(""); const [leadRef, setLeadRef] = useState("");
+  const [origin, setOrigin] = useState(""); const [status, setStatus] = useState(""); const [selected, setSelected] = useState<string[]>([]);
+  const [nextOffset, setNextOffset] = useState<number | null>(null); const [notice, setNotice] = useState("");
+  const [error, setError] = useState(""); const [busy, setBusy] = useState(false); const [detail, setDetail] = useState<QueueItem | null>(null);
+  const [detailItems, setDetailItems] = useState<QueueItem[]>([]); const [detailLoading, setDetailLoading] = useState(false);
+  const queryLeadRef = useMemo(() => typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("lead_ref") || "", []);
 
-  const load = useCallback(async () => {
-    const scoped = window.localStorage.getItem("ai-brain-persona-id") || "";
-    setPersonaId(scoped);
-    if (!scoped) { setBindings([]); setBatches([]); return; }
-    const [nextBindings, nextBatches] = await Promise.all([
-      api.workflowBindings(scoped),
-      api.releaseBatches(scoped),
-    ]);
-    setBindings(nextBindings || []);
-    setBatches(nextBatches || []);
-  }, []);
+  const load = useCallback(async (offset = 0, append = false) => {
+    const reprocessedHistory = status === "reprocessed";
+    const result = await api.messagingQueue({ persona_id: personaId || undefined, lead_ref: leadRef ? Number(leadRef) : undefined, origin: origin || undefined, status: reprocessedHistory ? undefined : status || undefined, history: reprocessedHistory ? "reprocessed" : undefined, offset, limit: 50 });
+    const rows = (reprocessedHistory
+      ? (result.history || []).map((event: any) => ({
+          id: `${event.entity_id}:${event.created_at}`, lead_ref: event.payload?.lead_ref,
+          persona_id: event.persona_id, preview: event.payload?.operator_reason || "Reprocessamento registrado",
+          origin: "system", status: event.payload?.result || "reprocessado", created_at: event.created_at,
+          attempt_count: 0, max_attempts: 0, actions: [event],
+        }))
+      : result.items || []) as QueueItem[];
+    setItems((previous) => append ? [...previous, ...rows] : rows); setNextOffset(result.next_offset ?? null);
+    if (!append) setSelected([]);
+  }, [leadRef, origin, personaId, status]);
 
   useEffect(() => {
-    load().catch((reason) => setError(reason?.message || "Falha ao carregar fila de liberacao."));
-    const timer = window.setInterval(() => load().catch(() => {}), 15_000);
-    const onPersona = () => { setSelectedBindingId(""); setReason(""); load().catch(() => {}); };
-    window.addEventListener("ai-brain-persona-change", onPersona);
-    return () => {
-      window.clearInterval(timer);
-      window.removeEventListener("ai-brain-persona-change", onPersona);
-    };
-  }, [load]);
+    // The default must be the authorized global queue.  A persona scope is a
+    // deliberate filter, not an implicit side-effect of the navigation menu.
+    setLeadRef(queryLeadRef);
+    Promise.resolve(api.personas?.() ?? []).then((rows) => setPersonas((rows || []) as Persona[])).catch(() => setPersonas([]));
+  }, [queryLeadRef]);
+  useEffect(() => { load().catch((cause) => setError(cause?.message || "Falha ao carregar a fila.")); }, [load]);
 
-  const pausedBindings = useMemo(
-    () => bindings.filter((row) => row.connection_status === "safety_paused"),
-    [bindings]
-  );
-
-  const kpis = useMemo(() => {
-    const registered = batches.filter((row) => row.status === "registered");
-    const pendingItems = registered.reduce((sum, row) => sum + (row.item_count || 0), 0);
-    return {
-      pausedBindings: pausedBindings.length,
-      registeredBatches: registered.length,
-      pendingItems,
-      totalBatches: batches.length,
-    };
-  }, [pausedBindings, batches]);
-
-  async function registerBatch() {
-    if (!selectedBindingId || !reason.trim()) return;
-    setBusy(true); setError(""); setNotice("");
+  async function openLead(item: QueueItem) {
+    if (!item.lead_ref) return;
+    setDetail(item); setDetailItems([]); setDetailLoading(true);
     try {
-      const result = await api.registerReleaseBatch({
-        scope: "safety_paused_binding",
-        persona_id: personaId,
-        binding_id: selectedBindingId,
-        reason,
-        idempotency_key: `release-batch:${crypto.randomUUID()}`,
-      });
-      setNotice(
-        result?.deduplicated
-          ? "Essa acao ja tinha sido registrada."
-          : `Canal restaurado e ${result?.item_count ?? 0} mensagem(ns) agendada(s) dentro do horario comercial.`
-      );
-      setSelectedBindingId(""); setReason("");
-      await load();
-    } catch (reason: any) {
-      setError(reason?.message || "Falha ao registrar liberacao.");
-    } finally {
-      setBusy(false);
+      const result = await api.messagingQueue({ lead_ref: item.lead_ref, offset: 0, limit: 100 });
+      const buffered = (result.items || []) as QueueItem[];
+      const bufferedIds = new Set(buffered.map((row) => String(row.correlation_id || row.id)));
+      const timeline = ((result.timeline || []) as QueueItem[])
+        .filter((row) => !bufferedIds.has(String(row.correlation_id || row.id)))
+        .map((row) => ({ ...row, id: `message:${row.id}`, status: row.status || "registrada", origin: row.origin || "conversation" }));
+      setDetailItems([...buffered, ...timeline].sort((a, b) => String(b.created_at || b.available_at || "").localeCompare(String(a.created_at || a.available_at || ""))));
     }
+    catch (cause: any) { setError(cause?.message || "Falha ao carregar o contexto da lead."); }
+    finally { setDetailLoading(false); }
   }
-
-  async function toggleDetail(batch: any) {
-    if (expandedId === batch.id) { setExpandedId(""); setDetail(null); return; }
-    setExpandedId(batch.id);
-    try { setDetail(await api.releaseBatch(batch.id)); }
-    catch (reason: any) { setError(reason?.message || "Falha ao carregar detalhes do lote."); }
-  }
-
-  async function refreshDetail(batchId: string) {
-    try { setDetail(await api.releaseBatch(batchId)); } catch { /* keep last known detail */ }
-  }
-
-  async function pauseItem(item: any) {
-    const itemReason = window.prompt("Motivo da pausa deste item:");
-    if (!itemReason?.trim()) return;
+  async function action(kind: QueueAction, ids = selected) {
+    if (!ids.length) return;
+    const verb = kind === "pause" ? "pausar" : kind === "resume" ? "retomar" : "reprocessar";
+    const reason = window.prompt(`Motivo para ${verb} ${ids.length} item(ns):`); if (!reason?.trim()) return;
+    setBusy(true); setError("");
     try {
-      await api.pauseReleaseItem(item.id, {
-        reason: itemReason,
-        idempotency_key: `release-item-pause:${item.id}:${crypto.randomUUID()}`,
-      });
-      await refreshDetail(item.batch_id);
-    } catch (reason: any) { setError(reason?.message || "Falha ao pausar item."); }
+      const result = await api.controlMessagingQueue(kind, { buffer_ids: ids, reason, idempotency_key: `queue:${kind}:${crypto.randomUUID()}` });
+      setNotice((result.items || []).map((row: { result?: string; reason?: string }) => `${row.result || "processado"}${row.reason ? ` (${row.reason})` : ""}`).join(" · ") || "Ação registrada.");
+      await load(); if (detail?.lead_ref) await openLead(detail);
+    } catch (cause: any) { setError(cause?.message || "Ação não concluída."); } finally { setBusy(false); }
   }
+  const toggle = (id: string) => setSelected((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
+  const allSelected = items.length > 0 && items.every((item) => selected.includes(item.id));
+  const detailLeadName = detail?.lead?.nome || detail?.lead?.name || detail?.lead_ref;
 
-  async function resumeItem(item: any) {
-    try {
-      await api.resumeReleaseItem(item.id, {
-        reason: "Retomado pelo operador",
-        idempotency_key: `release-item-resume:${item.id}:${crypto.randomUUID()}`,
-      });
-      await refreshDetail(item.batch_id);
-    } catch (reason: any) { setError(reason?.message || "Falha ao retomar item."); }
-  }
-
-  async function rescheduleItem(item: any) {
-    const draft = rescheduleDrafts[item.id];
-    if (!draft) return;
-    const iso = new Date(draft).toISOString();
-    try {
-      await api.rescheduleReleaseItem(item.id, {
-        reason: "Reagendado pelo operador",
-        idempotency_key: `release-item-reschedule:${item.id}:${crypto.randomUUID()}`,
-        new_available_at: iso,
-      });
-      await refreshDetail(item.batch_id);
-    } catch (reason: any) { setError(reason?.message || "Falha ao reagendar item."); }
-  }
-
-  return (
-    <div className="flex flex-col gap-5">
-      {!personaId && <Notice text="Selecione uma persona no topo para ver a fila de liberacao." />}
-      {error && <Notice text={error} error />}
-      {notice && <Notice text={notice} />}
-
-      {personaId && (
-        <>
-          <section className="grid gap-3 md:grid-cols-4">
-            <MetricCard label="Canais pausados" value={kpis.pausedBindings} tone={kpis.pausedBindings ? "rose" : "green"} />
-            <MetricCard label="Lotes agendados" value={kpis.registeredBatches} tone={kpis.registeredBatches ? "amber" : "green"} />
-            <MetricCard label="Itens pendentes" value={kpis.pendingItems} tone={kpis.pendingItems ? "amber" : "green"} />
-            <MetricCard label="Lotes no total" value={kpis.totalBatches} tone="violet" />
-          </section>
-
-          <section className="lg-card space-y-4">
-            <div>
-              <p className="text-[10px] uppercase tracking-[0.16em] text-obs-faint">Cadastrar acao</p>
-              <h2 className="mt-1 text-base font-semibold text-obs-text">Liberar canal pausado por seguranca</h2>
-              <p className="mt-1 text-xs text-obs-faint">
-                Restaura o canal e agenda todo o backlog represado dentro do horario comercial (08:00-20:00, America/Sao_Paulo) na mesma acao.
-              </p>
-            </div>
-            {!pausedBindings.length && <p className="text-xs text-obs-faint">Nenhum canal desta persona esta pausado por seguranca agora.</p>}
-            {!!pausedBindings.length && (
-              <div className="grid gap-3 md:grid-cols-2">
-                <label className="text-xs text-obs-subtle">
-                  <span className="mb-1 block">Canal pausado</span>
-                  <select value={selectedBindingId} onChange={(e) => setSelectedBindingId(e.target.value)} className="form-input">
-                    <option value="">Selecione</option>
-                    {pausedBindings.map((row) => (
-                      <option key={row.id} value={row.id}>
-                        {row.workflow_name || row.whatsapp_number} ({row.provider})
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="text-xs text-obs-subtle">
-                  <span className="mb-1 block">Motivo</span>
-                  <input value={reason} onChange={(e) => setReason(e.target.value)} className="form-input" placeholder="Fim do teste, retomando atendimento normal" />
-                </label>
-              </div>
-            )}
-            <div className="flex justify-end">
-              <button
-                disabled={busy || !selectedBindingId || !reason.trim()}
-                onClick={registerBatch}
-                className="lg-btn lg-btn-primary"
-              >
-                <Play size={13} /> Cadastrar acao de liberacao
-              </button>
-            </div>
-          </section>
-
-          <section className="lg-table-shell overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 [border-bottom:1px_solid_var(--border-glass-soft)]">
-              <div>
-                <h2 className="text-sm font-semibold text-obs-text">Lotes de liberacao</h2>
-                <p className="text-xs text-obs-faint">Polling a cada 15 segundos.</p>
-              </div>
-              <button className="lg-btn lg-btn-secondary" onClick={() => load()}><RefreshCw size={13} /> Atualizar</button>
-            </div>
-            {batches.map((row) => (
-              <div key={row.id} className="[border-bottom:1px_solid_var(--border-glass-soft)] last:[border-bottom:0]">
-                <div className="flex flex-wrap items-center gap-3 px-4 py-3">
-                  <div className="min-w-48 flex-1">
-                    <p className="text-sm font-medium text-obs-text">{SCOPE_LABEL[row.scope] || row.scope}</p>
-                    <p className="text-xs text-obs-faint">
-                      {row.item_count} item(ns) · {BATCH_STATUS_LABEL[row.status] || row.status} · {row.window_start_local}-{row.window_end_local} {row.timezone}
-                    </p>
-                  </div>
-                  <button onClick={() => toggleDetail(row)} className="lg-btn lg-btn-secondary">
-                    {expandedId === row.id ? "Ocultar" : "Detalhes"}
-                  </button>
-                </div>
-                {expandedId === row.id && detail && (
-                  <div className="space-y-2 px-4 pb-4">
-                    <div className="overflow-x-auto rounded-lg [border:1px_solid_var(--border-glass-soft)]">
-                      <table className="w-full text-xs">
-                        <thead className="bg-white/[0.03] text-obs-faint">
-                          <tr>
-                            <th className="px-3 py-2 text-left">Lead</th>
-                            <th className="px-3 py-2 text-left">Status atual</th>
-                            <th className="px-3 py-2 text-left">Horario agendado</th>
-                            <th className="px-3 py-2 text-left">Pausado</th>
-                            <th className="px-3 py-2 text-left">Acoes</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {(detail.items || []).map((item: any) => (
-                            <tr key={item.id} className="[border-top:1px_solid_var(--border-glass-soft)]">
-                              <td className="px-3 py-2 text-obs-text">{item.lead_ref}</td>
-                              <td className="px-3 py-2 text-obs-subtle">{item.lead_buffer?.status || "-"}</td>
-                              <td className="px-3 py-2 text-obs-faint">
-                                {item.override_available_at || item.computed_available_at}
-                              </td>
-                              <td className="px-3 py-2 text-obs-subtle">{item.paused ? "Sim" : "Nao"}</td>
-                              <td className="px-3 py-2">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  {!item.paused && (
-                                    <button onClick={() => pauseItem(item)} className="lg-btn lg-btn-secondary"><Pause size={12} /> Pausar</button>
-                                  )}
-                                  {item.paused && (
-                                    <button onClick={() => resumeItem(item)} className="lg-btn lg-btn-secondary"><Play size={12} /> Retomar</button>
-                                  )}
-                                  <input
-                                    type="datetime-local"
-                                    className="form-input w-auto"
-                                    value={rescheduleDrafts[item.id] ?? toLocalInputValue(item.override_available_at || item.computed_available_at)}
-                                    onChange={(e) => setRescheduleDrafts((current) => ({ ...current, [item.id]: e.target.value }))}
-                                  />
-                                  <button onClick={() => rescheduleItem(item)} className="lg-btn lg-btn-secondary"><Clock size={12} /> Reagendar</button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
-            {!batches.length && <p className="p-8 text-center text-sm text-obs-faint">Nenhum lote de liberacao registrado.</p>}
-          </section>
-        </>
-      )}
+  return <div className="flex flex-col gap-4">
+    <div className="flex gap-2 rounded-xl border border-obs-amber/25 bg-obs-amber/10 px-3 py-2 text-xs text-obs-amber"><AlertCircle className="shrink-0" size={15} />Bloqueios técnicos são somente leitura. Pausa, retomada e reprocessamento são sempre por mensagem.</div>
+    <div className="grid gap-2 rounded-xl border border-white/10 bg-obs-surface p-3 sm:grid-cols-2 xl:grid-cols-5">
+      <label className="text-xs text-obs-faint">Persona<select value={personaId} onChange={(event) => setPersonaId(event.target.value)} className="mt-1 block w-full rounded-lg border border-white/10 bg-obs-panel px-3 py-2 text-sm text-obs-text"><option value="">Todas autorizadas</option>{personas.filter((persona) => Boolean(persona.id)).map((persona) => <option key={persona.id} value={persona.id}>{personaLabel(persona)}</option>)}</select></label>
+      <label className="text-xs text-obs-faint">Lead<input aria-label="Lead" value={leadRef} inputMode="numeric" onChange={(event) => setLeadRef(event.target.value.replace(/\D/g, ""))} placeholder="ID da lead" className="mt-1 block w-full rounded-lg border border-white/10 bg-obs-panel px-3 py-2 text-sm text-obs-text" /></label>
+      <label className="text-xs text-obs-faint">Origem<select aria-label="Origem" value={origin} onChange={(event) => setOrigin(event.target.value)} className="mt-1 block w-full rounded-lg border border-white/10 bg-obs-panel px-3 py-2 text-sm text-obs-text"><option value="">Todas</option>{Object.entries(ORIGINS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
+      <label className="text-xs text-obs-faint">Estado<select aria-label="Estado" value={status} onChange={(event) => setStatus(event.target.value)} className="mt-1 block w-full rounded-lg border border-white/10 bg-obs-panel px-3 py-2 text-sm text-obs-text"><option value="">Todos</option>{STATES.map((state) => <option key={state} value={state}>{state === "reprocessed" ? "Reprocessadas (histórico)" : state}</option>)}</select></label>
+      <div className="flex items-end gap-2"><button onClick={() => load()} className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-obs-violet/15 px-3 py-2 text-sm text-obs-violet ring-1 ring-obs-violet/25"><RefreshCw size={15} />Atualizar</button>{leadRef && <button onClick={() => setLeadRef("")} className="rounded-lg border border-white/10 p-2 text-obs-subtle" title="Limpar filtro da lead"><X size={16} /></button>}</div>
     </div>
-  );
+    <div className="flex flex-wrap items-center gap-2 rounded-xl border border-white/10 bg-obs-surface p-3"><span className="mr-2 text-xs text-obs-subtle">{selected.length} selecionado(s)</span><button disabled={!selected.length || busy} onClick={() => action("pause")} className="flex items-center gap-1 rounded-lg bg-obs-amber/15 px-3 py-2 text-xs text-obs-amber disabled:opacity-40"><Pause size={14} />Pausar</button><button disabled={!selected.length || busy} onClick={() => action("resume")} className="flex items-center gap-1 rounded-lg bg-emerald-500/15 px-3 py-2 text-xs text-emerald-300 disabled:opacity-40"><Play size={14} />Retomar</button><button disabled={!selected.length || busy} onClick={() => action("reprocess")} className="flex items-center gap-1 rounded-lg bg-obs-violet/15 px-3 py-2 text-xs text-obs-violet disabled:opacity-40"><RotateCcw size={14} />Reprocessar</button></div>
+    {notice && <p role="status" className="rounded-lg bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300">{notice}</p>}{error && <p role="alert" className="rounded-lg bg-obs-rose/10 px-3 py-2 text-xs text-obs-rose">{error}</p>}
+    <div className="overflow-x-auto rounded-xl border border-white/10"><table className="w-full min-w-[1050px] text-left text-xs"><thead className="bg-white/[0.03] text-obs-faint"><tr><th className="p-3"><input type="checkbox" aria-label="Selecionar todos" checked={allSelected} onChange={(event) => setSelected(event.target.checked ? items.map((item) => item.id) : [])} /></th><th className="p-3">Mensagem</th><th className="p-3">Lead / persona</th><th className="p-3">Origem</th><th className="p-3">Previsto</th><th className="p-3">Estado</th><th className="p-3">Tentativas</th><th className="p-3">Regra / publicação</th><th className="p-3">Ação</th></tr></thead><tbody>{items.map((item) => <tr key={item.id} className="border-t border-white/[0.06] align-top"><td className="p-3"><input aria-label={`Selecionar ${item.id}`} type="checkbox" checked={selected.includes(item.id)} onChange={() => toggle(item.id)} /></td><td className="max-w-sm p-3 text-obs-text"><p className="line-clamp-2">{previewOf(item)}</p>{item.last_error && <p className="mt-1 line-clamp-2 text-obs-rose">{item.last_error}</p>}<p className="mt-1 font-mono text-[10px] text-obs-faint">{item.id}</p></td><td className="p-3"><button onClick={() => openLead(item)} disabled={!item.lead_ref} className="text-left text-obs-text hover:text-obs-violet disabled:cursor-default"><p>{item.lead?.nome || item.lead?.name || item.lead_ref || "Sem lead"}</p><p className="text-obs-faint">{personaLabel(item.persona, item.persona_id)}</p></button></td><td className="p-3">{ORIGINS[item.origin || ""] || item.origin || "—"}</td><td className="p-3">{formatDate(item.available_at || item.created_at)}</td><td className="p-3">{item.status || "—"}</td><td className="p-3">{item.attempt_count || 0}/{item.max_attempts || 0}</td><td className="max-w-40 p-3 text-obs-faint"><p className="truncate">{item.graph_rule || item.rule || "—"}</p><p className="truncate">{item.graph_publication || item.publication || ""}</p></td><td className="p-3 whitespace-nowrap"><button onClick={() => action("pause", [item.id])} className="mr-2 text-obs-amber">Pausar</button><button onClick={() => action("resume", [item.id])} className="mr-2 text-emerald-300">Retomar</button><button onClick={() => action("reprocess", [item.id])} className="text-obs-violet">Reprocessar</button></td></tr>)}</tbody></table>{!items.length && <p className="p-8 text-center text-sm text-obs-subtle">Nenhuma mensagem nesta fila com estes filtros.</p>}</div>
+    {nextOffset !== null && <button onClick={() => load(nextOffset, true)} className="self-center rounded-lg border border-white/10 px-4 py-2 text-sm">Carregar mais</button>}
+    {detail && <aside aria-label="Contexto da lead" className="rounded-xl border border-obs-violet/25 bg-obs-surface p-4"><div className="flex items-start justify-between gap-3"><div><p className="text-xs uppercase tracking-wide text-obs-faint">Linha do tempo e buffer</p><h2 className="mt-1 font-semibold text-obs-text">Lead {detailLeadName}</h2><p className="text-xs text-obs-subtle">{personaLabel(detail.persona, detail.persona_id)} · {detail.lead_ref}</p></div><button onClick={() => setDetail(null)} className="rounded-lg p-1 text-obs-subtle" aria-label="Fechar contexto"><X size={18} /></button></div><div className="mt-3 space-y-2">{detailLoading && <p className="text-sm text-obs-subtle">Carregando histórico da fila…</p>}{!detailLoading && detailItems.map((item) => <details key={item.id} className="rounded-lg border border-white/10 p-3"><summary className="flex cursor-pointer list-none items-center gap-2 text-sm text-obs-text"><span className="flex-1 line-clamp-1">{previewOf(item)}</span><span className="text-xs text-obs-faint">{item.status} · {formatDate(item.available_at || item.created_at)}</span><ChevronDown className="details-open:hidden" size={15} /><ChevronUp className="hidden details-open:block" size={15} /></summary><div className="mt-3 space-y-2 border-t border-white/[0.06] pt-3 text-xs"><p><span className="text-obs-faint">Origem:</span> {ORIGINS[item.origin || ""] || item.origin || "—"}</p><p><span className="text-obs-faint">Erro seguro:</span> {item.last_error || "—"}</p><p><span className="text-obs-faint">Regra/publicação:</span> {item.graph_rule || item.rule || "—"} {item.graph_publication || item.publication || ""}</p>{historyOf(item).map((entry, index) => <p key={index} className="rounded bg-white/[0.03] p-2 text-obs-subtle">{String(entry.action || entry.event_type || entry.result || "ação")} · {String(entry.reason || entry.created_at || "sem detalhe")}</p>)}</div></details>)}{!detailLoading && !detailItems.length && <p className="text-sm text-obs-subtle">Não há itens de buffer visíveis para esta lead.</p>}</div></aside>}
+  </div>;
 }

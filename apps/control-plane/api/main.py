@@ -15,7 +15,7 @@ for router in (health.router, auth.router, access.router, portal.router,
                knowledge.router, pipeline.router, kb_intake.router,
                generation.router, graph.router, graph_documents.router,
                graph_bundles.router, graph_projections.router,
-               marketing.router, messaging_campaigns.router, release_queue.router,
+               marketing.router, messaging_campaigns.router, release_queue.router, release_queue.queue_router,
                audiences.router, assets.router,
                menu.router, public_site_formats.router, logs.router,
                agent_harness.router, qa_contract.router):

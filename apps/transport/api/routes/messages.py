@@ -55,6 +55,7 @@ class InternalOutboundBody(BaseModel):
     media: dict[str, Any] | None = None
     template: dict[str, Any] | None = None
     campaign_scope: dict[str, Any] | None = None
+    message_origin: str | None = None
 
 
 class InternalCampaignOutboundBody(InternalOutboundBody):
@@ -166,6 +167,7 @@ def send_message(body: SendMessageBody, request: Request) -> dict:
                 "nome": body.nome or body.sender_id or "Operador",
                 "client_message_id": client_message_id,
             },
+            message_origin="manual",
         )
     except HTTPException:
         raise

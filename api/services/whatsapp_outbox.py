@@ -191,7 +191,7 @@ def prepare_outbound_envelope(
     message_id: str, correlation_id: str, idempotency_key: str | None = None,
     initial_status: str = "pending_send", metadata: dict[str, Any] | None = None,
     media: dict[str, Any] | None = None, template: dict[str, Any] | None = None,
-    campaign_scope: dict[str, Any] | None = None,
+    campaign_scope: dict[str, Any] | None = None, message_origin: str | None = None,
 ) -> dict[str, Any]:
     """Validate routing and build the canonical DB envelope without writing it."""
     if initial_status not in {"pending_send", "awaiting_proof"}:
@@ -202,13 +202,16 @@ def prepare_outbound_envelope(
     _observe_duplicate_content(
         lead=lead, binding=binding, text=text, correlation_id=correlation_id,
     )
+    origin = "campaign" if campaign_scope else (message_origin or "conversation")
+    if origin not in {"conversation", "campaign", "manual", "proactive", "system"}:
+        raise ValueError("invalid message origin")
     scope_fields = {
         "message_origin": "campaign",
         "campaign_id": campaign_scope.get("campaign_id"),
         "campaign_revision": campaign_scope.get("campaign_revision"),
         "campaign_recipient_id": campaign_scope.get("campaign_recipient_id"),
         "policy_checksum": campaign_scope.get("policy_checksum"),
-    } if campaign_scope else {}
+    } if campaign_scope else {"message_origin": origin}
     return {
         "binding": binding,
         "lock_key": lock_key,
@@ -246,7 +249,8 @@ def enqueue_outbound(*, lead: dict[str, Any], text: str, sender_type: str,
                      metadata: dict[str, Any] | None = None,
                      media: dict[str, Any] | None = None,
                      template: dict[str, Any] | None = None,
-                     campaign_scope: dict[str, Any] | None = None) -> dict[str, Any]:
+                     campaign_scope: dict[str, Any] | None = None,
+                     message_origin: str | None = None) -> dict[str, Any]:
     """Queue one outbound WhatsApp send.
 
     `campaign_scope` (campaign_id/campaign_revision/campaign_recipient_id/
@@ -260,7 +264,7 @@ def enqueue_outbound(*, lead: dict[str, Any], text: str, sender_type: str,
         lead=lead, text=text, sender_type=sender_type, message_id=message_id,
         correlation_id=correlation_id, idempotency_key=idempotency_key,
         initial_status=initial_status, metadata=metadata, media=media,
-        template=template, campaign_scope=campaign_scope,
+        template=template, campaign_scope=campaign_scope, message_origin=message_origin,
     )
     binding = prepared["binding"]
     lock_key = idempotency_key or correlation_id

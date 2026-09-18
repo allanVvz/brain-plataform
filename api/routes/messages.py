@@ -3,7 +3,7 @@ import json
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from services import (
@@ -14,9 +14,38 @@ from services import (
     supabase_client,
     whatsapp_outbox,
 )
+from routes.conversations import _authorize as authorize_internal
 
 router = APIRouter(prefix="/messages", tags=["messages"])
 logger = logging.getLogger("messages")
+internal_router = APIRouter(prefix="/internal/v1/control-plane", tags=["control-plane"])
+
+
+@internal_router.get("/personas/{persona_id}/outbound-policy")
+def published_outbound_policy(
+    persona_id: str,
+    x_webhook_token: str | None = Header(None, alias="X-Webhook-Token"),
+) -> dict:
+    """Expose only the pinned delivery window from the active GraphBundle."""
+    authorize_internal(x_webhook_token)
+    persona = supabase_client.get_persona_by_id(persona_id) or {}
+    slug = str(persona.get("slug") or "")
+    if not slug:
+        raise HTTPException(404, "Persona nao encontrada.")
+    from services import context_cards, graph_agent_runtime_v3
+    try:
+        version, checksum, graph = context_cards.current_graph(slug)
+    except Exception as exc:
+        raise HTTPException(409, "Persona sem GraphBundle publicado.") from exc
+    document = {"nodes": [node.model_dump(mode="json") for node in graph.nodes]}
+    persona_node = graph_agent_runtime_v3._persona_node(document) or {}
+    policy = ((persona_node.get("data") or {}).get("conversation_policy") or {}).get("business_hours")
+    if not isinstance(policy, dict) or policy.get("enabled") is False:
+        raise HTTPException(409, "Persona sem politica publicada de horario comercial.")
+    return {"published_business_hours": {
+        "timezone": policy.get("timezone"), "start": policy.get("start"), "end": policy.get("end"),
+        "graph_version": version, "graph_checksum": checksum,
+    }}
 
 
 class SendMessageBody(BaseModel):
@@ -120,6 +149,7 @@ def send_message(body: SendMessageBody, request: Request) -> dict:
                 "nome": body.nome or body.sender_id or "Operador",
                 "client_message_id": client_message_id,
             },
+            message_origin="manual",
         )
     except HTTPException:
         raise

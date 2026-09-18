@@ -217,3 +217,171 @@ def set_item_override(
         "p_new_available_at": new_available_at,
         "p_actor_user_id": _uuid_or_none(actor_user_id),
     }).execute().data
+
+
+def list_unified_queue(
+    *, persona_ids: list[str] | None, persona_id: str | None = None,
+    lead_ref: int | None = None, origin: str | None = None,
+    status: str | None = None, offset: int = 0, limit: int = 50,
+    history: str | None = None,
+) -> dict[str, Any]:
+    """Read the global queue from canonical lead_buffer, never from batches."""
+    query = supabase_client.get_client().table("lead_buffer").select("*")
+    if persona_id:
+        query = query.eq("persona_id", persona_id)
+    elif persona_ids is not None:
+        if not persona_ids:
+            return {"items": [], "next_offset": None, "timeline": [], "history": []}
+        query = query.in_("persona_id", persona_ids)
+    if lead_ref is not None:
+        query = query.eq("lead_ref", lead_ref)
+    if origin:
+        query = query.eq("message_origin", origin)
+    if status:
+        query = query.eq("status", status)
+    rows = _rows(query.order("created_at", desc=True).range(offset, offset + limit))
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    lead_refs = list({row.get("lead_ref") for row in rows if row.get("lead_ref") is not None})
+    persona_ids_for_rows = list({row.get("persona_id") for row in rows if row.get("persona_id")})
+    leads = {
+        row["id"]: row for row in _rows(
+            supabase_client.get_client().table("leads").select("id,nome,persona_id")
+            .in_("id", lead_refs)
+        )
+    } if lead_refs else {}
+    personas = {
+        row["id"]: row for row in _rows(
+            supabase_client.get_client().table("personas").select("id,name,slug")
+            .in_("id", persona_ids_for_rows)
+        )
+    } if persona_ids_for_rows else {}
+    buffer_ids = [str(row["id"]) for row in rows]
+    actions_by_buffer = _queue_actions(buffer_ids)
+    for row in rows:
+        payload = row.get("payload") or {}
+        row["preview"] = str(payload.get("text") or payload.get("caption") or "[sem texto]")[:240]
+        row["lead"] = leads.get(row.get("lead_ref"))
+        row["persona"] = personas.get(row.get("persona_id"))
+        row["origin"] = row.get("message_origin") or "conversation"
+        row["actions"] = actions_by_buffer.get(str(row["id"]), [])
+
+    timeline: list[dict] = []
+    if lead_ref is not None and _lead_is_in_scope(lead_ref, persona_ids, persona_id):
+        # messages is the immutable user-visible projection; lead_buffer is
+        # included separately above for transient/retry/paused state.
+        timeline = _rows(
+            supabase_client.get_client().table("messages").select("*")
+            .eq("lead_id", lead_ref).order("created_at", desc=True).range(0, 199)
+        )
+        for message in timeline:
+            message["preview"] = str(message.get("content") or "[sem texto]")[:240]
+
+    event_history = _queue_history(
+        persona_ids=persona_ids, persona_id=persona_id, lead_ref=lead_ref,
+        reprocessed_only=history == "reprocessed", offset=offset, limit=limit,
+    ) if history else []
+    return {
+        "items": rows,
+        "next_offset": offset + limit if has_more else None,
+        "timeline": timeline,
+        "history": event_history,
+    }
+
+
+def _lead_is_in_scope(lead_ref: int, persona_ids: list[str] | None, persona_id: str | None) -> bool:
+    lead = _one(
+        supabase_client.get_client().table("leads").select("id,persona_id")
+        .eq("id", lead_ref).maybe_single()
+    )
+    if not lead:
+        return False
+    if persona_id:
+        return lead.get("persona_id") == persona_id
+    return persona_ids is None or lead.get("persona_id") in set(persona_ids)
+
+
+def _queue_actions(buffer_ids: list[str]) -> dict[str, list[dict]]:
+    if not buffer_ids:
+        return {}
+    events = _rows(
+        supabase_client.get_client().table("system_events")
+        .select("event_type,entity_id,payload,created_at,level,source")
+        .eq("entity_type", "lead_buffer").like("event_type", "messaging.queue.%")
+        .in_("entity_id", buffer_ids).order("created_at", desc=True).range(0, 499)
+    )
+    result: dict[str, list[dict]] = {}
+    for event in events:
+        result.setdefault(str(event.get("entity_id")), []).append(event)
+    return result
+
+
+def _queue_history(
+    *, persona_ids: list[str] | None, persona_id: str | None, lead_ref: int | None,
+    reprocessed_only: bool, offset: int, limit: int,
+) -> list[dict]:
+    """Return audit history constrained by its immutable persona scope.
+
+    A lead-specific history resolves only that lead's already-scoped buffer
+    identities; a global history filters `system_events.persona_id` directly.
+    """
+    query = (
+        supabase_client.get_client().table("system_events")
+        .select("event_type,entity_type,entity_id,persona_id,payload,created_at,level,source")
+        .eq("entity_type", "lead_buffer").like("event_type", "messaging.queue.%")
+        .order("created_at", desc=True)
+    )
+    if persona_id:
+        query = query.eq("persona_id", persona_id)
+    elif persona_ids is not None:
+        if not persona_ids:
+            return []
+        query = query.in_("persona_id", persona_ids)
+    if lead_ref is not None:
+        scoped_buffers = supabase_client.get_client().table("lead_buffer").select("id")
+        if persona_id:
+            scoped_buffers = scoped_buffers.eq("persona_id", persona_id)
+        elif persona_ids is not None:
+            scoped_buffers = scoped_buffers.in_("persona_id", persona_ids)
+        ids = [str(row["id"]) for row in _rows(scoped_buffers.eq("lead_ref", lead_ref))]
+        if not ids:
+            return []
+        query = query.in_("entity_id", ids)
+    if reprocessed_only:
+        query = query.eq("event_type", "messaging.queue.reprocess")
+    return _rows(query.range(offset, offset + limit - 1))
+
+
+def next_reprocessable_queue_item(lead_ref: int) -> dict | None:
+    """Return the earliest safe inbound candidate, never an outbound retry."""
+    rows = _rows(
+        supabase_client.get_client().table("lead_buffer").select("id,persona_id,status,direction,payload,created_at")
+        .eq("lead_ref", lead_ref).eq("direction", "inbound")
+        .in_("status", ["received", "buffered", "retry"]).order("created_at").range(0, 49)
+    )
+    for row in rows:
+        payload = row.get("payload") or {}
+        if payload.get("queue_pause"):
+            continue
+        if (payload.get("conversation_commit") or {}).get("status") == "completed":
+            continue
+        proof = _one(
+            supabase_client.get_client().table("conversation_turn_proofs").select("id")
+            .eq("canonical_inbound_id", str(row["id"])).limit(1).maybe_single()
+        )
+        if not proof:
+            return row
+    return None
+
+
+def control_unified_queue(
+    *, buffer_ids: list[str], action: str, reason: str,
+    idempotency_key: str, actor_user_id: str | None,
+) -> dict[str, Any]:
+    return supabase_client.get_client().rpc("control_message_queue_v1", {
+        "p_buffer_ids": buffer_ids,
+        "p_action": action,
+        "p_reason": reason,
+        "p_idempotency_key": idempotency_key,
+        "p_actor_user_id": _uuid_or_none(actor_user_id),
+    }).execute().data

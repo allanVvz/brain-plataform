@@ -1045,6 +1045,22 @@ def enqueue_whatsapp_envelope(
     return payload
 
 
+def enqueue_proactive_with_proof(*, buffer: dict, message: dict, publication_id: str,
+                                 evidence_node_ids: list[str], proof_result: dict,
+                                 model_proposal: dict | None = None) -> dict:
+    result = get_client().rpc("enqueue_proactive_with_proof_v1", {
+        "p_buffer": buffer, "p_message": message, "p_publication_id": publication_id,
+        "p_evidence_node_ids": evidence_node_ids, "p_proof_result": proof_result,
+        "p_model_proposal": model_proposal or {},
+    }).execute()
+    payload = getattr(result, "data", None)
+    if isinstance(payload, list):
+        payload = payload[0] if payload else None
+    if not isinstance(payload, dict) or not payload.get("buffer_id"):
+        raise RuntimeError("enqueue_proactive_with_proof_v1 returned an invalid result")
+    return payload
+
+
 def get_whatsapp_buffer_by_idempotency(idempotency_key: str) -> Optional[dict]:
     if not idempotency_key:
         return None

@@ -2139,6 +2139,26 @@ def _context_appointment_policy(context: ConversationContext) -> dict[str, Any]:
     return policy if isinstance(policy, dict) else {}
 
 
+def _published_business_hours(context: ConversationContext) -> dict[str, Any] | None:
+    """Pin outbound delivery scheduling to the same published graph as a turn.
+
+    This is delivery metadata, not a decision branch: the model has already
+    produced and proof-authorized one normal reply for its canonical inbound.
+    Transport receives the exact published policy/checksum and may defer that
+    already-authorized item without replaying the inbound or generating copy.
+    """
+    persona = next((node for node in context.rag_nodes if node.get("node_type") == "persona"), {})
+    policy = ((persona.get("data") or {}).get("conversation_policy") or {})
+    hours = policy.get("business_hours")
+    if not isinstance(hours, dict) or hours.get("enabled") is False:
+        return None
+    return {
+        "timezone": hours.get("timezone"), "start": hours.get("start"), "end": hours.get("end"),
+        "graph_version": context.graph_version, "graph_checksum": context.graph_checksum,
+        "publication_id": context.publication_id,
+    }
+
+
 def _cited_context_nodes(
     context: ConversationContext, decision: ConversationDecision
 ) -> list[dict[str, Any]]:
@@ -2914,6 +2934,7 @@ def commit(
                 "token_usage": response.token_usage,
                 "trace_id": inbound_buffer_id,
                 "n8n_execution_id": n8n_execution_id,
+                "published_business_hours": _published_business_hours(context),
             }
         if context.runtime_version == graph_agent_runtime_v3.RUNTIME_VERSION:
             prepared_outbound = transport_client.prepare_outbound(

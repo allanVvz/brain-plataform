@@ -31,6 +31,7 @@ describe("Disparos rollout one", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    window.history.replaceState({}, "", "/disparos?tab=campanhas");
     localStorage.setItem("ai-brain-persona-id", "persona-1");
     mocks.leadImports.mockResolvedValue([
       { id: "batch-1", filename: "clientes.csv", status: "completed", valid_rows: 2 },

@@ -29,3 +29,28 @@ def attach_inbound_asset(asset_id: str) -> dict:
     if not isinstance(result, dict):
         raise RuntimeError("control plane returned an invalid response")
     return result
+
+
+def published_outbound_policy(persona_id: str) -> dict:
+    """Read the active GraphBundle delivery policy from its owning service."""
+    base_url = (os.environ.get("BRAIN_CONTROL_PLANE_URL") or "").strip().rstrip("/")
+    token = (os.environ.get("AI_BRAIN_WEBHOOK_TOKEN") or "").strip()
+    if not base_url or not token:
+        raise RuntimeError("control plane is not configured")
+    try:
+        with httpx.Client(timeout=10, verify=get_ca_bundle_path()) as client:
+            response = client.get(
+                base_url + f"/internal/v1/control-plane/personas/{persona_id}/outbound-policy",
+                headers={"X-Webhook-Token": token},
+            )
+    except httpx.HTTPError as exc:
+        raise RuntimeError("control plane is unavailable") from exc
+    if response.status_code >= 400:
+        raise RuntimeError(f"control plane returned HTTP {response.status_code}")
+    try:
+        result = response.json()
+    except ValueError as exc:
+        raise RuntimeError("control plane returned an invalid response") from exc
+    if not isinstance(result, dict) or not isinstance(result.get("published_business_hours"), dict):
+        raise RuntimeError("control plane returned an invalid outbound policy")
+    return result

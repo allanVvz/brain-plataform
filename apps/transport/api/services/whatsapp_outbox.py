@@ -1,19 +1,50 @@
 """Canonical WhatsApp outbox creation, always bound to the lead channel."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, time, timedelta, timezone
 from typing import Any
 import os
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import HTTPException
 
-from services import event_emitter, supabase_client
+from services import control_plane_client, event_emitter, supabase_client
 
 # Fallback when a binding does not set metadata.duplicate_guard_window_seconds.
 # Any workflow_bindings row can override or disable this per persona/channel
 # without a code change (see _observe_duplicate_content).
 DEFAULT_DUPLICATE_GUARD_WINDOW_SECONDS = 300
+
+
+def _published_schedule(metadata: dict[str, Any] | None, *, now: datetime | None = None) -> dict[str, Any] | None:
+    """Validate and calculate a schedule passed from a published graph turn.
+
+    Transport does not own commercial policy.  It accepts only the pinned
+    graph policy/checksum supplied by control-plane/runtime and never supplies
+    a default time, timezone, or customer-facing copy itself.
+    """
+    raw = (metadata or {}).get("published_business_hours")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise HTTPException(409, "Politica publicada de horario comercial invalida.")
+    try:
+        zone = ZoneInfo(str(raw["timezone"]))
+        start = time.fromisoformat(str(raw["start"]))
+        end = time.fromisoformat(str(raw["end"]))
+    except (KeyError, TypeError, ValueError, ZoneInfoNotFoundError) as exc:
+        raise HTTPException(409, "Politica publicada de horario comercial invalida.") from exc
+    if start >= end or not str(raw.get("graph_checksum") or "").strip():
+        raise HTTPException(409, "Politica publicada de horario comercial invalida.")
+    now = now or datetime.now(timezone.utc)
+    local = now.astimezone(zone)
+    local_time = local.timetz().replace(tzinfo=None)
+    if start <= local_time < end:
+        return {"closed": False, "available_at": now.isoformat(), "policy": raw}
+    date = local.date() if local_time < start else local.date() + timedelta(days=1)
+    opening = datetime.combine(date, start, tzinfo=zone).astimezone(timezone.utc)
+    return {"closed": True, "available_at": opening.isoformat(), "policy": raw}
 
 
 def _recipient_for_lead(lead: dict[str, Any]) -> str:
@@ -191,7 +222,7 @@ def prepare_outbound_envelope(
     message_id: str, correlation_id: str, idempotency_key: str | None = None,
     initial_status: str = "pending_send", metadata: dict[str, Any] | None = None,
     media: dict[str, Any] | None = None, template: dict[str, Any] | None = None,
-    campaign_scope: dict[str, Any] | None = None,
+    campaign_scope: dict[str, Any] | None = None, message_origin: str | None = None,
 ) -> dict[str, Any]:
     """Validate routing and build the canonical DB envelope without writing it."""
     if initial_status not in {"pending_send", "awaiting_proof"}:
@@ -202,13 +233,30 @@ def prepare_outbound_envelope(
     _observe_duplicate_content(
         lead=lead, binding=binding, text=text, correlation_id=correlation_id,
     )
+    effective_metadata = dict(metadata or {})
+    if effective_metadata.get("published_business_hours") is None:
+        try:
+            effective_metadata.update(control_plane_client.published_outbound_policy(str(lead["persona_id"])))
+        except Exception as exc:
+            raise HTTPException(409, "Nao foi possivel obter a politica publicada de entrega.") from exc
+    schedule = _published_schedule(effective_metadata)
+    effective_status = initial_status
+    if schedule and schedule["closed"] and initial_status == "pending_send":
+        effective_status = "buffered"
+    schedule_payload = (
+        {"published_business_hours": schedule["policy"], "available_at": schedule["available_at"]}
+        if schedule else {}
+    )
+    origin = "campaign" if campaign_scope else (message_origin or "conversation")
+    if origin not in {"conversation", "campaign", "manual", "proactive", "system"}:
+        raise ValueError("invalid message origin")
     scope_fields = {
         "message_origin": "campaign",
         "campaign_id": campaign_scope.get("campaign_id"),
         "campaign_revision": campaign_scope.get("campaign_revision"),
         "campaign_recipient_id": campaign_scope.get("campaign_recipient_id"),
         "policy_checksum": campaign_scope.get("policy_checksum"),
-    } if campaign_scope else {}
+    } if campaign_scope else {"message_origin": origin}
     return {
         "binding": binding,
         "lock_key": lock_key,
@@ -218,8 +266,9 @@ def prepare_outbound_envelope(
             "channel_binding_id": binding["id"],
             "whatsapp_phone_number_id": binding.get("whatsapp_phone_number_id"),
             "direction": "outbound",
-            "payload": {"text": text, "sender_type": sender_type, "media": media, "template": template},
-            "status": initial_status,
+            "payload": {"text": text, "sender_type": sender_type, "media": media, "template": template, **schedule_payload},
+            "status": effective_status,
+            **({"available_at": schedule["available_at"]} if schedule and schedule["closed"] else {}),
             "batch_key": f"{lead['persona_id']}:{lead['id']}",
             "idempotency_key": lock_key,
             "correlation_id": correlation_id,
@@ -233,7 +282,7 @@ def prepare_outbound_envelope(
             "channel": "whatsapp", "sender_id": message_id,
             "whatsapp_phone_number_id": binding.get("whatsapp_phone_number_id"),
             "channel_binding_id": binding["id"], "correlation_id": correlation_id,
-            "metadata": metadata or {}, "created_at": datetime.now(timezone.utc).isoformat(),
+            "metadata": effective_metadata, "created_at": datetime.now(timezone.utc).isoformat(),
             **scope_fields,
         },
     }
@@ -246,7 +295,8 @@ def enqueue_outbound(*, lead: dict[str, Any], text: str, sender_type: str,
                      metadata: dict[str, Any] | None = None,
                      media: dict[str, Any] | None = None,
                      template: dict[str, Any] | None = None,
-                     campaign_scope: dict[str, Any] | None = None) -> dict[str, Any]:
+                     campaign_scope: dict[str, Any] | None = None,
+                     message_origin: str | None = None) -> dict[str, Any]:
     """Queue one outbound WhatsApp send.
 
     `campaign_scope` (campaign_id/campaign_revision/campaign_recipient_id/
@@ -260,7 +310,7 @@ def enqueue_outbound(*, lead: dict[str, Any], text: str, sender_type: str,
         lead=lead, text=text, sender_type=sender_type, message_id=message_id,
         correlation_id=correlation_id, idempotency_key=idempotency_key,
         initial_status=initial_status, metadata=metadata, media=media,
-        template=template, campaign_scope=campaign_scope,
+        template=template, campaign_scope=campaign_scope, message_origin=message_origin,
     )
     binding = prepared["binding"]
     lock_key = idempotency_key or correlation_id

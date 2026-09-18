@@ -9,6 +9,7 @@ from services import auth_service, release_queue_service
 
 
 router = APIRouter(prefix="/messaging/release-queue", tags=["release-queue"])
+queue_router = APIRouter(prefix="/messaging", tags=["message-queue"])
 
 
 class RegisterBatchBody(BaseModel):
@@ -29,6 +30,18 @@ class ItemOverrideBody(BaseModel):
     reason: str = Field(min_length=3, max_length=500)
     idempotency_key: str = Field(min_length=8, max_length=200)
     new_available_at: str | None = None
+
+
+class QueueActionBody(BaseModel):
+    buffer_ids: list[str] = Field(min_length=1, max_length=100)
+    reason: str = Field(min_length=3, max_length=500)
+    idempotency_key: str = Field(min_length=8, max_length=200)
+
+
+class ReprocessNextBody(BaseModel):
+    lead_ref: int = Field(gt=0)
+    reason: str = Field(min_length=3, max_length=500)
+    idempotency_key: str = Field(min_length=8, max_length=200)
 
 
 @router.post("/batches")
@@ -141,3 +154,80 @@ def reschedule_item(item_id: str, body: ItemOverrideBody, request: Request):
     if not body.new_available_at:
         raise HTTPException(422, "new_available_at e obrigatorio para reagendar.")
     return _item_action(item_id, "reschedule", body, request)
+
+
+@queue_router.get("/queue")
+def list_queue(
+    request: Request,
+    persona_id: str | None = Query(None), lead_ref: int | None = Query(None),
+    origin: str | None = Query(None, pattern="^(conversation|campaign|manual|proactive|system)$"),
+    status: str | None = Query(None, max_length=40), offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
+    history: Literal["all", "reprocessed"] | None = Query(None),
+):
+    user = auth_service.current_user(request)
+    if persona_id:
+        auth_service.assert_persona_capability(request, "view", persona_id=persona_id)
+        scope = [persona_id]
+    elif auth_service.is_admin(user):
+        scope = None
+    else:
+        scope = auth_service.allowed_persona_ids(request)
+    # A lead filter is still scoped through the query; never fetch a lead first
+    # and accidentally disclose its persona/name on a 403 path.
+    return release_queue_service.list_unified_queue(
+        persona_ids=scope, persona_id=persona_id, lead_ref=lead_ref, origin=origin,
+        status=status, offset=offset, limit=limit, history=history,
+    )
+
+
+def _queue_action(action: str, body: QueueActionBody, request: Request):
+    # Fetch exact records independently of UI-visible pagination.
+    found = {
+        row["id"]: row for row in release_queue_service._rows(
+            release_queue_service.supabase_client.get_client().table("lead_buffer").select("id,persona_id")
+            .in_("id", body.buffer_ids)
+        )
+    }
+    if len(found) != len(set(body.buffer_ids)):
+        raise HTTPException(404, "Um ou mais itens da fila nao foram encontrados.")
+    for row in found.values():
+        auth_service.assert_persona_capability(request, "edit", persona_id=row["persona_id"])
+    return release_queue_service.control_unified_queue(
+        buffer_ids=body.buffer_ids, action=action, reason=body.reason,
+        idempotency_key=body.idempotency_key,
+        actor_user_id=auth_service.current_user(request).get("id"),
+    )
+
+
+@queue_router.post("/queue/pause")
+def pause_queue(body: QueueActionBody, request: Request):
+    return _queue_action("pause", body, request)
+
+
+@queue_router.post("/queue/resume")
+def resume_queue(body: QueueActionBody, request: Request):
+    return _queue_action("resume", body, request)
+
+
+@queue_router.post("/queue/reprocess")
+def reprocess_queue(body: QueueActionBody, request: Request):
+    return _queue_action("reprocess", body, request)
+
+
+@queue_router.post("/queue/reprocess-next")
+def reprocess_next_queue(body: ReprocessNextBody, request: Request):
+    """Reprocess exactly one eligible canonical inbound for a lead.
+
+    This is intentionally server-selected: the UI must never guess which
+    buffer row is safe after a delivery or a prior conversation commit.
+    """
+    user = auth_service.current_user(request)
+    candidate = release_queue_service.next_reprocessable_queue_item(body.lead_ref)
+    if not candidate:
+        return {"items": [{"result": "bloqueado", "reason": "nenhuma_mensagem_elegivel"}]}
+    auth_service.assert_persona_capability(request, "edit", persona_id=candidate["persona_id"])
+    return release_queue_service.control_unified_queue(
+        buffer_ids=[candidate["id"]], action="reprocess", reason=body.reason,
+        idempotency_key=body.idempotency_key, actor_user_id=user.get("id"),
+    )
