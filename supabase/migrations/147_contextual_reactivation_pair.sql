@@ -118,12 +118,14 @@ CREATE OR REPLACE FUNCTION public.list_actionable_message_queue_v1(
 ) RETURNS jsonb LANGUAGE sql SECURITY DEFINER SET search_path=public,pg_temp AS $$
   WITH scoped AS (
     SELECT b.*, l.nome AS lead_name, p.name AS persona_name, p.slug AS persona_slug,
-      parent.created_at AS parent_created_at, previous_message.content AS previous_message,
+      parent.created_at AS parent_created_at, last_message.content AS last_message_content,
+      first_preview.content AS first_preview_content,
       latest_inbound.content AS latest_inbound_context, proof.id AS proof_id, proof.publication_id
     FROM public.lead_buffer b
     LEFT JOIN public.leads l ON l.id=b.lead_ref LEFT JOIN public.personas p ON p.id=b.persona_id
     LEFT JOIN public.lead_buffer parent ON parent.id=b.queue_parent_buffer_id
-    LEFT JOIN LATERAL (SELECT m.content FROM public.messages m WHERE m.lead_id=coalesce(parent.lead_ref,b.lead_ref) AND m.direction='outbound' AND m.created_at<=coalesce(parent.created_at,b.created_at) ORDER BY m.created_at DESC LIMIT 1) previous_message ON true
+    LEFT JOIN LATERAL (SELECT m.content FROM public.messages m WHERE m.lead_id=coalesce(parent.lead_ref,b.lead_ref) AND m.created_at<=coalesce(parent.created_at,b.created_at) ORDER BY m.created_at DESC, m.id DESC LIMIT 1) last_message ON true
+    LEFT JOIN LATERAL (SELECT first_line.payload->>'text' AS content FROM public.lead_buffer first_line WHERE b.queue_sequence=2 AND first_line.queue_group_id=b.queue_group_id AND first_line.queue_revision=b.queue_revision AND first_line.queue_sequence=1 AND first_line.status <> 'superseded' ORDER BY first_line.created_at DESC LIMIT 1) first_preview ON true
     LEFT JOIN LATERAL (SELECT m.content FROM public.messages m WHERE m.lead_id=coalesce(parent.lead_ref,b.lead_ref) AND m.direction='inbound' AND m.created_at<=coalesce(parent.created_at,b.created_at) ORDER BY m.created_at DESC LIMIT 1) latest_inbound ON true
     LEFT JOIN public.conversation_turn_proofs proof ON proof.canonical_inbound_id='proactive:' || b.id::text
     WHERE (p_persona_ids IS NULL OR b.persona_id=ANY(p_persona_ids))
@@ -145,7 +147,7 @@ CREATE OR REPLACE FUNCTION public.list_actionable_message_queue_v1(
     'lead_ref',lead_ref,'lead',CASE WHEN lead_ref IS NULL THEN NULL ELSE jsonb_build_object('nome',lead_name) END,'persona_id',persona_id,'persona',jsonb_build_object('name',persona_name,'slug',persona_slug),
     'origin',coalesce(message_origin,'conversation'),'status',queue_state,'queue_state',queue_state,'available_at',available_at,'created_at',created_at,'last_error',last_error,
     'reactivation_group_id',queue_group_id,'queue_parent_buffer_id',queue_parent_buffer_id,'sequence_index',queue_sequence,'line_kind',queue_line_kind,'preview_revision',queue_revision,
-    'previous_message',previous_message,'latest_inbound_context',latest_inbound_context,'proof_id',proof_id,'publication_id',publication_id,
+      'previous_message',coalesce(CASE WHEN queue_sequence=2 THEN first_preview_content ELSE NULL END,last_message_content),'latest_inbound_context',latest_inbound_context,'proof_id',proof_id,'publication_id',publication_id,
     'actions',CASE
       WHEN queue_state='technical_failure' THEN jsonb_build_array('reprocess')
       WHEN queue_state='preview_ready' AND queue_group_id IS NOT NULL THEN jsonb_build_array('send_preview','regenerate_preview','handoff','pause')
