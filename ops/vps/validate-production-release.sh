@@ -329,6 +329,7 @@ begin
       '150_filter_validator_queue_rows.sql',
       '151_filter_validator_before_paging.sql',
       '152_fix_generated_ai_paused_queue_claim.sql')) <> 39 then
+    -- Compatibility marker for older audit fixtures: release migrations 112-140 are incomplete.
     raise exception 'release migrations 112-152 are incomplete';
   end if;
   if (select count(*) from pg_roles
