@@ -66,6 +66,23 @@ function statusLabel(state?: string | null) {
   return STATES.find(([value]) => value === state)?.[1] || state || "—";
 }
 
+function previousMessage(item: QueueItem) {
+  if (item.previous_message) return item.previous_message;
+  // Until the richer queue projection is available, the legacy `preview`
+  // field contains the last outbound message for awaiting-customer rows.
+  return item.queue_state === "awaiting_customer"
+    ? item.preview || "Sem mensagem anterior"
+    : "Sem mensagem anterior";
+}
+
+function currentPreview(item: QueueItem) {
+  if (item.preview_text) return item.preview_text;
+  // Never present the previous outbound as a new preview for a reactivation.
+  return item.queue_state === "awaiting_customer"
+    ? "Nenhuma prévia nova gerada"
+    : item.preview || "Nenhuma prévia disponível";
+}
+
 function primaryAction(item: QueueItem): { action: QueueAction; label: string } | null {
   if (item.actions?.includes("reprocess")) return { action: "reprocess", label: "Corrigir e gerar resposta" };
   if (item.actions?.includes("reactivate")) return { action: "reactivate", label: "Reativar cliente" };
@@ -183,8 +200,8 @@ export function ReleaseQueuePanel() {
           const action = primaryAction(item);
           return <tr key={item.id} className={`border-t border-white/[0.06] ${sent ? "bg-emerald-500/[0.06]" : "bg-rose-500/[0.06]"}`}>
             <td className="p-3"><input aria-label="Selecionar mensagem" type="checkbox" checked={selected.includes(item.id)} onChange={() => setSelected((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} /></td>
-            <td className="max-w-sm p-3"><p className="line-clamp-2 text-obs-subtle">{item.previous_message || "Sem mensagem anterior"}</p><p className="mt-1 text-xs text-obs-faint">{item.latest_inbound_context ? `Contexto: ${item.latest_inbound_context}` : "Sem contexto recebido"}</p></td>
-            <td className="max-w-sm p-3"><p className="line-clamp-3 text-obs-text">{item.preview_text || item.preview || "Sem conteúdo disponível"}</p>{item.reactivation_group_id && <p className="mt-1 text-xs text-obs-faint">Linha {item.sequence_index || 1} · {item.line_kind === "apology" ? "desculpa/retomada" : "contextual"} · revisão {item.preview_revision || 1}</p>}{item.sequence_index === 2 && <p className="mt-1 text-xs text-amber-200">Aviso: esta linha pode ser enviada independentemente da primeira.</p>}{item.last_error && <p className="mt-1 text-xs text-rose-200">{item.last_error}</p>}</td>
+            <td className="max-w-sm p-3"><p className="line-clamp-2 text-obs-subtle">{previousMessage(item)}</p><p className="mt-1 text-xs text-obs-faint">{item.latest_inbound_context ? `Contexto: ${item.latest_inbound_context}` : "Sem contexto recebido"}</p></td>
+            <td className="max-w-sm p-3"><p className="line-clamp-3 text-obs-text">{currentPreview(item)}</p>{item.reactivation_group_id && <p className="mt-1 text-xs text-obs-faint">Linha {item.sequence_index || 1} · {item.line_kind === "apology" ? "desculpa/retomada" : "contextual"} · revisão {item.preview_revision || 1}</p>}{item.sequence_index === 2 && <p className="mt-1 text-xs text-amber-200">Aviso: esta linha pode ser enviada independentemente da primeira.</p>}{item.last_error && <p className="mt-1 text-xs text-rose-200">{item.last_error}</p>}</td>
             <td className="p-3"><p className="text-obs-text">{item.lead?.nome || item.lead?.name || "Lead"}</p><p className="text-xs text-obs-faint">{item.persona?.name || item.persona?.slug || ""}</p></td>
             <td className="p-3 text-obs-subtle">{ORIGINS[item.origin || ""] || item.origin || "—"}</td>
             <td className="p-3 text-obs-subtle">{formatDate(item.available_at || item.created_at)}</td>
