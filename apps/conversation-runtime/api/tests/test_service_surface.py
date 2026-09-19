@@ -107,6 +107,8 @@ def test_other_domain_modules_are_not_shipped_in_runtime_source():
 
 def test_only_versioned_internal_journey_paths_are_service_authenticated():
     assert is_public_path("/internal/v1/conversations/resolve-understanding") is True
+    assert is_public_path("/internal/v1/conversations/reactivation-pair") is True
+    assert is_public_path("/internal/v1/conversations/queue-preview") is True
     assert is_public_path("/internal/v1/runtime/leads/decorate") is True
     assert is_public_path("/internal/v1/runtime/leads/admin") is False
     assert is_public_path("/internal/v1/agents/leads/42/journey-events") is True

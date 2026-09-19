@@ -27,6 +27,12 @@ PUBLIC_EXACT_PATHS = {
     "/internal/v1/conversations/commit",
     "/internal/v1/conversations/fail-safe-handoff",
     "/internal/v1/conversations/technical-failure",
+    # Control-plane authenticated queue operations. These routes validate the
+    # shared webhook token in the handler; they must not fall through to the
+    # browser-session middleware.
+    "/internal/v1/conversations/queue-preview",
+    "/internal/v1/conversations/reactivation-preview",
+    "/internal/v1/conversations/reactivation-pair",
     # Transport-authenticated lead decoration. The route performs its own
     # constant-time X-Webhook-Token validation before reading lead metadata.
     "/internal/v1/runtime/leads/decorate",
