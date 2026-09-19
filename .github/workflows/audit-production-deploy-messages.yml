@@ -145,6 +145,19 @@ jobs:
             order by b.created_at;
 
             with scope as (select id from public.personas where :'PERSONA_SLUG'='all' or slug=:'PERSONA_SLUG')
+            select 'CURRENT_ORPHAN_DETAIL',b.id,p.slug,b.status,b.created_at,b.updated_at,
+              b.locked_at,b.locked_by,b.attempt_count,left(coalesce(b.last_error,''),160),
+              (coalesce(b.payload,'{}'::jsonb) ? 'decision_attempt_started_at'),
+              (coalesce(b.payload,'{}'::jsonb) ? 'provider_attempt_started_at'),
+              exists (select 1 from public.conversation_turn_proofs proof where proof.canonical_inbound_id=b.id::text),
+              left(md5(coalesce(b.lead_ref::text,'')),12)
+            from public.lead_buffer b join scope s on s.id=b.persona_id join public.personas p on p.id=b.persona_id
+            where b.direction='inbound'
+              and b.status in ('processing','awaiting_proof')
+              and coalesce(b.locked_at,b.updated_at)<now()-interval '5 minutes'
+            order by b.created_at;
+
+            with scope as (select id from public.personas where :'PERSONA_SLUG'='all' or slug=:'PERSONA_SLUG')
             select 'CURRENT_ORPHANS',
               count(*) filter(where b.status in ('processing','awaiting_proof') and coalesce(b.locked_at,b.updated_at)<now()-interval '5 minutes'),
               count(*) filter(where b.status in ('received','buffered','retry') and b.payload->'conversation_commit' is not null)
