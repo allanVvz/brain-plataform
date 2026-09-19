@@ -48,6 +48,9 @@ def test_deployer_retries_image_pull_before_slot_creation():
     source = (ROOT / "ops/vps/deploy-microservice-blue-green.sh").read_text()
     assert "for pull_attempt in 1 2 3 4" in source
     assert "image pull failed after ${pull_attempt} attempts" in source
+    assert source.index('target_services=("$target_service")') < source.index(
+        "pull_candidate_images\n"
+    )
     assert source.index("pull_candidate_images\n") < source.index(
         '"${COMPOSE[@]}" up -d --no-deps --force-recreate'
     )

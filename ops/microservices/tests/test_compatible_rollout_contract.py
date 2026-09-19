@@ -42,7 +42,8 @@ def test_rollout_has_service_sha_digest_deduplication_and_automatic_rollback():
     assert "runtime canary failed; rolling back automatically" in workflow
     assert "conversation-runtime --rollback" in workflow
     assert 'WA_VALIDATOR_TIMEOUT_SECONDS: "300"' in workflow
-    assert "install_active_caddy_config" not in script
+    assert "install_active_caddy_config()" in script
+    assert "install_active_caddy_config\nif [[ ! -s \"$STATE_FILE\" ]]" in script
     assert "cannot establish immutable provenance" in script
     assert "interrupted historical rollback" in script
     assert "rollout-microservices.sh status" in workflow

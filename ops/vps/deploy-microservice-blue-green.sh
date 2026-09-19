@@ -128,10 +128,6 @@ pull_candidate_images() {
 
 active="$(read_state active)"
 previous="$(read_state previous)"
-if [[ "$ACTION" != "--rollback" ]]; then
-  pull_candidate_images
-fi
-
 if [[ "$ACTION" == "--rollback" ]]; then
   [[ "$previous" =~ ^(blue|green)$ ]] || { echo "no rollback slot recorded for $SERVICE" >&2; exit 1; }
   target="$previous"
@@ -153,6 +149,13 @@ case "$SERVICE" in
     target_services=("$target_service" "transport-dispatch-$target" "transport-media-$target")
     ;;
 esac
+
+# Build the exact service set before pulling. An empty Compose service list
+# means "all services", which would pull the retired legacy brain-workers
+# image during an unrelated microservice release.
+if [[ "$ACTION" != "--rollback" ]]; then
+  pull_candidate_images
+fi
 
 old_services=()
 if [[ "$active" =~ ^(blue|green)$ && "$active" != "$target" ]]; then
