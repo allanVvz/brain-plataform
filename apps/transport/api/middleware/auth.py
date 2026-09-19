@@ -20,6 +20,9 @@ PUBLIC_EXACT_PATHS = {
     "/internal/v1/transport/messages/campaign-outbound",
     "/internal/v1/transport/messages/prepare-outbound",
     "/internal/v1/transport/messages/outbound",
+    # Control-plane authenticated, inert reactivation previews.
+    "/internal/v1/transport/messages/reactivation-preview",
+    "/internal/v1/transport/messages/reactivation-pair",
     "/internal/v1/transport/messages/validator-media",
     "/internal/v1/transport/messages/validator-inbound",
     "/internal/v1/transport/whatsapp/meta/templates/create",

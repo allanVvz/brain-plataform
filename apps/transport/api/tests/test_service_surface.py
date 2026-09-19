@@ -44,6 +44,7 @@ def test_service_identity_and_readiness_surface():
     assert "/internal/v1/transport/messages/prepare-outbound" in paths
     assert "/internal/v1/transport/messages/outbound" in paths
     assert "/internal/v1/transport/messages/reactivation-preview" in paths
+    assert "/internal/v1/transport/messages/reactivation-pair" in paths
     assert "/internal/v1/transport/messages/validator-media" in paths
     assert "/internal/v1/transport/messages/validator-inbound" in paths
     assert "/internal/v1/transport/messages/inbound/{buffer_id}/technical-failure" in paths
@@ -60,6 +61,8 @@ def test_internal_transport_commands_reach_route_token_authentication():
         "/internal/v1/transport/messages/campaign-outbound",
         "/internal/v1/transport/messages/prepare-outbound",
         "/internal/v1/transport/messages/outbound",
+        "/internal/v1/transport/messages/reactivation-preview",
+        "/internal/v1/transport/messages/reactivation-pair",
         "/internal/v1/transport/messages/validator-media",
         "/internal/v1/transport/messages/validator-inbound",
         "/internal/v1/transport/messages/validator-inbound/"
