@@ -50,7 +50,7 @@ describe("actionable message queue", () => {
     render(<ReleaseQueuePanel />);
 
     expect(await screen.findByText("Ultima mensagem da cliente")).toBeInTheDocument();
-    expect(screen.getByText("Nenhuma prÃ©via nova gerada")).toBeInTheDocument();
+    expect(screen.getByText("Nenhuma prévia nova gerada")).toBeInTheDocument();
     expect(screen.queryByText("Posso ajudar?")).not.toBeInTheDocument();
 
     fireEvent.click(await screen.findByRole("button", { name: "Reativar cliente" }));

@@ -80,7 +80,7 @@ function previousMessage(item: QueueItem) {
 function currentPreview(item: QueueItem) {
   // An already sent outbound is not a new preview. Older API responses may
   // still populate `preview_text` with that outbound, so fail closed here too.
-  if (item.queue_state === "awaiting_customer") return "Nenhuma prÃ©via nova gerada";
+  if (item.queue_state === "awaiting_customer") return "Nenhuma prévia nova gerada";
   if (item.preview_text) return item.preview_text;
   // Never present the previous outbound as a new preview for a reactivation.
   return item.queue_state === "awaiting_customer"
