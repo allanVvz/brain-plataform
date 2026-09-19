@@ -124,19 +124,22 @@ jobs:
             printf '%s\n' "
             BEGIN;
             SELECT pg_advisory_xact_lock(hashtext('claim_whatsapp_buffer:v3'));
+            SELECT set_config('brain.recovery.buffer_ids', :'BUFFER_IDS', true);
+            SELECT set_config('brain.recovery.persona_slug', :'PERSONA_SLUG', true);
+            SELECT set_config('brain.recovery.reason', :'RECOVERY_REASON', true);
             DO \$\$
             DECLARE
               row public.lead_buffer%ROWTYPE;
               seen_count integer := 0;
-              expected_count integer := array_length(string_to_array(:'BUFFER_IDS',',')::uuid[],1);
-              reason text := :'RECOVERY_REASON';
+              expected_count integer := array_length(string_to_array(current_setting('brain.recovery.buffer_ids'),',')::uuid[],1);
+              reason text := current_setting('brain.recovery.reason');
             BEGIN
               FOR row IN
                 SELECT b.*
                   FROM public.lead_buffer b
                   JOIN public.personas p ON p.id=b.persona_id
-                 WHERE b.id=ANY(string_to_array(:'BUFFER_IDS',',')::uuid[])
-                   AND p.slug=:'PERSONA_SLUG'
+                 WHERE b.id=ANY(string_to_array(current_setting('brain.recovery.buffer_ids'),',')::uuid[])
+                   AND p.slug=current_setting('brain.recovery.persona_slug')
                  ORDER BY b.id
                  FOR UPDATE
               LOOP
