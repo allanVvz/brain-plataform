@@ -369,7 +369,7 @@ export const api = {
     });
     return req<any>(`/messaging/queue?${query.toString()}`);
   },
-  controlMessagingQueue: (action: "pause" | "resume" | "reprocess" | "send-preview" | "reactivate", body: Record<string, unknown>) =>
+  controlMessagingQueue: (action: "pause" | "resume" | "reprocess" | "send-preview" | "reactivate" | "regenerate-preview" | "handoff", body: Record<string, unknown>) =>
     req<any>(`/messaging/queue/${action}`, { method: "POST", body: JSON.stringify(body) }),
   updateLeadInfo: (leadRef: number, body: {
     nome?: string;
