@@ -118,6 +118,40 @@ def test_only_versioned_internal_journey_paths_are_service_authenticated():
     assert is_public_path("/internal/runtime/leads/42/resume") is False
 
 
+def test_queue_preview_is_explicitly_non_committing(monkeypatch):
+    from routes import conversations
+
+    captured = {}
+    monkeypatch.setattr(
+        conversations.internal_auth,
+        "authorize_webhook_token",
+        lambda _token: None,
+    )
+    monkeypatch.setattr(
+        conversations.agentic_turn,
+        "execute",
+        lambda **kwargs: captured.update(kwargs) or {"ok": True},
+    )
+    monkeypatch.setattr(
+        conversations.conversation_runtime,
+        "dispatch_result_envelope",
+        lambda result, correlation_id: {**result, "correlation_id": correlation_id},
+    )
+
+    body = conversations.QueuePreviewRequest(
+        persona_slug="fixture",
+        lead_ref=42,
+        message="mensagem técnica",
+        correlation_id="corr-1",
+        channel_binding_id="binding-1",
+        inbound_buffer_id="buffer-1",
+    )
+    conversations.queue_preview(body, x_webhook_token="internal")
+
+    assert captured["preview_only"] is True
+    assert captured["commit_result"] is False
+
+
 def _jwt_for_role(role: str) -> str:
     payload = base64.urlsafe_b64encode(
         json.dumps({"role": role}).encode()

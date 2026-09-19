@@ -237,7 +237,13 @@ def queue_preview(
     """
     internal_auth.authorize_webhook_token(x_webhook_token)
     try:
-        result = agentic_turn.execute(**body.model_dump(), preview_only=True)
+        # A queue preview is deliberately inert: it may run the same
+        # understanding/reply/proof path, but it must never consume the
+        # canonical inbound commit.  The default for execute() is a real
+        # commit, so make this boundary explicit here.
+        result = agentic_turn.execute(
+            **body.model_dump(), preview_only=True, commit_result=False,
+        )
     except Exception as exc:
         raise HTTPException(409, str(exc)) from exc
     return conversation_runtime.dispatch_result_envelope(
