@@ -41,12 +41,17 @@ describe("actionable message queue", () => {
   it("creates a separate reactivation preview from the inline action", async () => {
     mocks.queue.mockResolvedValue({
       items: [{
-        id: "sent-outbound", persona_id: "tock-persona", preview: "Posso ajudar?", queue_state: "awaiting_customer",
+        id: "sent-outbound", persona_id: "tock-persona", preview: "Posso ajudar?", preview_text: "Posso ajudar?",
+        latest_message: "Ultima mensagem da cliente", queue_state: "awaiting_customer",
         origin: "conversation", lead: { nome: "Teste" }, persona: { name: "Tock Fatal" },
         actions: ["reactivate"],
       }], next_offset: null,
     });
     render(<ReleaseQueuePanel />);
+
+    expect(await screen.findByText("Ultima mensagem da cliente")).toBeInTheDocument();
+    expect(screen.getByText("Nenhuma prÃ©via nova gerada")).toBeInTheDocument();
+    expect(screen.queryByText("Posso ajudar?")).not.toBeInTheDocument();
 
     fireEvent.click(await screen.findByRole("button", { name: "Reativar cliente" }));
 

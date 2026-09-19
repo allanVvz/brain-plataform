@@ -70,16 +70,17 @@ function statusLabel(state?: string | null) {
 
 function previousMessage(item: QueueItem) {
   if (item.sequence_index === 2 && item.first_preview_text) return item.first_preview_text;
-  if (item.sequence_index !== 2 && item.latest_message) return item.latest_message;
+  if (item.latest_message) return item.latest_message;
   if (item.previous_message) return item.previous_message;
   // Until the richer queue projection is available, the legacy `preview`
   // field contains the last outbound message for awaiting-customer rows.
-  return item.queue_state === "awaiting_customer"
-    ? item.preview || "Sem mensagem anterior"
-    : "Sem mensagem anterior";
+  return "Sem mensagem anterior";
 }
 
 function currentPreview(item: QueueItem) {
+  // An already sent outbound is not a new preview. Older API responses may
+  // still populate `preview_text` with that outbound, so fail closed here too.
+  if (item.queue_state === "awaiting_customer") return "Nenhuma prÃ©via nova gerada";
   if (item.preview_text) return item.preview_text;
   // Never present the previous outbound as a new preview for a reactivation.
   return item.queue_state === "awaiting_customer"
