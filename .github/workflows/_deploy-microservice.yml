@@ -44,18 +44,18 @@ jobs:
         env:
           AUDIT_ROOT: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           ALLOW_PENDING_MICROSERVICE_DIGESTS: "true"
-          script_path: ops/vps/validate-production-release.sh
+          AUDIT_SCRIPT: ops/vps/validate-production-release.sh
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
           command_timeout: 3m
-          envs: AUDIT_ROOT,ALLOW_PENDING_MICROSERVICE_DIGESTS,script_path
+          envs: AUDIT_ROOT,ALLOW_PENDING_MICROSERVICE_DIGESTS,AUDIT_SCRIPT
           script: |
             set -Eeuo pipefail
             cd "$AUDIT_ROOT"
-            bash "$script_path"
+            bash "$AUDIT_SCRIPT"
             bash ops/vps/rollout-microservices.sh status
 
   mutate:
