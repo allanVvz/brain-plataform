@@ -155,5 +155,6 @@ $$;
 
 REVOKE ALL ON FUNCTION public.list_actionable_message_queue_v149(uuid[],text,text,integer,integer) FROM PUBLIC,anon,authenticated;
 REVOKE ALL ON FUNCTION public.list_actionable_message_queue_v1(uuid[],text,text,integer,integer) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.list_actionable_message_queue_v149(uuid[],text,text,integer,integer) TO brain_control_plane;
 GRANT EXECUTE ON FUNCTION public.list_actionable_message_queue_v1(uuid[],text,text,integer,integer) TO service_role,brain_control_plane;
 NOTIFY pgrst, 'reload schema';
