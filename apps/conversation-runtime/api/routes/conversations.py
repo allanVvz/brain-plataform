@@ -159,6 +159,12 @@ class ReactivationPreviewRequest(StrictModel):
     source_buffer_id: str
 
 
+class ReactivationPairRequest(ReactivationPreviewRequest):
+    """Two independent preview lines sharing one reactivation group."""
+
+    regenerate: bool = False
+
+
 
 @router.post("/execute")
 def execute(
@@ -251,6 +257,26 @@ def reactivation_preview(
         return conversation_runtime.create_reactivation_preview(
             persona_slug=body.persona_slug, lead_ref=body.lead_ref,
             source_buffer_id=body.source_buffer_id, actor_user_id=x_brain_actor_id,
+        )
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except (LookupError, RuntimeError, ValueError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/reactivation-pair")
+def reactivation_pair(
+    body: ReactivationPairRequest,
+    x_webhook_token: str | None = Header(None, alias="X-Webhook-Token"),
+    x_brain_actor_id: str | None = Header(None, alias="X-Brain-Actor-Id"),
+) -> dict:
+    """Generate apology and contextual previews without delivery."""
+    internal_auth.authorize_webhook_token(x_webhook_token)
+    try:
+        return conversation_runtime.create_reactivation_pair(
+            persona_slug=body.persona_slug, lead_ref=body.lead_ref,
+            source_buffer_id=body.source_buffer_id, actor_user_id=x_brain_actor_id,
+            regenerate=body.regenerate,
         )
     except PermissionError as exc:
         raise HTTPException(403, str(exc)) from exc

@@ -4185,6 +4185,10 @@ def resolve_understanding(
     }
     decision, response = decide(focused_context, model_observation=observation)
     proof = response.proof or {}
+    # The understanding stage intentionally has no public reply yet.  Its
+    # proof may reject optional branch/question metadata while still yielding
+    # a usable state for the reply stage.  Only a real delivery gate or an
+    # unresolved repair remains terminal here.
     if (
         proof.get("valid") is not True
         or proof.get("repair_required") is True
@@ -4954,14 +4958,21 @@ def _decide(
         proof["valid"] = False
     if service_operations and not service_proof["valid"]:
         proof["errors"] = [*proof.get("errors", []), *service_proof["errors"]]
-        proof["valid"] = False
         proof["repair_required"] = False
+    safe_service_operations = service_operations if service_proof["valid"] else []
+    delivery_gates = [
+        str(error) for error in proof.get("errors") or []
+        if str(error).startswith(("publication_", "claim_"))
+    ]
+    proof["gating_errors"] = list(dict.fromkeys(delivery_gates))
+    proof["valid"] = not delivery_gates
+    proof["delivery_authorized"] = not delivery_gates
     proof.update({
         "service_resolution": context.retrieval_trace.get("service_resolution") or {},
         "service_operations": service_operations,
         "model_proposed_service_operations": model_proposed_service_operations,
         "model_service_observations": model_service_observations,
-        "applied_service_operations": service_operations,
+        "applied_service_operations": safe_service_operations,
         "service_operation_rejection_reason": (
             "model_operations_replaced_by_backend_resolver"
             if model_proposed_service_operations != service_operations else None
@@ -4983,35 +4994,17 @@ def _decide(
         ])),
         "quality_warnings": list(dict.fromkeys([
             *(proof.get("quality_warnings") or []),
+            *[
+                error for error in proof.get("errors") or []
+                if error not in (proof.get("gating_errors") or [])
+            ],
             *discarded_components,
         ])),
     })
-    # An explicit switch/add is only a Phase-A decision on the first pass.
-    # Force one directed Phase-B retrieval for the selected branch before
-    # any reply or fact can be committed, even if an anchor snippet
-    # happened to suffice.
-    if (
-        int(observation.get("repair_attempt") or 0) == 0
-        and proposal.branch_action.value in {"select", "switch", "add"}
-        and proposal.branch_anchor_node_id
-        != context.retrieval_trace.get("retrieval_branch_node_id")
-        and not [error for error in proof["errors"] if "outside_package" not in error]
-    ):
-        requirement_ids = list(dict.fromkeys([
-            proposal.branch_anchor_node_id,
-            *(((document.get("coordinates") or {}).get(proposal.branch_anchor_node_id) or {}).get("path_node_ids") or []),
-            *proposal.cited_node_ids,
-            *([proposal.next_question_node_id] if proposal.next_question_node_id else []),
-            *(contract.get("handoff_rule_node_ids") or []),
-        ]))
-        proof.update({
-            "valid": False,
-            "errors": [*proof["errors"], "selected_branch_requires_phase_b"],
-            "repair_required": True,
-            "repair_requirements": [
-                {"kind": "node", "id": node_id} for node_id in requirement_ids if node_id
-            ],
-        })
+    # Branch selection is contextual metadata.  The reply model already saw
+    # the resolved brief, so a second retrieval pass must not suppress a
+    # usable SDR sentence.  The selected branch still has to pass the normal
+    # evidence checks before its facts can be committed.
     repair_cards: list[dict[str, Any]] = []
     if (
         proof["repair_required"]
@@ -5239,12 +5232,12 @@ def _decide(
             }
         accepted_facts = list(proof.get("accepted_facts") or [])
         accepted_facts.extend(_service_facts_for_operations(
-            operations=service_operations,
+            operations=safe_service_operations,
             document=document,
             grouped_facts=grouped_facts,
             source_message_id=_source_message_id(context.messages),
         ))
-        if service_candidate and not service_operations:
+        if service_candidate and not safe_service_operations:
             previous_service_fact = next(
                 (
                     fact for fact in grouped_facts.get("servico", [])
@@ -5351,11 +5344,11 @@ def _decide(
             *([context.active_branch_node_id] if context.active_branch_node_id else []),
             *context.active_branch_node_ids,
         ]))
-        if service_operations:
+        if safe_service_operations:
             active_branch_ids = list(service_proof["next_active_branch_node_ids"])
         committed_branch = (
             (context.retrieval_trace.get("service_resolution") or {}).get("focused_branch_node_id")
-            if service_operations
+            if safe_service_operations
             else context.active_branch_node_id
         )
         if active_branch_ids and committed_branch not in set(active_branch_ids):
@@ -5410,78 +5403,20 @@ def _decide(
             proposal.next_question_node_id, askable_question_ids,
         )
         if rejected_question_id:
-            # Never preserve prose that asks a graph field after that field was
-            # resolved (or before its dependencies are satisfied).  Older
-            # behavior discarded only the structured question id while still
-            # releasing the model's byte-for-byte reply, which let a known
-            # qualification fact be asked again.  Give the model one generic
-            # repair opportunity; a second invalid proposal becomes an
-            # observable handoff and is never published.
-            repair_attempt = int(observation.get("repair_attempt") or 0)
-            repair_requirement = {
-                "kind": "model_reply",
-                "issue": "qualification_question_not_askable",
-                "rejected_question_node_id": rejected_question_id,
-                "eligible_question_node_ids": sorted(askable_question_ids),
-                "instruction": (
-                    "Remove the non-askable qualification question. Ask at "
-                    "most one currently eligible graph field; when none is "
-                    "eligible, remain consultative and keep asked_field_key null."
-                ),
+            # The structured question pointer is disposable metadata.  Do
+            # not spend a repair or create a handoff for it; the model reply
+            # remains the contextual SDR reply and the pointer is discarded.
+            proof = {
+                **proof,
+                "quality_warnings": list(dict.fromkeys([
+                    *(proof.get("quality_warnings") or []),
+                    f"qualification_question_not_askable:{rejected_question_id}",
+                ])),
+                "discarded_structured_components": list(dict.fromkeys([
+                    *(proof.get("discarded_structured_components") or []),
+                    f"next_question_node_id:{rejected_question_id}",
+                ])),
             }
-            if repair_attempt < 1:
-                return (
-                    ConversationDecision(
-                        classifier="graph_proof_checker_v3",
-                        intent="repair_retrieval",
-                        route=ConversationRoute.SDR,
-                        confidence=0,
-                        lead_stage=str(context.cart.get("_lead_stage") or "novo"),
-                    ),
-                    AgentResponse(
-                        reply_text=None,
-                        role=ConversationRoute.SDR,
-                        cart_state=context.cart,
-                        handoff_required=False,
-                        proposal=proposal,
-                        proof={
-                            **proof,
-                            "valid": False,
-                            "delivery_authorized": False,
-                            "repair_required": True,
-                            "repair_requirements": [repair_requirement],
-                            "fallback_used": False,
-                            "model_reply_preserved": True,
-                        },
-                    ),
-                )
-            return (
-                ConversationDecision(
-                    classifier="graph_proof_checker_v3",
-                    intent="qualification_question_handoff",
-                    route=ConversationRoute.HUMAN,
-                    confidence=0,
-                    lead_stage=str(context.cart.get("_lead_stage") or "novo"),
-                    handoff_reason="qualification_question_not_askable_after_repair",
-                ),
-                AgentResponse(
-                    reply_text=None,
-                    role=ConversationRoute.HUMAN,
-                    cart_state=context.cart,
-                    handoff_required=True,
-                    proposal=proposal,
-                    proof={
-                        **proof,
-                        "valid": False,
-                        "delivery_authorized": False,
-                        "repair_required": False,
-                        "repair_requirements": [repair_requirement],
-                        "fallback_used": False,
-                        "model_reply_preserved": True,
-                        "handoff_observable": True,
-                    },
-                ),
-            )
         question_contract = next(
             (
                 candidate for candidate in (document.get("branch_contracts") or {}).values()
@@ -5573,68 +5508,10 @@ def _decide(
             "allowed" if repetition["passed"] else "quality_failure_recorded"
         )
         if not repetition["passed"]:
-            repair_attempt = int(observation.get("repair_attempt") or 0)
-            if repair_attempt < 1:
-                return (
-                    ConversationDecision(
-                        classifier="graph_proof_checker_v3",
-                        intent="repair_retrieval",
-                        route=ConversationRoute.SDR,
-                        confidence=0,
-                        lead_stage=str(context.cart.get("_lead_stage") or "novo"),
-                    ),
-                    AgentResponse(
-                        reply_text=None,
-                        role=ConversationRoute.SDR,
-                        cart_state=context.cart,
-                        handoff_required=False,
-                        proposal=proposal,
-                        proof={
-                            **proof,
-                            "valid": False,
-                            "delivery_authorized": False,
-                            "repair_required": True,
-                            "repair_requirements": [{
-                                "kind": "model_reply",
-                                "issue": "semantic_repetition",
-                                "instruction": (
-                                    "Rewrite once without repeating a recent reply; "
-                                    "preserve every grounded fact."
-                                ),
-                            }],
-                            "repetition_audit": repetition,
-                            "fallback_used": False,
-                            "model_reply_preserved": True,
-                        },
-                    ),
-                )
-            return (
-                ConversationDecision(
-                    classifier="graph_proof_checker_v3",
-                    intent="repetition_handoff",
-                    route=ConversationRoute.HUMAN,
-                    confidence=0,
-                    lead_stage=str(context.cart.get("_lead_stage") or "novo"),
-                    handoff_reason="model_repetition_after_repair",
-                ),
-                AgentResponse(
-                    reply_text=None,
-                    role=ConversationRoute.HUMAN,
-                    cart_state=context.cart,
-                    handoff_required=True,
-                    proposal=proposal,
-                    proof={
-                        **proof,
-                        "valid": False,
-                        "delivery_authorized": False,
-                        "repair_required": False,
-                        "repetition_audit": repetition,
-                        "fallback_used": False,
-                        "model_reply_preserved": True,
-                        "handoff_observable": True,
-                    },
-                ),
-            )
+            # Repetition is a quality signal, not a delivery failure.  Keep
+            # the model's contextual sentence and record the observation for
+            # audit/metrics instead of spending a repair or forcing handoff.
+            repetition_action = "quality_failure_recorded"
         projection_contract = (
             (document.get("branch_contracts") or {}).get(committed_branch)
             or document.get("common_contract")

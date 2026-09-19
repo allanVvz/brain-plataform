@@ -5,7 +5,7 @@ import { AlertCircle, CheckCircle2, RefreshCw, Send } from "lucide-react";
 import { api } from "@/lib/api";
 import { useGlobalPersona } from "@/lib/useGlobalPersona";
 
-type QueueAction = "pause" | "resume" | "reprocess" | "send-preview" | "reactivate";
+type QueueAction = "pause" | "resume" | "reprocess" | "send-preview" | "reactivate" | "regenerate-preview" | "handoff";
 type QueueItem = {
   id: string;
   preview?: string | null;
@@ -20,6 +20,13 @@ type QueueItem = {
   created_at?: string | null;
   last_error?: string | null;
   actions?: string[];
+  reactivation_group_id?: string | null;
+  sequence_index?: number;
+  line_kind?: "apology" | "context" | null;
+  preview_text?: string | null;
+  preview_revision?: number;
+  previous_message?: string | null;
+  latest_inbound_context?: string | null;
 };
 
 const ORIGINS: Record<string, string> = {
@@ -35,6 +42,8 @@ const STATES: Array<[string, string]> = [
 const ACTIONS: Array<{ value: QueueAction; label: string }> = [
   { value: "reprocess", label: "Gerar preview" },
   { value: "reactivate", label: "Reativar cliente" },
+  { value: "regenerate-preview", label: "Regerar prévia" },
+  { value: "handoff", label: "Handoff" },
   { value: "send-preview", label: "Enviar preview" },
   { value: "pause", label: "Pausar" },
   { value: "resume", label: "Retomar" },
@@ -63,6 +72,7 @@ function primaryAction(item: QueueItem): { action: QueueAction; label: string } 
   if (item.actions?.includes("send_preview")) return { action: "send-preview", label: "Enviar" };
   if (item.actions?.includes("resume")) return { action: "resume", label: "Retomar" };
   if (item.actions?.includes("pause")) return { action: "pause", label: "Pausar" };
+  if (item.actions?.includes("regenerate_preview")) return { action: "regenerate-preview", label: "Regerar prévia" };
   return null;
 }
 
@@ -100,12 +110,13 @@ export function ReleaseQueuePanel() {
   const selectedItems = useMemo(() => visibleItems.filter((item) => selected.includes(item.id)), [visibleItems, selected]);
   const allSelected = visibleItems.length > 0 && selectedItems.length === visibleItems.length;
   const selectedActions = useMemo(() => ACTIONS.filter(({ value }) =>
-    selectedItems.length > 0 && selectedItems.every((item) => item.actions?.includes(value === "send-preview" ? "send_preview" : value)),
+    selectedItems.length > 0 && selectedItems.every((item) => item.actions?.includes(value.replaceAll("-", "_"))),
   ), [selectedItems]);
 
   async function runAction(action: QueueAction, targets = selectedItems) {
     if (!targets.length) return;
-    const unsupported = targets.filter((item) => !item.actions?.includes(action));
+    const apiAction = action.replaceAll("-", "_");
+    const unsupported = targets.filter((item) => !item.actions?.includes(apiAction));
     if (unsupported.length) {
       setError(`${unsupported.length} mensagem(ns) não aceitam esta ação no estado atual.`);
       return;
@@ -165,19 +176,20 @@ export function ReleaseQueuePanel() {
       <table className="w-full min-w-[960px] text-left text-sm">
         <thead className="bg-white/[0.03] text-xs text-obs-faint"><tr>
           <th className="w-12 p-3"><input aria-label="Selecionar todas" type="checkbox" checked={allSelected} onChange={(event) => setSelected(event.target.checked ? visibleItems.map((item) => item.id) : [])} /></th>
-          <th className="p-3">Mensagem</th><th className="p-3">Lead</th><th className="p-3">Origem</th><th className="p-3">Previsão</th><th className="p-3">Estado</th><th className="p-3 text-right">Ação</th>
+          <th className="p-3">Mensagem anterior</th><th className="p-3">Prévia atual</th><th className="p-3">Lead</th><th className="p-3">Origem</th><th className="p-3">Horário</th><th className="p-3">Estado</th><th className="p-3 text-right">Ações</th>
         </tr></thead>
         <tbody>{visibleItems.map((item) => {
           const sent = item.queue_state === "awaiting_customer";
           const action = primaryAction(item);
           return <tr key={item.id} className={`border-t border-white/[0.06] ${sent ? "bg-emerald-500/[0.06]" : "bg-rose-500/[0.06]"}`}>
             <td className="p-3"><input aria-label="Selecionar mensagem" type="checkbox" checked={selected.includes(item.id)} onChange={() => setSelected((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} /></td>
-            <td className="max-w-xl p-3"><p className="line-clamp-2 text-obs-text">{item.preview || "Sem conteúdo disponível"}</p>{item.last_error && <p className="mt-1 text-xs text-rose-200">{item.last_error}</p>}</td>
+            <td className="max-w-sm p-3"><p className="line-clamp-2 text-obs-subtle">{item.previous_message || "Sem mensagem anterior"}</p><p className="mt-1 text-xs text-obs-faint">{item.latest_inbound_context ? `Contexto: ${item.latest_inbound_context}` : "Sem contexto recebido"}</p></td>
+            <td className="max-w-sm p-3"><p className="line-clamp-3 text-obs-text">{item.preview_text || item.preview || "Sem conteúdo disponível"}</p>{item.reactivation_group_id && <p className="mt-1 text-xs text-obs-faint">Linha {item.sequence_index || 1} · {item.line_kind === "apology" ? "desculpa/retomada" : "contextual"} · revisão {item.preview_revision || 1}</p>}{item.sequence_index === 2 && <p className="mt-1 text-xs text-amber-200">Aviso: esta linha pode ser enviada independentemente da primeira.</p>}{item.last_error && <p className="mt-1 text-xs text-rose-200">{item.last_error}</p>}</td>
             <td className="p-3"><p className="text-obs-text">{item.lead?.nome || item.lead?.name || "Lead"}</p><p className="text-xs text-obs-faint">{item.persona?.name || item.persona?.slug || ""}</p></td>
             <td className="p-3 text-obs-subtle">{ORIGINS[item.origin || ""] || item.origin || "—"}</td>
             <td className="p-3 text-obs-subtle">{formatDate(item.available_at || item.created_at)}</td>
             <td className="p-3"><span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs ${sent ? "bg-emerald-500/15 text-emerald-200" : "bg-rose-500/15 text-rose-100"}`}>{sent ? <CheckCircle2 size={13} /> : <AlertCircle size={13} />}{statusLabel(item.queue_state)}</span></td>
-            <td className="p-3 text-right">{action && <button type="button" disabled={busy} onClick={() => void runAction(action.action, [item])} className={`inline-flex items-center gap-1 rounded-lg px-3 py-2 text-xs font-medium disabled:opacity-40 ${action.action === "reactivate" ? "bg-obs-violet text-white" : action.action === "send-preview" ? "bg-emerald-500/20 text-emerald-100" : "border border-white/10 text-obs-text"}`}><Send size={13} />{action.label}</button>}</td>
+            <td className="p-3 text-right"><div className="flex flex-wrap justify-end gap-1">{item.actions?.includes("regenerate_preview") && <button type="button" disabled={busy} onClick={() => void runAction("regenerate-preview", [item])} className="rounded-lg border border-white/10 px-2 py-2 text-xs text-obs-text">Regerar prévia</button>}{item.actions?.includes("send_preview") && <button type="button" disabled={busy} onClick={() => void runAction("send-preview", [item])} className="rounded-lg bg-emerald-500/20 px-2 py-2 text-xs text-emerald-100">Enviar</button>}{item.actions?.includes("handoff") && <button type="button" disabled={busy} onClick={() => void runAction("handoff", [item])} className="rounded-lg border border-amber-400/30 px-2 py-2 text-xs text-amber-100">Handoff</button>}{action && !item.actions?.includes("send_preview") && !item.actions?.includes("handoff") && <button type="button" disabled={busy} onClick={() => void runAction(action.action, [item])} className="inline-flex items-center gap-1 rounded-lg bg-obs-violet px-3 py-2 text-xs font-medium text-white disabled:opacity-40"><Send size={13} />{action.label}</button>}</div></td>
           </tr>;
         })}</tbody>
       </table>

@@ -170,3 +170,11 @@ def generate_reactivation_preview(payload: dict[str, Any], *, actor_user_id: str
         payload,
         actor_user_id=actor_user_id,
     )
+
+
+def generate_reactivation_pair(payload: dict[str, Any], *, actor_user_id: str | None) -> dict:
+    return _post(
+        "/internal/v1/conversations/reactivation-pair",
+        payload,
+        actor_user_id=actor_user_id,
+    )

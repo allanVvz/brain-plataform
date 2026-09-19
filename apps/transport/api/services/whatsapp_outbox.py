@@ -223,6 +223,9 @@ def prepare_outbound_envelope(
     initial_status: str = "pending_send", metadata: dict[str, Any] | None = None,
     media: dict[str, Any] | None = None, template: dict[str, Any] | None = None,
     campaign_scope: dict[str, Any] | None = None, message_origin: str | None = None,
+    queue_group_id: str | None = None, queue_parent_buffer_id: str | None = None,
+    queue_line_kind: str | None = None, queue_sequence: int | None = None,
+    queue_revision: int | None = None, queue_regenerate: bool | None = None,
 ) -> dict[str, Any]:
     """Validate routing and build the canonical DB envelope without writing it."""
     # preview_ready is deliberately not claimable by the dispatch worker.  It
@@ -277,6 +280,12 @@ def prepare_outbound_envelope(
             "correlation_id": correlation_id,
             **scope_fields,
             **({"campaign_step": campaign_scope.get("campaign_step")} if campaign_scope else {}),
+            **({"queue_group_id": queue_group_id} if queue_group_id else {}),
+            **({"queue_parent_buffer_id": queue_parent_buffer_id} if queue_parent_buffer_id else {}),
+            **({"queue_line_kind": queue_line_kind} if queue_line_kind else {}),
+            **({"queue_sequence": queue_sequence} if queue_sequence is not None else {}),
+            **({"queue_revision": queue_revision} if queue_revision is not None else {}),
+            **({"queue_regenerate": queue_regenerate} if queue_regenerate is not None else {}),
         },
         "message": {
             "lead_id": lead["id"],
@@ -376,3 +385,42 @@ def enqueue_reactivation_preview(
         evidence_node_ids=evidence_node_ids, proof_result=proof_result,
         model_proposal=model_proposal, actor_user_id=actor_user_id,
     )
+
+
+def enqueue_reactivation_pair(
+    *, source_buffer_id: str, lead: dict[str, Any], publication_id: str,
+    lines: list[dict[str, Any]], actor_user_id: str | None = None,
+    regenerate: bool = False,
+) -> dict[str, Any]:
+    """Build and commit both previews in one proof-gated database transaction."""
+    if len(lines) != 2:
+        raise ValueError("reactivation pair must contain exactly two lines")
+    prepared: list[dict[str, Any]] = []
+    for line in lines:
+        prepared.append(prepare_outbound_envelope(
+            lead=lead, text=str(line.get("text") or ""), sender_type="agent",
+            message_id=str(line.get("message_id") or ""),
+            correlation_id=str(line.get("correlation_id") or ""),
+            idempotency_key=str(line.get("idempotency_key") or ""),
+            initial_status="awaiting_proof", metadata=None,
+            message_origin="proactive",
+            queue_group_id=str(line.get("queue_group_id") or ""),
+            queue_parent_buffer_id=source_buffer_id,
+            queue_line_kind=str(line.get("queue_line_kind") or ""),
+            queue_sequence=int(line.get("queue_sequence") or 0),
+            queue_revision=int(line.get("queue_revision") or 0),
+            queue_regenerate=regenerate,
+        ))
+    result = supabase_client.enqueue_reactivation_pair_with_proof(
+        source_buffer_id=source_buffer_id,
+        apology_buffer=prepared[0]["buffer"], apology_message=prepared[0]["message"],
+        context_buffer=prepared[1]["buffer"], context_message=prepared[1]["message"],
+        publication_id=publication_id,
+        evidence_node_ids=lines[0].get("evidence_node_ids") or [],
+        apology_proof_result=lines[0].get("proof_result") or {},
+        context_proof_result=lines[1].get("proof_result") or {},
+        apology_model_proposal=lines[0].get("model_proposal") or {},
+        context_model_proposal=lines[1].get("model_proposal") or {},
+        actor_user_id=actor_user_id,
+    )
+    return result

@@ -386,7 +386,9 @@ def generate_queue_previews(*, buffer_ids: list[str], actor_user_id: str | None)
     return {"items": results}
 
 
-def generate_reactivation_previews(*, buffer_ids: list[str], actor_user_id: str | None) -> dict[str, Any]:
+def generate_reactivation_previews(
+    *, buffer_ids: list[str], actor_user_id: str | None, regenerate: bool = False,
+) -> dict[str, Any]:
     """Create one independent proactive preview for each delivered outbound.
 
     Eligibility is deliberately checked again by transport in the final
@@ -396,28 +398,57 @@ def generate_reactivation_previews(*, buffer_ids: list[str], actor_user_id: str 
     results: list[dict[str, Any]] = []
     for buffer_id in buffer_ids:
         try:
-            source = _one(
+            line = _one(
                 supabase_client.get_client().table("lead_buffer")
-                .select("id,persona_id,lead_ref,direction,status")
+                .select("id,persona_id,lead_ref,direction,status,payload,queue_parent_buffer_id")
                 .eq("id", buffer_id).maybe_single()
             ) or {}
-            if source.get("direction") != "outbound" or source.get("status") not in {"sent", "delivered", "read"}:
+            if line.get("direction") != "outbound":
+                raise RuntimeError("mensagem nao esta elegivel para reativacao")
+            payload = line.get("payload") or {}
+            source_id = payload.get("reactivation_source_buffer_id") or line.get("queue_parent_buffer_id") or buffer_id
+            source = line
+            if str(source_id) != str(buffer_id):
+                source = _one(
+                    supabase_client.get_client().table("lead_buffer")
+                    .select("id,persona_id,lead_ref,direction,status")
+                    .eq("id", source_id).maybe_single()
+                ) or {}
+                if (
+                    line.get("status") != "preview_ready"
+                    or source.get("direction") != "outbound"
+                    or source.get("status") not in {"sent", "delivered", "read"}
+                    or source.get("persona_id") != line.get("persona_id")
+                    or source.get("lead_ref") != line.get("lead_ref")
+                ):
+                    raise RuntimeError("preview de reativacao ou fonte nao esta elegivel")
+            elif source.get("status") not in {"sent", "delivered", "read"}:
                 raise RuntimeError("mensagem nao esta elegivel para reativacao")
             persona = _one(
                 supabase_client.get_client().table("personas").select("slug")
-                .eq("id", source.get("persona_id")).maybe_single()
+                .eq("id", line.get("persona_id")).maybe_single()
             ) or {}
-            result = runtime_client.generate_reactivation_preview({
+            result = runtime_client.generate_reactivation_pair({
                 "persona_slug": persona.get("slug"),
-                "lead_ref": source.get("lead_ref"),
-                "source_buffer_id": str(buffer_id),
+                "lead_ref": line.get("lead_ref"),
+                "source_buffer_id": str(source_id),
+                "regenerate": regenerate,
             }, actor_user_id=actor_user_id)
             results.append({
                 "buffer_id": buffer_id,
                 "result": "preview_reativacao_gerado",
-                "preview_buffer_id": result.get("buffer_id"),
+                "preview_buffer_id": (result.get("lines") or [{}])[0].get("buffer_id"),
                 "deduplicated": bool(result.get("deduplicated")),
             })
         except Exception as exc:
             results.append({"buffer_id": buffer_id, "result": "bloqueado", "reason": str(exc)[:300]})
     return {"items": results}
+
+
+def handoff_reactivation_lines(*, buffer_ids: list[str], actor_user_id: str | None) -> dict[str, Any]:
+    """Pause the lead and invalidate the whole pair with an operational reason."""
+    return supabase_client.get_client().rpc("handoff_reactivation_lines_v1", {
+        "p_buffer_ids": buffer_ids,
+        "p_actor_user_id": _uuid_or_none(actor_user_id),
+        "p_reason": "handoff_operacional_fila_reativacao",
+    }).execute().data

@@ -485,6 +485,7 @@ def execute(
     publication_id: str | None = None,
     provider: str | None = None,
     preview_only: bool = False,
+    commit_result: bool = True,
 ) -> dict[str, Any]:
     context = conversation_runtime.build_context(
         persona_slug=persona_slug,
@@ -630,6 +631,16 @@ def execute(
         # render anything.  The control plane releases its technical claim so
         # the item remains actionable instead of disappearing from the queue.
         raise AgenticTurnError("preview_unavailable", "the published policy produced no preview")
+    if not commit_result:
+        return {
+            "ok": True,
+            "status": "preview_generated",
+            "context": context,
+            "decision": decision,
+            "response": response,
+            "model_calls": 2,
+            "preview_ready": True,
+        }
     result = conversation_runtime.commit(
         lead_ref=lead_ref,
         context=resolved.context,
