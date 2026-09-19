@@ -47,6 +47,7 @@ const STATES: Array<[string, string]> = [
   ["pending", "Aguardando envio"],
   ["preview_ready", "Preview pronto"],
   ["technical_failure", "Falha técnica"],
+  ["blocked", "Bloqueada"],
   ["pending_response", "Aguardando resposta da IA"],
   ["paused", "Pausada"],
   ["awaiting_customer", "Enviada — aguarda resposta"],
@@ -82,9 +83,16 @@ function previousMessage(item: QueueItem) {
   if (item.sequence_index === 2 && item.first_preview_text) return item.first_preview_text;
   if (item.last_agent_message) return item.last_agent_message;
   if (item.previous_message) return item.previous_message;
-  if (item.latest_message) return item.latest_message;
-  if (item.latest_inbound_context) return item.latest_inbound_context;
-  return "Sem mensagem anterior";
+  return "Nenhuma mensagem anterior do agente registrada";
+}
+
+function stateReason(item: QueueItem) {
+  if (item.last_error) return item.last_error;
+  if (item.queue_state === "blocked") return "Aguardando reconciliação operacional";
+  if (item.queue_state === "technical_failure") return "Elegível para gerar uma nova prévia";
+  if (item.queue_state === "pending_response") return "A IA ainda está processando esta mensagem";
+  if (item.queue_state === "awaiting_customer") return "A mensagem foi enviada e aguarda a lead";
+  return "";
 }
 
 function contextLabel(message: NonNullable<QueueItem["recent_context"]>[number]) {
@@ -249,8 +257,8 @@ export function ReleaseQueuePanel() {
             <td className="p-3"><p className="text-obs-text">{item.lead?.nome || item.lead?.name || "Lead"}</p><p className="text-xs text-obs-faint">{item.persona?.name || item.persona?.slug || ""}</p></td>
             <td className="p-3 text-obs-subtle">{ORIGINS[item.origin || ""] || item.origin || "—"}</td>
             <td className="p-3 text-obs-subtle">{formatDate(item.available_at || item.created_at)}</td>
-            <td className="p-3"><span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs ${sent ? "bg-emerald-500/15 text-emerald-200" : "bg-rose-500/15 text-rose-100"}`}>{sent ? <CheckCircle2 size={13} /> : <AlertCircle size={13} />}{statusLabel(item.queue_state)}</span></td>
-            <td className="p-3 text-right"><div className="flex flex-wrap justify-end gap-1">{item.actions?.includes("regenerate_preview") && <button type="button" disabled={busy} onClick={() => void runAction("regenerate-preview", [item])} className="rounded-lg border border-white/10 px-2 py-2 text-xs text-obs-text">Regerar prévia</button>}{item.actions?.includes("send_preview") && <button type="button" disabled={busy} onClick={() => void runAction("send-preview", [item])} className="rounded-lg bg-emerald-500/20 px-2 py-2 text-xs text-emerald-100">Enviar</button>}{item.actions?.includes("handoff") && <button type="button" disabled={busy} onClick={() => void runAction("handoff", [item])} className="rounded-lg border border-amber-400/30 px-2 py-2 text-xs text-amber-100">Handoff</button>}{action && !item.actions?.includes("send_preview") && !item.actions?.includes("handoff") && <button type="button" disabled={busy} onClick={() => void runAction(action.action, [item])} className="inline-flex items-center gap-1 rounded-lg bg-obs-violet px-3 py-2 text-xs font-medium text-white disabled:opacity-40"><Send size={13} />{action.label}</button>}</div></td>
+            <td className="p-3"><span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs ${sent ? "bg-emerald-500/15 text-emerald-200" : "bg-rose-500/15 text-rose-100"}`}>{sent ? <CheckCircle2 size={13} /> : <AlertCircle size={13} />}{statusLabel(item.queue_state)}</span>{stateReason(item) && <p className="mt-1 max-w-56 text-xs text-obs-faint">{stateReason(item)}</p>}</td>
+            <td className="p-3 text-right"><div className="flex flex-wrap justify-end gap-1">{item.actions?.includes("regenerate_preview") && <button type="button" disabled={busy} onClick={() => void runAction("regenerate-preview", [item])} className="rounded-lg border border-white/10 px-2 py-2 text-xs text-obs-text">Regerar prévia</button>}{item.actions?.includes("send_preview") && <button type="button" disabled={busy} onClick={() => void runAction("send-preview", [item])} className="rounded-lg bg-emerald-500/20 px-2 py-2 text-xs text-emerald-100">Enviar</button>}{item.actions?.includes("handoff") && <button type="button" disabled={busy} onClick={() => void runAction("handoff", [item])} className="rounded-lg border border-amber-400/30 px-2 py-2 text-xs text-amber-100">Handoff</button>}{action && !item.actions?.includes("send_preview") && !item.actions?.includes("handoff") && <button type="button" disabled={busy} onClick={() => void runAction(action.action, [item])} className="inline-flex items-center gap-1 rounded-lg bg-obs-violet px-3 py-2 text-xs font-medium text-white disabled:opacity-40"><Send size={13} />{action.label}</button>}{!action && !item.actions?.length && <span className="max-w-48 text-xs text-obs-faint">Sem ação segura disponível</span>}</div></td>
           </tr>;
         })}</tbody>
       </table>

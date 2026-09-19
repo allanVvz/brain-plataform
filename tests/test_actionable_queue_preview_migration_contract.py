@@ -8,6 +8,9 @@ MIGRATION = (
 PERSISTENCE_MIGRATION = (
     ROOT / "supabase" / "migrations" / "154_persist_queue_preview_and_preserve_position.sql"
 ).read_text(encoding="utf-8").lower()
+RECONCILIATION_MIGRATION = (
+    ROOT / "supabase" / "migrations" / "155_reconcile_real_actionable_queue.sql"
+).read_text(encoding="utf-8").lower()
 
 
 def test_preview_uses_the_existing_buffer_and_stays_inert_until_explicit_send():
@@ -69,3 +72,23 @@ def test_persisted_preview_clears_claim_and_keeps_the_inbound_position():
     assert "list_actionable_message_queue_v1" in PERSISTENCE_MIGRATION
     assert "list_actionable_message_queue_v149" in PERSISTENCE_MIGRATION
     assert "then (payload->>'queue_position_epoch')::double precision" in PERSISTENCE_MIGRATION
+
+
+def test_reconciliation_filters_all_validator_markers_before_paging():
+    assert "coalesce(b.external_message_id,'') not like 'validator:%'" in RECONCILIATION_MIGRATION
+    assert "coalesce(b.external_message_id,'') not like 'ai_reply.validator:%'" in RECONCILIATION_MIGRATION
+    assert "coalesce(b.payload->>'source','') <> 'wa_validator'" in RECONCILIATION_MIGRATION
+    assert "coalesce(b.payload->>'provider','') <> 'internal_validator'" in RECONCILIATION_MIGRATION
+    assert "coalesce(b.correlation_id,'') not ilike '%validator%'" in RECONCILIATION_MIGRATION
+
+
+def test_dead_letter_recovery_requires_technical_event_without_proof_or_matching_outbound():
+    assert "v_row.status not in ('waiting_human','dead_letter')" in RECONCILIATION_MIGRATION
+    assert "conversation.technical_failure" in RECONCILIATION_MIGRATION
+    assert "conversation_turn_proofs" in RECONCILIATION_MIGRATION
+    assert "outbound.correlation_id=('ai:' || coalesce(s.correlation_id,''))" in RECONCILIATION_MIGRATION
+    assert "then 'blocked'" in RECONCILIATION_MIGRATION
+
+
+def test_previous_message_never_falls_back_to_customer_message():
+    assert "'previous_message',coalesce(case when queue_sequence=2 then first_preview_text else null end,last_agent_message)" in RECONCILIATION_MIGRATION

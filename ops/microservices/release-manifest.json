@@ -2,7 +2,7 @@
   "source_sha": "4f7c793fd09571371d1f3a0460b261d88fb0c7ca",
   "contracts_version": "3.2.0",
   "contracts_checksum": "sha256:4fef73451747a4b482067a0a50b9c239f0a50d778ff0d5d82ea99fdf211270e4",
-  "schema_version": 154,
+  "schema_version": 155,
   "route_map_checksum": "sha256:0146765a3fed6f690566d212fee29d1a324183ce2106429bf52f891403fd5c64",
   "services": {
     "gateway": {

@@ -42,16 +42,16 @@ describe("actionable message queue", () => {
     mocks.queue.mockResolvedValue({
       items: [{
         id: "sent-outbound", persona_id: "tock-persona", preview: "Posso ajudar?", preview_text: "Posso ajudar?",
-        latest_message: "Ultima mensagem da cliente", queue_state: "awaiting_customer",
+        latest_message: "Ultima mensagem da cliente", last_agent_message: "Posso ajudar?", queue_state: "awaiting_customer",
         origin: "conversation", lead: { nome: "Teste" }, persona: { name: "Tock Fatal" },
         actions: ["reactivate"],
       }], next_offset: null,
     });
     render(<ReleaseQueuePanel />);
 
-    expect(await screen.findByText("Ultima mensagem da cliente")).toBeInTheDocument();
+    expect(await screen.findByText("Posso ajudar?")).toBeInTheDocument();
     expect(screen.getByText("Nenhuma prévia nova gerada")).toBeInTheDocument();
-    expect(screen.queryByText("Posso ajudar?")).not.toBeInTheDocument();
+    expect(screen.queryByText("Ultima mensagem da cliente")).not.toBeInTheDocument();
 
     fireEvent.click(await screen.findByRole("button", { name: "Reativar cliente" }));
 
@@ -63,7 +63,7 @@ describe("actionable message queue", () => {
       items: [
         {
           id: "pair-1", persona_id: "tock-persona", queue_state: "preview_ready", origin: "proactive",
-          latest_message: "Última mensagem real da cliente", preview_text: "Prévia de retomada",
+          latest_message: "Última mensagem real da cliente", last_agent_message: "Resposta anterior do modelo", preview_text: "Prévia de retomada",
           reactivation_group_id: "12345678-1234-1234-1234-123456789012", sequence_index: 1,
           line_kind: "apology", preview_revision: 2, lead: { nome: "Teste" }, persona: { name: "Tock Fatal" }, actions: [],
         },
@@ -78,7 +78,7 @@ describe("actionable message queue", () => {
 
     render(<ReleaseQueuePanel />);
 
-    expect(await screen.findByText("Última mensagem real da cliente")).toBeInTheDocument();
+    expect(await screen.findByText("Resposta anterior do modelo")).toBeInTheDocument();
     expect(screen.getAllByText("Prévia de retomada")).toHaveLength(2);
     expect(screen.getByText("Prévia contextual diferente")).toBeInTheDocument();
     expect(screen.queryByText(/Contexto:/)).not.toBeInTheDocument();
@@ -128,5 +128,23 @@ describe("actionable message queue", () => {
     expect(dropdown).toBeInTheDocument();
     fireEvent.click(dropdown);
     expect(screen.getByText("A nova mensagem do cliente")).toBeInTheDocument();
+  });
+
+  it("does not replace a missing agent message with the customer's message", async () => {
+    mocks.queue.mockResolvedValue({
+      items: [{
+        id: "blocked-inbound", persona_id: "tock-persona", queue_state: "blocked",
+        latest_message: "Mensagem recente do cliente", last_error: "binding safety paused",
+        lead: { nome: "Allan" }, persona: { name: "Tock Fatal" }, actions: [],
+      }], next_offset: null,
+    });
+
+    render(<ReleaseQueuePanel />);
+
+    expect(await screen.findByText("Nenhuma mensagem anterior do agente registrada")).toBeInTheDocument();
+    expect(screen.queryByText("Mensagem recente do cliente")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Bloqueada").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("binding safety paused").length).toBeGreaterThan(0);
+    expect(screen.getByText("Sem ação segura disponível")).toBeInTheDocument();
   });
 });
