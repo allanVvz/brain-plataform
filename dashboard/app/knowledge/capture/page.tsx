@@ -530,6 +530,14 @@ function repairText(value: string) {
   }
 }
 
+function normalizeSessionMessages(value: unknown): Message[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item: any) => item && ["user", "assistant", "system"].includes(item.role))
+    .map((item: any) => ({ role: item.role, content: String(item.content || "") }))
+    .filter((item) => item.content.trim());
+}
+
 function slugifyPlanValue(value: string) {
   return value
     .normalize("NFKD")
@@ -1451,7 +1459,19 @@ function ChatPanel({
     if (!sessionId || stage !== "idle") return;
     setStage(sessionStatus === "saved" ? "done" : sessionStatus || "chatting");
     setCls((prev) => ({ ...prev, persona_slug: prev.persona_slug || plan.personaSlug || null }));
-    setMessages([{ role: "system", content: "Sessao CRIAR restaurada com o plano atual da Sofia." }]);
+    let active = true;
+    void api.kbIntakeSession(sessionId)
+      .then((session: any) => {
+        if (!active) return;
+        const restoredMessages = normalizeSessionMessages(session?.messages);
+        setMessages(restoredMessages.length > 0
+          ? restoredMessages
+          : [{ role: "system", content: "Sessao CRIAR restaurada com o plano atual da Sofia." }]);
+      })
+      .catch(() => {
+        if (active) setMessages([{ role: "system", content: "Sessao CRIAR restaurada com o plano atual da Sofia." }]);
+      });
+    return () => { active = false; };
   }, [sessionId, sessionStatus, stage, plan.personaSlug]);
 
   useEffect(() => {
@@ -1710,8 +1730,10 @@ function ChatPanel({
           setFriendlyError("A Sofia aplicou parte do reparo; ainda ha pendencias bloqueantes.");
         }
       }
-      if ((d.message || "").trim()) {
-        setMessages((p) => [...p, { role: "assistant", content: d.message }]);
+      const assistantMessage = (d.message || "").trim()
+        || (nextState ? summarizePlanStateForChat(nextState) : "");
+      if (assistantMessage) {
+        setMessages((p) => [...p, { role: "assistant", content: assistantMessage }]);
       }
     } catch (e: any) {
       if (isKbIntakeSessionNotFound(e)) {
@@ -1751,8 +1773,10 @@ function ChatPanel({
           setFriendlyError(null);
         }
       }
-      if ((d.message || "").trim()) {
-        setMessages((p) => [...p, { role: "assistant", content: d.message }]);
+      const assistantMessage = (d.message || "").trim()
+        || (nextState ? summarizePlanStateForChat(nextState) : "");
+      if (assistantMessage) {
+        setMessages((p) => [...p, { role: "assistant", content: assistantMessage }]);
       }
     } catch (e: any) {
       if (isKbIntakeSessionNotFound(e)) {
@@ -2055,6 +2079,10 @@ function ChatPanel({
                 setPlanConfirmed(true);
                 setSessionStatus(result.status || "ready_to_save");
                 setFriendlyError(null);
+                setMessages((p) => [...p, {
+                  role: "assistant",
+                  content: "Estrutura confirmada. A previa visual foi atualizada abaixo. Revise os blocos e clique em Salvar conhecimento quando estiver pronto.",
+                }]);
               } catch (error: any) {
                 setPlanSyncPending(false);
                 setFriendlyError(formatChatRequestError(error));
@@ -2566,11 +2594,11 @@ function GraphPreviewPanel({
         <button
           type="button"
           onClick={onConfirmStructure}
-          disabled={!canSave}
+          disabled={!canSave || confirmed}
           title={canSave ? "" : `Confirme apos resolver: ${blockingReasons.slice(0, 4).join("; ")}${blockingReasons.length > 4 ? ` (+${blockingReasons.length - 4})` : ""}`}
           className="rounded-lg border border-green-400/25 px-3 py-1.5 text-xs text-green-300 disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          Confirmar estrutura
+          {confirmed ? "Estrutura confirmada" : "Confirmar estrutura"}
         </button>
         <button
           type="button"

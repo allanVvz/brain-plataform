@@ -4523,6 +4523,14 @@ def _context_with_resume(initial_context: str, resume_meta: dict[str, Any]) -> s
 
 def _session_public_state(session: dict) -> dict[str, Any]:
     prune_unpersisted_asset_readings(session)
+    messages = [
+        {
+            "role": str(message.get("role") or "assistant"),
+            "content": str(message.get("content") or ""),
+        }
+        for message in (session.get("messages") or [])
+        if isinstance(message, dict) and str(message.get("content") or "").strip()
+    ]
     normalized_plan = session.get("normalized_plan") or session.get("knowledge_plan")
     plan_summary = session.get("plan_summary") or (
         summarize_normalized_plan(normalized_plan) if isinstance(normalized_plan, dict) else None
@@ -4553,6 +4561,7 @@ def _session_public_state(session: dict) -> dict[str, Any]:
         "plan_hash": plan_hash,
         "confirmed_plan_hash": session.get("confirmed_plan_hash"),
         "memory_summary": session.get("memory_summary") or "",
+        "messages": messages,
         "plan_changed": bool(session.get("plan_changed")),
         "asset_readings": session.get("asset_readings") or [],
         "asset_readings_pruned": int(session.get("asset_readings_pruned") or 0),
@@ -4593,6 +4602,7 @@ def _bootstrap_result_payload(session: dict, result: dict[str, Any]) -> dict[str
         "persona_id": live_state.get("persona_id"),
         "source_url": live_state["source_url"],
         "memory_summary": live_state["memory_summary"],
+        "messages": live_state.get("messages") or [],
         "plan_changed": bool(result.get("plan_changed")),
         "bootstrap_llm": bool(result.get("bootstrap_llm", True)),
         "timings_ms": result.get("timings_ms") or {},
