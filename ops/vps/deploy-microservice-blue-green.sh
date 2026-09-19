@@ -111,8 +111,27 @@ set_slot_provenance() {
   fi
 }
 
+pull_candidate_images() {
+  local pull_attempt
+  for pull_attempt in 1 2 3 4; do
+    if "${COMPOSE[@]}" pull "${target_services[@]}"; then
+      return 0
+    fi
+    if (( pull_attempt == 4 )); then
+      echo "image pull failed after ${pull_attempt} attempts" >&2
+      return 1
+    fi
+    echo "image pull attempt ${pull_attempt} failed; retrying" >&2
+    sleep $((pull_attempt * 5))
+  done
+}
+
 active="$(read_state active)"
 previous="$(read_state previous)"
+if [[ "$ACTION" != "--rollback" ]]; then
+  pull_candidate_images
+fi
+
 if [[ "$ACTION" == "--rollback" ]]; then
   [[ "$previous" =~ ^(blue|green)$ ]] || { echo "no rollback slot recorded for $SERVICE" >&2; exit 1; }
   target="$previous"
@@ -179,6 +198,21 @@ rollback_on_error() {
 }
 trap rollback_on_error ERR
 
+install_active_caddy_config() {
+  local approved="$ROOT_DIR/infra/Caddyfile"
+  local active="$CADDY_DIR/Caddyfile"
+  local previous="$CADDY_DIR/Caddyfile.previous"
+  [[ -s "$approved" ]] || { echo "approved Caddyfile missing: $approved" >&2; return 1; }
+  if [[ -s "$active" ]]; then
+    cp "$active" "$previous"
+  elif [[ -s "$previous" ]]; then
+    cp "$previous" "$active"
+  else
+    cp "$approved" "$active"
+  fi
+  echo "public upstream unchanged while candidate is isolated"
+}
+
 echo "service=$SERVICE action=$ACTION active=${active:-none} target=$target manifest=$(basename "$MANIFEST")"
 if [[ "$ACTION" == "--dry-run" ]]; then
   "${COMPOSE[@]}" config --quiet
@@ -200,6 +234,7 @@ if [[ "$ACTION" == "--apply" ]]; then
   python3 "$ROOT_DIR/ops/microservices/bootstrap-service-envs.py"
 fi
 mkdir -p "$STATE_DIR" "$CADDY_DIR"
+install_active_caddy_config
 if [[ ! -s "$STATE_FILE" ]]; then
   printf '%s\n' '{"gateway":{"active":"legacy","previous":null}}' > "$STATE_FILE"
 fi
@@ -241,21 +276,6 @@ if [[ "$ACTION" == "--rollback" ]]; then
   set_slot_provenance "$target" "$target_release_sha" "$target_release_digest"
 fi
 
-pull_candidate_images() {
-  local pull_attempt
-  for pull_attempt in 1 2 3 4; do
-    if "${COMPOSE[@]}" pull "${target_services[@]}"; then
-      return 0
-    fi
-    if (( pull_attempt == 4 )); then
-      echo "image pull failed after ${pull_attempt} attempts" >&2
-      return 1
-    fi
-    echo "image pull attempt ${pull_attempt} failed; retrying" >&2
-    sleep $((pull_attempt * 5))
-  done
-}
-
 if [[ "$ACTION" == "--rollback" ]]; then
   # A rollback restores the HTTP service immediately, but it must not wake
   # queue consumers while a release-wide safety pause is in effect.  The old
@@ -270,7 +290,6 @@ if [[ "$ACTION" == "--rollback" ]]; then
     workers_paused=false
   fi
 else
-  pull_candidate_images
   # A candidate is isolated: only its HTTP API starts before validation.
   # Queue consumers move once, immediately before the route cutover.
   "${COMPOSE[@]}" up -d --no-deps --force-recreate "$target_service"

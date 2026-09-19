@@ -19,7 +19,7 @@ on:
       action:
         description: Validate prerequisites, run, or inspect one terminal session
         type: choice
-        options: [dry-run, run, inspect]
+        options: [dry-run, run, run-source, inspect]
         default: dry-run
       session_id:
         description: Existing terminal session UUID (required only for inspect)

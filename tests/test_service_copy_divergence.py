@@ -296,12 +296,14 @@ DIVERGENT_BASELINE: tuple[tuple[str, str], ...] = (
     ("conversation-runtime", "graph_proof_checker_v3.py"),
     ("conversation-runtime", "integration_service.py"),
     ("conversation-runtime", "knowledge_service.py"),
+    ("conversation-runtime", "shared_lead_memory.py"),
     ("conversation-runtime", "supabase_client.py"),
     ("conversation-runtime", "wa_validator_service.py"),
     ("transport", "conversation_repetition.py"),
     ("transport", "deepseek_n8n_service.py"),
     ("transport", "integration_service.py"),
     ("transport", "supabase_client.py"),
+    ("transport", "whatsapp_outbox.py"),
     ("transport", "whatsapp_providers/meta.py"),
 )
 

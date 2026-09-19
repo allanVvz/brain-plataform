@@ -280,7 +280,7 @@ def test_microservice_schema_gate_covers_the_manifest_target():
     manifest = json.loads(
         (ROOT / "ops/microservices/release-manifest.json").read_text(encoding="utf-8")
     )
-    assert manifest["schema_version"] == 140
+    assert manifest["schema_version"] == 152
 
     audit = (ROOT / "ops/vps/validate-production-release.sh").read_text(encoding="utf-8")
     for migration in (
@@ -291,9 +291,21 @@ def test_microservice_schema_gate_covers_the_manifest_target():
         "138_resume_binding_without_releasable_backlog.sql",
         "139_release_queue_microservice_grants.sql",
         "140_message_template_meta_lifecycle.sql",
+        "141_unified_message_queue.sql",
+        "142_published_business_hours_outbox.sql",
+        "143_atomic_proactive_queue_proof.sql",
+        "144_graph_publication_role_and_embed_copy_rule.sql",
+        "145_actionable_message_queue_preview.sql",
+        "146_operator_reactivation_preview.sql",
+        "147_contextual_reactivation_pair.sql",
+        "148_reactivation_pair_revision_and_projection.sql",
+        "149_fix_actionable_queue_previous_and_preview.sql",
+        "150_filter_validator_queue_rows.sql",
+        "151_filter_validator_before_paging.sql",
+        "152_fix_generated_ai_paused_queue_claim.sql",
     ):
         assert migration in audit
-    assert "release migrations 112-140 are incomplete" in audit
+    assert "release migrations 112-152 are incomplete" in audit
 
     for script_name in (
         "ops/vps/deploy-microservice-blue-green.sh",

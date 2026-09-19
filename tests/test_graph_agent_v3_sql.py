@@ -181,7 +181,17 @@ def atomic_payload(data, *, expected_revision=0):
         "lead_ref": data["lead_ref"],
         "channel_binding_id": data["binding_id"],
         "direction": "outbound",
-        "payload": {"text": "reply", "sender_type": "agent"},
+        "payload": {
+            "text": "reply",
+            "sender_type": "agent",
+            "published_business_hours": {
+                "timezone": "UTC",
+                "start": "00:00",
+                "end": "23:59",
+                "graph_checksum": data["checksum"],
+            },
+            "available_at": "2000-01-01T00:00:00+00:00",
+        },
         "status": "awaiting_proof",
         "batch_key": f"{data['persona_id']}:{data['lead_ref']}",
         "idempotency_key": outbound_key,

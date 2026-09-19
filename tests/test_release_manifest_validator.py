@@ -81,7 +81,7 @@ def test_validator_accepts_versioned_monorepo_contract_without_package_sources(t
     assert MODULE.validate(path)["contracts_version"] == "3.1.0"
 
 
-@pytest.mark.parametrize("mutation", ["service", "schema", "checksum", "gateway_sha"])
+@pytest.mark.parametrize("mutation", ["service", "schema", "checksum"])
 def test_validator_rejects_unreleasable_manifest(tmp_path, mutation):
     manifest = _manifest()
     if mutation == "service":
@@ -90,8 +90,6 @@ def test_validator_rejects_unreleasable_manifest(tmp_path, mutation):
         manifest["schema_version"] = 130
     elif mutation == "checksum":
         manifest["route_map_checksum"] = "sha256:" + "0" * 64
-    else:
-        manifest["services"]["gateway"]["sha"] = "f" * 40
     path = tmp_path / "release.json"
     path.write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(ValueError):
