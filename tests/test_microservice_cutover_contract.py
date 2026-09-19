@@ -406,10 +406,10 @@ def test_microservice_resume_never_starts_legacy_worker_and_rolls_back_pause():
 def test_microservice_preflight_runs_immutable_auditor_without_sync():
     workflow = (ROOT / ".github/workflows/_deploy-microservice.yml").read_text(encoding="utf-8")
     preflight = workflow.split("  mutate:", 1)[0]
-    assert "script_path: ops/vps/validate-production-release.sh" in preflight
+    assert "AUDIT_SCRIPT: ops/vps/validate-production-release.sh" in preflight
     assert "scp-action" not in preflight
     assert 'ALLOW_PENDING_MICROSERVICE_DIGESTS: "true"' in preflight
-    assert "AUDIT_ROOT,ALLOW_PENDING_MICROSERVICE_DIGESTS" in preflight
+    assert "AUDIT_ROOT,ALLOW_PENDING_MICROSERVICE_DIGESTS,AUDIT_SCRIPT" in preflight
     assert 'with: {ref: "${{ inputs.manifest_sha }}"}' in workflow
 
 
