@@ -64,6 +64,23 @@ def enqueue_reactivation_preview(*, actor_user_id: str | None = None, **payload:
     )
 
 
+def enqueue_reactivation_pair(
+    *, actor_user_id: str | None = None, regenerate: bool = False, **payload: Any
+) -> dict:
+    payload = {**payload, "regenerate": regenerate}
+    return _post(
+        "/internal/v1/transport/messages/reactivation-pair", payload,
+        actor_user_id=actor_user_id,
+    )
+
+
+def generate_reactivation_pair(*, actor_user_id: str | None = None, **payload: Any) -> dict:
+    return _post(
+        "/internal/v1/conversations/reactivation-pair", payload,
+        actor_user_id=actor_user_id,
+    )
+
+
 def store_validator_media(**payload: Any) -> dict:
     return _post("/internal/v1/transport/messages/validator-media", payload)
 

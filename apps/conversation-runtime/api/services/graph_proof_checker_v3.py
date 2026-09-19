@@ -966,18 +966,15 @@ def check(
     discarded_metadata = [
         f"next_question_node_id:{error}" for error in metadata_errors
     ]
-    hard_prefixes = (
-        "publication_", "branch_", "keep_", "add_", "switch_", "drop_",
-        "cited_node_", "cited_chunk_", "claim_",
-    )
+    # The proof checker is an evidence/safety boundary, not a copy editor or
+    # journey controller.  A grounded natural reply must remain deliverable
+    # when the model's optional branch, citation, question or handoff
+    # metadata is imperfect.  Only publication integrity and commercial
+    # claims can revoke delivery authorization here.
+    hard_prefixes = ("publication_", "claim_")
     gating_errors = [
         error for error in errors
         if error.startswith(hard_prefixes)
-        # Premature-confirmation language is an auditable quality concern,
-        # not evidence of a cross-persona/commercial safety violation.  The
-        # reply remains deliverable and the published qualification state is
-        # still kept pending.
-        or error in {"handoff_not_authorized"}
     ]
     repair_only = bool(gating_errors) and all(
         "outside_package" in error for error in gating_errors

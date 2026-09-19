@@ -72,6 +72,14 @@ class InternalReactivationPreviewBody(InternalOutboundBody):
     message_origin: str = "proactive"
 
 
+class InternalReactivationPairBody(BaseModel):
+    source_buffer_id: UUID
+    lead: dict[str, Any]
+    publication_id: UUID
+    lines: list[dict[str, Any]]
+    regenerate: bool = False
+
+
 class InternalValidatorMediaBody(BaseModel):
     session_id: str
     persona_id: str
@@ -292,6 +300,27 @@ def enqueue_reactivation_preview_internal(
     except Exception as exc:
         logger.error("reactivation preview enqueue failed: %s", exc)
         raise HTTPException(409, "Nao foi possivel criar o preview de reativacao.") from exc
+
+
+@internal_router.post("/reactivation-pair")
+def enqueue_reactivation_pair_internal(
+    body: InternalReactivationPairBody,
+    x_webhook_token: str | None = Header(None, alias="X-Webhook-Token"),
+    x_brain_actor_id: str | None = Header(None, alias="X-Brain-Actor-Id"),
+) -> dict:
+    """Commit both inert reactivation lines atomically."""
+    internal_auth.authorize_webhook_token(x_webhook_token)
+    try:
+        return whatsapp_outbox.enqueue_reactivation_pair(
+            source_buffer_id=str(body.source_buffer_id), lead=body.lead,
+            publication_id=str(body.publication_id), lines=body.lines,
+            actor_user_id=x_brain_actor_id, regenerate=body.regenerate,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("reactivation pair enqueue failed: %s", exc)
+        raise HTTPException(409, "Nao foi possivel criar o par de previews de reativacao.") from exc
 
 
 @internal_router.post("/validator-media")

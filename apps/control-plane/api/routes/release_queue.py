@@ -186,8 +186,13 @@ def _queue_action(action: str, body: QueueActionBody, request: Request):
         return release_queue_service.generate_queue_previews(
             buffer_ids=body.buffer_ids, actor_user_id=actor_user_id,
         )
-    if action == "reactivate":
+    if action in {"reactivate", "regenerate_preview"}:
         return release_queue_service.generate_reactivation_previews(
+            buffer_ids=body.buffer_ids, actor_user_id=actor_user_id,
+            regenerate=action == "regenerate_preview",
+        )
+    if action == "handoff":
+        return release_queue_service.handoff_reactivation_lines(
             buffer_ids=body.buffer_ids, actor_user_id=actor_user_id,
         )
     return release_queue_service.control_unified_queue(
@@ -218,6 +223,16 @@ def send_preview_queue(body: QueueActionBody, request: Request):
 @queue_router.post("/queue/reactivate")
 def reactivate_queue(body: QueueActionBody, request: Request):
     return _queue_action("reactivate", body, request)
+
+
+@queue_router.post("/queue/regenerate-preview")
+def regenerate_preview_queue(body: QueueActionBody, request: Request):
+    return _queue_action("regenerate_preview", body, request)
+
+
+@queue_router.post("/queue/handoff")
+def handoff_queue(body: QueueActionBody, request: Request):
+    return _queue_action("handoff", body, request)
 
 
 @queue_router.post("/queue/reprocess-next")

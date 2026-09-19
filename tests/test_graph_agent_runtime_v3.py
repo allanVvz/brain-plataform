@@ -765,6 +765,19 @@ def test_claims_and_handoff_need_published_policy():
     assert "handoff_not_authorized" in check(document, value)["errors"]
 
 
+def test_unauthorized_handoff_is_a_warning_and_does_not_suppress_sdr_reply():
+    document = compiled_fixture()
+    value = proposal(document)
+    value["handoff_requested"] = True
+
+    proof = check(document, value)
+
+    assert "handoff_not_authorized" in proof["quality_warnings"]
+    assert "handoff_not_authorized" not in proof["gating_errors"]
+    assert proof["valid"] is True
+    assert proof["delivery_authorized"] is True
+
+
 def test_claim_evidence_and_handoff_condition_are_exactly_authorized():
     document = compiled_fixture()
     contract = document["branch_contracts"]["branch:a"]
