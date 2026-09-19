@@ -52,4 +52,31 @@ describe("actionable message queue", () => {
 
     await waitFor(() => expect(mocks.control).toHaveBeenCalledWith("reactivate", { buffer_ids: ["sent-outbound"] }));
   });
+
+  it("renders a contextual pair as a connected journey without generic context", async () => {
+    mocks.queue.mockResolvedValue({
+      items: [
+        {
+          id: "pair-1", persona_id: "tock-persona", queue_state: "preview_ready", origin: "proactive",
+          latest_message: "Última mensagem real da cliente", preview_text: "Prévia de retomada",
+          reactivation_group_id: "12345678-1234-1234-1234-123456789012", sequence_index: 1,
+          line_kind: "apology", preview_revision: 2, lead: { nome: "Teste" }, persona: { name: "Tock Fatal" }, actions: [],
+        },
+        {
+          id: "pair-2", persona_id: "tock-persona", queue_state: "preview_ready", origin: "proactive",
+          first_preview_text: "Prévia de retomada", preview_text: "Prévia contextual diferente",
+          reactivation_group_id: "12345678-1234-1234-1234-123456789012", sequence_index: 2,
+          line_kind: "context", preview_revision: 2, lead: { nome: "Teste" }, persona: { name: "Tock Fatal" }, actions: [],
+        },
+      ], next_offset: null,
+    });
+
+    render(<ReleaseQueuePanel />);
+
+    expect(await screen.findByText("Última mensagem real da cliente")).toBeInTheDocument();
+    expect(screen.getAllByText("Prévia de retomada")).toHaveLength(2);
+    expect(screen.getByText("Prévia contextual diferente")).toBeInTheDocument();
+    expect(screen.queryByText(/Contexto:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/independentemente da primeira/)).not.toBeInTheDocument();
+  });
 });

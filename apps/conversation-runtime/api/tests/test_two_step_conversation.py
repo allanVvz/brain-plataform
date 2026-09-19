@@ -238,6 +238,23 @@ def test_two_step_proof_failure_preserves_sanitized_reason(monkeypatch):
         )
 
 
+def test_missing_model_call_telemetry_is_diagnostic_not_a_delivery_gate():
+    telemetry = conversation_runtime.build_turn_telemetry(
+        turn_id="preview-1",
+        token_usage={},
+        response_generated=True,
+        delivery_allowed=True,
+    )
+
+    assert telemetry == {
+        "turn_id": "preview-1",
+        "model_calls": 0,
+        "response_generated": True,
+        "delivery_allowed": True,
+        "telemetry_missing": True,
+    }
+
+
 def test_template_routes_sdr_two_step_without_semantic_repair_and_fails_safe():
     workflow = json.loads(TEMPLATE.read_text(encoding="utf-8"))
     connections = workflow["connections"]

@@ -1574,6 +1574,34 @@ def _ground_decision_in_context_cards(
     )
 
 
+def build_turn_telemetry(
+    *,
+    turn_id: str | None,
+    token_usage: dict[str, Any] | None,
+    response_generated: bool,
+    delivery_allowed: bool,
+) -> dict[str, Any]:
+    """Return the small telemetry contract shared by every agentic outcome.
+
+    Telemetry describes an already-made decision; it is never an authorization
+    input.  A missing counter is surfaced as a diagnostic while preserving the
+    reply and the independent delivery safety verdict.
+    """
+    raw_model_calls = (token_usage or {}).get("model_calls")
+    has_model_calls = (
+        isinstance(raw_model_calls, (int, float))
+        and not isinstance(raw_model_calls, bool)
+        and raw_model_calls >= 0
+    )
+    return {
+        "turn_id": str(turn_id or ""),
+        "model_calls": int(raw_model_calls) if has_model_calls else 0,
+        "response_generated": bool(response_generated),
+        "delivery_allowed": bool(delivery_allowed),
+        "telemetry_missing": not has_model_calls,
+    }
+
+
 def decide_agentic(
     context: ConversationContext,
     *,
@@ -1717,6 +1745,19 @@ def decide_agentic(
         if resolved_understanding is not None
         else token_usage
     ) or token_usage
+    telemetry = build_turn_telemetry(
+        turn_id=trace_id,
+        token_usage=token_usage,
+        response_generated=bool(str(response.reply_text or "").strip()),
+        delivery_allowed=bool(
+            response.proof.get(
+                "delivery_authorized", response.proof.get("valid", False)
+            )
+        ),
+    )
+    response = response.model_copy(update={
+        "proof": {**response.proof, "telemetry": telemetry},
+    })
     emit_turn_event(
         agent_name=(
             "conversation.repair_call" if is_repair
@@ -1741,6 +1782,7 @@ def decide_agentic(
             "proof_valid": response.proof.get("valid"),
             "proof_errors": response.proof.get("errors"),
             "repair_required": response.proof.get("repair_required"),
+            "telemetry": telemetry,
         },
     )
     return decision, response
@@ -2369,13 +2411,21 @@ def create_reactivation_pair(
         publication_id=str(publication["id"]), lines=[first, second],
         actor_user_id=actor_user_id, regenerate=regenerate,
     )
+    pair_telemetry = contextual_proof.get("telemetry") or build_turn_telemetry(
+        turn_id=f"reactivation-context:{source_buffer_id}",
+        token_usage=getattr(contextual_response, "token_usage", None),
+        response_generated=bool(contextual_response.reply_text),
+        delivery_allowed=bool(contextual_proof.get("delivery_authorized")),
+    )
     return {
+        **pair_telemetry,
         "reactivation_group_id": group_id,
         "latest_inbound_context": latest_context[:1000] if latest_context else None,
         "preview_revision": result.get("preview_revision", revision),
         "deduplicated": bool(result.get("deduplicated")),
         "handoff_required": bool(contextual_response.handoff_required),
         "handoff_reason": contextual_decision.handoff_reason,
+        "telemetry": pair_telemetry,
         "lines": result.get("lines") or [first, second],
     }
 
@@ -2583,7 +2633,6 @@ def commit(
     if _reply_confirms_price_or_schedule(response.reply_text):
         if response.proposal is not None:
             authorized = bool(context.graph_contract.get("confirmation_required"))
-            safe_text = context.graph_contract.get("confirmation_text")
             decision = decision.model_copy(
                 update={
                     "route": ConversationRoute.HUMAN if authorized else ConversationRoute.SDR,
@@ -2595,12 +2644,17 @@ def commit(
             )
             response = response.model_copy(
                 update={
-                    "reply_text": safe_text,
+                    "reply_text": None,
                     "role": ConversationRoute.HUMAN if authorized else ConversationRoute.SDR,
                     "handoff_required": authorized,
                     "proof": {
                         **response.proof,
                         "unsafe_confirmation_blocked": True,
+                        "delivery_authorized": False,
+                        "gating_errors": [
+                            *(response.proof.get("gating_errors") or []),
+                            "unsafe_price_or_schedule_confirmation",
+                        ],
                     },
                 }
             )
@@ -2614,12 +2668,18 @@ def commit(
             )
             response = response.model_copy(
                 update={
-                    "reply_text": (
-                        "Vou encaminhar sua conversa para a equipe confirmar "
-                        "os detalhes."
-                    ),
+                    "reply_text": None,
                     "role": ConversationRoute.HUMAN,
                     "handoff_required": True,
+                    "proof": {
+                        **response.proof,
+                        "unsafe_confirmation_blocked": True,
+                        "delivery_authorized": False,
+                        "gating_errors": [
+                            *(response.proof.get("gating_errors") or []),
+                            "unsafe_price_or_schedule_confirmation",
+                        ],
+                    },
                 }
             )
 
@@ -2629,11 +2689,6 @@ def commit(
         appointment_policy,
         cited_nodes=_cited_context_nodes(context, decision),
     ):
-        texts = appointment_policy.get("texts") or {}
-        safe_text = str(texts.get("preco_humano") or "").strip() or (
-            "O valor é definido por uma pessoa da equipe. Vou encaminhar sua "
-            "conversa para o atendimento."
-        )
         decision = decision.model_copy(
             update={
                 "route": ConversationRoute.HUMAN,
@@ -2642,12 +2697,17 @@ def commit(
         )
         response = response.model_copy(
             update={
-                "reply_text": safe_text,
+                "reply_text": None,
                 "role": ConversationRoute.HUMAN,
                 "handoff_required": True,
                 "proof": {
                     **response.proof,
                     "price_disclosure_blocked": True,
+                    "delivery_authorized": False,
+                    "gating_errors": [
+                        *(response.proof.get("gating_errors") or []),
+                        "price_disclosure_requires_human",
+                    ],
                 },
             }
         )
@@ -2674,6 +2734,28 @@ def commit(
                 )
             }
         )
+
+    # The decision telemetry is created before commit, while delivery safety
+    # can still withhold an unsafe response above. Refresh the envelope from
+    # the final response so a caller never sees delivery_allowed=true for a
+    # message that commit deliberately retained.
+    telemetry_usage = dict(response.token_usage or {})
+    previous_telemetry = response.proof.get("telemetry") or {}
+    if "model_calls" not in telemetry_usage and "model_calls" in previous_telemetry:
+        telemetry_usage["model_calls"] = previous_telemetry["model_calls"]
+    final_telemetry = build_turn_telemetry(
+        turn_id=inbound_buffer_id,
+        token_usage=telemetry_usage,
+        response_generated=bool(str(response.reply_text or "").strip()),
+        delivery_allowed=bool(
+            response.proof.get(
+                "delivery_authorized", response.proof.get("valid", False)
+            )
+        ),
+    )
+    response = response.model_copy(update={
+        "proof": {**response.proof, "telemetry": final_telemetry},
+    })
 
     lead = supabase_client.get_lead_by_ref(lead_ref) or {}
     if not lead:
@@ -2787,6 +2869,13 @@ def commit(
             "graph_checksum": context.graph_checksum,
             "knowledge_context": knowledge_context,
             "proof": response.proof,
+            "telemetry": response.proof.get("telemetry") or build_turn_telemetry(
+                turn_id=inbound_buffer_id,
+                token_usage=response.token_usage,
+                response_generated=bool(response.reply_text),
+                delivery_allowed=bool(response.proof.get("delivery_authorized", response.proof.get("valid", False))),
+            ),
+            **(response.proof.get("telemetry") or {}),
             "qualification": (lead.get("metadata") or {}).get("qualification") or {},
             "stage": lead.get("stage") or decision.lead_stage,
             "graph_turn": graph_turn,
@@ -3376,6 +3465,13 @@ def commit(
         "graph_checksum": context.graph_checksum,
         "knowledge_context": knowledge_context,
         "proof": response.proof,
+        "telemetry": response.proof.get("telemetry") or build_turn_telemetry(
+            turn_id=inbound_buffer_id,
+            token_usage=response.token_usage,
+            response_generated=bool(response.reply_text),
+            delivery_allowed=bool(response.proof.get("delivery_authorized", response.proof.get("valid", False))),
+        ),
+        **(response.proof.get("telemetry") or {}),
         "qualification": qualification,
         "stage": qualified_stage,
         "graph_turn": graph_turn,

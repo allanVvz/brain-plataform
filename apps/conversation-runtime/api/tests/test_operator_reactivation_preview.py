@@ -110,3 +110,5 @@ def test_contextual_reactivation_pair_uses_read_only_agentic_reply(monkeypatch):
     assert captured["regenerate"] is True
     assert captured_agentic["commit_result"] is False
     assert captured_agentic["preview_only"] is True
+    assert result["telemetry"]["telemetry_missing"] is True
+    assert result["telemetry"]["delivery_allowed"] is True

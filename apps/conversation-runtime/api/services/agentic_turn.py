@@ -597,9 +597,6 @@ def execute(
         reply = ConversationReplyV1.model_validate(reply_raw)
     except ValidationError as exc:
         raise AgenticTurnError("reply_validation", "reply schema is invalid") from exc
-    failure_streak = int(resolved.conversation_brief.get("failure_streak_before_turn") or 0)
-    if reply.knowledge_gap and failure_streak >= 1 and not reply.handoff_requested:
-        reply = reply.model_copy(update={"handoff_requested": True})
     try:
         decision, response = conversation_runtime.decide_agentic(
             context,
@@ -626,6 +623,21 @@ def execute(
                 "cited_chunk_ids": reply.cited_chunk_ids,
             },
         ) from exc
+    telemetry = dict(response.proof.get("telemetry") or {})
+    if not telemetry:
+        telemetry = conversation_runtime.build_turn_telemetry(
+            turn_id=inbound_buffer_id,
+            token_usage={"model_calls": 2},
+            response_generated=bool(str(response.reply_text or "").strip()),
+            delivery_allowed=bool(
+                response.proof.get(
+                    "delivery_authorized", response.proof.get("valid", False)
+                )
+            ),
+        )
+        response = response.model_copy(update={
+            "proof": {**response.proof, "telemetry": telemetry},
+        })
     if preview_only and not str(response.reply_text or "").strip():
         # Do not spend the inbound proof on an operator action that cannot
         # render anything.  The control plane releases its technical claim so
@@ -638,7 +650,11 @@ def execute(
             "context": context,
             "decision": decision,
             "response": response,
-            "model_calls": 2,
+            "model_calls": telemetry.get("model_calls", 0),
+            "response_generated": telemetry.get("response_generated", False),
+            "delivery_allowed": telemetry.get("delivery_allowed", False),
+            "telemetry_missing": telemetry.get("telemetry_missing", True),
+            "telemetry": telemetry,
             "preview_ready": True,
         }
     result = conversation_runtime.commit(
@@ -655,6 +671,7 @@ def execute(
         expected_decision_owner="n8n_agents",
         outbound_initial_status="preview_ready" if preview_only else "awaiting_proof",
     )
+    committed_telemetry = dict(result.get("telemetry") or response.proof.get("telemetry") or {})
     committed = {
         **result,
         "ok": True,
@@ -663,7 +680,11 @@ def execute(
         "technical_failure": False,
         "pipeline_contract": "conversation_agentic_v1",
         "execution_strategy": "interpret_then_respond",
-        "model_calls": 2,
+        "model_calls": committed_telemetry.get("model_calls", 0),
+        "response_generated": committed_telemetry.get("response_generated", False),
+        "delivery_allowed": committed_telemetry.get("delivery_allowed", False),
+        "telemetry_missing": committed_telemetry.get("telemetry_missing", True),
+        "telemetry": committed_telemetry,
         "preview_ready": preview_only,
     }
     committed.setdefault(
