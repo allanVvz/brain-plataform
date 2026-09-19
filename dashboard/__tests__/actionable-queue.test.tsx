@@ -84,4 +84,27 @@ describe("actionable message queue", () => {
     expect(screen.queryByText(/Contexto:/)).not.toBeInTheDocument();
     expect(screen.queryByText(/independentemente da primeira/)).not.toBeInTheDocument();
   });
+
+  it("uses the last agent message as the row anchor and keeps the combined context in a dropdown", async () => {
+    mocks.queue.mockResolvedValue({
+      items: [{
+        id: "pending-inbound", persona_id: "tock-persona", queue_state: "pending_response",
+        latest_message: "A nova mensagem do cliente", last_agent_message: "Resposta anterior da Vitoria",
+        recent_context: [
+          { id: "agent-1", direction: "outbound", role: "assistant", content: "Resposta anterior da Vitoria" },
+          { id: "client-1", direction: "inbound", role: "user", content: "A nova mensagem do cliente" },
+        ],
+        lead: { nome: "Allan" }, persona: { name: "Tock Fatal" }, actions: [],
+      }], next_offset: null,
+    });
+
+    render(<ReleaseQueuePanel />);
+
+    expect((await screen.findAllByText("Resposta anterior da Vitoria"))[0]).toBeInTheDocument();
+    expect(screen.getAllByText("Aguardando resposta da IA").length).toBeGreaterThan(0);
+    const dropdown = screen.getByText("Ver contexto (2)");
+    expect(dropdown).toBeInTheDocument();
+    fireEvent.click(dropdown);
+    expect(screen.getByText("A nova mensagem do cliente")).toBeInTheDocument();
+  });
 });

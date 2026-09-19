@@ -26,9 +26,18 @@ type QueueItem = {
   preview_text?: string | null;
   preview_revision?: number;
   latest_message?: string | null;
+  last_agent_message?: string | null;
   first_preview_text?: string | null;
   previous_message?: string | null;
   latest_inbound_context?: string | null;
+  recent_context?: Array<{
+    id?: string | number | null;
+    content?: string | null;
+    direction?: "inbound" | "outbound" | string | null;
+    role?: string | null;
+    sender_type?: string | null;
+    created_at?: string | null;
+  }> | null;
 };
 
 const ORIGINS: Record<string, string> = {
@@ -38,6 +47,7 @@ const STATES: Array<[string, string]> = [
   ["pending", "Aguardando envio"],
   ["preview_ready", "Preview pronto"],
   ["technical_failure", "Falha técnica"],
+  ["pending_response", "Aguardando resposta da IA"],
   ["paused", "Pausada"],
   ["awaiting_customer", "Enviada — aguarda resposta"],
 ];
@@ -70,11 +80,31 @@ function statusLabel(state?: string | null) {
 
 function previousMessage(item: QueueItem) {
   if (item.sequence_index === 2 && item.first_preview_text) return item.first_preview_text;
-  if (item.latest_message) return item.latest_message;
+  if (item.last_agent_message) return item.last_agent_message;
   if (item.previous_message) return item.previous_message;
-  // Until the richer queue projection is available, the legacy `preview`
-  // field contains the last outbound message for awaiting-customer rows.
+  if (item.latest_message) return item.latest_message;
+  if (item.latest_inbound_context) return item.latest_inbound_context;
   return "Sem mensagem anterior";
+}
+
+function contextLabel(message: NonNullable<QueueItem["recent_context"]>[number]) {
+  return message.direction === "outbound" || ["assistant", "agent", "ai"].includes(message.role || "")
+    ? "Servidor"
+    : "Cliente";
+}
+
+function ContextDropdown({ item }: { item: QueueItem }) {
+  const context = item.recent_context || [];
+  if (!context.length) return null;
+  return <details className="mt-2 rounded-lg border border-white/10 bg-obs-panel/50 px-2 py-1 text-xs">
+    <summary className="cursor-pointer text-obs-faint">Ver contexto ({context.length})</summary>
+    <ol className="mt-2 space-y-2 pb-1">
+      {context.map((message, index) => <li key={String(message.id ?? `${message.created_at || "message"}-${index}`)} className="border-t border-white/[0.06] pt-2 first:border-0 first:pt-0">
+        <p className="text-obs-faint">{contextLabel(message)}</p>
+        <p className="mt-0.5 whitespace-pre-wrap text-obs-subtle">{message.content || "[sem texto]"}</p>
+      </li>)}
+    </ol>
+  </details>;
 }
 
 function currentPreview(item: QueueItem) {
@@ -109,7 +139,7 @@ export function ReleaseQueuePanel() {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
 
-  const load = useCallback(async (offset = 0, append = false) => {
+  const load = useCallback(async (offset = 0, append = false, clearSelection = true) => {
     if (!persona.id) {
       setItems([]);
       setNextOffset(null);
@@ -119,11 +149,18 @@ export function ReleaseQueuePanel() {
     const rows = (result.items || []) as QueueItem[];
     setItems((current) => append ? [...current, ...rows] : rows);
     setNextOffset(result.next_offset ?? null);
-    if (!append) setSelected([]);
+    if (!append && clearSelection) setSelected([]);
   }, [origin, persona.id, status]);
 
   useEffect(() => {
     load().catch((cause) => setError(cause?.message || "Falha ao carregar a fila."));
+  }, [load]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      load(0, false, false).catch((cause) => setError(cause?.message || "Falha ao atualizar a fila."));
+    }, 10000);
+    return () => window.clearInterval(timer);
   }, [load]);
 
   // The current API deployment may still return an admin-wide page. Keep the
@@ -205,7 +242,7 @@ export function ReleaseQueuePanel() {
           const action = primaryAction(item);
           return <tr key={item.id} className={`border-t border-white/[0.06] ${sent ? "bg-emerald-500/[0.06]" : "bg-rose-500/[0.06]"}`}>
             <td className="p-3"><input aria-label="Selecionar mensagem" type="checkbox" checked={selected.includes(item.id)} onChange={() => setSelected((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} /></td>
-            <td className="max-w-sm p-3"><p className="line-clamp-2 text-obs-subtle">{previousMessage(item)}</p></td>
+            <td className="max-w-sm p-3"><p className="line-clamp-2 text-obs-subtle">{previousMessage(item)}</p><ContextDropdown item={item} /></td>
             <td className="max-w-sm p-3"><p className="line-clamp-3 text-obs-text">{currentPreview(item)}</p>{item.reactivation_group_id && <p className="mt-1 text-xs text-obs-faint">Par {item.reactivation_group_id.slice(0, 8)} · linha {item.sequence_index || 1} · {item.line_kind === "apology" ? "retomada" : "continuação contextual"} · revisão {item.preview_revision || 1}</p>}{item.last_error && <p className="mt-1 text-xs text-rose-200">{item.last_error}</p>}</td>
             <td className="p-3"><p className="text-obs-text">{item.lead?.nome || item.lead?.name || "Lead"}</p><p className="text-xs text-obs-faint">{item.persona?.name || item.persona?.slug || ""}</p></td>
             <td className="p-3 text-obs-subtle">{ORIGINS[item.origin || ""] || item.origin || "—"}</td>
