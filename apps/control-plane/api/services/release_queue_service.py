@@ -13,6 +13,7 @@ conversation that per-lead staleness check would deliberately leave silent.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import Any
 
 from fastapi import HTTPException
@@ -359,6 +360,17 @@ def generate_queue_previews(*, buffer_ids: list[str], actor_user_id: str | None)
             claimed = value[0] if isinstance(value, list) and value else value
             if not isinstance(claimed, dict):
                 raise RuntimeError("preview claim returned an invalid payload")
+            source_row = _one(
+                supabase_client.get_client().table("lead_buffer").select("created_at")
+                .eq("id", buffer_id).maybe_single()
+            ) or {}
+            created_at = str(source_row.get("created_at") or "")
+            try:
+                queue_position_epoch = datetime.fromisoformat(
+                    created_at.replace("Z", "+00:00")
+                ).timestamp()
+            except (TypeError, ValueError, OverflowError):
+                queue_position_epoch = None
             persona = _one(
                 supabase_client.get_client().table("personas").select("slug")
                 .eq("id", claimed["persona_id"]).maybe_single()
@@ -372,6 +384,7 @@ def generate_queue_previews(*, buffer_ids: list[str], actor_user_id: str | None)
                 "correlation_id": claimed.get("correlation_id") or f"queue-preview:{buffer_id}",
                 "channel_binding_id": claimed.get("channel_binding_id"),
                 "inbound_buffer_id": str(buffer_id),
+                "queue_position_epoch": queue_position_epoch,
             }, actor_user_id=actor_id)
             results.append({"buffer_id": buffer_id, "result": "preview_gerado", "preview": result.get("reply_text")})
         except Exception as exc:

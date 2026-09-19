@@ -142,6 +142,7 @@ class QueuePreviewRequest(StrictModel):
     phone_number_id: str | None = None
     channel_binding_id: str
     inbound_buffer_id: str
+    queue_position_epoch: float | None = None
 
     @field_validator("message")
     @classmethod
@@ -237,12 +238,11 @@ def queue_preview(
     """
     internal_auth.authorize_webhook_token(x_webhook_token)
     try:
-        # A queue preview is deliberately inert: it may run the same
-        # understanding/reply/proof path, but it must never consume the
-        # canonical inbound commit.  The default for execute() is a real
-        # commit, so make this boundary explicit here.
+        # A queue preview is inert at the provider boundary, but it must be
+        # committed as preview_ready so the operator can review it and send it
+        # explicitly later. The inbound proof and preview outbox are atomic.
         result = agentic_turn.execute(
-            **body.model_dump(), preview_only=True, commit_result=False,
+            **body.model_dump(), preview_only=True, commit_result=True,
         )
     except Exception as exc:
         raise HTTPException(409, str(exc)) from exc

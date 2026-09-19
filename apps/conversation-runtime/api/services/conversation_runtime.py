@@ -2627,6 +2627,7 @@ def commit(
     expected_decision_owner: str | None = None,
     n8n_execution_id: str | None = None,
     outbound_initial_status: str = "awaiting_proof",
+    queue_position_epoch: float | None = None,
 ) -> dict[str, Any]:
     if outbound_initial_status not in {"awaiting_proof", "preview_ready"}:
         raise ValueError("unsupported outbound initial status")
@@ -3255,12 +3256,14 @@ def commit(
                 message_id=message_id, correlation_id=message_id,
                 idempotency_key=message_id, initial_status=outbound_initial_status,
                 metadata=outbound_metadata,
+                queue_position_epoch=queue_position_epoch,
             )
         else:
             envelope = transport_client.enqueue_outbound(
                 lead=lead, text=response.reply_text, sender_type="agent",
                 message_id=message_id, correlation_id=message_id,
-                idempotency_key=message_id, metadata=outbound_metadata,
+                idempotency_key=message_id, initial_status=outbound_initial_status,
+                metadata=outbound_metadata, queue_position_epoch=queue_position_epoch,
             )
             buffer = {"id": envelope.get("buffer_id"), "status": envelope.get("status")}
 

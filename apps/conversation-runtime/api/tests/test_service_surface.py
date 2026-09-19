@@ -118,7 +118,7 @@ def test_only_versioned_internal_journey_paths_are_service_authenticated():
     assert is_public_path("/internal/runtime/leads/42/resume") is False
 
 
-def test_queue_preview_is_explicitly_non_committing(monkeypatch):
+def test_queue_preview_commits_an_inert_preview_outbox(monkeypatch):
     from routes import conversations
 
     captured = {}
@@ -145,11 +145,13 @@ def test_queue_preview_is_explicitly_non_committing(monkeypatch):
         correlation_id="corr-1",
         channel_binding_id="binding-1",
         inbound_buffer_id="buffer-1",
+        queue_position_epoch=1726650000.0,
     )
     conversations.queue_preview(body, x_webhook_token="internal")
 
     assert captured["preview_only"] is True
-    assert captured["commit_result"] is False
+    assert captured["commit_result"] is True
+    assert captured["queue_position_epoch"] == 1726650000.0
 
 
 def _jwt_for_role(role: str) -> str:

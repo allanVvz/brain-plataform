@@ -52,11 +52,11 @@ const STATES: Array<[string, string]> = [
   ["awaiting_customer", "Enviada — aguarda resposta"],
 ];
 const ACTIONS: Array<{ value: QueueAction; label: string }> = [
-  { value: "reprocess", label: "Gerar preview" },
+  { value: "reprocess", label: "Corrigir e gerar resposta" },
   { value: "reactivate", label: "Reativar cliente" },
   { value: "regenerate-preview", label: "Regerar prévia" },
   { value: "handoff", label: "Handoff" },
-  { value: "send-preview", label: "Enviar preview" },
+  { value: "send-preview", label: "Enviar mensagem" },
   { value: "pause", label: "Pausar" },
   { value: "resume", label: "Retomar" },
 ];
@@ -111,6 +111,8 @@ function currentPreview(item: QueueItem) {
   // An already sent outbound is not a new preview. Older API responses may
   // still populate `preview_text` with that outbound, so fail closed here too.
   if (item.queue_state === "awaiting_customer") return "Nenhuma prévia nova gerada";
+  if (item.queue_state === "technical_failure") return "Nenhuma prévia gerada";
+  if (item.queue_state === "pending_response") return "Aguardando a prévia da IA";
   if (item.preview_text) return item.preview_text;
   // Never present the previous outbound as a new preview for a reactivation.
   return item.queue_state === "awaiting_customer"
@@ -121,7 +123,7 @@ function currentPreview(item: QueueItem) {
 function primaryAction(item: QueueItem): { action: QueueAction; label: string } | null {
   if (item.actions?.includes("reprocess")) return { action: "reprocess", label: "Corrigir e gerar resposta" };
   if (item.actions?.includes("reactivate")) return { action: "reactivate", label: "Reativar cliente" };
-  if (item.actions?.includes("send_preview")) return { action: "send-preview", label: "Enviar" };
+  if (item.actions?.includes("send_preview")) return { action: "send-preview", label: "Enviar mensagem" };
   if (item.actions?.includes("resume")) return { action: "resume", label: "Retomar" };
   if (item.actions?.includes("pause")) return { action: "pause", label: "Pausar" };
   if (item.actions?.includes("regenerate_preview")) return { action: "regenerate-preview", label: "Regerar prévia" };

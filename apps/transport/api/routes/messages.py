@@ -56,6 +56,7 @@ class InternalOutboundBody(BaseModel):
     template: dict[str, Any] | None = None
     campaign_scope: dict[str, Any] | None = None
     message_origin: str | None = None
+    queue_position_epoch: float | None = None
 
 
 class InternalCampaignOutboundBody(InternalOutboundBody):

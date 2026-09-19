@@ -91,7 +91,8 @@ def test_preview_envelope_remains_inert_until_operator_sends(monkeypatch):
     envelope = whatsapp_outbox.prepare_outbound_envelope(
         lead={"id": 7, "persona_id": "persona"}, text="preview", sender_type="agent",
         message_id="preview:1", correlation_id="preview:1", initial_status="preview_ready",
-        metadata={"published_business_hours": policy},
+        metadata={"published_business_hours": policy}, queue_position_epoch=1726650000.0,
     )
     assert envelope["buffer"]["status"] == "preview_ready"
     assert envelope["buffer"]["payload"]["published_business_hours"] == policy
+    assert envelope["buffer"]["payload"]["queue_position_epoch"] == 1726650000.0

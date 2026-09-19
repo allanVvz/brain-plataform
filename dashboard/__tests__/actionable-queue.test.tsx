@@ -32,7 +32,7 @@ describe("actionable message queue", () => {
     expect(screen.queryByText("Global")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Lead")).not.toBeInTheDocument();
     fireEvent.click(screen.getByLabelText("Selecionar mensagem"));
-    fireEvent.click(screen.getByRole("button", { name: "Gerar preview" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Corrigir e gerar resposta" }).at(-1)!);
 
     await waitFor(() => expect(mocks.queue).toHaveBeenCalledWith(expect.objectContaining({ personaId: "tock-persona" })));
     await waitFor(() => expect(mocks.control).toHaveBeenCalledWith("reprocess", { buffer_ids: ["technical-inbound"] }));
@@ -83,6 +83,28 @@ describe("actionable message queue", () => {
     expect(screen.getByText("Prévia contextual diferente")).toBeInTheDocument();
     expect(screen.queryByText(/Contexto:/)).not.toBeInTheDocument();
     expect(screen.queryByText(/independentemente da primeira/)).not.toBeInTheDocument();
+  });
+
+  it("keeps generation separate from sending an existing preview", async () => {
+    mocks.queue.mockResolvedValue({
+      items: [{
+        id: "preview-1", persona_id: "tock-persona", queue_state: "preview_ready",
+        preview_text: "Resposta pronta para revisão", lead: { nome: "Allan" },
+        persona: { name: "Tock Fatal" }, actions: ["send_preview", "pause"],
+      }], next_offset: null,
+    });
+
+    render(<ReleaseQueuePanel />);
+
+    expect(await screen.findByText("Resposta pronta para revisão")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Enviar" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Corrigir e gerar resposta" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Enviar" }));
+
+    await waitFor(() => expect(mocks.control).toHaveBeenCalledWith(
+      "send-preview", { buffer_ids: ["preview-1"] },
+    ));
   });
 
   it("uses the last agent message as the row anchor and keeps the combined context in a dropdown", async () => {

@@ -484,6 +484,7 @@ def execute(
     inbound_buffer_id: str,
     publication_id: str | None = None,
     provider: str | None = None,
+    queue_position_epoch: float | None = None,
     preview_only: bool = False,
     commit_result: bool = True,
 ) -> dict[str, Any]:
@@ -666,6 +667,7 @@ def execute(
         phone_number_id=phone_number_id,
         channel_binding_id=channel_binding_id,
         inbound_buffer_id=inbound_buffer_id,
+        queue_position_epoch=queue_position_epoch,
         # Database metadata keeps this historical value until a schema-neutral
         # rename is possible. It no longer means that n8n executes the turn.
         expected_decision_owner="n8n_agents",

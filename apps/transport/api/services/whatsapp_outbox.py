@@ -226,6 +226,7 @@ def prepare_outbound_envelope(
     queue_group_id: str | None = None, queue_parent_buffer_id: str | None = None,
     queue_line_kind: str | None = None, queue_sequence: int | None = None,
     queue_revision: int | None = None, queue_regenerate: bool | None = None,
+    queue_position_epoch: float | None = None,
 ) -> dict[str, Any]:
     """Validate routing and build the canonical DB envelope without writing it."""
     # preview_ready is deliberately not claimable by the dispatch worker.  It
@@ -272,7 +273,11 @@ def prepare_outbound_envelope(
             "channel_binding_id": binding["id"],
             "whatsapp_phone_number_id": binding.get("whatsapp_phone_number_id"),
             "direction": "outbound",
-            "payload": {"text": text, "sender_type": sender_type, "media": media, "template": template, **schedule_payload},
+            "payload": {
+                "text": text, "sender_type": sender_type, "media": media,
+                "template": template, **schedule_payload,
+                **({"queue_position_epoch": queue_position_epoch} if queue_position_epoch is not None else {}),
+            },
             "status": effective_status,
             **({"available_at": schedule["available_at"]} if schedule and schedule["closed"] else {}),
             "batch_key": f"{lead['persona_id']}:{lead['id']}",
@@ -308,7 +313,8 @@ def enqueue_outbound(*, lead: dict[str, Any], text: str, sender_type: str,
                      media: dict[str, Any] | None = None,
                      template: dict[str, Any] | None = None,
                      campaign_scope: dict[str, Any] | None = None,
-                     message_origin: str | None = None) -> dict[str, Any]:
+                     message_origin: str | None = None,
+                     queue_position_epoch: float | None = None) -> dict[str, Any]:
     """Queue one outbound WhatsApp send.
 
     `campaign_scope` (campaign_id/campaign_revision/campaign_recipient_id/
@@ -323,6 +329,7 @@ def enqueue_outbound(*, lead: dict[str, Any], text: str, sender_type: str,
         correlation_id=correlation_id, idempotency_key=idempotency_key,
         initial_status=initial_status, metadata=metadata, media=media,
         template=template, campaign_scope=campaign_scope, message_origin=message_origin,
+        queue_position_epoch=queue_position_epoch,
     )
     binding = prepared["binding"]
     lock_key = idempotency_key or correlation_id

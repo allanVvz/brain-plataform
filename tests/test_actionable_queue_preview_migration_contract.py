@@ -5,6 +5,9 @@ ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = (
     ROOT / "supabase" / "migrations" / "145_actionable_message_queue_preview.sql"
 ).read_text(encoding="utf-8").lower()
+PERSISTENCE_MIGRATION = (
+    ROOT / "supabase" / "migrations" / "154_persist_queue_preview_and_preserve_position.sql"
+).read_text(encoding="utf-8").lower()
 
 
 def test_preview_uses_the_existing_buffer_and_stays_inert_until_explicit_send():
@@ -56,3 +59,13 @@ def test_queue_rpcs_are_not_public():
     ):
         assert f"revoke all on function public.{function}" in MIGRATION
         assert f"grant execute on function public.{function}" in MIGRATION
+
+
+def test_persisted_preview_clears_claim_and_keeps_the_inbound_position():
+    assert "v_outbound.status = 'awaiting_proof'" in PERSISTENCE_MIGRATION
+    assert "v_outbound.status not in ('preview_ready','pending_send','processing','sent','delivered','read')" in PERSISTENCE_MIGRATION
+    assert "payload, '{}'::jsonb) - 'queue_preview_claim'" in PERSISTENCE_MIGRATION
+    assert "queue_position_epoch" in PERSISTENCE_MIGRATION
+    assert "list_actionable_message_queue_v1" in PERSISTENCE_MIGRATION
+    assert "list_actionable_message_queue_v149" in PERSISTENCE_MIGRATION
+    assert "then (payload->>'queue_position_epoch')::double precision" in PERSISTENCE_MIGRATION
