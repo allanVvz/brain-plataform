@@ -163,6 +163,13 @@ def generate_queue_preview(payload: dict[str, Any], *, actor_user_id: str | None
     )
 
 
+def retry_queue_message(payload: dict[str, Any], *, actor_user_id: str | None) -> dict:
+    return _post(
+        "/internal/v1/conversations/queue-message-retry",
+        payload, actor_user_id=actor_user_id,
+    )
+
+
 def generate_reactivation_preview(payload: dict[str, Any], *, actor_user_id: str | None) -> dict:
     """Ask runtime to create a separate, proof-gated proactive preview."""
     return _post(

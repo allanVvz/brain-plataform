@@ -41,7 +41,7 @@ def _manifest() -> dict:
     return {
         "source_sha": source_sha,
         "contracts_version": "1.1.0",
-        "schema_version": 155,
+        "schema_version": 156,
         "route_map_checksum": _checksum(ROOT / "ops/microservices/route-map.json"),
         "n8n_checksum": _checksum(ROOT / "apps/conversation-runtime/n8n/persona-conversation-template.json"),
         "services": {
@@ -56,9 +56,9 @@ def test_schema_plan_ends_at_manifest_version_and_is_checksummed(tmp_path):
     path = tmp_path / "release.json"
     path.write_text(json.dumps(_manifest()), encoding="utf-8")
     plan = MODULE.build_plan(path)
-    assert plan["schema_version"] == 155
-    assert plan["target_migration"] == "155_reconcile_real_actionable_queue.sql"
-    assert plan["migrations"][-1]["version"] == 155
+    assert plan["schema_version"] == 156
+    assert plan["target_migration"] == "156_operational_queue_demands.sql"
+    assert plan["migrations"][-1]["version"] == 156
     assert plan["inventory_checksum"].startswith("sha256:")
 
 
@@ -83,6 +83,7 @@ def test_current_pending_migrations_are_atomic_compatible():
             "145_actionable_message_queue_preview.sql",
             "154_persist_queue_preview_and_preserve_position.sql",
             "155_reconcile_real_actionable_queue.sql",
+            "156_operational_queue_demands.sql",
         ]
     )
 

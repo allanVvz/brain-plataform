@@ -331,9 +331,10 @@ begin
       '152_fix_generated_ai_paused_queue_claim.sql',
       '153_actionable_queue_agent_context.sql',
       '154_persist_queue_preview_and_preserve_position.sql',
-      '155_reconcile_real_actionable_queue.sql')) <> 42 then
+      '155_reconcile_real_actionable_queue.sql',
+      '156_operational_queue_demands.sql')) <> 43 then
     -- Compatibility marker for older audit fixtures: release migrations 112-140 are incomplete.
-    raise exception 'release migrations 112-155 are incomplete';
+    raise exception 'release migrations 112-156 are incomplete';
   end if;
   if (select count(*) from pg_roles
       where rolname in ('brain_gateway','brain_control_plane','brain_runtime','brain_transport')
