@@ -13,7 +13,7 @@ conversation that per-lead staleness check would deliberately leave silent.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import HTTPException
@@ -337,6 +337,50 @@ def next_reprocessable_queue_item(lead_ref: int) -> dict | None:
     return None
 
 
+def with_idempotency(
+    *, action: str, buffer_ids: list[str], idempotency_key: str | None,
+    persona_id: str | None, run,
+) -> dict[str, Any]:
+    """Replay the exact previous response for a repeated (action, buffer_ids, key).
+
+    This is a best-effort, migration-free layer: it reuses `system_events`
+    (already the audit table for every queue action) instead of a new table
+    or unique constraint. The real duplicate-click/duplicate-send guard is
+    the atomic status transition each RPC already performs (send_preview
+    only fires from `preview_ready`, a retry only supersedes the exact
+    revision it read); this layer exists purely so a genuinely retried HTTP
+    request (network retry, a second tab) gets back the same result instead
+    of a confusing second-order error. Two calls with the same key racing
+    within the same instant can still both execute -- that residual race is
+    accepted because the DB-level guard above already makes it safe.
+    """
+    if not idempotency_key:
+        return run()
+    key_signature = f"{action}:{','.join(sorted(buffer_ids))}"
+    existing = _rows(
+        supabase_client.get_client().table("system_events").select("payload")
+        .eq("entity_type", "messaging_queue_idempotency").eq("entity_id", idempotency_key)
+        .order("created_at", desc=True).limit(1)
+    )
+    if existing:
+        cached = existing[0].get("payload") or {}
+        if cached.get("key_signature") == key_signature and "response" in cached:
+            return cached["response"]
+        raise HTTPException(409, "idempotency_key ja foi usada para uma acao diferente.")
+    result = run()
+    try:
+        supabase_client.insert_event({
+            "event_type": "messaging.queue.idempotent_call",
+            "entity_type": "messaging_queue_idempotency",
+            "entity_id": idempotency_key,
+            "persona_id": persona_id,
+            "payload": {"key_signature": key_signature, "action": action, "buffer_ids": buffer_ids, "response": result},
+        }, source="messaging.queue")
+    except Exception:
+        pass
+    return result
+
+
 def control_unified_queue(
     *, buffer_ids: list[str], action: str, actor_user_id: str | None,
 ) -> dict[str, Any]:
@@ -374,6 +418,10 @@ def _generate_inbound_previews(
     actor_id = _uuid_or_none(actor_user_id)
     for buffer_id in buffer_ids:
         claimed: dict[str, Any] | None = None
+        # A few seconds of tolerance for app/database clock skew: missing the
+        # event would silently downgrade the label, and a false positive only
+        # mislabels a preview that was generated anyway.
+        call_started_at = (datetime.now(timezone.utc) - timedelta(seconds=5)).isoformat()
         try:
             value = supabase_client.get_client().rpc(claim_function, {
                 "p_buffer_id": buffer_id, "p_actor_user_id": actor_id,
@@ -381,6 +429,17 @@ def _generate_inbound_previews(
             claimed = value[0] if isinstance(value, list) and value else value
             if not isinstance(claimed, dict):
                 raise RuntimeError("preview claim returned an invalid payload")
+            # migration 158's claim_queue_operator_preview_v1 silently releases
+            # an old (>5min) processing claim before claiming for real. Surface
+            # that as its own operational state ("Recuperando tentativa
+            # antiga") instead of the generic preview-generated label, so an
+            # operator can tell the two apart in the queue.
+            recovered_stale_commit = claim_function == "claim_queue_operator_preview_v1" and bool(_rows(
+                supabase_client.get_client().table("system_events").select("id")
+                .eq("entity_type", "lead_buffer").eq("entity_id", str(buffer_id))
+                .eq("event_type", "messaging.queue.stale_commit_released")
+                .gte("created_at", call_started_at).limit(1)
+            ))
             source_row = _one(
                 supabase_client.get_client().table("lead_buffer").select("created_at")
                 .eq("id", buffer_id).maybe_single()
@@ -407,7 +466,11 @@ def _generate_inbound_previews(
                 "inbound_buffer_id": str(buffer_id),
                 "queue_position_epoch": queue_position_epoch,
             }, actor_user_id=actor_id)
-            results.append({"buffer_id": buffer_id, "result": result_name, "preview": result.get("reply_text")})
+            results.append({
+                "buffer_id": buffer_id,
+                "result": "recuperando_tentativa_antiga" if recovered_stale_commit else result_name,
+                "preview": result.get("reply_text"),
+            })
         except Exception as exc:
             if claimed:
                 try:

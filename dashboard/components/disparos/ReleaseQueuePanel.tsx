@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertCircle, CheckCircle2, RefreshCw, RotateCcw, Send } from "lucide-react";
-import { api } from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
 import { useGlobalPersona } from "@/lib/useGlobalPersona";
 
 type QueueAction = "reprocess" | "send-preview" | "regenerate-preview" | "operator-preview";
@@ -40,7 +40,12 @@ function formatDate(value?: string | null) {
   return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(date);
 }
 function statusLabel(state?: string | null) { return STATES.find(([value]) => value === state)?.[1] || state || "—"; }
-function messageStatusLabel(status?: string | null) {
+// A message blocked from sending only because its proof/publication check
+// failed reads as "Pronta" (its buffer status is still preview_ready) unless
+// the send_reason is consulted — this maps that specific reason to its own
+// label so an operator does not read a bad proof as a healthy preview.
+function messageStatusLabel(status?: string | null, sendReason?: string | null) {
+  if (status === "preview_ready" && /proof|publica/i.test(sendReason || "")) return "Proof inválida";
   const labels: Record<string, string> = {
     preview_ready: "Pronta", pending_send: "Envio solicitado", buffered: "Agendada", processing: "Enviando",
     sent: "Enviada", delivered: "Entregue", read: "Lida", failed: "Falhou", dead_letter: "Falha técnica",
@@ -51,17 +56,56 @@ function messageStatusLabel(status?: string | null) {
 function contextLabel(message: ContextMessage) {
   return message.direction === "outbound" || ["assistant", "agent", "ai"].includes(message.role || "") ? "Agente" : "Cliente";
 }
-function ContextHistory({ messages }: { messages: ContextMessage[] }) {
+// The two headline lines above ("Demanda da cliente" / "Última resposta
+// efetiva") already show the newest inbound/outbound. Without this filter,
+// expanding "Histórico recente" repeated those exact two lines a second time
+// — confusing, since they read as if the conversation had four turns instead
+// of two.
+function dedupeAgainstHeadline(
+  messages: ContextMessage[],
+  headline: Array<{ content?: string | null; at?: string | null }>,
+): ContextMessage[] {
+  return messages.filter((message) => !headline.some(
+    (shown) => shown.content && shown.at && shown.content === message.content && shown.at === message.created_at,
+  ));
+}
+function ContextHistory({ messages, headline }: {
+  messages: ContextMessage[];
+  headline: Array<{ content?: string | null; at?: string | null }>;
+}) {
+  const filtered = useMemo(() => dedupeAgainstHeadline(messages, headline), [messages, headline]);
   return <details className="mt-2 rounded-lg border border-white/10 bg-obs-panel/50 px-2 py-1 text-xs">
-    <summary className="cursor-pointer text-obs-faint">Histórico recente ({messages.length})</summary>
-    {messages.length ? <ol className="mt-2 space-y-2 pb-1">{messages.map((message, index) =>
+    <summary className="cursor-pointer text-obs-faint">Histórico recente ({filtered.length})</summary>
+    {filtered.length ? <ol className="mt-2 space-y-2 pb-1">{filtered.map((message, index) =>
       <li key={String(message.id ?? `${message.created_at || "message"}-${index}`)} className="border-t border-white/[0.06] pt-2 first:border-0 first:pt-0">
         <p className="text-obs-faint">{contextLabel(message)} · {formatDate(message.created_at)}</p>
         <p className="mt-0.5 whitespace-pre-wrap text-obs-subtle">{message.content || "[sem texto]"}</p>
-      </li>)}</ol> : <p className="mt-2 pb-1 text-obs-faint">Histórico ainda não disponível.</p>}
+      </li>)}</ol> : <p className="mt-2 pb-1 text-obs-faint">Nenhuma mensagem anterior além do que já está exibido acima.</p>}
   </details>;
 }
 function exactReason(enabled: boolean | undefined, reason?: string | null) { return enabled ? "" : (reason || "Ação indisponível no estado atual"); }
+
+function newIdempotencyKey(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  return `queue-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+// Turns the raw ApiError into an operator-facing sentence that never lets a
+// 401/403/409/422 read as "backend indisponível" (they are not the same
+// failure and demand different operator reactions), and always keeps the
+// request_id visible for support/log correlation.
+function describeQueueError(cause: unknown): string {
+  if (!(cause instanceof ApiError)) return cause instanceof Error ? cause.message : "Ação não concluída.";
+  const requestSuffix = cause.requestId ? ` (request_id ${cause.requestId})` : "";
+  if (cause.status === 0) return `Tempo esgotado ou sem conexão com o backend. Tente novamente.${requestSuffix}`;
+  if (cause.kind === "unauthenticated") return `Sessão expirada — faça login novamente.${requestSuffix}`;
+  if (cause.kind === "forbidden") return `Sem permissão para esta ação nesta persona.${requestSuffix}`;
+  if (cause.status === 409) return `Outro operador ou uma nova mensagem já mudou este item — atualize a fila.${requestSuffix}`;
+  if (cause.status === 422) return `Dados inválidos para esta ação: ${cause.detail || "confira os campos"}.${requestSuffix}`;
+  if (cause.kind === "unavailable") return `Backend respondeu indisponível (HTTP ${cause.status}). Tentando novamente pode ajudar.${requestSuffix}`;
+  if (cause.kind === "server") return `Erro interno no servidor (HTTP ${cause.status}).${requestSuffix}`;
+  return `${cause.detail || "Ação não concluída"} (HTTP ${cause.status}).${requestSuffix}`;
+}
 
 export function ReleaseQueuePanel() {
   const persona = useGlobalPersona();
@@ -81,9 +125,9 @@ export function ReleaseQueuePanel() {
     setNextOffset(result.next_offset ?? null);
   }, [origin, persona.id, status]);
 
-  useEffect(() => { load().catch((cause) => setError(cause?.message || "Falha ao carregar a fila.")); }, [load]);
+  useEffect(() => { load().catch((cause) => setError(describeQueueError(cause))); }, [load]);
   useEffect(() => {
-    const timer = window.setInterval(() => load().catch((cause) => setError(cause?.message || "Falha ao atualizar a fila.")), 10000);
+    const timer = window.setInterval(() => load().catch((cause) => setError(describeQueueError(cause))), 10000);
     return () => window.clearInterval(timer);
   }, [load]);
   const visibleItems = useMemo(() => items.filter((item) => item.persona_id === persona.id), [items, persona.id]);
@@ -96,16 +140,21 @@ export function ReleaseQueuePanel() {
     const actionName: QueueAction = action === "send" ? "send-preview" : action === "generate" ? "operator-preview" : item.queue_state === "technical_failure" ? "reprocess" : "regenerate-preview";
     setBusyMessage(message.buffer_id); setError(""); setNotice("");
     try {
-      const result = await api.controlMessagingQueue(actionName, { buffer_ids: [message.buffer_id] });
+      // A key per click, not per component: a browser/network retry of the
+      // same POST replays this exact key and gets back the same recorded
+      // result from the backend instead of running the action twice.
+      const idempotency_key = newIdempotencyKey();
+      const result = await api.controlMessagingQueue(actionName, { buffer_ids: [message.buffer_id], idempotency_key });
       const labels: Record<string, string> = {
         operator_preview_gerado: "Previa gerada a partir da mensagem da cliente",
+        recuperando_tentativa_antiga: "Recuperando tentativa antiga — prévia gerada",
         preview_gerado: "Prévia gerada", preview_individual_regenerado: "Mensagem regenerada",
         preview_reativacao_gerado: "Demanda de reativação criada", agendado: "Envio solicitado",
         bloqueado: "Ação bloqueada", superado: "Contexto mudou",
       };
       setNotice((result.items || []).map((row: { result?: string; reason?: string }) => `${labels[row.result || ""] || row.result || "Concluído"}${row.reason ? `: ${row.reason}` : ""}`).join(" · "));
       await load();
-    } catch (cause: any) { setError(cause?.message || "Ação não concluída."); }
+    } catch (cause) { setError(describeQueueError(cause)); }
     finally { setBusyMessage(null); }
   }
 
@@ -116,7 +165,7 @@ export function ReleaseQueuePanel() {
     <div className="flex flex-wrap items-end gap-2 rounded-xl border border-white/10 bg-obs-surface p-3">
       <label className="min-w-40 text-xs text-obs-faint">Origem<select aria-label="Origem" value={origin} onChange={(event) => setOrigin(event.target.value)} className="mt-1 block w-full rounded-lg border border-white/10 bg-obs-panel px-3 py-2 text-sm text-obs-text"><option value="">Todas as origens</option>{Object.entries(ORIGINS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
       <label className="min-w-52 text-xs text-obs-faint">Estado<select aria-label="Estado" value={status} onChange={(event) => setStatus(event.target.value)} className="mt-1 block w-full rounded-lg border border-white/10 bg-obs-panel px-3 py-2 text-sm text-obs-text"><option value="">Todos os estados</option>{STATES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-      <button type="button" onClick={() => load().catch((cause) => setError(cause?.message || "Falha ao atualizar."))} className="flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-sm text-obs-subtle"><RefreshCw size={15} />Atualizar</button>
+      <button type="button" onClick={() => load().catch((cause) => setError(describeQueueError(cause)))} className="flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-sm text-obs-subtle"><RefreshCw size={15} />Atualizar</button>
     </div>
     {notice && <p role="status" className="rounded-lg bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300">{notice}</p>}
     {error && <p role="alert" className="rounded-lg bg-rose-500/10 px-3 py-2 text-xs text-rose-200">{error}</p>}
@@ -127,11 +176,14 @@ export function ReleaseQueuePanel() {
           const sent = item.queue_state === "awaiting_customer";
           const messages = item.outbound_messages || [];
           return <tr key={item.demand_id || item.id} className={`border-t border-white/[0.06] align-top ${sent ? "bg-emerald-500/[0.04]" : "bg-rose-500/[0.04]"}`}>
-            <td className="max-w-sm p-3"><p className="text-xs text-obs-faint">Demanda da cliente · {formatDate(item.customer_message_at || item.created_at)}</p><p className="mt-1 whitespace-pre-wrap text-obs-text">{item.customer_message || "Demanda sem texto disponível"}</p><p className="mt-3 text-xs text-obs-faint">Última resposta efetiva do agente</p><p className="mt-1 whitespace-pre-wrap text-obs-subtle">{item.last_agent_message || "Ainda sem resposta do agente"}</p><ContextHistory messages={item.recent_context || []} /></td>
-            <td className="max-w-sm space-y-3 p-3">{messages.map((message, index) => <article key={message.buffer_id} className="rounded-lg border border-white/10 bg-obs-panel/40 p-2"><p className="text-xs font-medium text-obs-faint">Mensagem {index + 1} de {messages.length}</p><p className="mt-1 whitespace-pre-wrap text-obs-text">{message.text || "Nenhuma prévia gerada"}</p><p className="mt-2 text-xs text-obs-faint">{messageStatusLabel(message.status)}{message.proof_id ? ` · proof ${message.proof_id.slice(0, 8)}` : " · sem proof"}</p></article>)}</td>
+            <td className="max-w-sm p-3"><p className="text-xs text-obs-faint">Demanda da cliente · {formatDate(item.customer_message_at || item.created_at)}</p><p className="mt-1 whitespace-pre-wrap text-obs-text">{item.customer_message || "Demanda sem texto disponível"}</p><p className="mt-3 text-xs text-obs-faint">Última resposta efetiva do agente</p><p className="mt-1 whitespace-pre-wrap text-obs-subtle">{item.last_agent_message || "Ainda sem resposta do agente"}</p><ContextHistory messages={item.recent_context || []} headline={[
+              { content: item.customer_message, at: item.customer_message_at },
+              { content: item.last_agent_message, at: item.last_agent_message_at },
+            ]} /></td>
+            <td className="max-w-sm space-y-3 p-3">{messages.map((message, index) => <article key={message.buffer_id} className="rounded-lg border border-white/10 bg-obs-panel/40 p-2"><p className="text-xs font-medium text-obs-faint">Mensagem {index + 1} de {messages.length}</p><p className="mt-1 whitespace-pre-wrap text-obs-text">{message.text || "Nenhuma prévia gerada"}</p><p className="mt-2 text-xs text-obs-faint">{messageStatusLabel(message.status, message.send_reason)}{message.proof_id ? ` · proof ${message.proof_id.slice(0, 8)}` : " · sem proof"}</p></article>)}</td>
             <td className="p-3"><p className="text-obs-text">{item.lead?.nome || item.lead?.name || "Lead"}</p><p className="text-xs text-obs-faint">{item.persona?.name || item.persona?.slug || ""}</p></td>
             <td className="p-3 text-obs-subtle">{ORIGINS[item.origin || ""] || item.origin || "—"}</td><td className="p-3 text-obs-subtle">{formatDate(item.available_at || item.created_at)}</td>
-            <td className="p-3"><span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs ${sent ? "bg-emerald-500/15 text-emerald-200" : "bg-rose-500/15 text-rose-100"}`}>{sent ? <CheckCircle2 size={13} /> : <AlertCircle size={13} />}{statusLabel(item.queue_state)}</span><ul className="mt-2 space-y-1 text-xs text-obs-faint">{messages.map((message, index) => <li key={message.buffer_id}>Mensagem {index + 1}: {messageStatusLabel(message.status)}</li>)}</ul></td>
+            <td className="p-3"><span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs ${sent ? "bg-emerald-500/15 text-emerald-200" : "bg-rose-500/15 text-rose-100"}`}>{sent ? <CheckCircle2 size={13} /> : <AlertCircle size={13} />}{statusLabel(item.queue_state)}</span><ul className="mt-2 space-y-1 text-xs text-obs-faint">{messages.map((message, index) => <li key={message.buffer_id}>Mensagem {index + 1}: {messageStatusLabel(message.status, message.send_reason)}</li>)}</ul></td>
             <td className="p-3 text-right"><div className="space-y-3">{messages.map((message, index) => {
               const retryReason = exactReason(message.can_retry, message.retry_reason); const sendReason = exactReason(message.can_send, message.send_reason);
               const generateReason = exactReason(message.can_generate_preview, message.generate_preview_reason);

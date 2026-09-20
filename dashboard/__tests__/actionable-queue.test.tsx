@@ -1,15 +1,20 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ReleaseQueuePanel } from "@/components/disparos/ReleaseQueuePanel";
+import { ApiError } from "@/lib/api";
 
 const mocks = vi.hoisted(() => ({ queue: vi.fn(), control: vi.fn() }));
-vi.mock("@/lib/api", () => ({ api: { messagingQueue: mocks.queue, controlMessagingQueue: mocks.control } }));
+vi.mock("@/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api")>();
+  return { ...actual, api: { messagingQueue: mocks.queue, controlMessagingQueue: mocks.control } };
+});
 vi.mock("@/lib/useGlobalPersona", () => ({ useGlobalPersona: () => ({ id: "persona-1", slug: "fixture" }) }));
 
 const base = {
   id: "demand-1", demand_id: "group-1", persona_id: "persona-1", lead_ref: 7,
   customer_message: "Preciso saber quando vocês atendem", customer_message_at: "2026-09-18T10:00:00Z",
-  last_agent_message: "Como posso ajudar?", lead: { nome: "Cliente real" }, persona: { name: "Loja" },
+  last_agent_message: "Como posso ajudar?", last_agent_message_at: "2026-09-18T09:59:00Z",
+  lead: { nome: "Cliente real" }, persona: { name: "Loja" },
   origin: "proactive", queue_state: "preview_ready", recent_context: [
     { id: "i1", direction: "inbound", content: "Preciso saber quando vocês atendem", created_at: "2026-09-18T10:00:00Z" },
     { id: "o1", direction: "outbound", content: "Como posso ajudar?", created_at: "2026-09-18T09:59:00Z" },
@@ -48,11 +53,11 @@ describe("operational demand queue", () => {
     expect(screen.getByText(/Retry: Envio em andamento/)).toBeInTheDocument();
   });
 
-  it("retries one ordinary outbound without sending it", async () => {
+  it("retries one ordinary outbound without sending it, tagging the call with a fresh idempotency key", async () => {
     render(<ReleaseQueuePanel />);
     fireEvent.click(await screen.findByRole("button", { name: "Retry mensagem 1" }));
     await waitFor(() => expect(mocks.control).toHaveBeenCalledWith(
-      "regenerate-preview", { buffer_ids: ["message-1"] },
+      "regenerate-preview", { buffer_ids: ["message-1"], idempotency_key: expect.any(String) },
     ));
     expect(mocks.control).not.toHaveBeenCalledWith("send-preview", expect.anything());
   });
@@ -67,7 +72,7 @@ describe("operational demand queue", () => {
     render(<ReleaseQueuePanel />);
     fireEvent.click(await screen.findByRole("button", { name: "Gerar prévia da mensagem 1" }));
     await waitFor(() => expect(mocks.control).toHaveBeenCalledWith(
-      "operator-preview", { buffer_ids: ["canonical-inbound"] },
+      "operator-preview", { buffer_ids: ["canonical-inbound"], idempotency_key: expect.any(String) },
     ));
     expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("mensagem original"));
     expect(mocks.control).not.toHaveBeenCalledWith("send-preview", expect.anything());
@@ -93,7 +98,7 @@ describe("operational demand queue", () => {
     render(<ReleaseQueuePanel />);
     fireEvent.click(await screen.findByRole("button", { name: "Retry mensagem 2" }));
     await waitFor(() => expect(mocks.control).toHaveBeenCalledTimes(1));
-    expect(mocks.control).toHaveBeenCalledWith("regenerate-preview", { buffer_ids: ["second-failed"] });
+    expect(mocks.control).toHaveBeenCalledWith("regenerate-preview", { buffer_ids: ["second-failed"], idempotency_key: expect.any(String) });
     expect(mocks.control).not.toHaveBeenCalledWith("send-preview", expect.anything());
   });
 
@@ -104,8 +109,60 @@ describe("operational demand queue", () => {
     const button = await screen.findByRole("button", { name: "Enviar mensagem 1" });
     fireEvent.click(button); fireEvent.click(button);
     expect(mocks.control).toHaveBeenCalledTimes(1);
-    expect(mocks.control).toHaveBeenCalledWith("send-preview", { buffer_ids: ["message-1"] });
+    expect(mocks.control).toHaveBeenCalledWith("send-preview", { buffer_ids: ["message-1"], idempotency_key: expect.any(String) });
     resolve({ items: [{ result: "agendado" }] });
+  });
+
+  it("generates a fresh idempotency key per click instead of reusing one across actions", async () => {
+    render(<ReleaseQueuePanel />);
+    fireEvent.click(await screen.findByRole("button", { name: "Retry mensagem 1" }));
+    await waitFor(() => expect(mocks.control).toHaveBeenCalledTimes(1));
+    fireEvent.click(await screen.findByRole("button", { name: "Enviar mensagem 1" }));
+    await waitFor(() => expect(mocks.control).toHaveBeenCalledTimes(2));
+    const [, firstBody] = mocks.control.mock.calls[0];
+    const [, secondBody] = mocks.control.mock.calls[1];
+    expect(firstBody.idempotency_key).not.toEqual(secondBody.idempotency_key);
+  });
+
+  it("shows an operator-facing instruction instead of a generic backend-down message for a 409/422/403", async () => {
+    render(<ReleaseQueuePanel />);
+    mocks.control.mockRejectedValueOnce(new ApiError({ status: 409, path: "/messaging/queue/send-preview", kind: "client", detail: "superado", requestId: "req-409" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Enviar mensagem 1" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/já mudou este item/);
+    expect(screen.getByRole("alert")).toHaveTextContent("req-409");
+    expect(screen.getByRole("alert")).not.toHaveTextContent(/indispon[íi]vel/i);
+
+    mocks.control.mockRejectedValueOnce(new ApiError({ status: 403, path: "/messaging/queue/send-preview", kind: "forbidden", detail: "sem acesso", requestId: "req-403" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Enviar mensagem 1" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/sem permiss[ãa]o/i);
+
+    mocks.control.mockRejectedValueOnce(new ApiError({ status: 502, path: "/messaging/queue/send-preview", kind: "unavailable", detail: "", requestId: "req-502" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Enviar mensagem 1" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/indispon[íi]vel/i);
+  });
+
+  it("labels a preview blocked by an invalid proof distinctly from a healthy preview", async () => {
+    mocks.queue.mockResolvedValue({ items: [{ ...base, outbound_messages: [{
+      buffer_id: "message-1", sequence: 1, kind: "response", text: "Resposta pronta",
+      status: "preview_ready", can_retry: true, can_send: false,
+      send_reason: "Proof ou publicação inválida",
+    }] }], next_offset: null });
+    render(<ReleaseQueuePanel />);
+    // Labelled in both the preview card and the per-message state summary.
+    expect(await screen.findAllByText(/Proof inválida/)).toHaveLength(2);
+    expect(screen.queryByText("Pronta")).not.toBeInTheDocument();
+  });
+
+  it("labels a recovered stale claim distinctly from an ordinary generated preview", async () => {
+    mocks.queue.mockResolvedValue({ items: [{ ...base, queue_state: "blocked", outbound_messages: [{
+      buffer_id: "canonical-inbound", sequence: 1, kind: "response", status: "blocked",
+      can_retry: false, can_generate_preview: true, can_send: false,
+    }] }], next_offset: null });
+    mocks.control.mockResolvedValue({ items: [{ buffer_id: "canonical-inbound", result: "recuperando_tentativa_antiga" }] });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<ReleaseQueuePanel />);
+    fireEvent.click(await screen.findByRole("button", { name: "Gerar prévia da mensagem 1" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("Recuperando tentativa antiga");
   });
 
   it("shows three API demands for one lead without a local two-row limit", async () => {
@@ -121,12 +178,33 @@ describe("operational demand queue", () => {
   });
 
   it("uses the explicit empty-agent fallback and expands directional history", async () => {
-    mocks.queue.mockResolvedValue({ items: [{ ...base, last_agent_message: null, outbound_messages: [{ buffer_id: "blocked", sequence: 1, kind: "response", status: "blocked", can_retry: false, can_send: false }] }], next_offset: null });
+    mocks.queue.mockResolvedValue({ items: [{ ...base, last_agent_message: null, recent_context: [
+      { id: "i0", direction: "inbound", content: "Oi, tudo bem?", created_at: "2026-09-18T09:00:00Z" },
+      ...base.recent_context,
+    ], outbound_messages: [{ buffer_id: "blocked", sequence: 1, kind: "response", status: "blocked", can_retry: false, can_send: false }] }], next_offset: null });
     render(<ReleaseQueuePanel />);
     expect(await screen.findByText("Ainda sem resposta do agente")).toBeInTheDocument();
     fireEvent.click(screen.getByText("Histórico recente (2)"));
     const history = screen.getByText("Histórico recente (2)").parentElement!;
     expect(within(history).getByText(/Cliente ·/)).toBeInTheDocument();
     expect(within(history).getByText(/Agente ·/)).toBeInTheDocument();
+  });
+
+  it("does not repeat the headline customer/agent messages inside the expandable history", async () => {
+    // base.recent_context already contains the exact same content+timestamp
+    // as base.customer_message/base.customer_message_at (the headline). Only
+    // the genuinely older, distinct message should survive into history.
+    mocks.queue.mockResolvedValue({ items: [{ ...base, recent_context: [
+      { id: "i-older", direction: "inbound", content: "Oi, bom dia", created_at: "2026-09-18T08:00:00Z" },
+      ...base.recent_context,
+    ], outbound_messages: [{ buffer_id: "message-1", sequence: 1, kind: "response", text: "Resposta pronta", status: "preview_ready", can_retry: true, can_send: true }] }], next_offset: null });
+    render(<ReleaseQueuePanel />);
+    fireEvent.click(await screen.findByText(/Histórico recente/));
+    expect(screen.getByText("Histórico recente (1)")).toBeInTheDocument();
+    expect(screen.getByText("Oi, bom dia")).toBeInTheDocument();
+    // "Preciso saber quando vocês atendem" still appears once, as the headline
+    // — but not a second time inside the expanded history.
+    const history = screen.getByText("Histórico recente (1)").parentElement!;
+    expect(within(history).queryByText("Preciso saber quando vocês atendem")).not.toBeInTheDocument();
   });
 });

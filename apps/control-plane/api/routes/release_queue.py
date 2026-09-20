@@ -34,10 +34,16 @@ class ItemOverrideBody(BaseModel):
 
 class QueueActionBody(BaseModel):
     buffer_ids: list[str] = Field(min_length=1, max_length=100)
+    # Optional: a client-generated key that lets a retried request (network
+    # retry, double tab) replay the exact same response instead of running
+    # the action again. See release_queue_service.with_idempotency for why
+    # this does not require a migration or a unique constraint.
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=200)
 
 
 class ReprocessNextBody(BaseModel):
     lead_ref: int = Field(gt=0)
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=200)
 
 
 @router.post("/batches")
@@ -189,25 +195,33 @@ def _queue_action(action: str, body: QueueActionBody, request: Request):
     for row in found.values():
         auth_service.assert_persona_capability(request, "edit", persona_id=row["persona_id"])
     actor_user_id = auth_service.current_user(request).get("id")
-    if action == "reprocess":
-        return release_queue_service.generate_queue_previews(
-            buffer_ids=body.buffer_ids, actor_user_id=actor_user_id,
+    persona_id = next((row["persona_id"] for row in found.values() if row.get("persona_id")), None)
+
+    def run():
+        if action == "reprocess":
+            return release_queue_service.generate_queue_previews(
+                buffer_ids=body.buffer_ids, actor_user_id=actor_user_id,
+            )
+        if action == "operator_preview":
+            return release_queue_service.generate_operator_queue_previews(
+                buffer_ids=body.buffer_ids, actor_user_id=actor_user_id,
+            )
+        if action in {"reactivate", "regenerate_preview"}:
+            return release_queue_service.generate_reactivation_previews(
+                buffer_ids=body.buffer_ids, actor_user_id=actor_user_id,
+                regenerate=action == "regenerate_preview",
+            )
+        if action == "handoff":
+            return release_queue_service.handoff_reactivation_lines(
+                buffer_ids=body.buffer_ids, actor_user_id=actor_user_id,
+            )
+        return release_queue_service.control_unified_queue(
+            buffer_ids=body.buffer_ids, action=action, actor_user_id=actor_user_id,
         )
-    if action == "operator_preview":
-        return release_queue_service.generate_operator_queue_previews(
-            buffer_ids=body.buffer_ids, actor_user_id=actor_user_id,
-        )
-    if action in {"reactivate", "regenerate_preview"}:
-        return release_queue_service.generate_reactivation_previews(
-            buffer_ids=body.buffer_ids, actor_user_id=actor_user_id,
-            regenerate=action == "regenerate_preview",
-        )
-    if action == "handoff":
-        return release_queue_service.handoff_reactivation_lines(
-            buffer_ids=body.buffer_ids, actor_user_id=actor_user_id,
-        )
-    return release_queue_service.control_unified_queue(
-        buffer_ids=body.buffer_ids, action=action, actor_user_id=actor_user_id,
+
+    return release_queue_service.with_idempotency(
+        action=action, buffer_ids=body.buffer_ids,
+        idempotency_key=body.idempotency_key, persona_id=persona_id, run=run,
     )
 
 
@@ -263,6 +277,10 @@ def reprocess_next_queue(body: ReprocessNextBody, request: Request):
     if not candidate:
         return {"items": [{"result": "bloqueado", "reason": "nenhuma_mensagem_elegivel"}]}
     auth_service.assert_persona_capability(request, "edit", persona_id=candidate["persona_id"])
-    return release_queue_service.generate_queue_previews(
-        buffer_ids=[candidate["id"]], actor_user_id=user.get("id"),
+    return release_queue_service.with_idempotency(
+        action="reprocess_next", buffer_ids=[candidate["id"]],
+        idempotency_key=body.idempotency_key, persona_id=candidate["persona_id"],
+        run=lambda: release_queue_service.generate_queue_previews(
+            buffer_ids=[candidate["id"]], actor_user_id=user.get("id"),
+        ),
     )
