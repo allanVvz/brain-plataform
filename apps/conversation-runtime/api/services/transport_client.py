@@ -74,6 +74,24 @@ def enqueue_reactivation_pair(
     )
 
 
+def enqueue_reactivation_line_revision(
+    *, actor_user_id: str | None = None, **payload: Any
+) -> dict:
+    return _post(
+        "/internal/v1/transport/messages/reactivation-line-revision", payload,
+        actor_user_id=actor_user_id,
+    )
+
+
+def enqueue_queue_message_revision(
+    *, actor_user_id: str | None = None, **payload: Any
+) -> dict:
+    return _post(
+        "/internal/v1/transport/messages/queue-message-revision", payload,
+        actor_user_id=actor_user_id,
+    )
+
+
 def generate_reactivation_pair(*, actor_user_id: str | None = None, **payload: Any) -> dict:
     return _post(
         "/internal/v1/conversations/reactivation-pair", payload,

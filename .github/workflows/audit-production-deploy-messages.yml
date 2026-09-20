@@ -169,4 +169,36 @@ jobs:
             where b.direction='outbound' and b.created_at>=:'WINDOW_START'::timestamptz
               and coalesce(b.payload->>'sender_type','')='agent'
               and not exists (select 1 from public.conversation_turn_proofs p where p.outbound_id=b.id::text and coalesce((p.proof_result->>'valid')::boolean,false));
+
+            with scope as (select id from public.personas where :'PERSONA_SLUG'='all' or slug=:'PERSONA_SLUG'),
+            projection as (
+              select public.list_actionable_message_queue_v1(
+                (select array_agg(id) from scope), null, null, 0, 100
+              ) as data
+            )
+            select 'QUEUE_PROJECTION_ITEM',
+              item->>'id',item->>'queue_state',item->>'status',
+              case when nullif(item->>'previous_message','') is null then 0 else 1 end,
+              case when nullif(item->>'last_agent_message','') is null then 0 else 1 end,
+              case when jsonb_array_length(coalesce(item->'recent_context','[]'::jsonb)) > 0 then 1 else 0 end,
+              left(coalesce(item->>'last_error',''),160),coalesce(item->>'actions','[]')
+            from projection, lateral jsonb_array_elements(coalesce(data->'items','[]'::jsonb)) item;
+
+            with scope as (select id from public.personas where :'PERSONA_SLUG'='all' or slug=:'PERSONA_SLUG'),
+            real_inbound as (
+              select b.* from public.lead_buffer b join scope s on s.id=b.persona_id
+              where b.direction='inbound'
+                and b.status in ('received','buffered','retry','processing','awaiting_proof','waiting_human','dead_letter')
+                and coalesce(b.external_message_id,'') not like 'validator:%'
+                and coalesce(b.external_message_id,'') not like 'ai_reply.validator:%'
+                and coalesce(b.payload->>'source','') <> 'wa_validator'
+            )
+            select 'REAL_BUFFER_RECONCILIATION',
+              b.id,p.slug,b.status,left(coalesce(b.last_error,''),160),
+              exists (select 1 from public.system_events e where e.entity_type='lead_buffer' and e.entity_id=b.id::text and e.event_type in ('conversation.technical_failure','conversation.technical_handoff')),
+              exists (select 1 from public.conversation_turn_proofs proof where proof.canonical_inbound_id=b.id::text),
+              (select count(*) from public.lead_buffer o where o.direction='outbound' and o.lead_ref=b.lead_ref and o.channel_binding_id is not distinct from b.channel_binding_id),
+              left(md5(coalesce(b.lead_ref::text,'')),12)
+            from real_inbound b join public.personas p on p.id=b.persona_id
+            order by b.created_at;
             SQL

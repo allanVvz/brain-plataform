@@ -1115,6 +1115,55 @@ def enqueue_reactivation_pair_with_proof(*, source_buffer_id: str,
     return payload
 
 
+def enqueue_reactivation_line_revision_with_proof(
+    *, previous_buffer_id: str, buffer: dict, message: dict,
+    publication_id: str, evidence_node_ids: list[str], proof_result: dict,
+    model_proposal: dict | None = None, actor_user_id: str | None = None,
+) -> dict:
+    """Commit one new proof-backed revision without touching its sibling."""
+    result = get_client().rpc("enqueue_reactivation_line_revision_v1", {
+        "p_previous_buffer_id": previous_buffer_id,
+        "p_buffer": buffer,
+        "p_message": message,
+        "p_publication_id": publication_id,
+        "p_evidence_node_ids": evidence_node_ids,
+        "p_proof_result": proof_result,
+        "p_model_proposal": model_proposal or {},
+        "p_actor_user_id": actor_user_id,
+    }).execute()
+    payload = getattr(result, "data", None)
+    if isinstance(payload, list):
+        payload = payload[0] if payload else None
+    if not isinstance(payload, dict) or not isinstance(payload.get("lines"), list):
+        raise RuntimeError("enqueue_reactivation_line_revision_v1 returned an invalid result")
+    return payload
+
+
+def enqueue_queue_message_revision_with_proof(
+    *, previous_buffer_id: str, canonical_inbound_id: str,
+    buffer: dict, message: dict, publication_id: str,
+    evidence_node_ids: list[str], proof_result: dict,
+    model_proposal: dict | None = None, actor_user_id: str | None = None,
+) -> dict:
+    result = get_client().rpc("enqueue_queue_message_revision_v1", {
+        "p_previous_buffer_id": previous_buffer_id,
+        "p_canonical_inbound_id": canonical_inbound_id,
+        "p_buffer": buffer,
+        "p_message": message,
+        "p_publication_id": publication_id,
+        "p_evidence_node_ids": evidence_node_ids,
+        "p_proof_result": proof_result,
+        "p_model_proposal": model_proposal or {},
+        "p_actor_user_id": actor_user_id,
+    }).execute()
+    payload = getattr(result, "data", None)
+    if isinstance(payload, list):
+        payload = payload[0] if payload else None
+    if not isinstance(payload, dict) or not payload.get("buffer_id"):
+        raise RuntimeError("enqueue_queue_message_revision_v1 returned an invalid result")
+    return payload
+
+
 def get_whatsapp_buffer_by_idempotency(idempotency_key: str) -> Optional[dict]:
     if not idempotency_key:
         return None

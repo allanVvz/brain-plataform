@@ -2336,9 +2336,71 @@ def create_reactivation_preview(
     )
 
 
+def retry_queue_message_preview(
+    *, persona_slug: str, lead_ref: int, message: str,
+    correlation_id: str, channel_binding_id: str, inbound_buffer_id: str,
+    previous_buffer_id: str, retry_revision: int,
+    message_id: str | None = None, phone_number_id: str | None = None,
+    queue_position_epoch: float | None = None,
+    actor_user_id: str | None = None,
+) -> dict[str, Any]:
+    """Create one new inert revision without replaying the canonical inbound."""
+    lead = supabase_client.get_lead_by_ref(lead_ref) or {}
+    if not lead:
+        raise LookupError("queue retry lead was not found")
+    from services import agentic_turn
+    result = agentic_turn.execute(
+        persona_slug=persona_slug, lead_ref=lead_ref, message=message,
+        message_id=message_id, correlation_id=f"queue-retry:{inbound_buffer_id}:r{retry_revision}",
+        phone_number_id=phone_number_id, channel_binding_id=channel_binding_id,
+        inbound_buffer_id=inbound_buffer_id, preview_only=True, commit_result=False,
+    )
+    context = result.get("context")
+    response = result.get("response")
+    decision = result.get("decision")
+    if context is None or response is None or decision is None or not response.reply_text:
+        raise RuntimeError("queue retry did not produce a proved response")
+    proof_result = {
+        **dict(response.proof or {}),
+        "kind": "operator_queue_message_retry",
+        "publication_id": context.publication_id,
+        "graph_checksum": context.graph_checksum,
+        "evidence_node_ids": list(response.evidence_node_ids or []),
+        "handoff_required": bool(response.handoff_required),
+        "handoff_reason": decision.handoff_reason,
+    }
+    authorized = proof_result.get("delivery_authorized")
+    if authorized is None:
+        authorized = proof_result.get("valid")
+    if not bool(authorized):
+        raise RuntimeError("queue retry proof failed")
+    identity = f"queue-retry:{inbound_buffer_id}:r{retry_revision}"
+    persisted = transport_client.enqueue_queue_message_revision(
+        previous_buffer_id=previous_buffer_id,
+        canonical_inbound_id=inbound_buffer_id, lead=lead,
+        text=response.reply_text, message_id=identity,
+        correlation_id=identity, idempotency_key=identity,
+        publication_id=context.publication_id,
+        evidence_node_ids=list(response.evidence_node_ids or []),
+        proof_result=proof_result,
+        model_proposal=(response.proposal.model_dump(mode="json") if response.proposal else {}),
+        retry_revision=retry_revision, queue_position_epoch=queue_position_epoch,
+        actor_user_id=actor_user_id,
+    )
+    return {
+        "reply_text": response.reply_text,
+        "buffer_id": persisted.get("buffer_id"),
+        "proof_id": persisted.get("proof_id"),
+        "preview_revision": persisted.get("preview_revision", retry_revision),
+        "deduplicated": bool(persisted.get("deduplicated")),
+    }
+
+
 def create_reactivation_pair(
     *, persona_slug: str, lead_ref: int, source_buffer_id: str,
     actor_user_id: str | None = None, regenerate: bool = False,
+    retry_buffer_id: str | None = None, retry_sequence: int | None = None,
+    retry_revision: int | None = None,
 ) -> dict[str, Any]:
     """Create two inert, proof-authorized lines from the active GraphBundle."""
     lead = supabase_client.get_lead_by_ref(lead_ref) or {}
@@ -2350,7 +2412,30 @@ def create_reactivation_pair(
     if not latest_context:
         raise RuntimeError("contextual reactivation requires a latest inbound message")
     group_id = str(uuid5(NAMESPACE_URL, f"brain-reactivation:{source_buffer_id}"))
-    revision = 1
+    revision = (int(retry_revision or 0) + 1) if retry_sequence else 1
+    if retry_sequence == 1:
+        if not retry_buffer_id:
+            raise ValueError("retry_buffer_id is required for an individual retry")
+        first = _create_reactivation_preview_line(
+            persona_slug=persona_slug, lead_ref=lead_ref,
+            source_buffer_id=source_buffer_id, actor_user_id=actor_user_id,
+            line_kind="apology", sequence_index=1,
+            reactivation_group_id=group_id, preview_revision=revision,
+            publication_override=publication, enqueue=False,
+        )
+        result = transport_client.enqueue_reactivation_line_revision(
+            previous_buffer_id=retry_buffer_id,
+            source_buffer_id=source_buffer_id, lead=lead,
+            publication_id=str(publication["id"]), line=first,
+            actor_user_id=actor_user_id,
+        )
+        return {
+            "reactivation_group_id": group_id,
+            "latest_inbound_context": latest_context[:1000],
+            "preview_revision": result.get("preview_revision", revision),
+            "deduplicated": bool(result.get("deduplicated")),
+            "lines": result.get("lines") or [first],
+        }
     # This is a read-only agentic turn. It runs the same understanding ->
     # reply -> graph proof path as normal conversation, but does not commit a
     # conversation turn or outbound. The operator still reviews the resulting
@@ -2394,6 +2479,40 @@ def create_reactivation_pair(
             if contextual_response.proposal else {}
         ),
     }
+    if retry_sequence == 2:
+        if not retry_buffer_id:
+            raise ValueError("retry_buffer_id is required for an individual retry")
+        second = _create_reactivation_preview_line(
+            persona_slug=persona_slug, lead_ref=lead_ref,
+            source_buffer_id=source_buffer_id, actor_user_id=actor_user_id,
+            line_kind="context", sequence_index=2,
+            reactivation_group_id=group_id, preview_revision=revision,
+            publication_override=publication,
+            contextual_preview=contextual_preview, enqueue=False,
+        )
+        result = transport_client.enqueue_reactivation_line_revision(
+            previous_buffer_id=retry_buffer_id,
+            source_buffer_id=source_buffer_id, lead=lead,
+            publication_id=str(publication["id"]), line=second,
+            actor_user_id=actor_user_id,
+        )
+        pair_telemetry = contextual_proof.get("telemetry") or build_turn_telemetry(
+            turn_id=f"reactivation-context:{source_buffer_id}:r{revision}",
+            token_usage=getattr(contextual_response, "token_usage", None),
+            response_generated=bool(contextual_response.reply_text),
+            delivery_allowed=bool(contextual_proof.get("delivery_authorized")),
+        )
+        return {
+            **pair_telemetry,
+            "reactivation_group_id": group_id,
+            "latest_inbound_context": latest_context[:1000],
+            "preview_revision": result.get("preview_revision", revision),
+            "deduplicated": bool(result.get("deduplicated")),
+            "handoff_required": bool(contextual_response.handoff_required),
+            "handoff_reason": contextual_decision.handoff_reason,
+            "telemetry": pair_telemetry,
+            "lines": result.get("lines") or [second],
+        }
     first = _create_reactivation_preview_line(
         persona_slug=persona_slug, lead_ref=lead_ref, source_buffer_id=source_buffer_id,
         actor_user_id=actor_user_id, line_kind="apology", sequence_index=1,

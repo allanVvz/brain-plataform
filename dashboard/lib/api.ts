@@ -136,6 +136,26 @@ async function assertResponse(path: string, res: Response, requestId: string): P
 
 type ReqOptions = RequestInit & { retryUnavailable?: boolean };
 
+// A rewrite can be temporarily unavailable while Vercel reconnects to the
+// internal API.  Leaving the browser fetch unbounded keeps AppShell in its
+// authentication spinner forever, even though the user can recover by
+// retrying.  Bound it so callers receive the normal actionable API error.
+const API_REQUEST_TIMEOUT_MS = 15_000;
+
+async function fetchApi(url: string, options: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const upstreamSignal = options.signal;
+  const abortFromCaller = () => controller.abort();
+  upstreamSignal?.addEventListener("abort", abortFromCaller, { once: true });
+  const timer = window.setTimeout(() => controller.abort(), API_REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    window.clearTimeout(timer);
+    upstreamSignal?.removeEventListener("abort", abortFromCaller);
+  }
+}
+
 async function req<T>(path: string, opts?: ReqOptions): Promise<T> {
   assertApiConfigured();
   const { retryUnavailable = false, ...fetchOptions } = opts || {};
@@ -147,7 +167,7 @@ async function req<T>(path: string, opts?: ReqOptions): Promise<T> {
   };
   let res: Response;
   try {
-    res = await fetch(`${BASE}${path}`, {
+    res = await fetchApi(`${BASE}${path}`, {
       credentials: "include",
       ...fetchOptions,
       headers,
@@ -158,7 +178,7 @@ async function req<T>(path: string, opts?: ReqOptions): Promise<T> {
 
   if (retryUnavailable && [502, 503, 504].includes(res.status)) {
     try {
-      res = await fetch(`${BASE}${path}`, {
+      res = await fetchApi(`${BASE}${path}`, {
         credentials: "include",
         ...fetchOptions,
         headers,
@@ -177,7 +197,7 @@ async function reqForm<T>(path: string, form: FormData): Promise<T> {
   const requestId = newRequestId();
   let res: Response;
   try {
-    res = await fetch(`${BASE}${path}`, {
+    res = await fetchApi(`${BASE}${path}`, {
       method: "POST",
       body: form,
       credentials: "include",
@@ -369,7 +389,7 @@ export const api = {
     });
     return req<any>(`/messaging/queue?${query.toString()}`);
   },
-  controlMessagingQueue: (action: "pause" | "resume" | "reprocess" | "send-preview" | "reactivate" | "regenerate-preview" | "handoff", body: Record<string, unknown>) =>
+  controlMessagingQueue: (action: "pause" | "resume" | "reprocess" | "send-preview" | "reactivate" | "regenerate-preview" | "operator-preview" | "handoff", body: Record<string, unknown>) =>
     req<any>(`/messaging/queue/${action}`, { method: "POST", body: JSON.stringify(body) }),
   updateLeadInfo: (leadRef: number, body: {
     nome?: string;

@@ -431,3 +431,58 @@ def enqueue_reactivation_pair(
         actor_user_id=actor_user_id,
     )
     return result
+
+
+def enqueue_reactivation_line_revision(
+    *, previous_buffer_id: str, source_buffer_id: str, lead: dict[str, Any],
+    publication_id: str, line: dict[str, Any], actor_user_id: str | None = None,
+) -> dict[str, Any]:
+    """Build and commit only the operator-selected outbound revision."""
+    prepared = prepare_outbound_envelope(
+        lead=lead, text=str(line.get("text") or ""), sender_type="agent",
+        message_id=str(line.get("message_id") or ""),
+        correlation_id=str(line.get("correlation_id") or ""),
+        idempotency_key=str(line.get("idempotency_key") or ""),
+        initial_status="awaiting_proof", metadata=None,
+        message_origin="proactive",
+        queue_group_id=str(line.get("queue_group_id") or ""),
+        queue_parent_buffer_id=source_buffer_id,
+        queue_line_kind=str(line.get("queue_line_kind") or ""),
+        queue_sequence=int(line.get("queue_sequence") or 0),
+        queue_revision=int(line.get("queue_revision") or 0),
+        queue_regenerate=True,
+    )
+    return supabase_client.enqueue_reactivation_line_revision_with_proof(
+        previous_buffer_id=previous_buffer_id,
+        buffer=prepared["buffer"], message=prepared["message"],
+        publication_id=publication_id,
+        evidence_node_ids=line.get("evidence_node_ids") or [],
+        proof_result=line.get("proof_result") or {},
+        model_proposal=line.get("model_proposal") or {},
+        actor_user_id=actor_user_id,
+    )
+
+
+def enqueue_queue_message_revision(
+    *, previous_buffer_id: str, canonical_inbound_id: str,
+    lead: dict[str, Any], text: str, message_id: str, correlation_id: str,
+    idempotency_key: str, publication_id: str, evidence_node_ids: list[str],
+    proof_result: dict[str, Any], model_proposal: dict[str, Any] | None,
+    retry_revision: int, queue_position_epoch: float | None = None,
+    actor_user_id: str | None = None,
+) -> dict[str, Any]:
+    prepared = prepare_outbound_envelope(
+        lead=lead, text=text, sender_type="agent", message_id=message_id,
+        correlation_id=correlation_id, idempotency_key=idempotency_key,
+        initial_status="awaiting_proof", metadata=None,
+        message_origin="conversation", queue_revision=retry_revision,
+        queue_position_epoch=queue_position_epoch,
+    )
+    return supabase_client.enqueue_queue_message_revision_with_proof(
+        previous_buffer_id=previous_buffer_id,
+        canonical_inbound_id=canonical_inbound_id,
+        buffer=prepared["buffer"], message=prepared["message"],
+        publication_id=publication_id, evidence_node_ids=evidence_node_ids,
+        proof_result=proof_result, model_proposal=model_proposal,
+        actor_user_id=actor_user_id,
+    )

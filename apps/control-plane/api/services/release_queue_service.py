@@ -349,12 +349,33 @@ def control_unified_queue(
 
 def generate_queue_previews(*, buffer_ids: list[str], actor_user_id: str | None) -> dict[str, Any]:
     """Claim each technical inbound, then ask runtime for an inert preview."""
+    return _generate_inbound_previews(
+        buffer_ids=buffer_ids, actor_user_id=actor_user_id,
+        claim_function="claim_queue_preview_v1", release_function="release_queue_preview_claim_v1",
+        result_name="preview_gerado",
+    )
+
+
+def generate_operator_queue_previews(*, buffer_ids: list[str], actor_user_id: str | None) -> dict[str, Any]:
+    """Explicitly create inert previews from selected human-held inbounds."""
+    return _generate_inbound_previews(
+        buffer_ids=buffer_ids, actor_user_id=actor_user_id,
+        claim_function="claim_queue_operator_preview_v1",
+        release_function="release_queue_operator_preview_claim_v1",
+        result_name="operator_preview_gerado",
+    )
+
+
+def _generate_inbound_previews(
+    *, buffer_ids: list[str], actor_user_id: str | None,
+    claim_function: str, release_function: str, result_name: str,
+) -> dict[str, Any]:
     results: list[dict[str, Any]] = []
     actor_id = _uuid_or_none(actor_user_id)
     for buffer_id in buffer_ids:
         claimed: dict[str, Any] | None = None
         try:
-            value = supabase_client.get_client().rpc("claim_queue_preview_v1", {
+            value = supabase_client.get_client().rpc(claim_function, {
                 "p_buffer_id": buffer_id, "p_actor_user_id": actor_id,
             }).execute().data
             claimed = value[0] if isinstance(value, list) and value else value
@@ -386,13 +407,16 @@ def generate_queue_previews(*, buffer_ids: list[str], actor_user_id: str | None)
                 "inbound_buffer_id": str(buffer_id),
                 "queue_position_epoch": queue_position_epoch,
             }, actor_user_id=actor_id)
-            results.append({"buffer_id": buffer_id, "result": "preview_gerado", "preview": result.get("reply_text")})
+            results.append({"buffer_id": buffer_id, "result": result_name, "preview": result.get("reply_text")})
         except Exception as exc:
             if claimed:
                 try:
-                    supabase_client.get_client().rpc("release_queue_preview_claim_v1", {
+                    release_args = {
                         "p_buffer_id": buffer_id, "p_error": str(exc)[:1000],
-                    }).execute()
+                    }
+                    if release_function == "release_queue_operator_preview_claim_v1":
+                        release_args["p_actor_user_id"] = actor_id
+                    supabase_client.get_client().rpc(release_function, release_args).execute()
                 except Exception:
                     pass
             results.append({"buffer_id": buffer_id, "result": "bloqueado", "reason": str(exc)[:300]})
@@ -413,11 +437,57 @@ def generate_reactivation_previews(
         try:
             line = _one(
                 supabase_client.get_client().table("lead_buffer")
-                .select("id,persona_id,lead_ref,direction,status,payload,queue_parent_buffer_id")
+                .select("id,persona_id,lead_ref,direction,status,payload,queue_parent_buffer_id,queue_group_id,queue_sequence,queue_revision")
                 .eq("id", buffer_id).maybe_single()
             ) or {}
             if line.get("direction") != "outbound":
                 raise RuntimeError("mensagem nao esta elegivel para reativacao")
+            if regenerate and not line.get("queue_group_id"):
+                proof = _one(
+                    supabase_client.get_client().table("conversation_turn_proofs")
+                    .select("canonical_inbound_id,final_decision")
+                    .eq("outbound_id", buffer_id).order("created_at", desc=True)
+                    .limit(1).maybe_single()
+                ) or {}
+                canonical_id = str(proof.get("canonical_inbound_id") or "")
+                if canonical_id.startswith("queue-retry:"):
+                    canonical_id = str((proof.get("final_decision") or {}).get("queue_canonical_inbound_id") or "")
+                canonical_id = _uuid_or_none(canonical_id) or ""
+                inbound = _one(
+                    supabase_client.get_client().table("lead_buffer")
+                    .select("id,payload,correlation_id,external_message_id,channel_binding_id,created_at")
+                    .eq("id", canonical_id).maybe_single()
+                ) or {}
+                if not inbound:
+                    raise RuntimeError("inbound canonico da mensagem nao foi encontrado")
+                persona = _one(
+                    supabase_client.get_client().table("personas").select("slug")
+                    .eq("id", line.get("persona_id")).maybe_single()
+                ) or {}
+                retry_revision = int(line.get("queue_revision") or 1) + 1
+                created_at = str(inbound.get("created_at") or "")
+                try:
+                    queue_position_epoch = datetime.fromisoformat(created_at.replace("Z", "+00:00")).timestamp()
+                except (TypeError, ValueError, OverflowError):
+                    queue_position_epoch = None
+                result = runtime_client.retry_queue_message({
+                    "persona_slug": persona.get("slug"),
+                    "lead_ref": line.get("lead_ref"),
+                    "message": str((inbound.get("payload") or {}).get("text") or ""),
+                    "message_id": inbound.get("external_message_id"),
+                    "correlation_id": inbound.get("correlation_id") or f"queue-retry:{canonical_id}",
+                    "channel_binding_id": inbound.get("channel_binding_id"),
+                    "inbound_buffer_id": canonical_id,
+                    "previous_buffer_id": buffer_id,
+                    "retry_revision": retry_revision,
+                    "queue_position_epoch": queue_position_epoch,
+                }, actor_user_id=actor_user_id)
+                results.append({
+                    "buffer_id": buffer_id, "result": "preview_individual_regenerado",
+                    "preview_buffer_id": result.get("buffer_id"),
+                    "deduplicated": bool(result.get("deduplicated")),
+                })
+                continue
             payload = line.get("payload") or {}
             source_id = payload.get("reactivation_source_buffer_id") or line.get("queue_parent_buffer_id") or buffer_id
             source = line
@@ -428,7 +498,7 @@ def generate_reactivation_previews(
                     .eq("id", source_id).maybe_single()
                 ) or {}
                 if (
-                    line.get("status") != "preview_ready"
+                    line.get("status") not in {"preview_ready", "failed", "dead_letter", "retry"}
                     or source.get("direction") != "outbound"
                     or source.get("status") not in {"sent", "delivered", "read"}
                     or source.get("persona_id") != line.get("persona_id")
@@ -446,10 +516,15 @@ def generate_reactivation_previews(
                 "lead_ref": line.get("lead_ref"),
                 "source_buffer_id": str(source_id),
                 "regenerate": regenerate,
+                **({
+                    "retry_buffer_id": str(buffer_id),
+                    "retry_sequence": int(line.get("queue_sequence") or 0),
+                    "retry_revision": int(line.get("queue_revision") or 0),
+                } if regenerate and line.get("queue_group_id") else {}),
             }, actor_user_id=actor_user_id)
             results.append({
                 "buffer_id": buffer_id,
-                "result": "preview_reativacao_gerado",
+                "result": "preview_individual_regenerado" if regenerate else "preview_reativacao_gerado",
                 "preview_buffer_id": (result.get("lines") or [{}])[0].get("buffer_id"),
                 "deduplicated": bool(result.get("deduplicated")),
             })
