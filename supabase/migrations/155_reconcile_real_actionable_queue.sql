@@ -185,7 +185,7 @@ CREATE OR REPLACE FUNCTION public.list_actionable_message_queue_v149(
   SELECT jsonb_build_object(
     'items',coalesce((SELECT jsonb_agg(jsonb_build_object(
       'id',id,'preview',left(coalesce(payload->>'text',payload->>'caption','[sem texto]'),240),
-      'preview_text',CASE WHEN queue_state IN ('awaiting_customer','blocked','technical_failure') THEN NULL ELSE left(coalesce(payload->>'text',payload->>'caption',''),2000) END,
+      'preview_text',CASE WHEN queue_state IN ('awaiting_customer','blocked','technical_failure','pending_response') THEN NULL ELSE left(coalesce(payload->>'text',payload->>'caption',''),2000) END,
       'lead_ref',lead_ref,'lead',CASE WHEN lead_ref IS NULL THEN NULL ELSE jsonb_build_object('nome',lead_name) END,
       'persona_id',persona_id,'persona',jsonb_build_object('name',persona_name,'slug',persona_slug),
       'origin',coalesce(message_origin,'conversation'),'status',queue_state,'queue_state',queue_state,

@@ -98,3 +98,7 @@ def test_projection_keeps_only_two_recent_lines_per_lead():
     assert "row_number() over" in RECONCILIATION_MIGRATION
     assert "partition by persona_id, lead_ref" in RECONCILIATION_MIGRATION
     assert "where lead_rank <= 2" in RECONCILIATION_MIGRATION
+
+
+def test_inbound_text_is_not_presented_as_a_generated_preview():
+    assert "'pending_response') then null" in RECONCILIATION_MIGRATION
