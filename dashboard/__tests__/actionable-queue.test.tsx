@@ -1,132 +1,116 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ReleaseQueuePanel } from "@/components/disparos/ReleaseQueuePanel";
 
 const mocks = vi.hoisted(() => ({ queue: vi.fn(), control: vi.fn() }));
+vi.mock("@/lib/api", () => ({ api: { messagingQueue: mocks.queue, controlMessagingQueue: mocks.control } }));
+vi.mock("@/lib/useGlobalPersona", () => ({ useGlobalPersona: () => ({ id: "persona-1", slug: "fixture" }) }));
 
-vi.mock("@/lib/api", () => ({
-  api: { messagingQueue: mocks.queue, controlMessagingQueue: mocks.control },
-}));
+const base = {
+  id: "demand-1", demand_id: "group-1", persona_id: "persona-1", lead_ref: 7,
+  customer_message: "Preciso saber quando vocês atendem", customer_message_at: "2026-09-18T10:00:00Z",
+  last_agent_message: "Como posso ajudar?", lead: { nome: "Cliente real" }, persona: { name: "Loja" },
+  origin: "proactive", queue_state: "preview_ready", recent_context: [
+    { id: "i1", direction: "inbound", content: "Preciso saber quando vocês atendem", created_at: "2026-09-18T10:00:00Z" },
+    { id: "o1", direction: "outbound", content: "Como posso ajudar?", created_at: "2026-09-18T09:59:00Z" },
+  ],
+};
 
-vi.mock("@/lib/useGlobalPersona", () => ({
-  useGlobalPersona: () => ({ id: "tock-persona", slug: "tock-fatal" }),
-}));
-
-describe("actionable message queue", () => {
+describe("operational demand queue", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.queue.mockResolvedValue({
-      items: [{
-        id: "technical-inbound", persona_id: "tock-persona", preview: "oi", queue_state: "technical_failure",
-        origin: "conversation", available_at: "2026-09-18T12:00:00.000Z",
-        lead: { nome: "Teste" }, persona: { name: "Tock Fatal" }, actions: ["reprocess"],
-      }], next_offset: null,
-    });
-    mocks.control.mockResolvedValue({ items: [{ result: "preview_gerado" }] });
+    mocks.control.mockResolvedValue({ items: [{ result: "agendado" }] });
+    mocks.queue.mockResolvedValue({ items: [{ ...base, outbound_messages: [{
+      buffer_id: "message-1", sequence: 1, kind: "response", text: "Resposta pronta",
+      proof_id: "proof-1", status: "preview_ready", can_retry: true, can_send: true,
+    }] }], next_offset: null });
   });
 
-  it("removes the misleading global label and generates a preview without asking for a reason", async () => {
+  it("renders customer context and one outbound without ever using inbound as preview", async () => {
     render(<ReleaseQueuePanel />);
-
-    expect(await screen.findByText("Mensagens ativas.", { exact: false })).toBeInTheDocument();
-    expect(screen.queryByText("Global")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Lead")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByLabelText("Selecionar mensagem"));
-    fireEvent.click(screen.getAllByRole("button", { name: "Corrigir e gerar resposta" }).at(-1)!);
-
-    await waitFor(() => expect(mocks.queue).toHaveBeenCalledWith(expect.objectContaining({ personaId: "tock-persona" })));
-    await waitFor(() => expect(mocks.control).toHaveBeenCalledWith("reprocess", { buffer_ids: ["technical-inbound"] }));
+    expect(await screen.findByText("Contexto da conversa")).toBeInTheDocument();
+    expect(screen.getAllByText("Preciso saber quando vocês atendem").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Como posso ajudar?").length).toBeGreaterThan(0);
+    expect(screen.getByText("Resposta pronta")).toBeInTheDocument();
+    expect(screen.getByText("Mensagem 1 de 1")).toBeInTheDocument();
+    expect(screen.queryByText("Mensagem anterior")).not.toBeInTheDocument();
   });
 
-  it("creates a separate reactivation preview from the inline action", async () => {
-    mocks.queue.mockResolvedValue({
-      items: [{
-        id: "sent-outbound", persona_id: "tock-persona", preview: "Posso ajudar?", preview_text: "Posso ajudar?",
-        latest_message: "Ultima mensagem da cliente", queue_state: "awaiting_customer",
-        origin: "conversation", lead: { nome: "Teste" }, persona: { name: "Tock Fatal" },
-        actions: ["reactivate"],
-      }], next_offset: null,
-    });
+  it("shows Retry and Enviar even when a capability is blocked", async () => {
+    mocks.queue.mockResolvedValue({ items: [{ ...base, outbound_messages: [{
+      buffer_id: "message-1", sequence: 1, kind: "response", text: "Resposta pronta",
+      status: "processing", can_retry: false, retry_reason: "Envio em andamento",
+      can_send: false, send_reason: "Mensagem não está pronta para envio",
+    }] }], next_offset: null });
     render(<ReleaseQueuePanel />);
-
-    expect(await screen.findByText("Ultima mensagem da cliente")).toBeInTheDocument();
-    expect(screen.getByText("Nenhuma prévia nova gerada")).toBeInTheDocument();
-    expect(screen.queryByText("Posso ajudar?")).not.toBeInTheDocument();
-
-    fireEvent.click(await screen.findByRole("button", { name: "Reativar cliente" }));
-
-    await waitFor(() => expect(mocks.control).toHaveBeenCalledWith("reactivate", { buffer_ids: ["sent-outbound"] }));
+    expect(await screen.findByRole("button", { name: "Retry mensagem 1" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Enviar mensagem 1" })).toBeDisabled();
+    expect(screen.getByText(/Retry: Envio em andamento/)).toBeInTheDocument();
   });
 
-  it("renders a contextual pair as a connected journey without generic context", async () => {
-    mocks.queue.mockResolvedValue({
-      items: [
-        {
-          id: "pair-1", persona_id: "tock-persona", queue_state: "preview_ready", origin: "proactive",
-          latest_message: "Última mensagem real da cliente", preview_text: "Prévia de retomada",
-          reactivation_group_id: "12345678-1234-1234-1234-123456789012", sequence_index: 1,
-          line_kind: "apology", preview_revision: 2, lead: { nome: "Teste" }, persona: { name: "Tock Fatal" }, actions: [],
-        },
-        {
-          id: "pair-2", persona_id: "tock-persona", queue_state: "preview_ready", origin: "proactive",
-          first_preview_text: "Prévia de retomada", preview_text: "Prévia contextual diferente",
-          reactivation_group_id: "12345678-1234-1234-1234-123456789012", sequence_index: 2,
-          line_kind: "context", preview_revision: 2, lead: { nome: "Teste" }, persona: { name: "Tock Fatal" }, actions: [],
-        },
-      ], next_offset: null,
-    });
-
+  it("retries one ordinary outbound without sending it", async () => {
     render(<ReleaseQueuePanel />);
-
-    expect(await screen.findByText("Última mensagem real da cliente")).toBeInTheDocument();
-    expect(screen.getAllByText("Prévia de retomada")).toHaveLength(2);
-    expect(screen.getByText("Prévia contextual diferente")).toBeInTheDocument();
-    expect(screen.queryByText(/Contexto:/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/independentemente da primeira/)).not.toBeInTheDocument();
-  });
-
-  it("keeps generation separate from sending an existing preview", async () => {
-    mocks.queue.mockResolvedValue({
-      items: [{
-        id: "preview-1", persona_id: "tock-persona", queue_state: "preview_ready",
-        preview_text: "Resposta pronta para revisão", lead: { nome: "Allan" },
-        persona: { name: "Tock Fatal" }, actions: ["send_preview", "pause"],
-      }], next_offset: null,
-    });
-
-    render(<ReleaseQueuePanel />);
-
-    expect(await screen.findByText("Resposta pronta para revisão")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Enviar" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Corrigir e gerar resposta" })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Enviar" }));
-
+    fireEvent.click(await screen.findByRole("button", { name: "Retry mensagem 1" }));
     await waitFor(() => expect(mocks.control).toHaveBeenCalledWith(
-      "send-preview", { buffer_ids: ["preview-1"] },
+      "regenerate-preview", { buffer_ids: ["message-1"] },
     ));
+    expect(mocks.control).not.toHaveBeenCalledWith("send-preview", expect.anything());
   });
 
-  it("uses the last agent message as the row anchor and keeps the combined context in a dropdown", async () => {
-    mocks.queue.mockResolvedValue({
-      items: [{
-        id: "pending-inbound", persona_id: "tock-persona", queue_state: "pending_response",
-        latest_message: "A nova mensagem do cliente", last_agent_message: "Resposta anterior da Vitoria",
-        recent_context: [
-          { id: "agent-1", direction: "outbound", role: "assistant", content: "Resposta anterior da Vitoria" },
-          { id: "client-1", direction: "inbound", role: "user", content: "A nova mensagem do cliente" },
-        ],
-        lead: { nome: "Allan" }, persona: { name: "Tock Fatal" }, actions: [],
-      }], next_offset: null,
-    });
-
+  it("renders two messages in one demand and blocks message 2 until message 1 is confirmed", async () => {
+    mocks.queue.mockResolvedValue({ items: [{ ...base, outbound_messages: [
+      { buffer_id: "first", sequence: 1, kind: "apology", text: "Aviso de horário", proof_id: "proof-1", status: "preview_ready", can_retry: true, can_send: true },
+      { buffer_id: "second", sequence: 2, kind: "context", text: "Resposta contextual", proof_id: "proof-2", status: "preview_ready", can_retry: true, can_send: false, send_reason: "A mensagem 1 ainda não foi confirmada" },
+    ] }], next_offset: null });
     render(<ReleaseQueuePanel />);
+    expect(await screen.findByText("Mensagem 1 de 2")).toBeInTheDocument();
+    expect(screen.getByText("Mensagem 2 de 2")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Enviar mensagem 2" })).toBeDisabled();
+    expect(screen.getByText(/A mensagem 1 ainda não foi confirmada/)).toBeInTheDocument();
+  });
 
-    expect((await screen.findAllByText("Resposta anterior da Vitoria"))[0]).toBeInTheDocument();
-    expect(screen.getAllByText("Aguardando resposta da IA").length).toBeGreaterThan(0);
-    const dropdown = screen.getByText("Ver contexto (2)");
-    expect(dropdown).toBeInTheDocument();
-    fireEvent.click(dropdown);
-    expect(screen.getByText("A nova mensagem do cliente")).toBeInTheDocument();
+  it("retries only the selected second message and does not send in the same click", async () => {
+    mocks.queue.mockResolvedValue({ items: [{ ...base, outbound_messages: [
+      { buffer_id: "first-sent", sequence: 1, kind: "apology", text: "Aviso", status: "sent", can_retry: false, retry_reason: "Mensagem já confirmada", can_send: false, send_reason: "Mensagem já confirmada" },
+      { buffer_id: "second-failed", sequence: 2, kind: "context", text: "Contexto", status: "failed", can_retry: true, can_send: false, send_reason: "Mensagem não está pronta para envio" },
+    ] }], next_offset: null });
+    render(<ReleaseQueuePanel />);
+    fireEvent.click(await screen.findByRole("button", { name: "Retry mensagem 2" }));
+    await waitFor(() => expect(mocks.control).toHaveBeenCalledTimes(1));
+    expect(mocks.control).toHaveBeenCalledWith("regenerate-preview", { buffer_ids: ["second-failed"] });
+    expect(mocks.control).not.toHaveBeenCalledWith("send-preview", expect.anything());
+  });
+
+  it("sends one selected message and suppresses a double click while the request is pending", async () => {
+    let resolve!: (value: unknown) => void;
+    mocks.control.mockReturnValue(new Promise((done) => { resolve = done; }));
+    render(<ReleaseQueuePanel />);
+    const button = await screen.findByRole("button", { name: "Enviar mensagem 1" });
+    fireEvent.click(button); fireEvent.click(button);
+    expect(mocks.control).toHaveBeenCalledTimes(1);
+    expect(mocks.control).toHaveBeenCalledWith("send-preview", { buffer_ids: ["message-1"] });
+    resolve({ items: [{ result: "agendado" }] });
+  });
+
+  it("shows three API demands for one lead without a local two-row limit", async () => {
+    mocks.queue.mockResolvedValue({ items: [1, 2, 3].map((value) => ({
+      ...base, id: `d-${value}`, demand_id: `g-${value}`, customer_message: `Demanda ${value}`,
+      outbound_messages: [{ buffer_id: `b-${value}`, sequence: 1, kind: "response", text: `Resposta ${value}`, status: "blocked", can_retry: false, can_send: false }],
+    })), next_offset: null });
+    render(<ReleaseQueuePanel />);
+    expect(await screen.findByText("Demanda 1")).toBeInTheDocument();
+    expect(screen.getByText("Demanda 2")).toBeInTheDocument();
+    expect(screen.getByText("Demanda 3")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /Retry mensagem 1/ })).toHaveLength(3);
+  });
+
+  it("uses the explicit empty-agent fallback and expands directional history", async () => {
+    mocks.queue.mockResolvedValue({ items: [{ ...base, last_agent_message: null, outbound_messages: [{ buffer_id: "blocked", sequence: 1, kind: "response", status: "blocked", can_retry: false, can_send: false }] }], next_offset: null });
+    render(<ReleaseQueuePanel />);
+    expect(await screen.findByText("Ainda sem resposta do agente")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Histórico recente (2)"));
+    const history = screen.getByText("Histórico recente (2)").parentElement!;
+    expect(within(history).getByText(/Cliente ·/)).toBeInTheDocument();
+    expect(within(history).getByText(/Agente ·/)).toBeInTheDocument();
   });
 });

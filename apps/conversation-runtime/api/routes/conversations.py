@@ -153,6 +153,11 @@ class QueuePreviewRequest(StrictModel):
         return normalized
 
 
+class QueueMessageRetryRequest(QueuePreviewRequest):
+    previous_buffer_id: str
+    retry_revision: int = Field(ge=2)
+
+
 class ReactivationPreviewRequest(StrictModel):
     """A new proactive preview tied to a previously delivered outbound."""
     persona_slug: str
@@ -164,6 +169,9 @@ class ReactivationPairRequest(ReactivationPreviewRequest):
     """Two independent preview lines sharing one reactivation group."""
 
     regenerate: bool = False
+    retry_buffer_id: str | None = None
+    retry_sequence: int | None = Field(default=None, ge=1, le=2)
+    retry_revision: int | None = Field(default=None, ge=1)
 
 
 
@@ -251,6 +259,22 @@ def queue_preview(
     )
 
 
+@router.post("/queue-message-retry")
+def queue_message_retry(
+    body: QueueMessageRetryRequest,
+    x_webhook_token: str | None = Header(None, alias="X-Webhook-Token"),
+    x_brain_actor_id: str | None = Header(None, alias="X-Brain-Actor-Id"),
+) -> dict:
+    """Regenerate only one ordinary queue preview under a new proof identity."""
+    internal_auth.authorize_webhook_token(x_webhook_token)
+    try:
+        return conversation_runtime.retry_queue_message_preview(
+            **body.model_dump(), actor_user_id=x_brain_actor_id,
+        )
+    except (LookupError, RuntimeError, ValueError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 @router.post("/reactivation-preview")
 def reactivation_preview(
     body: ReactivationPreviewRequest,
@@ -283,6 +307,9 @@ def reactivation_pair(
             persona_slug=body.persona_slug, lead_ref=body.lead_ref,
             source_buffer_id=body.source_buffer_id, actor_user_id=x_brain_actor_id,
             regenerate=body.regenerate,
+            retry_buffer_id=body.retry_buffer_id,
+            retry_sequence=body.retry_sequence,
+            retry_revision=body.retry_revision,
         )
     except PermissionError as exc:
         raise HTTPException(403, str(exc)) from exc

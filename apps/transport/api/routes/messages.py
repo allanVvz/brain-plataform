@@ -81,6 +81,30 @@ class InternalReactivationPairBody(BaseModel):
     regenerate: bool = False
 
 
+class InternalReactivationLineRevisionBody(BaseModel):
+    previous_buffer_id: UUID
+    source_buffer_id: UUID
+    lead: dict[str, Any]
+    publication_id: UUID
+    line: dict[str, Any]
+
+
+class InternalQueueMessageRevisionBody(BaseModel):
+    previous_buffer_id: UUID
+    canonical_inbound_id: UUID
+    lead: dict[str, Any]
+    text: str
+    message_id: str
+    correlation_id: str
+    idempotency_key: str
+    publication_id: UUID
+    evidence_node_ids: list[str]
+    proof_result: dict[str, Any]
+    model_proposal: dict[str, Any] | None = None
+    retry_revision: int
+    queue_position_epoch: float | None = None
+
+
 class InternalValidatorMediaBody(BaseModel):
     session_id: str
     persona_id: str
@@ -322,6 +346,46 @@ def enqueue_reactivation_pair_internal(
     except Exception as exc:
         logger.error("reactivation pair enqueue failed: %s", exc)
         raise HTTPException(409, "Nao foi possivel criar o par de previews de reativacao.") from exc
+
+
+@internal_router.post("/reactivation-line-revision")
+def enqueue_reactivation_line_revision_internal(
+    body: InternalReactivationLineRevisionBody,
+    x_webhook_token: str | None = Header(None, alias="X-Webhook-Token"),
+    x_brain_actor_id: str | None = Header(None, alias="X-Brain-Actor-Id"),
+) -> dict:
+    """Commit one independently retried line; never recreate its sibling."""
+    internal_auth.authorize_webhook_token(x_webhook_token)
+    try:
+        return whatsapp_outbox.enqueue_reactivation_line_revision(
+            previous_buffer_id=str(body.previous_buffer_id),
+            source_buffer_id=str(body.source_buffer_id), lead=body.lead,
+            publication_id=str(body.publication_id), line=body.line,
+            actor_user_id=x_brain_actor_id,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("reactivation line retry failed: %s", exc)
+        raise HTTPException(409, "Nao foi possivel regerar a mensagem selecionada.") from exc
+
+
+@internal_router.post("/queue-message-revision")
+def enqueue_queue_message_revision_internal(
+    body: InternalQueueMessageRevisionBody,
+    x_webhook_token: str | None = Header(None, alias="X-Webhook-Token"),
+    x_brain_actor_id: str | None = Header(None, alias="X-Brain-Actor-Id"),
+) -> dict:
+    internal_auth.authorize_webhook_token(x_webhook_token)
+    try:
+        return whatsapp_outbox.enqueue_queue_message_revision(
+            **body.model_dump(mode="json"), actor_user_id=x_brain_actor_id,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("queue message retry failed: %s", exc)
+        raise HTTPException(409, "Nao foi possivel regerar a mensagem selecionada.") from exc
 
 
 @internal_router.post("/validator-media")
