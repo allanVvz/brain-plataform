@@ -160,9 +160,17 @@ CREATE OR REPLACE FUNCTION public.list_actionable_message_queue_v149(
       ELSE NULL
     END AS queue_state
     FROM scoped s
-  ), filtered AS (
-    SELECT * FROM projected
+  ), ranked AS (
+    SELECT projected.*,
+      row_number() OVER (
+        PARTITION BY persona_id, lead_ref
+        ORDER BY created_at DESC, id DESC
+      ) AS lead_rank
+    FROM projected
     WHERE queue_state IS NOT NULL
+  ), filtered AS (
+    SELECT * FROM ranked
+    WHERE lead_rank <= 2
       AND (p_origin IS NULL OR p_origin='' OR coalesce(message_origin,'conversation')=p_origin)
       AND (p_status IS NULL OR p_status='' OR queue_state=p_status)
   ), page AS (

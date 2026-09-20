@@ -92,3 +92,9 @@ def test_dead_letter_recovery_requires_technical_event_without_proof_or_matching
 
 def test_previous_message_never_falls_back_to_customer_message():
     assert "'previous_message',coalesce(case when queue_sequence=2 then first_preview_text else null end,last_agent_message)" in RECONCILIATION_MIGRATION
+
+
+def test_projection_keeps_only_two_recent_lines_per_lead():
+    assert "row_number() over" in RECONCILIATION_MIGRATION
+    assert "partition by persona_id, lead_ref" in RECONCILIATION_MIGRATION
+    assert "where lead_rank <= 2" in RECONCILIATION_MIGRATION

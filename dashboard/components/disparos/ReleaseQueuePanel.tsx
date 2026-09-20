@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { AlertCircle, CheckCircle2, RefreshCw, Send } from "lucide-react";
 import { api } from "@/lib/api";
 import { useGlobalPersona } from "@/lib/useGlobalPersona";
@@ -103,15 +103,14 @@ function contextLabel(message: NonNullable<QueueItem["recent_context"]>[number])
 
 function ContextDropdown({ item }: { item: QueueItem }) {
   const context = item.recent_context || [];
-  if (!context.length) return null;
   return <details className="mt-2 rounded-lg border border-white/10 bg-obs-panel/50 px-2 py-1 text-xs">
     <summary className="cursor-pointer text-obs-faint">Ver contexto ({context.length})</summary>
-    <ol className="mt-2 space-y-2 pb-1">
+    {context.length ? <ol className="mt-2 space-y-2 pb-1">
       {context.map((message, index) => <li key={String(message.id ?? `${message.created_at || "message"}-${index}`)} className="border-t border-white/[0.06] pt-2 first:border-0 first:pt-0">
         <p className="text-obs-faint">{contextLabel(message)}</p>
         <p className="mt-0.5 whitespace-pre-wrap text-obs-subtle">{message.content || "[sem texto]"}</p>
       </li>)}
-    </ol>
+    </ol> : <p className="mt-2 pb-1 text-obs-faint">Contexto ainda não disponível para esta linha.</p>}
   </details>;
 }
 
@@ -176,6 +175,19 @@ export function ReleaseQueuePanel() {
   // The current API deployment may still return an admin-wide page. Keep the
   // dashboard fail-closed to the persona selected in the global selector.
   const visibleItems = useMemo(() => items.filter((item) => item.persona_id === persona.id), [items, persona.id]);
+  const groupedVisibleItems = useMemo(() => {
+    const groups = new Map<string, QueueItem[]>();
+    for (const item of visibleItems) {
+      const key = item.lead_ref == null ? `buffer:${item.id}` : `lead:${item.lead_ref}`;
+      const current = groups.get(key) || [];
+      current.push(item);
+      groups.set(key, current);
+    }
+    return Array.from(groups, ([key, group]) => ({
+      key,
+      items: group.slice().sort((left, right) => String(right.created_at || "").localeCompare(String(left.created_at || ""))).slice(0, 2).sort((left, right) => String(left.created_at || "").localeCompare(String(right.created_at || ""))),
+    }));
+  }, [visibleItems]);
   const selectedItems = useMemo(() => visibleItems.filter((item) => selected.includes(item.id)), [visibleItems, selected]);
   const allSelected = visibleItems.length > 0 && selectedItems.length === visibleItems.length;
   const selectedActions = useMemo(() => ACTIONS.filter(({ value }) =>
@@ -235,6 +247,7 @@ export function ReleaseQueuePanel() {
         </select>
       </label>
       {selectedActions.map(({ value, label }) => <button key={value} type="button" disabled={busy} onClick={() => void runAction(value)} className="rounded-lg border border-obs-violet/30 px-3 py-2 text-sm text-obs-text disabled:opacity-40">{label}</button>)}
+      {selectedItems.length > 1 && !selectedActions.length && <span className="rounded-lg border border-amber-400/20 px-3 py-2 text-xs text-amber-100">Seleção mista: use a ação de cada linha</span>}
       <button type="button" onClick={() => load().catch((cause) => setError(cause?.message || "Falha ao atualizar."))} className="flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-sm text-obs-subtle"><RefreshCw size={15} />Atualizar</button>
     </div>
 
@@ -247,7 +260,9 @@ export function ReleaseQueuePanel() {
           <th className="w-12 p-3"><input aria-label="Selecionar todas" type="checkbox" checked={allSelected} onChange={(event) => setSelected(event.target.checked ? visibleItems.map((item) => item.id) : [])} /></th>
           <th className="p-3">Mensagem anterior</th><th className="p-3">Prévia atual</th><th className="p-3">Lead</th><th className="p-3">Origem</th><th className="p-3">Horário</th><th className="p-3">Estado</th><th className="p-3 text-right">Ações</th>
         </tr></thead>
-        <tbody>{visibleItems.map((item) => {
+        <tbody>{groupedVisibleItems.map((group) => <Fragment key={group.key}>
+          {group.items.length > 1 && <tr className="border-t border-white/[0.06] bg-white/[0.02]"><td colSpan={8} className="px-3 py-2 text-xs text-obs-faint">{group.items[0].lead?.nome || group.items[0].lead?.name || "Lead"} · 2 linhas mais recentes agrupadas</td></tr>}
+          {group.items.map((item) => {
           const sent = item.queue_state === "awaiting_customer";
           const action = primaryAction(item);
           return <tr key={item.id} className={`border-t border-white/[0.06] ${sent ? "bg-emerald-500/[0.06]" : "bg-rose-500/[0.06]"}`}>
@@ -260,7 +275,8 @@ export function ReleaseQueuePanel() {
             <td className="p-3"><span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs ${sent ? "bg-emerald-500/15 text-emerald-200" : "bg-rose-500/15 text-rose-100"}`}>{sent ? <CheckCircle2 size={13} /> : <AlertCircle size={13} />}{statusLabel(item.queue_state)}</span>{stateReason(item) && <p className="mt-1 max-w-56 text-xs text-obs-faint">{stateReason(item)}</p>}</td>
             <td className="p-3 text-right"><div className="flex flex-wrap justify-end gap-1">{item.actions?.includes("regenerate_preview") && <button type="button" disabled={busy} onClick={() => void runAction("regenerate-preview", [item])} className="rounded-lg border border-white/10 px-2 py-2 text-xs text-obs-text">Regerar prévia</button>}{item.actions?.includes("send_preview") && <button type="button" disabled={busy} onClick={() => void runAction("send-preview", [item])} className="rounded-lg bg-emerald-500/20 px-2 py-2 text-xs text-emerald-100">Enviar</button>}{item.actions?.includes("handoff") && <button type="button" disabled={busy} onClick={() => void runAction("handoff", [item])} className="rounded-lg border border-amber-400/30 px-2 py-2 text-xs text-amber-100">Handoff</button>}{action && !item.actions?.includes("send_preview") && !item.actions?.includes("handoff") && <button type="button" disabled={busy} onClick={() => void runAction(action.action, [item])} className="inline-flex items-center gap-1 rounded-lg bg-obs-violet px-3 py-2 text-xs font-medium text-white disabled:opacity-40"><Send size={13} />{action.label}</button>}{!action && !item.actions?.length && <span className="max-w-48 text-xs text-obs-faint">Sem ação segura disponível</span>}</div></td>
           </tr>;
-        })}</tbody>
+        })}
+        </Fragment>)}</tbody>
       </table>
       {!visibleItems.length && <p className="p-10 text-center text-sm text-obs-subtle">Nenhuma mensagem ativa aguarda envio ou resposta da lead.</p>}
     </div>

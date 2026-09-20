@@ -147,4 +147,20 @@ describe("actionable message queue", () => {
     expect(screen.getAllByText("binding safety paused").length).toBeGreaterThan(0);
     expect(screen.getByText("Sem ação segura disponível")).toBeInTheDocument();
   });
+
+  it("shows at most the two latest lines for the same lead as one group", async () => {
+    mocks.queue.mockResolvedValue({
+      items: [
+        { id: "old-line", persona_id: "tock-persona", lead_ref: 7, created_at: "2026-09-18T10:00:00Z", queue_state: "blocked", lead: { nome: "Allan" }, actions: [] },
+        { id: "middle-line", persona_id: "tock-persona", lead_ref: 7, created_at: "2026-09-18T11:00:00Z", queue_state: "blocked", lead: { nome: "Allan" }, actions: [] },
+        { id: "latest-line", persona_id: "tock-persona", lead_ref: 7, created_at: "2026-09-18T12:00:00Z", queue_state: "technical_failure", lead: { nome: "Allan" }, actions: ["reprocess"] },
+      ], next_offset: null,
+    });
+
+    render(<ReleaseQueuePanel />);
+
+    expect(await screen.findByText("Allan · 2 linhas mais recentes agrupadas")).toBeInTheDocument();
+    expect(screen.getAllByLabelText("Selecionar mensagem")).toHaveLength(2);
+    expect(screen.queryByText("old-line")).not.toBeInTheDocument();
+  });
 });
