@@ -57,6 +57,22 @@ describe("operational demand queue", () => {
     expect(mocks.control).not.toHaveBeenCalledWith("send-preview", expect.anything());
   });
 
+  it("explicitly generates an inert preview from a blocked inbound", async () => {
+    mocks.queue.mockResolvedValue({ items: [{ ...base, queue_state: "blocked", outbound_messages: [{
+      buffer_id: "canonical-inbound", sequence: 1, kind: "response", status: "blocked",
+      can_retry: false, retry_reason: "Demanda sem falha técnica recuperável",
+      can_generate_preview: true, can_send: false, send_reason: "Gere uma resposta válida antes de enviar",
+    }] }], next_offset: null });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<ReleaseQueuePanel />);
+    fireEvent.click(await screen.findByRole("button", { name: "Gerar prévia da mensagem 1" }));
+    await waitFor(() => expect(mocks.control).toHaveBeenCalledWith(
+      "operator-preview", { buffer_ids: ["canonical-inbound"] },
+    ));
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("mensagem original"));
+    expect(mocks.control).not.toHaveBeenCalledWith("send-preview", expect.anything());
+  });
+
   it("renders two messages in one demand and blocks message 2 until message 1 is confirmed", async () => {
     mocks.queue.mockResolvedValue({ items: [{ ...base, outbound_messages: [
       { buffer_id: "first", sequence: 1, kind: "apology", text: "Aviso de horário", proof_id: "proof-1", status: "preview_ready", can_retry: true, can_send: true },

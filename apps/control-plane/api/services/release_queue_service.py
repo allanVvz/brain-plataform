@@ -349,12 +349,33 @@ def control_unified_queue(
 
 def generate_queue_previews(*, buffer_ids: list[str], actor_user_id: str | None) -> dict[str, Any]:
     """Claim each technical inbound, then ask runtime for an inert preview."""
+    return _generate_inbound_previews(
+        buffer_ids=buffer_ids, actor_user_id=actor_user_id,
+        claim_function="claim_queue_preview_v1", release_function="release_queue_preview_claim_v1",
+        result_name="preview_gerado",
+    )
+
+
+def generate_operator_queue_previews(*, buffer_ids: list[str], actor_user_id: str | None) -> dict[str, Any]:
+    """Explicitly create inert previews from selected human-held inbounds."""
+    return _generate_inbound_previews(
+        buffer_ids=buffer_ids, actor_user_id=actor_user_id,
+        claim_function="claim_queue_operator_preview_v1",
+        release_function="release_queue_operator_preview_claim_v1",
+        result_name="operator_preview_gerado",
+    )
+
+
+def _generate_inbound_previews(
+    *, buffer_ids: list[str], actor_user_id: str | None,
+    claim_function: str, release_function: str, result_name: str,
+) -> dict[str, Any]:
     results: list[dict[str, Any]] = []
     actor_id = _uuid_or_none(actor_user_id)
     for buffer_id in buffer_ids:
         claimed: dict[str, Any] | None = None
         try:
-            value = supabase_client.get_client().rpc("claim_queue_preview_v1", {
+            value = supabase_client.get_client().rpc(claim_function, {
                 "p_buffer_id": buffer_id, "p_actor_user_id": actor_id,
             }).execute().data
             claimed = value[0] if isinstance(value, list) and value else value
@@ -386,13 +407,16 @@ def generate_queue_previews(*, buffer_ids: list[str], actor_user_id: str | None)
                 "inbound_buffer_id": str(buffer_id),
                 "queue_position_epoch": queue_position_epoch,
             }, actor_user_id=actor_id)
-            results.append({"buffer_id": buffer_id, "result": "preview_gerado", "preview": result.get("reply_text")})
+            results.append({"buffer_id": buffer_id, "result": result_name, "preview": result.get("reply_text")})
         except Exception as exc:
             if claimed:
                 try:
-                    supabase_client.get_client().rpc("release_queue_preview_claim_v1", {
+                    release_args = {
                         "p_buffer_id": buffer_id, "p_error": str(exc)[:1000],
-                    }).execute()
+                    }
+                    if release_function == "release_queue_operator_preview_claim_v1":
+                        release_args["p_actor_user_id"] = actor_id
+                    supabase_client.get_client().rpc(release_function, release_args).execute()
                 except Exception:
                     pass
             results.append({"buffer_id": buffer_id, "result": "bloqueado", "reason": str(exc)[:300]})

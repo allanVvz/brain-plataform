@@ -193,6 +193,10 @@ def _queue_action(action: str, body: QueueActionBody, request: Request):
         return release_queue_service.generate_queue_previews(
             buffer_ids=body.buffer_ids, actor_user_id=actor_user_id,
         )
+    if action == "operator_preview":
+        return release_queue_service.generate_operator_queue_previews(
+            buffer_ids=body.buffer_ids, actor_user_id=actor_user_id,
+        )
     if action in {"reactivate", "regenerate_preview"}:
         return release_queue_service.generate_reactivation_previews(
             buffer_ids=body.buffer_ids, actor_user_id=actor_user_id,
@@ -220,6 +224,11 @@ def resume_queue(body: QueueActionBody, request: Request):
 @queue_router.post("/queue/reprocess")
 def reprocess_queue(body: QueueActionBody, request: Request):
     return _queue_action("reprocess", body, request)
+
+
+@queue_router.post("/queue/operator-preview")
+def operator_preview_queue(body: QueueActionBody, request: Request):
+    return _queue_action("operator_preview", body, request)
 
 
 @queue_router.post("/queue/send-preview")

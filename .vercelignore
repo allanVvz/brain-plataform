@@ -1,6 +1,13 @@
 /.pytest_cache
 /.git
 /.codex
+/.codex-run
+/.codex-screenshots
+/.test-browser-profile
+/test-artifacts
+/.runtime
+/.tmp-pycache-*
+/apps
 /.agents
 /.claude
 /.vault-dev

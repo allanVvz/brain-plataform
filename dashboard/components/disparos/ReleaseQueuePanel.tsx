@@ -5,12 +5,13 @@ import { AlertCircle, CheckCircle2, RefreshCw, RotateCcw, Send } from "lucide-re
 import { api } from "@/lib/api";
 import { useGlobalPersona } from "@/lib/useGlobalPersona";
 
-type QueueAction = "reprocess" | "send-preview" | "regenerate-preview";
+type QueueAction = "reprocess" | "send-preview" | "regenerate-preview" | "operator-preview";
 type ContextMessage = { id?: string | number | null; content?: string | null; direction?: string | null; role?: string | null; sender_type?: string | null; created_at?: string | null };
 type OutboundMessage = {
   buffer_id: string; sequence: number; kind: string; text?: string | null;
   proof_id?: string | null; status?: string | null; can_retry?: boolean;
-  retry_reason?: string | null; can_send?: boolean; send_reason?: string | null;
+  retry_reason?: string | null; can_generate_preview?: boolean; generate_preview_reason?: string | null;
+  can_send?: boolean; send_reason?: string | null;
 };
 type QueueItem = {
   id: string; demand_id?: string | null; lead_ref?: number | null; persona_id?: string | null;
@@ -87,15 +88,17 @@ export function ReleaseQueuePanel() {
   }, [load]);
   const visibleItems = useMemo(() => items.filter((item) => item.persona_id === persona.id), [items, persona.id]);
 
-  async function runMessageAction(action: "retry" | "send", item: QueueItem, message: OutboundMessage) {
-    const capability = action === "retry" ? message.can_retry : message.can_send;
-    const reason = action === "retry" ? message.retry_reason : message.send_reason;
+  async function runMessageAction(action: "retry" | "generate" | "send", item: QueueItem, message: OutboundMessage) {
+    const capability = action === "retry" ? message.can_retry : action === "generate" ? message.can_generate_preview : message.can_send;
+    const reason = action === "retry" ? message.retry_reason : action === "generate" ? message.generate_preview_reason : message.send_reason;
+    if (action === "generate" && !window.confirm("Vou reativar somente esta lead e gerar uma prévia usando a mensagem original. Nada será enviado até você clicar em Enviar. Continuar?")) return;
     if (!capability || busyMessage) { if (!capability) setError(reason || "Ação indisponível no estado atual."); return; }
-    const actionName: QueueAction = action === "send" ? "send-preview" : item.queue_state === "technical_failure" ? "reprocess" : "regenerate-preview";
+    const actionName: QueueAction = action === "send" ? "send-preview" : action === "generate" ? "operator-preview" : item.queue_state === "technical_failure" ? "reprocess" : "regenerate-preview";
     setBusyMessage(message.buffer_id); setError(""); setNotice("");
     try {
       const result = await api.controlMessagingQueue(actionName, { buffer_ids: [message.buffer_id] });
       const labels: Record<string, string> = {
+        operator_preview_gerado: "Previa gerada a partir da mensagem da cliente",
         preview_gerado: "Prévia gerada", preview_individual_regenerado: "Mensagem regenerada",
         preview_reativacao_gerado: "Demanda de reativação criada", agendado: "Envio solicitado",
         bloqueado: "Ação bloqueada", superado: "Contexto mudou",
@@ -131,7 +134,8 @@ export function ReleaseQueuePanel() {
             <td className="p-3"><span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs ${sent ? "bg-emerald-500/15 text-emerald-200" : "bg-rose-500/15 text-rose-100"}`}>{sent ? <CheckCircle2 size={13} /> : <AlertCircle size={13} />}{statusLabel(item.queue_state)}</span><ul className="mt-2 space-y-1 text-xs text-obs-faint">{messages.map((message, index) => <li key={message.buffer_id}>Mensagem {index + 1}: {messageStatusLabel(message.status)}</li>)}</ul></td>
             <td className="p-3 text-right"><div className="space-y-3">{messages.map((message, index) => {
               const retryReason = exactReason(message.can_retry, message.retry_reason); const sendReason = exactReason(message.can_send, message.send_reason);
-              return <div key={message.buffer_id} className="rounded-lg border border-white/[0.08] p-2"><p className="mb-2 text-xs text-obs-faint">Mensagem {index + 1}</p><div className="flex justify-end gap-1"><button type="button" disabled={Boolean(busyMessage) || !message.can_retry} title={retryReason} aria-label={`Retry mensagem ${index + 1}`} onClick={() => void runMessageAction("retry", item, message)} className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2 py-2 text-xs text-obs-text disabled:cursor-not-allowed disabled:opacity-40"><RotateCcw size={13} />Retry</button><button type="button" disabled={Boolean(busyMessage) || !message.can_send} title={sendReason} aria-label={`Enviar mensagem ${index + 1}`} onClick={() => void runMessageAction("send", item, message)} className="inline-flex items-center gap-1 rounded-lg bg-emerald-500/20 px-2 py-2 text-xs text-emerald-100 disabled:cursor-not-allowed disabled:opacity-40"><Send size={13} />Enviar</button></div>{retryReason && <p className="mt-1 max-w-52 text-xs text-obs-faint">Retry: {retryReason}</p>}{sendReason && <p className="mt-1 max-w-52 text-xs text-obs-faint">Enviar: {sendReason}</p>}</div>;
+              const generateReason = exactReason(message.can_generate_preview, message.generate_preview_reason);
+              return <div key={message.buffer_id} className="rounded-lg border border-white/[0.08] p-2"><p className="mb-2 text-xs text-obs-faint">Mensagem {index + 1}</p><div className="flex justify-end gap-1">{message.can_generate_preview !== undefined && <button type="button" disabled={Boolean(busyMessage) || !message.can_generate_preview} title={generateReason} aria-label={`Gerar prévia da mensagem ${index + 1}`} onClick={() => void runMessageAction("generate", item, message)} className="inline-flex items-center gap-1 rounded-lg border border-sky-400/20 px-2 py-2 text-xs text-sky-100 disabled:cursor-not-allowed disabled:opacity-40">Gerar prévia</button>}<button type="button" disabled={Boolean(busyMessage) || !message.can_retry} title={retryReason} aria-label={`Retry mensagem ${index + 1}`} onClick={() => void runMessageAction("retry", item, message)} className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2 py-2 text-xs text-obs-text disabled:cursor-not-allowed disabled:opacity-40"><RotateCcw size={13} />Retry</button><button type="button" disabled={Boolean(busyMessage) || !message.can_send} title={sendReason} aria-label={`Enviar mensagem ${index + 1}`} onClick={() => void runMessageAction("send", item, message)} className="inline-flex items-center gap-1 rounded-lg bg-emerald-500/20 px-2 py-2 text-xs text-emerald-100 disabled:cursor-not-allowed disabled:opacity-40"><Send size={13} />Enviar</button></div>{message.can_generate_preview !== undefined && generateReason && <p className="mt-1 max-w-52 text-xs text-obs-faint">Gerar prévia: {generateReason}</p>}{retryReason && <p className="mt-1 max-w-52 text-xs text-obs-faint">Retry: {retryReason}</p>}{sendReason && <p className="mt-1 max-w-52 text-xs text-obs-faint">Enviar: {sendReason}</p>}</div>;
             })}</div></td>
           </tr>;
         })}</tbody>
