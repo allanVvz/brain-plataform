@@ -2,6 +2,7 @@ from pathlib import Path
 
 
 SQL = (Path(__file__).resolve().parents[1] / "supabase/migrations/157_operator_replay_blocked_inbound.sql").read_text(encoding="utf-8").lower()
+RECOVERY_SQL = (Path(__file__).resolve().parents[1] / "supabase/migrations/158_recover_stale_operator_preview_claim.sql").read_text(encoding="utf-8").lower()
 
 
 def test_operator_replay_is_explicit_atomic_and_inert():
@@ -35,3 +36,12 @@ def test_projection_exposes_generate_preview_only_for_blocked_inbound_fallback()
     assert "can_generate_preview',true" in wrapper
     assert "generate_preview_reason" in wrapper
     assert "create table" not in SQL
+
+
+def test_operator_replay_recovers_only_old_unproved_commit():
+    assert "v_commit->>'status','')='processing'" in RECOVERY_SQL
+    assert "interval '5 minutes'" in RECOVERY_SQL
+    assert "conversation_turn_proofs" in RECOVERY_SQL
+    assert "messaging.queue.stale_commit_released" in RECOVERY_SQL
+    assert "inbound conversation commit is still processing" in RECOVERY_SQL
+    assert "inbound is superseded by a newer customer message" in RECOVERY_SQL
