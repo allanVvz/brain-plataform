@@ -1,8 +1,8 @@
 {
-  "source_sha": "a74dade66346403a60178ab5a2acc895640c9061",
+  "source_sha": "8004fe82f7baafe4c3793a077ca3d1149f74164a",
   "contracts_version": "3.2.0",
   "contracts_checksum": "sha256:4fef73451747a4b482067a0a50b9c239f0a50d778ff0d5d82ea99fdf211270e4",
-  "schema_version": 158,
+  "schema_version": 159,
   "route_map_checksum": "sha256:0146765a3fed6f690566d212fee29d1a324183ce2106429bf52f891403fd5c64",
   "services": {
     "gateway": {
@@ -14,9 +14,9 @@
     },
     "control-plane": {
       "repository": "allanVvz/brain-plataform",
-      "sha": "a74dade66346403a60178ab5a2acc895640c9061",
-      "digest": "sha256:7b7858659e8797b231f4cd257b5b1582e25a9f017f987328073585f2230412b1",
-      "required_schema_version": 158,
+      "sha": "8004fe82f7baafe4c3793a077ca3d1149f74164a",
+      "digest": "sha256:5ffa8dcca6ba1f7e6fadac92d90413a8086792e401567848e41e52d7cfd85242",
+      "required_schema_version": 159,
       "contracts_version": "3.2.0",
       "contracts_checksum": "sha256:4fef73451747a4b482067a0a50b9c239f0a50d778ff0d5d82ea99fdf211270e4",
       "build_context": "apps/control-plane"
