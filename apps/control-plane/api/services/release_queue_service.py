@@ -437,7 +437,10 @@ def _generate_inbound_previews(
             recovered_stale_commit = claim_function == "claim_queue_operator_preview_v1" and bool(_rows(
                 supabase_client.get_client().table("system_events").select("id")
                 .eq("entity_type", "lead_buffer").eq("entity_id", str(buffer_id))
-                .eq("event_type", "messaging.queue.stale_commit_released")
+                # stale_commit_released: migration 158, a stale payload.conversation_commit.
+                # stale_worker_claim_released: migration 159, a stale worker-level
+                # status='processing' claim (the dispatcher itself crashed mid-decision).
+                .in_("event_type", ["messaging.queue.stale_commit_released", "messaging.queue.stale_worker_claim_released"])
                 .gte("created_at", call_started_at).limit(1)
             ))
             source_row = _one(
