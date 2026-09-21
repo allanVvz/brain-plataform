@@ -280,7 +280,7 @@ def test_microservice_schema_gate_covers_the_manifest_target():
     manifest = json.loads(
         (ROOT / "ops/microservices/release-manifest.json").read_text(encoding="utf-8")
     )
-    assert manifest["schema_version"] == 159
+    assert manifest["schema_version"] == 160
 
     audit = (ROOT / "ops/vps/validate-production-release.sh").read_text(encoding="utf-8")
     for migration in (
@@ -310,9 +310,10 @@ def test_microservice_schema_gate_covers_the_manifest_target():
         "157_operator_replay_blocked_inbound.sql",
         "158_recover_stale_operator_preview_claim.sql",
         "159_recover_stale_worker_claim.sql",
+        "160_fix_operator_preview_generated_column.sql",
     ):
         assert migration in audit
-    assert "release migrations 112-159 are incomplete" in audit
+    assert "release migrations 112-160 are incomplete" in audit
 
     for script_name in (
         "ops/vps/deploy-microservice-blue-green.sh",
