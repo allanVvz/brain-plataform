@@ -19,19 +19,32 @@ def _configuration() -> tuple[str, str]:
     return base_url, token
 
 
+# A queue preview asks runtime to run a full decide+proof cycle through the
+# model synchronously, in the request/response path -- that regularly takes
+# longer than a plain internal call. 15s is fine for those; it timed out for
+# real against a live stuck lead when it was the only budget the browser and
+# this hop shared. This does not make the browser wait 45s by itself: the
+# dashboard's own per-call timeout (see api.ts's PREVIEW_ACTION_TIMEOUT_MS)
+# is raised to match, so the two budgets stay aligned instead of one cutting
+# the other off first.
+_DEFAULT_TIMEOUT_SECONDS = 15
+_PREVIEW_GENERATION_TIMEOUT_SECONDS = 45
+
+
 def _post(
     path: str,
     payload: dict[str, Any],
     *,
     actor_user_id: str | None,
     params: dict[str, str] | None = None,
+    timeout: float = _DEFAULT_TIMEOUT_SECONDS,
 ) -> dict:
     base_url, token = _configuration()
     headers = {"X-Webhook-Token": token}
     if actor_user_id:
         headers["X-Brain-Actor-Id"] = actor_user_id
     try:
-        with httpx.Client(timeout=15, verify=get_ca_bundle_path()) as client:
+        with httpx.Client(timeout=timeout, verify=get_ca_bundle_path()) as client:
             response = client.post(
                 base_url + path,
                 json=payload,
@@ -160,6 +173,7 @@ def generate_queue_preview(payload: dict[str, Any], *, actor_user_id: str | None
         "/internal/v1/conversations/queue-preview",
         payload,
         actor_user_id=actor_user_id,
+        timeout=_PREVIEW_GENERATION_TIMEOUT_SECONDS,
     )
 
 
@@ -167,6 +181,7 @@ def retry_queue_message(payload: dict[str, Any], *, actor_user_id: str | None) -
     return _post(
         "/internal/v1/conversations/queue-message-retry",
         payload, actor_user_id=actor_user_id,
+        timeout=_PREVIEW_GENERATION_TIMEOUT_SECONDS,
     )
 
 
@@ -176,6 +191,7 @@ def generate_reactivation_preview(payload: dict[str, Any], *, actor_user_id: str
         "/internal/v1/conversations/reactivation-preview",
         payload,
         actor_user_id=actor_user_id,
+        timeout=_PREVIEW_GENERATION_TIMEOUT_SECONDS,
     )
 
 
@@ -184,4 +200,5 @@ def generate_reactivation_pair(payload: dict[str, Any], *, actor_user_id: str | 
         "/internal/v1/conversations/reactivation-pair",
         payload,
         actor_user_id=actor_user_id,
+        timeout=_PREVIEW_GENERATION_TIMEOUT_SECONDS,
     )

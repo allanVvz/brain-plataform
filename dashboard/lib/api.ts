@@ -134,7 +134,7 @@ async function assertResponse(path: string, res: Response, requestId: string): P
   });
 }
 
-type ReqOptions = RequestInit & { retryUnavailable?: boolean };
+type ReqOptions = RequestInit & { retryUnavailable?: boolean; timeoutMs?: number };
 
 // A rewrite can be temporarily unavailable while Vercel reconnects to the
 // internal API.  Leaving the browser fetch unbounded keeps AppShell in its
@@ -142,12 +142,21 @@ type ReqOptions = RequestInit & { retryUnavailable?: boolean };
 // retrying.  Bound it so callers receive the normal actionable API error.
 const API_REQUEST_TIMEOUT_MS = 15_000;
 
-async function fetchApi(url: string, options: RequestInit): Promise<Response> {
+// Queue actions that ask runtime to run a full decide+proof cycle through the
+// model (reprocess/operator-preview/reactivate/regenerate-preview) share this
+// longer budget with control-plane's own runtime_client._PREVIEW_GENERATION_-
+// TIMEOUT_SECONDS -- confirmed live on 2026-09-21: the default 15s cut off a
+// real recovery-and-preview call against a genuinely stuck lead before
+// either side actually failed. Every other queue action (pause/resume/
+// send-preview/handoff) stays on the default: those are plain DB writes.
+export const QUEUE_PREVIEW_ACTION_TIMEOUT_MS = 45_000;
+
+async function fetchApi(url: string, options: RequestInit, timeoutMs: number = API_REQUEST_TIMEOUT_MS): Promise<Response> {
   const controller = new AbortController();
   const upstreamSignal = options.signal;
   const abortFromCaller = () => controller.abort();
   upstreamSignal?.addEventListener("abort", abortFromCaller, { once: true });
-  const timer = window.setTimeout(() => controller.abort(), API_REQUEST_TIMEOUT_MS);
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, { ...options, signal: controller.signal });
   } finally {
@@ -158,7 +167,7 @@ async function fetchApi(url: string, options: RequestInit): Promise<Response> {
 
 async function req<T>(path: string, opts?: ReqOptions): Promise<T> {
   assertApiConfigured();
-  const { retryUnavailable = false, ...fetchOptions } = opts || {};
+  const { retryUnavailable = false, timeoutMs, ...fetchOptions } = opts || {};
   const requestId = newRequestId();
   const headers = {
     "Content-Type": "application/json",
@@ -171,7 +180,7 @@ async function req<T>(path: string, opts?: ReqOptions): Promise<T> {
       credentials: "include",
       ...fetchOptions,
       headers,
-    });
+    }, timeoutMs);
   } catch {
     throw new ApiError({ status: 0, path, kind: "network", requestId });
   }
@@ -182,7 +191,7 @@ async function req<T>(path: string, opts?: ReqOptions): Promise<T> {
         credentials: "include",
         ...fetchOptions,
         headers,
-      });
+      }, timeoutMs);
     } catch {
       throw new ApiError({ status: 0, path, kind: "network", requestId });
     }
@@ -390,7 +399,11 @@ export const api = {
     return req<any>(`/messaging/queue?${query.toString()}`);
   },
   controlMessagingQueue: (action: "pause" | "resume" | "reprocess" | "send-preview" | "reactivate" | "regenerate-preview" | "operator-preview" | "handoff", body: Record<string, unknown>) =>
-    req<any>(`/messaging/queue/${action}`, { method: "POST", body: JSON.stringify(body) }),
+    req<any>(`/messaging/queue/${action}`, {
+      method: "POST", body: JSON.stringify(body),
+      timeoutMs: ["reprocess", "operator-preview", "reactivate", "regenerate-preview"].includes(action)
+        ? QUEUE_PREVIEW_ACTION_TIMEOUT_MS : undefined,
+    }),
   updateLeadInfo: (leadRef: number, body: {
     nome?: string;
     interesse_produto?: string;

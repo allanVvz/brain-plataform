@@ -4,6 +4,7 @@ import { API_OFFLINE_ERROR, ApiError, api } from "@/lib/api";
 describe("API error taxonomy", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it("keeps a 403 as an authorization error instead of reporting an outage", async () => {
@@ -58,5 +59,28 @@ describe("API error taxonomy", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(error).toMatchObject({ status: 503, requestId: "req-2" });
     expect(error.message).toContain("request_id req-2");
+  });
+
+  it("gives a preview-generating queue action a longer client timeout than a plain queue action", async () => {
+    // Confirmed live on 2026-09-21: the default 15s budget cut off a real
+    // operator-preview call (which asks runtime to run a full decide+proof
+    // cycle) against a genuinely stuck lead. Plain queue writes (pause/
+    // resume/send-preview) stay on the default -- they never call the model.
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn((_url: string, options: RequestInit) => new Promise((_, reject) => {
+      options.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+    })));
+
+    const pauseSettled = vi.fn();
+    const previewSettled = vi.fn();
+    api.controlMessagingQueue("pause", { buffer_ids: ["b1"] }).catch(pauseSettled);
+    api.controlMessagingQueue("operator-preview", { buffer_ids: ["b2"] }).catch(previewSettled);
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(pauseSettled).toHaveBeenCalledTimes(1);
+    expect(previewSettled).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(previewSettled).toHaveBeenCalledTimes(1);
   });
 });
