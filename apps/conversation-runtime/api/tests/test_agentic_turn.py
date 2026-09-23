@@ -200,6 +200,45 @@ def test_reply_claim_contract_exposes_only_graph_authorized_price_evidence():
     }]
 
 
+def test_reply_claim_contract_exposes_only_retained_graph_claim_evidence():
+    context = _context().model_copy(update={
+        "graph_contract": {
+            "claims": [
+                {
+                    "claim_type": "service_detail",
+                    "evidence_node_ids": ["faq:service", "faq:not-retrieved"],
+                },
+                {
+                    "claim_type": "availability",
+                    "evidence_node_ids": ["faq:availability"],
+                },
+            ],
+        },
+    })
+    resolved = ResolvedUnderstandingV1(
+        understanding=TurnUnderstandingV1(),
+        context=context,
+        prospective_state={},
+        conversation_brief={},
+        context_manifest={"retained_node_ids": ["faq:service", "faq:availability"]},
+    )
+
+    contract = agentic_turn._reply_claim_contract(resolved)
+
+    assert contract["authorized_claims"] == [
+        {
+            "claim_type": "service_detail",
+            "evidence_node_ids": ["faq:service"],
+            "evidence_chunk_ids": [],
+        },
+        {
+            "claim_type": "availability",
+            "evidence_node_ids": ["faq:availability"],
+            "evidence_chunk_ids": [],
+        },
+    ]
+
+
 def test_non_literal_fact_evidence_fails_without_reply_call(monkeypatch):
     context = _context()
     monkeypatch.setattr(agentic_turn.conversation_runtime, "build_context", lambda **_kwargs: context)

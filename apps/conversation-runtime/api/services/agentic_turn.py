@@ -266,6 +266,40 @@ def _reply_claim_contract(resolved: Any) -> dict[str, Any]:
         for item in (resolved.conversation_brief.get("price_comparison_catalog") or [])
         if isinstance(item, dict)
     ]
+    # The proof checker already owns authorization; the model only needs the
+    # small, turn-scoped subset it may cite.  Without this projection a model
+    # can correctly explain a published service but cite its product anchor
+    # instead of the graph-authorized FAQ/copy evidence, making an otherwise
+    # grounded turn fail proof.  This is deliberately generic: it derives
+    # claim types and evidence from the resolved graph contract, never from a
+    # persona, service or authored reply.
+    retained_node_ids = {
+        str(node_id)
+        for node_id in (resolved.context_manifest.get("retained_node_ids") or [])
+        if str(node_id)
+    }
+    authorized_claims = []
+    for raw_claim in (resolved.context.graph_contract.get("claims") or []):
+        if not isinstance(raw_claim, dict):
+            continue
+        claim_type = str(raw_claim.get("claim_type") or "").strip()
+        evidence_node_ids = [
+            str(node_id)
+            for node_id in (raw_claim.get("evidence_node_ids") or [])
+            if str(node_id) in retained_node_ids
+        ]
+        evidence_chunk_ids = [
+            str(chunk_id)
+            for chunk_id in (raw_claim.get("evidence_chunk_ids") or [])
+            if str(chunk_id)
+        ]
+        if not claim_type or (not evidence_node_ids and not evidence_chunk_ids):
+            continue
+        authorized_claims.append({
+            "claim_type": claim_type,
+            "evidence_node_ids": evidence_node_ids,
+            "evidence_chunk_ids": evidence_chunk_ids,
+        })
     return {
         "claims_are_optional": True,
         "default": "Use claims: [] unless the reply makes a factual commercial claim.",
@@ -284,10 +318,12 @@ def _reply_claim_contract(resolved: Any) -> dict[str, Any]:
             ),
             "allowed_catalog": catalog,
         },
+        "authorized_claims": authorized_claims,
         "other_claims": (
-            "Use only when every cited node or chunk id is present in the "
-            "resolved context_manifest. Do not use a claim to make ordinary "
-            "recommendations or conversation sound more complete."
+            "For a non-price factual claim, copy one claim_type and only its "
+            "listed evidence IDs from authorized_claims. Otherwise use claims: []. "
+            "Do not use a claim to make ordinary recommendations or conversation "
+            "sound more complete."
         ),
     }
 
