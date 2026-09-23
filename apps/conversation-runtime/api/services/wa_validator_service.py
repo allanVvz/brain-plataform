@@ -65,6 +65,13 @@ SEMANTIC_SALES_FLOWS = frozenset({
     "sdr_sales_photo_available", "sdr_sales_photo_unavailable",
 })
 
+# A validator drives the real transport path.  Its observation window must be
+# longer than the transport's 135-second agentic request budget; otherwise the
+# validator can terminalize a healthy turn while its two model stages are
+# still running.  The small allowance covers queue claim and the final atomic
+# commit.  This applies to every agentic persona, never to a specific graph.
+_AGENTIC_CANONICAL_COMMIT_WAIT_SECONDS = 150.0
+
 
 def supports_semantic_validator_flow(flow_id: str) -> bool:
     """Whether a flow has a graph-driven validator, safe for candidate checks."""
@@ -3152,7 +3159,10 @@ async def run_session_direct(
                     if conversation_mode == "n8n_agents":
                         turn_audit = await _wait_for_turn_audit_v3(
                             buffer_uuid,
-                            max_wait_s=max(configured_wait, 45.0),
+                            max_wait_s=max(
+                                configured_wait,
+                                _AGENTIC_CANONICAL_COMMIT_WAIT_SECONDS,
+                            ),
                         )
                         committed_buffer = (
                             supabase_client.get_whatsapp_buffer_by_idempotency(
