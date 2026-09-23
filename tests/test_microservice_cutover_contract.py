@@ -124,8 +124,8 @@ def test_validator_uses_only_active_runtime_validator_and_stops_it_after_run():
     assert "WA_VALIDATOR_INSPECT_RESULT=passed" in script
     assert "run-microservice-wa-validator.sh" in workflow
     assert "release_lifecycle.py show" not in workflow
-    assert "options: [tock-fatal, aurora, vz-lupas]" in workflow
-    assert "^(aurora|tock-fatal|vz-lupas)$" in script
+    assert "options: [tock-fatal, aurora, vz-lupas, utzig-garage]" in workflow
+    assert "^(aurora|tock-fatal|vz-lupas|utzig-garage)$" in script
 
 
 def test_production_backup_workflow_is_bounded_and_restore_verified():
