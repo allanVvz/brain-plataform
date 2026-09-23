@@ -2,7 +2,7 @@
 
 ## Escopo e guardrails
 
-- Persona: `utzig-garage`; somente testadores que já estejam na allowlist.
+- Persona: `utzig-garage`; liberada para todos, sem allowlist.
 - Transporte de validação: `internal_validator`; nunca WhatsApp real.
 - Sem campanha, disparo proativo, reenvio, mudança de GraphBundle, site ou
   binding sem evidência operacional.
@@ -69,6 +69,55 @@ manual na VPS.
 - Veredito: `technical_pass=false`, `quality_pass=false`. Não repetir deploy
   até que o estágio técnico entre transport e runtime seja diagnosticado e
   corrigido por uma única alteração de serviço.
+
+## Candidato GraphBundle v5 — conhecimento completo aprovado
+
+Classificação: `graph`. Não exige imagem, deploy de serviço, migration, n8n,
+pausa de binding, pausa de persona ou reinício de worker.
+
+- Fonte factual: publicação aprovada da Aurora
+  `d5c7afd7-24ea-44d6-90e9-8532fd3fc303`, checksum
+  `sha256:3f727095819f75836453af2e3bbee42c1138b50a6dc99a59f502b5a1917811ec`.
+- Escopo aproveitado: todo FAQ aprovado aplicável aos 12 serviços equivalentes
+  da Utzig. FAQs de mera disponibilidade já cobertas foram deduplicadas; uma
+  negativa específica de subtipos da Aurora foi excluída por não provar um
+  fato da Utzig.
+- Acréscimo: 23 FAQs aprovadas e rastreáveis; 11 nodes de Copy receberam
+  variações conversacionais de explicação, expectativa e próximo passo.
+- Segurança comercial preservada: preço, prazo, agenda, disponibilidade e
+  resultado final continuam dependentes de confirmação humana; não há preço
+  numérico importado.
+- Topologia: cada FAQ possui um pai factual de serviço, uma relação
+  `answers_question` e exatamente uma projeção no `Embedded`.
+- Dry-run: 23 nodes e 69 edges adicionados, 11 Copys alteradas, zero remoção,
+  23 chunks novos, 128 reutilizados e zero erro de validação.
+- Checksums aprovados: draft
+  `sha256:e806506f07057eeb8127b247515c15621a29258dfae14ee5e6ec5ddb3dbc7a5e`
+  e runtime
+  `sha256:af58d99ac5f3a9ba9afcf3918c18e22b7791ab71021662f442b9c82385c93a33`.
+- Aprovação: operador autorizou o conhecimento completo deste candidato. A
+  ativação deve usar stage + CAS; a publicação v4 permanece ativa diante de
+  qualquer falha.
+
+## Débitos de backend fora do escopo GraphBundle
+
+O último candidate do `conversation-runtime` aguardou 150 segundos e terminou
+sem decisão, proof, commit ou outbound. Isso não é lacuna do grafo: o inbound
+chegou ao caminho agentic, mas o resultado canônico não voltou ao transport.
+O rollback automático preservou o slot anterior.
+
+Esse achado fica no roadmap do runtime, sem nova adaptação do backend para a
+Utzig. A correção futura deve ser genérica e limitada ao estágio comprovado por
+telemetria (chamada de modelo, validação estruturada, proof ou retorno ao
+transport). Observabilidade insuficiente, timeout excessivo e diagnóstico do
+estágio terminal são débitos; nenhum deles autoriza hardcode por persona.
+
+Auditoria read-only de 2026-09-23: gateway, control-plane e transport estão no
+slot blue e alinhados; claims não estão pausados. O runtime blue continua no
+digest restaurado pelo rollback, enquanto o manifesto ainda aponta para o
+candidate reprovado. Esse drift deve ser corrigido no pipeline/manifesto antes
+de uma futura release do runtime; ele não será “resolvido” por novo deploy no
+escopo desta publicação de grafo.
 
 ## Matriz mínima do WA Validator
 
