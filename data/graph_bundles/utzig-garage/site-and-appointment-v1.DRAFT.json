@@ -5,7 +5,7 @@
     "slug": "utzig-garage"
   },
   "metadata": {
-    "purpose": "utzig_garage_candidate_dry_run",
+    "purpose": "utzig_visual_media_reconciliation_candidate",
     "publication_allowed": true,
     "publication_blockers": [],
     "draft_persona_id": {
@@ -39,6 +39,32 @@
       "embedding_provider": "local",
       "embedding_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
       "embedding_dimension": 1536
+    },
+    "visual_media_reconciliation": {
+      "status": "operator_review_required",
+      "source": "approved_utzig_drive_folder",
+      "pending_validation": [
+        "EDIÇÃO assets are excluded from public media and RAG"
+      ],
+      "direct_evidence_services": [
+        "product:engine-bay-wash",
+        "product:glass-polish",
+        "product:headlight-restoration",
+        "product:interior-cleaning",
+        "product:technical-polish",
+        "product:windshield-crystallization"
+      ],
+      "representative_only_services": [
+        "product:ppf",
+        "product:vitrification",
+        "product:bodywork",
+        "product:painting",
+        "product:commercial-polish",
+        "product:detailed-wash",
+        "product:evaluation"
+      ],
+      "preserved_active_faq_count": 0,
+      "soft_disabled_edge_count": 13
     }
   },
   "nodes": [
@@ -249,6 +275,16 @@
               }
             },
             "texture": "matte_metal"
+          },
+          "catalog_media_fallback": {
+            "enabled": true,
+            "campaign_id": "campaign:automotive-detailing",
+            "precedence": [
+              "product",
+              "group",
+              "campaign"
+            ],
+            "direct_assets_compatibility": true
           }
         }
       }
@@ -464,20 +500,23 @@
               "cta_label": "Descubra este serviço",
               "node_ids": [
                 "group:preservation",
+                "group:cleaning",
                 "group:revitalization",
+                "group:repair-paint",
                 "group:enhancement",
                 "product:evaluation",
                 "product:detailed-wash",
-                "product:interior-cleaning",
-                "product:glass-polish",
                 "product:engine-bay-wash",
-                "product:technical-polish",
+                "product:interior-cleaning",
                 "product:commercial-polish",
+                "product:technical-polish",
+                "product:glass-polish",
                 "product:headlight-restoration",
-                "product:vitrification",
-                "product:ppf",
                 "product:bodywork",
-                "product:painting"
+                "product:painting",
+                "product:ppf",
+                "product:vitrification",
+                "product:windshield-crystallization"
               ]
             },
             {
@@ -687,9 +726,9 @@
     {
       "id": "group:preservation",
       "node_type": "product_group",
-      "slug": "preservation",
-      "title": "Preservação",
-      "summary": "Serviços agrupados para avaliação, limpeza e preservação.",
+      "slug": "assessment-guidance",
+      "title": "Avaliação e orientação",
+      "summary": "Grupo de serviços da Utzig Garage; a capa é uma referência visual do grupo.",
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
@@ -699,15 +738,17 @@
             "label": "Explorar Preservação",
             "message_template": "Olá! Quero entender quais serviços de preservação combinam com o meu carro."
           }
-        }
+        },
+        "position": 0,
+        "media_role": "representative_group_cover"
       }
     },
     {
       "id": "group:revitalization",
       "node_type": "product_group",
-      "slug": "revitalization",
-      "title": "Revitalização",
-      "summary": "Serviços agrupados para revitalização de superfícies e acabamento.",
+      "slug": "correction-finish",
+      "title": "Correção e acabamento",
+      "summary": "Grupo de serviços da Utzig Garage; a capa é uma referência visual do grupo.",
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
@@ -717,15 +758,17 @@
             "label": "Explorar Revitalização",
             "message_template": "Olá! Quero entender quais serviços de revitalização combinam com o meu carro."
           }
-        }
+        },
+        "position": 2,
+        "media_role": "representative_group_cover"
       }
     },
     {
       "id": "group:enhancement",
       "node_type": "product_group",
-      "slug": "enhancement",
-      "title": "Aprimoramento",
-      "summary": "Serviços agrupados para proteção, funilaria e pintura.",
+      "slug": "protection-conservation",
+      "title": "Proteção e conservação",
+      "summary": "Grupo de serviços da Utzig Garage; a capa é uma referência visual do grupo.",
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
@@ -735,7 +778,9 @@
             "label": "Explorar Aprimoramento",
             "message_template": "Olá! Quero entender quais serviços de aprimoramento combinam com o meu carro."
           }
-        }
+        },
+        "position": 4,
+        "media_role": "representative_group_cover"
       }
     },
     {
@@ -4282,7 +4327,10 @@
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
         "validation_status": "approved",
-        "protected": true
+        "protected": true,
+        "capabilities": {
+          "global_context": true
+        }
       }
     },
     {
@@ -4298,6 +4346,1352 @@
         "protected": true,
         "rag_index": "default"
       }
+    },
+    {
+      "id": "group:cleaning",
+      "node_type": "product_group",
+      "slug": "cleaning-hygiene",
+      "title": "Limpeza e higienização",
+      "summary": "Grupo de serviços da Utzig Garage; a capa é uma referência visual do grupo.",
+      "status": "approved",
+      "data": {
+        "source": "user_provided_utzig_plan_2026_09_22",
+        "validation_status": "approved",
+        "public_site": {
+          "cta": {
+            "label": "Explorar Preservação",
+            "message_template": "Olá! Quero entender quais serviços de preservação combinam com o meu carro."
+          }
+        },
+        "position": 1,
+        "media_role": "representative_group_cover"
+      }
+    },
+    {
+      "id": "group:repair-paint",
+      "node_type": "product_group",
+      "slug": "repair-paint",
+      "title": "Reparo e pintura",
+      "summary": "Grupo de serviços da Utzig Garage; a capa é uma referência visual do grupo.",
+      "status": "approved",
+      "data": {
+        "source": "user_provided_utzig_plan_2026_09_22",
+        "validation_status": "approved",
+        "public_site": {
+          "cta": {
+            "label": "Explorar Preservação",
+            "message_template": "Olá! Quero entender quais serviços de preservação combinam com o meu carro."
+          }
+        },
+        "position": 3,
+        "media_role": "representative_group_cover"
+      }
+    },
+    {
+      "id": "product:windshield-crystallization",
+      "node_type": "product",
+      "slug": "windshield-crystallization",
+      "title": "Cristalização de para-brisa",
+      "summary": "Serviço de cristalização de para-brisa oferecido pela Utzig Garage.",
+      "status": "approved",
+      "data": {
+        "source": "user_provided_utzig_plan_2026_09_22",
+        "validation_status": "approved",
+        "public_site": {
+          "cta": {
+            "label": "Pedir uma avaliação",
+            "message_template": "Olá! Quero pedir uma avaliação para cristalização de para-brisa."
+          }
+        },
+        "aliases": [
+          "Cristalização de para-brisa"
+        ],
+        "capabilities": {
+          "branch_anchor": true
+        },
+        "booking": {
+          "required_fields": [
+            "nome_cliente",
+            "servico",
+            "modelo_veiculo",
+            "condicao"
+          ]
+        },
+        "qualification": {
+          "fields": [
+            {
+              "key": "nome_cliente",
+              "owner_node_id": "persona:utzig-garage",
+              "scope": "persona",
+              "question_node_id": "faq:qualification:nome_cliente",
+              "required": true,
+              "accepted_statuses": [
+                "known"
+              ],
+              "value_schema": {
+                "type": "string",
+                "minLength": 1
+              },
+              "validation": {
+                "mode": "schema"
+              },
+              "depends_on": [],
+              "priority": 1,
+              "overwrite_policy": "explicit_correction"
+            },
+            {
+              "key": "servico",
+              "owner_node_id": "product:windshield-crystallization",
+              "scope": "branch",
+              "question_node_id": "faq:qualification:servico",
+              "required": true,
+              "accepted_statuses": [
+                "known"
+              ],
+              "value_schema": {
+                "type": "string",
+                "minLength": 1
+              },
+              "validation": {
+                "mode": "schema"
+              },
+              "depends_on": [
+                "nome_cliente"
+              ],
+              "priority": 0.8,
+              "overwrite_policy": "explicit_correction"
+            },
+            {
+              "key": "modelo_veiculo",
+              "owner_node_id": "persona:utzig-garage",
+              "scope": "persona",
+              "question_node_id": "faq:qualification:modelo_veiculo",
+              "required": true,
+              "accepted_statuses": [
+                "known"
+              ],
+              "value_schema": {
+                "type": "string",
+                "minLength": 1
+              },
+              "validation": {
+                "mode": "schema"
+              },
+              "depends_on": [
+                "servico"
+              ],
+              "priority": 0.8,
+              "overwrite_policy": "explicit_correction"
+            },
+            {
+              "key": "condicao",
+              "owner_node_id": "product:windshield-crystallization",
+              "scope": "branch",
+              "question_node_id": "faq:qualification:condicao",
+              "required": true,
+              "accepted_statuses": [
+                "known"
+              ],
+              "value_schema": {
+                "type": "string",
+                "minLength": 1
+              },
+              "validation": {
+                "mode": "schema"
+              },
+              "depends_on": [
+                "servico"
+              ],
+              "priority": 0.8,
+              "overwrite_policy": "explicit_correction"
+            }
+          ]
+        },
+        "completion": {
+          "required_fields": [
+            "nome_cliente",
+            "servico",
+            "modelo_veiculo",
+            "condicao"
+          ]
+        },
+        "handoff": {
+          "on_complete_rule_node_id": "rule:human-handoff"
+        },
+        "metadata": {
+          "internal_commercial_value_band": {
+            "band": "faixa_2",
+            "source": "estimated_from_service_name"
+          }
+        }
+      }
+    },
+    {
+      "id": "copy:windshield-crystallization",
+      "node_type": "copy",
+      "slug": "windshield-crystallization",
+      "title": "Cristalização de para-brisa",
+      "summary": "Conheça Polimento de vidros e peça uma avaliação para entender o cuidado adequado ao seu veículo.",
+      "status": "approved",
+      "data": {
+        "source": "user_provided_utzig_plan_2026_09_22",
+        "validation_status": "approved",
+        "channel": "public_site",
+        "target_node_id": "product:glass-polish"
+      }
+    },
+    {
+      "id": "faq:service:windshield-crystallization",
+      "node_type": "faq",
+      "slug": "windshield-crystallization",
+      "title": "Cristalização de para-brisa",
+      "summary": "Informação pública sobre o catálogo de Polimento de vidros.",
+      "status": "approved",
+      "data": {
+        "source": "user_provided_utzig_plan_2026_09_22",
+        "validation_status": "approved",
+        "question": "A Utzig Garage oferece cristalização de para-brisa?",
+        "answer": "A disponibilidade e a avaliação da cristalização de para-brisa são confirmadas pela equipe da Utzig Garage.",
+        "claims": [
+          {
+            "claim_type": "service_availability",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "faq:service:windshield-crystallization"
+            ],
+            "owner_node_id": "faq:service:windshield-crystallization"
+          }
+        ]
+      }
+    },
+    {
+      "id": "faq:service:bodywork:chapeacao-preco-tempo",
+      "data": {
+        "answer": "Preço, prazo e disponibilidade da chapeação são confirmados pela equipe após a avaliação.",
+        "claims": [
+          {
+            "policy": "published_service_detail_with_source_provenance",
+            "claim_type": "service_detail",
+            "evidence_node_ids": [
+              "faq:service:bodywork:chapeacao-preco-tempo"
+            ]
+          }
+        ],
+        "source": "aurora_active_graph_publication_v75_2026_09_23",
+        "status": "approved",
+        "question": "Quanto custa chapeação?",
+        "branch_path": [
+          "product:bodywork",
+          "faq:service:bodywork:chapeacao-preco-tempo"
+        ],
+        "source_node_id": "product:bodywork",
+        "question_aliases": [
+          "quanto custa chapeação",
+          "prazo da funilaria",
+          "valor do amassado",
+          "tem vaga para chapear",
+          "quando fica pronto"
+        ],
+        "source_node_type": "product",
+        "import_provenance": {
+          "source": "aurora_active_graph_publication_v75_2026_09_23",
+          "source_node_id": "aurora-faq-chapeacao-preco-tempo",
+          "source_node_type": "faq",
+          "source_publication_id": "d5c7afd7-24ea-44d6-90e9-8532fd3fc303",
+          "source_validation_status": "approved",
+          "source_publication_version": 75,
+          "source_publication_checksum": "sha256:3f727095819f75836453af2e3bbee42c1138b50a6dc99a59f502b5a1917811ec"
+        },
+        "validation_status": "approved",
+        "graph_json_node_id": "faq:service:bodywork:chapeacao-preco-tempo"
+      },
+      "slug": "faq-service-bodywork-chapeacao-preco-tempo",
+      "tags": [],
+      "title": "Quanto custa chapeação?",
+      "status": "approved",
+      "summary": "Preço, prazo e disponibilidade da chapeação são confirmados pela equipe após a avaliação.",
+      "node_type": "faq",
+      "projection_node_id": "b15cafa4-e646-522f-a2c8-5b84f0f0bb5a"
+    },
+    {
+      "id": "faq:service:bodywork:chapeacao-remota",
+      "data": {
+        "answer": "A avaliação inicial de chapeação pode começar com fotos e vídeos, mas a equipe confirma o diagnóstico e o orçamento.",
+        "claims": [
+          {
+            "policy": "published_service_detail_with_source_provenance",
+            "claim_type": "service_detail",
+            "evidence_node_ids": [
+              "faq:service:bodywork:chapeacao-remota"
+            ]
+          }
+        ],
+        "source": "aurora_active_graph_publication_v75_2026_09_23",
+        "status": "approved",
+        "question": "Orçamento de chapeação por foto?",
+        "branch_path": [
+          "product:bodywork",
+          "faq:service:bodywork:chapeacao-remota"
+        ],
+        "source_node_id": "product:bodywork",
+        "question_aliases": [
+          "orçamento de chapeação por foto",
+          "posso mandar vídeo",
+          "avaliam amassado online",
+          "não consigo levar agora",
+          "foto da lataria serve"
+        ],
+        "source_node_type": "product",
+        "import_provenance": {
+          "source": "aurora_active_graph_publication_v75_2026_09_23",
+          "source_node_id": "aurora-faq-chapeacao-remota",
+          "source_node_type": "faq",
+          "source_publication_id": "d5c7afd7-24ea-44d6-90e9-8532fd3fc303",
+          "source_validation_status": "approved",
+          "source_publication_version": 75,
+          "source_publication_checksum": "sha256:3f727095819f75836453af2e3bbee42c1138b50a6dc99a59f502b5a1917811ec"
+        },
+        "validation_status": "approved",
+        "graph_json_node_id": "faq:service:bodywork:chapeacao-remota"
+      },
+      "slug": "faq-service-bodywork-chapeacao-remota",
+      "tags": [],
+      "title": "Orçamento de chapeação por foto?",
+      "status": "approved",
+      "summary": "A avaliação inicial de chapeação pode começar com fotos e vídeos, mas a equipe confirma o diagnóstico e o orçamento.",
+      "node_type": "faq",
+      "projection_node_id": "500b3a37-d445-5b7b-880f-79a7a8991d16"
+    },
+    {
+      "id": "faq:service:commercial-polish:polimento-comercial-diferenca",
+      "data": {
+        "answer": "A escolha entre polimento comercial e técnico depende do objetivo e da condição observada; a equipe orienta após a avaliação.",
+        "claims": [
+          {
+            "policy": "published_service_detail_with_source_provenance",
+            "claim_type": "service_detail",
+            "evidence_node_ids": [
+              "faq:service:commercial-polish:polimento-comercial-diferenca"
+            ]
+          }
+        ],
+        "source": "aurora_active_graph_publication_v75_2026_09_23",
+        "status": "approved",
+        "question": "Comercial ou técnico?",
+        "branch_path": [
+          "product:commercial-polish",
+          "faq:service:commercial-polish:polimento-comercial-diferenca"
+        ],
+        "source_node_id": "product:commercial-polish",
+        "question_aliases": [
+          "comercial ou técnico",
+          "qual polimento escolher",
+          "diferença entre os polimentos",
+          "preciso do técnico",
+          "comercial serve para mim"
+        ],
+        "source_node_type": "product",
+        "import_provenance": {
+          "source": "aurora_active_graph_publication_v75_2026_09_23",
+          "source_node_id": "aurora-faq-polimento-comercial-diferenca",
+          "source_node_type": "faq",
+          "source_publication_id": "d5c7afd7-24ea-44d6-90e9-8532fd3fc303",
+          "source_validation_status": "approved",
+          "source_publication_version": 75,
+          "source_publication_checksum": "sha256:3f727095819f75836453af2e3bbee42c1138b50a6dc99a59f502b5a1917811ec"
+        },
+        "validation_status": "approved",
+        "graph_json_node_id": "faq:service:commercial-polish:polimento-comercial-diferenca"
+      },
+      "slug": "faq-service-commercial-polish-polimento-comercial-diferenca",
+      "tags": [],
+      "title": "Comercial ou técnico?",
+      "status": "approved",
+      "summary": "A escolha entre polimento comercial e técnico depende do objetivo e da condição observada; a equipe orienta após a avaliação.",
+      "node_type": "faq",
+      "projection_node_id": "c93000d8-680f-5150-8f6d-bcc3ef0245ad"
+    },
+    {
+      "id": "faq:service:detailed-wash:lavagem-detalhada-objetivo",
+      "data": {
+        "answer": "Para orientar a lavagem técnica detalhada, a assistente virtual registra o que o cliente quer melhorar e a condição atual do veículo.",
+        "claims": [
+          {
+            "policy": "published_service_detail_with_source_provenance",
+            "claim_type": "service_detail",
+            "evidence_node_ids": [
+              "faq:service:detailed-wash:lavagem-detalhada-objetivo"
+            ]
+          }
+        ],
+        "source": "aurora_active_graph_publication_v75_2026_09_23",
+        "status": "approved",
+        "question": "Lavagem serve para meu caso?",
+        "branch_path": [
+          "product:detailed-wash",
+          "faq:service:detailed-wash:lavagem-detalhada-objetivo"
+        ],
+        "source_node_id": "product:detailed-wash",
+        "question_aliases": [
+          "lavagem serve para meu caso",
+          "qual lavagem escolher",
+          "carro muito sujo pode",
+          "como saber se preciso",
+          "quero melhorar a limpeza"
+        ],
+        "source_node_type": "product",
+        "import_provenance": {
+          "source": "aurora_active_graph_publication_v75_2026_09_23",
+          "source_node_id": "aurora-faq-lavagem-detalhada-objetivo",
+          "source_node_type": "faq",
+          "source_publication_id": "d5c7afd7-24ea-44d6-90e9-8532fd3fc303",
+          "source_validation_status": "approved",
+          "source_publication_version": 75,
+          "source_publication_checksum": "sha256:3f727095819f75836453af2e3bbee42c1138b50a6dc99a59f502b5a1917811ec"
+        },
+        "validation_status": "approved",
+        "graph_json_node_id": "faq:service:detailed-wash:lavagem-detalhada-objetivo"
+      },
+      "slug": "faq-service-detailed-wash-lavagem-detalhada-objetivo",
+      "tags": [],
+      "title": "Lavagem serve para meu caso?",
+      "status": "approved",
+      "summary": "Para orientar a lavagem técnica detalhada, a assistente virtual registra o que o cliente quer melhorar e a condição atual do veículo.",
+      "node_type": "faq",
+      "projection_node_id": "772efe16-f27a-5f01-98df-6bf147424a16"
+    },
+    {
+      "id": "faq:service:detailed-wash:lavagem-detalhada-preco",
+      "data": {
+        "answer": "O valor da lavagem técnica detalhada é confirmado pela equipe humana após os dados necessários do veículo.",
+        "claims": [
+          {
+            "policy": "published_service_detail_with_source_provenance",
+            "claim_type": "service_detail",
+            "evidence_node_ids": [
+              "faq:service:detailed-wash:lavagem-detalhada-preco"
+            ]
+          }
+        ],
+        "source": "aurora_active_graph_publication_v75_2026_09_23",
+        "status": "approved",
+        "question": "Preço da lavagem detalhada?",
+        "branch_path": [
+          "product:detailed-wash",
+          "faq:service:detailed-wash:lavagem-detalhada-preco"
+        ],
+        "source_node_id": "product:detailed-wash",
+        "question_aliases": [
+          "preço da lavagem detalhada",
+          "quanto custa lavar",
+          "lavagem técnica tem valor",
+          "me passa orçamento da lavagem",
+          "tabela da lavagem"
+        ],
+        "source_node_type": "product",
+        "import_provenance": {
+          "source": "aurora_active_graph_publication_v75_2026_09_23",
+          "source_node_id": "aurora-faq-lavagem-detalhada-preco",
+          "source_node_type": "faq",
+          "source_publication_id": "d5c7afd7-24ea-44d6-90e9-8532fd3fc303",
+          "source_validation_status": "approved",
+          "source_publication_version": 75,
+          "source_publication_checksum": "sha256:3f727095819f75836453af2e3bbee42c1138b50a6dc99a59f502b5a1917811ec"
+        },
+        "validation_status": "approved",
+        "graph_json_node_id": "faq:service:detailed-wash:lavagem-detalhada-preco"
+      },
+      "slug": "faq-service-detailed-wash-lavagem-detalhada-preco",
+      "tags": [],
+      "title": "Preço da lavagem detalhada?",
+      "status": "approved",
+      "summary": "O valor da lavagem técnica detalhada é confirmado pela equipe humana após os dados necessários do veículo.",
+      "node_type": "faq",
+      "projection_node_id": "f181987b-14dd-5a55-87f9-9fb57347bf91"
+    },
+    {
+      "id": "faq:service:engine-bay-wash:motor-estrada",
+      "data": {
+        "answer": "A frequência em estrada de chão é uma informação usada para contextualizar a condição do motor e do cofre.",
+        "claims": [
+          {
+            "policy": "published_service_detail_with_source_provenance",
+            "claim_type": "service_detail",
+            "evidence_node_ids": [
+              "faq:service:engine-bay-wash:motor-estrada"
+            ]
+          }
+        ],
+        "source": "aurora_active_graph_publication_v75_2026_09_23",
+        "status": "approved",
+        "question": "Estrada de chão influencia?",
+        "branch_path": [
+          "product:engine-bay-wash",
+          "faq:service:engine-bay-wash:motor-estrada"
+        ],
+        "source_node_id": "product:engine-bay-wash",
+        "question_aliases": [
+          "estrada de chão influencia",
+          "carro pega muita poeira",
+          "por que pergunta onde circulo",
+          "uso rural muda o serviço",
+          "poeira no cofre importa"
+        ],
+        "source_node_type": "product",
+        "import_provenance": {
+          "source": "aurora_active_graph_publication_v75_2026_09_23",
+          "source_node_id": "aurora-faq-motor-estrada",
+          "source_node_type": "faq",
+          "source_publication_id": "d5c7afd7-24ea-44d6-90e9-8532fd3fc303",
+          "source_validation_status": "approved",
+          "source_publication_version": 75,
+          "source_publication_checksum": "sha256:3f727095819f75836453af2e3bbee42c1138b50a6dc99a59f502b5a1917811ec"
+        },
+        "validation_status": "approved",
+        "graph_json_node_id": "faq:service:engine-bay-wash:motor-estrada"
+      },
+      "slug": "faq-service-engine-bay-wash-motor-estrada",
+      "tags": [],
+      "title": "Estrada de chão influencia?",
+      "status": "approved",
+      "summary": "A frequência em estrada de chão é uma informação usada para contextualizar a condição do motor e do cofre.",
+      "node_type": "faq",
+      "projection_node_id": "061b4dd1-6b99-5ced-8318-1f6990cbcc48"
+    },
+    {
+      "id": "faq:service:engine-bay-wash:motor-vazamento",
+      "data": {
+        "answer": "Para esse serviço, é importante informar se há sinal de vazamento de óleo antes da avaliação.",
+        "claims": [
+          {
+            "policy": "published_service_detail_with_source_provenance",
+            "claim_type": "service_detail",
+            "evidence_node_ids": [
+              "faq:service:engine-bay-wash:motor-vazamento"
+            ]
+          }
+        ],
+        "source": "aurora_active_graph_publication_v75_2026_09_23",
+        "status": "approved",
+        "question": "Tem problema lavar com vazamento?",
+        "branch_path": [
+          "product:engine-bay-wash",
+          "faq:service:engine-bay-wash:motor-vazamento"
+        ],
+        "source_node_id": "product:engine-bay-wash",
+        "question_aliases": [
+          "tem problema lavar com vazamento",
+          "motor vazando pode limpar",
+          "por que pergunta sobre óleo",
+          "vazamento muda a avaliação",
+          "preciso avisar vazamento"
+        ],
+        "source_node_type": "product",
+        "import_provenance": {
+          "source": "aurora_active_graph_publication_v75_2026_09_23",
+          "source_node_id": "aurora-faq-motor-vazamento",
+          "source_node_type": "faq",
+          "source_publication_id": "d5c7afd7-24ea-44d6-90e9-8532fd3fc303",
+          "source_validation_status": "approved",
+          "source_publication_version": 75,
+          "source_publication_checksum": "sha256:3f727095819f75836453af2e3bbee42c1138b50a6dc99a59f502b5a1917811ec"
+        },
+        "validation_status": "approved",
+        "graph_json_node_id": "faq:service:engine-bay-wash:motor-vazamento"
+      },
+      "slug": "faq-service-engine-bay-wash-motor-vazamento",
+      "tags": [],
+      "title": "Tem problema lavar com vazamento?",
+      "status": "approved",
+      "summary": "Para esse serviço, é importante informar se há sinal de vazamento de óleo antes da avaliação.",
+      "node_type": "faq",
+      "projection_node_id": "81e07ae8-dd3d-5337-942f-f19c0de71f09"
+    },
+    {
+      "id": "faq:service:glass-polish:vidros-orcamento",
+      "data": {
+        "answer": "Resultado esperado, preço e duração do polimento de vidros dependem da avaliação e são confirmados pela equipe.",
+        "claims": [
+          {
+            "policy": "published_service_detail_with_source_provenance",
+            "claim_type": "service_detail",
+            "evidence_node_ids": [
+              "faq:service:glass-polish:vidros-orcamento"
+            ]
+          }
+        ],
+        "source": "aurora_active_graph_publication_v75_2026_09_23",
+        "status": "approved",
+        "question": "Polimento tira minha mancha?",
+        "branch_path": [
+          "product:glass-polish",
+          "faq:service:glass-polish:vidros-orcamento"
+        ],
+        "source_node_id": "product:glass-polish",
+        "question_aliases": [
+          "polimento tira minha mancha",
+          "quanto custa o vidro",
+          "tempo do polimento",
+          "dá para garantir resultado",
+          "orçamento do para-brisa"
+        ],
+        "source_node_type": "product",
+        "import_provenance": {
+          "source": "aurora_active_graph_publication_v75_2026_09_23",
+          "source_node_id": "aurora-faq-vidros-orcamento",
+          "source_node_type": "faq",
+          "source_publication_id": "d5c7afd7-24ea-44d6-90e9-8532fd3fc303",
+          "source_validation_status": "approved",
+          "source_publication_version": 75,
+          "source_publication_checksum": "sha256:3f727095819f75836453af2e3bbee42c1138b50a6dc99a59f502b5a1917811ec"
+        },
+        "validation_status": "approved",
+        "graph_json_node_id": "faq:service:glass-polish:vidros-orcamento"
+      },
+      "slug": "faq-service-glass-polish-vidros-orcamento",
+      "tags": [],
+      "title": "Polimento tira minha mancha?",
+      "status": "approved",
+      "summary": "Resultado esperado, preço e duração do polimento de vidros dependem da avaliação e são confirmados pela equipe.",
+      "node_type": "faq",
+      "projection_node_id": "1ec6f724-7ee1-5718-b112-7c3de2f0de0b"
+    },
+    {
+      "id": "faq:service:headlight-restoration:farois-resultado",
+      "data": {
+        "answer": "O resultado possível na restauração de faróis depende da condição observada e não é garantido automaticamente pela assistente virtual.",
+        "claims": [
+          {
+            "policy": "published_service_detail_with_source_provenance",
+            "claim_type": "service_detail",
+            "evidence_node_ids": [
+              "faq:service:headlight-restoration:farois-resultado"
+            ]
+          }
+        ],
+        "source": "aurora_active_graph_publication_v75_2026_09_23",
+        "status": "approved",
+        "question": "Farol fica novo?",
+        "branch_path": [
+          "product:headlight-restoration",
+          "faq:service:headlight-restoration:farois-resultado"
+        ],
+        "source_node_id": "product:headlight-restoration",
+        "question_aliases": [
+          "farol fica novo",
+          "remove amarelado",
+          "garante transparência",
+          "qual resultado esperar",
+          "meu farol opaco resolve"
+        ],
+        "source_node_type": "product",
+        "import_provenance": {
+          "source": "aurora_active_graph_publication_v75_2026_09_23",
+          "source_node_id": "aurora-faq-farois-resultado",
+          "source_node_type": "faq",
+          "source_publication_id": "d5c7afd7-24ea-44d6-90e9-8532fd3fc303",
+          "source_validation_status": "approved",
+          "source_publication_version": 75,
+          "source_publication_checksum": "sha256:3f727095819f75836453af2e3bbee42c1138b50a6dc99a59f502b5a1917811ec"
+        },
+        "validation_status": "approved",
+        "graph_json_node_id": "faq:service:headlight-restoration:farois-resultado"
+      },
+      "slug": "faq-service-headlight-restoration-farois-resultado",
+      "tags": [],
+      "title": "Farol fica novo?",
+      "status": "approved",
+      "summary": "O resultado possível na restauração de faróis depende da condição observada e não é garantido automaticamente pela assistente virtual.",
+      "node_type": "faq",
+      "projection_node_id": "9b5c327a-c82e-504a-ba11-05b87d808ff8"
+    },
+    {
+      "id": "faq:service:headlight-restoration:farois-uv",
+      "data": {
+        "answer": "Proteção UV não é uma alegação publicada nesta revisão; a equipe deve confirmar qualquer proteção ou acabamento aplicável.",
+        "claims": [
+          {
+            "policy": "published_service_detail_with_source_provenance",
+            "claim_type": "service_detail",
+            "evidence_node_ids": [
+              "faq:service:headlight-restoration:farois-uv"
+            ]
+          }
+        ],
+        "source": "aurora_active_graph_publication_v75_2026_09_23",
+        "status": "approved",
+        "question": "Tem proteção uv?",
+        "branch_path": [
+          "product:headlight-restoration",
+          "faq:service:headlight-restoration:farois-uv"
+        ],
+        "source_node_id": "product:headlight-restoration",
+        "question_aliases": [
+          "tem proteção uv",
+          "passa verniz uv",
+          "protege do sol",
+          "farol não amarela de novo",
+          "qual proteção recebe"
+        ],
+        "source_node_type": "product",
+        "import_provenance": {
+          "source": "aurora_active_graph_publication_v75_2026_09_23",
+          "source_node_id": "aurora-faq-farois-uv",
+          "source_node_type": "faq",
+          "source_publication_id": "d5c7afd7-24ea-44d6-90e9-8532fd3fc303",
+          "source_validation_status": "approved",
+          "source_publication_version": 75,
+          "source_publication_checksum": "sha256:3f727095819f75836453af2e3bbee42c1138b50a6dc99a59f502b5a1917811ec"
+        },
+        "validation_status": "approved",
+        "graph_json_node_id": "faq:service:headlight-restoration:farois-uv"
+      },
+      "slug": "faq-service-headlight-restoration-farois-uv",
+      "tags": [],
+      "title": "Tem proteção uv?",
+      "status": "approved",
+      "summary": "Proteção UV não é uma alegação publicada nesta revisão; a equipe deve confirmar qualquer proteção ou acabamento aplicável.",
+      "node_type": "faq",
+      "projection_node_id": "dfce27e5-557b-52f9-92fa-d58002f14641"
+    },
+    {
+      "id": "faq:service:interior-cleaning:higienizacao-estrada",
+      "data": {
+        "answer": "O uso frequente em estrada de chão ajuda a equipe a entender a exposição do interior à poeira e à sujeira.",
+        "claims": [
+          {
+            "policy": "published_service_detail_with_source_provenance",
+            "claim_type": "service_detail",
+            "evidence_node_ids": [
+              "faq:service:interior-cleaning:higienizacao-estrada"
+            ]
+          }
+        ],
+        "source": "aurora_active_graph_publication_v75_2026_09_23",
+        "status": "approved",
+        "question": "Estrada de chão afeta interior?",
+        "branch_path": [
+          "product:interior-cleaning",
+          "faq:service:interior-cleaning:higienizacao-estrada"
+        ],
+        "source_node_id": "product:interior-cleaning",
+        "question_aliases": [
+          "estrada de chão afeta interior",
+          "carro de sítio pode higienizar",
+          "poeira muda avaliação",
+          "uso rural importa",
+          "precisa saber onde o carro roda"
+        ],
+        "source_node_type": "product",
+        "import_provenance": {
+          "source": "aurora_active_graph_publication_v75_2026_09_23",
+          "source_node_id": "aurora-faq-higienizacao-estrada",
+          "source_node_type": "faq",
+          "source_publication_id": "d5c7afd7-24ea-44d6-90e9-8532fd3fc303",
+          "source_validation_status": "approved",
+          "source_publication_version": 75,
+          "source_publication_checksum": "sha256:3f727095819f75836453af2e3bbee42c1138b50a6dc99a59f502b5a1917811ec"
+        },
+        "validation_status": "approved",
+        "graph_json_node_id": "faq:service:interior-cleaning:higienizacao-estrada"
+      },
+      "slug": "faq-service-interior-cleaning-higienizacao-estrada",
+      "tags": [],
+      "title": "Estrada de chão afeta interior?",
+      "status": "approved",
+      "summary": "O uso frequente em estrada de chão ajuda a equipe a entender a exposição do interior à poeira e à sujeira.",
+      "node_type": "faq",
+      "projection_node_id": "2697fd2b-775c-542d-a0fe-b2c5c8a3db8b"
+    },
+    {
+      "id": "faq:service:interior-cleaning:higienizacao-preco-tempo",
+      "data": {
+        "answer": "Preço e duração da higienização são confirmados pela equipe conforme o veículo e sua condição.",
+        "claims": [
+          {
+            "policy": "published_service_detail_with_source_provenance",
+            "claim_type": "service_detail",
+            "evidence_node_ids": [
+              "faq:service:interior-cleaning:higienizacao-preco-tempo"
+            ]
+          }
+        ],
+        "source": "aurora_active_graph_publication_v75_2026_09_23",
+        "status": "approved",
+        "question": "Quanto custa higienizar?",
+        "branch_path": [
+          "product:interior-cleaning",
+          "faq:service:interior-cleaning:higienizacao-preco-tempo"
+        ],
+        "source_node_id": "product:interior-cleaning",
+        "question_aliases": [
+          "quanto custa higienizar",
+          "tempo da higienização",
+          "orçamento da limpeza interna",
+          "fica pronto quando",
+          "preço para bancos"
+        ],
+        "source_node_type": "product",
+        "import_provenance": {
+          "source": "aurora_active_graph_publication_v75_2026_09_23",
+          "source_node_id": "aurora-faq-higienizacao-preco-tempo",
+          "source_node_type": "faq",
+          "source_publication_id": "d5c7afd7-24ea-44d6-90e9-8532fd3fc303",
+          "source_validation_status": "approved",
+          "source_publication_version": 75,
+          "source_publication_checksum": "sha256:3f727095819f75836453af2e3bbee42c1138b50a6dc99a59f502b5a1917811ec"
+        },
+        "validation_status": "approved",
+        "graph_json_node_id": "faq:service:interior-cleaning:higienizacao-preco-tempo"
+      },
+      "slug": "faq-service-interior-cleaning-higienizacao-preco-tempo",
+      "tags": [],
+      "title": "Quanto custa higienizar?",
+      "status": "approved",
+      "summary": "Preço e duração da higienização são confirmados pela equipe conforme o veículo e sua condição.",
+      "node_type": "faq",
+      "projection_node_id": "1cc78621-bcc1-526c-901e-27828c7d05f0"
+    },
+    {
+      "id": "faq:service:interior-cleaning:higienizacao-revestimento",
+      "data": {
+        "answer": "Para qualificar a higienização, a assistente virtual pergunta se os bancos são de couro ou tecido.",
+        "claims": [
+          {
+            "policy": "published_service_detail_with_source_provenance",
+            "claim_type": "service_detail",
+            "evidence_node_ids": [
+              "faq:service:interior-cleaning:higienizacao-revestimento"
+            ]
+          }
+        ],
+        "source": "aurora_active_graph_publication_v75_2026_09_23",
+        "status": "approved",
+        "question": "Importa ser couro?",
+        "branch_path": [
+          "product:interior-cleaning",
+          "faq:service:interior-cleaning:higienizacao-revestimento"
+        ],
+        "source_node_id": "product:interior-cleaning",
+        "question_aliases": [
+          "importa ser couro",
+          "banco de tecido muda",
+          "por que pergunta o material",
+          "higieniza couro e tecido",
+          "qual revestimento preciso informar"
+        ],
+        "source_node_type": "product",
+        "import_provenance": {
+          "source": "aurora_active_graph_publication_v75_2026_09_23",
+          "source_node_id": "aurora-faq-higienizacao-revestimento",
+          "source_node_type": "faq",
+          "source_publication_id": "d5c7afd7-24ea-44d6-90e9-8532fd3fc303",
+          "source_validation_status": "approved",
+          "source_publication_version": 75,
+          "source_publication_checksum": "sha256:3f727095819f75836453af2e3bbee42c1138b50a6dc99a59f502b5a1917811ec"
+        },
+        "validation_status": "approved",
+        "graph_json_node_id": "faq:service:interior-cleaning:higienizacao-revestimento"
+      },
+      "slug": "faq-service-interior-cleaning-higienizacao-revestimento",
+      "tags": [],
+      "title": "Importa ser couro?",
+      "status": "approved",
+      "summary": "Para qualificar a higienização, a assistente virtual pergunta se os bancos são de couro ou tecido.",
+      "node_type": "faq",
+      "projection_node_id": "aeb93e3d-da86-522f-946e-c5cca219c3b9"
+    },
+    {
+      "id": "faq:service:painting:pintura-preco-tempo",
+      "data": {
+        "answer": "Preço, prazo, agenda e resultado da pintura não são confirmados automaticamente; dependem da avaliação e da equipe humana.",
+        "claims": [
+          {
+            "policy": "published_service_detail_with_source_provenance",
+            "claim_type": "service_detail",
+            "evidence_node_ids": [
+              "faq:service:painting:pintura-preco-tempo"
+            ]
+          }
+        ],
+        "source": "aurora_active_graph_publication_v75_2026_09_23",
+        "status": "approved",
+        "question": "Quanto custa pintar?",
+        "branch_path": [
+          "product:painting",
+          "faq:service:painting:pintura-preco-tempo"
+        ],
+        "source_node_id": "product:painting",
+        "question_aliases": [
+          "quanto custa pintar",
+          "demora para pintar",
+          "agenda da pintura",
+          "garante a cor",
+          "orçamento de repintura"
+        ],
+        "source_node_type": "product",
+        "import_provenance": {
+          "source": "aurora_active_graph_publication_v75_2026_09_23",
+          "source_node_id": "aurora-faq-pintura-preco-tempo",
+          "source_node_type": "faq",
+          "source_publication_id": "d5c7afd7-24ea-44d6-90e9-8532fd3fc303",
+          "source_validation_status": "approved",
+          "source_publication_version": 75,
+          "source_publication_checksum": "sha256:3f727095819f75836453af2e3bbee42c1138b50a6dc99a59f502b5a1917811ec"
+        },
+        "validation_status": "approved",
+        "graph_json_node_id": "faq:service:painting:pintura-preco-tempo"
+      },
+      "slug": "faq-service-painting-pintura-preco-tempo",
+      "tags": [],
+      "title": "Quanto custa pintar?",
+      "status": "approved",
+      "summary": "Preço, prazo, agenda e resultado da pintura não são confirmados automaticamente; dependem da avaliação e da equipe humana.",
+      "node_type": "faq",
+      "projection_node_id": "5e9680fb-96f3-5152-bb09-27c3687e681a"
+    },
+    {
+      "id": "faq:service:painting:pintura-remota",
+      "data": {
+        "answer": "A avaliação inicial de pintura pode começar com fotos e vídeos; cor, condição, modelo e ano precisam ser registrados, e a equipe confirma o diagnóstico.",
+        "claims": [
+          {
+            "policy": "published_service_detail_with_source_provenance",
+            "claim_type": "service_detail",
+            "evidence_node_ids": [
+              "faq:service:painting:pintura-remota"
+            ]
+          }
+        ],
+        "source": "aurora_active_graph_publication_v75_2026_09_23",
+        "status": "approved",
+        "question": "Orçamento de pintura por foto?",
+        "branch_path": [
+          "product:painting",
+          "faq:service:painting:pintura-remota"
+        ],
+        "source_node_id": "product:painting",
+        "question_aliases": [
+          "orçamento de pintura por foto",
+          "posso mandar vídeo da pintura",
+          "avaliam cor pelo whatsapp",
+          "pintura opaca por imagem",
+          "não posso ir presencialmente"
+        ],
+        "source_node_type": "product",
+        "import_provenance": {
+          "source": "aurora_active_graph_publication_v75_2026_09_23",
+          "source_node_id": "aurora-faq-pintura-remota",
+          "source_node_type": "faq",
+          "source_publication_id": "d5c7afd7-24ea-44d6-90e9-8532fd3fc303",
+          "source_validation_status": "approved",
+          "source_publication_version": 75,
+          "source_publication_checksum": "sha256:3f727095819f75836453af2e3bbee42c1138b50a6dc99a59f502b5a1917811ec"
+        },
+        "validation_status": "approved",
+        "graph_json_node_id": "faq:service:painting:pintura-remota"
+      },
+      "slug": "faq-service-painting-pintura-remota",
+      "tags": [],
+      "title": "Orçamento de pintura por foto?",
+      "status": "approved",
+      "summary": "A avaliação inicial de pintura pode começar com fotos e vídeos; cor, condição, modelo e ano precisam ser registrados, e a equipe confirma o diagnóstico.",
+      "node_type": "faq",
+      "projection_node_id": "27e6cebb-a65d-5595-95e9-444c24a782a6"
+    },
+    {
+      "id": "faq:service:ppf:ppf-avaliacao",
+      "data": {
+        "answer": "A aplicação de PPF precisa ser orientada pela equipe conforme o veículo, a condição e o objetivo informado.",
+        "claims": [
+          {
+            "policy": "published_service_detail_with_source_provenance",
+            "claim_type": "service_detail",
+            "evidence_node_ids": [
+              "faq:service:ppf:ppf-avaliacao"
+            ]
+          }
+        ],
+        "source": "aurora_active_graph_publication_v75_2026_09_23",
+        "status": "approved",
+        "question": "Ppf serve no meu carro?",
+        "branch_path": [
+          "product:ppf",
+          "faq:service:ppf:ppf-avaliacao"
+        ],
+        "source_node_id": "product:ppf",
+        "question_aliases": [
+          "ppf serve no meu carro",
+          "onde aplicar",
+          "precisa avaliar",
+          "posso escolher a área",
+          "como funciona a indicação"
+        ],
+        "source_node_type": "product",
+        "import_provenance": {
+          "source": "aurora_active_graph_publication_v75_2026_09_23",
+          "source_node_id": "aurora-faq-ppf-avaliacao",
+          "source_node_type": "faq",
+          "source_publication_id": "d5c7afd7-24ea-44d6-90e9-8532fd3fc303",
+          "source_validation_status": "approved",
+          "source_publication_version": 75,
+          "source_publication_checksum": "sha256:3f727095819f75836453af2e3bbee42c1138b50a6dc99a59f502b5a1917811ec"
+        },
+        "validation_status": "approved",
+        "graph_json_node_id": "faq:service:ppf:ppf-avaliacao"
+      },
+      "slug": "faq-service-ppf-ppf-avaliacao",
+      "tags": [],
+      "title": "Ppf serve no meu carro?",
+      "status": "approved",
+      "summary": "A aplicação de PPF precisa ser orientada pela equipe conforme o veículo, a condição e o objetivo informado.",
+      "node_type": "faq",
+      "projection_node_id": "3ec56213-405b-5327-97a8-91b634cfe5b4"
+    },
+    {
+      "id": "faq:service:ppf:ppf-preco-tempo",
+      "data": {
+        "answer": "O orçamento e o prazo do PPF são confirmados pela equipe após a avaliação necessária.",
+        "claims": [
+          {
+            "policy": "published_service_detail_with_source_provenance",
+            "claim_type": "service_detail",
+            "evidence_node_ids": [
+              "faq:service:ppf:ppf-preco-tempo"
+            ]
+          }
+        ],
+        "source": "aurora_active_graph_publication_v75_2026_09_23",
+        "status": "approved",
+        "question": "Quanto custa ppf?",
+        "branch_path": [
+          "product:ppf",
+          "faq:service:ppf:ppf-preco-tempo"
+        ],
+        "source_node_id": "product:ppf",
+        "question_aliases": [
+          "quanto custa ppf",
+          "prazo da película",
+          "valor para aplicar",
+          "demora a instalação",
+          "orçamento de ppf"
+        ],
+        "source_node_type": "product",
+        "import_provenance": {
+          "source": "aurora_active_graph_publication_v75_2026_09_23",
+          "source_node_id": "aurora-faq-ppf-preco-tempo",
+          "source_node_type": "faq",
+          "source_publication_id": "d5c7afd7-24ea-44d6-90e9-8532fd3fc303",
+          "source_validation_status": "approved",
+          "source_publication_version": 75,
+          "source_publication_checksum": "sha256:3f727095819f75836453af2e3bbee42c1138b50a6dc99a59f502b5a1917811ec"
+        },
+        "validation_status": "approved",
+        "graph_json_node_id": "faq:service:ppf:ppf-preco-tempo"
+      },
+      "slug": "faq-service-ppf-ppf-preco-tempo",
+      "tags": [],
+      "title": "Quanto custa ppf?",
+      "status": "approved",
+      "summary": "O orçamento e o prazo do PPF são confirmados pela equipe após a avaliação necessária.",
+      "node_type": "faq",
+      "projection_node_id": "d5fcdc8d-6e70-5f21-b97f-ee94ee2f8b94"
+    },
+    {
+      "id": "faq:service:technical-polish:polimento-anterior",
+      "data": {
+        "answer": "A equipe precisa saber se já houve procedimento anterior na pintura para contextualizar a avaliação do polimento.",
+        "claims": [
+          {
+            "policy": "published_service_detail_with_source_provenance",
+            "claim_type": "service_detail",
+            "evidence_node_ids": [
+              "faq:service:technical-polish:polimento-anterior"
+            ]
+          }
+        ],
+        "source": "aurora_active_graph_publication_v75_2026_09_23",
+        "status": "approved",
+        "question": "Já poli antes importa?",
+        "branch_path": [
+          "product:technical-polish",
+          "faq:service:technical-polish:polimento-anterior"
+        ],
+        "source_node_id": "product:technical-polish",
+        "question_aliases": [
+          "já poli antes importa",
+          "precisa saber serviço anterior",
+          "pintura já tratada muda",
+          "procedimento antigo influencia",
+          "por que pergunta histórico"
+        ],
+        "source_node_type": "product",
+        "import_provenance": {
+          "source": "aurora_active_graph_publication_v75_2026_09_23",
+          "source_node_id": "aurora-faq-polimento-anterior",
+          "source_node_type": "faq",
+          "source_publication_id": "d5c7afd7-24ea-44d6-90e9-8532fd3fc303",
+          "source_validation_status": "approved",
+          "source_publication_version": 75,
+          "source_publication_checksum": "sha256:3f727095819f75836453af2e3bbee42c1138b50a6dc99a59f502b5a1917811ec"
+        },
+        "validation_status": "approved",
+        "graph_json_node_id": "faq:service:technical-polish:polimento-anterior"
+      },
+      "slug": "faq-service-technical-polish-polimento-anterior",
+      "tags": [],
+      "title": "Já poli antes importa?",
+      "status": "approved",
+      "summary": "A equipe precisa saber se já houve procedimento anterior na pintura para contextualizar a avaliação do polimento.",
+      "node_type": "faq",
+      "projection_node_id": "ace5e4d3-86e0-5cf2-be6c-374b9ffe92a5"
+    },
+    {
+      "id": "faq:service:technical-polish:polimento-avaliacao",
+      "data": {
+        "answer": "O polimento requer avaliação para relacionar objetivo, histórico e condição da pintura antes do orçamento.",
+        "claims": [
+          {
+            "policy": "published_service_detail_with_source_provenance",
+            "claim_type": "service_detail",
+            "evidence_node_ids": [
+              "faq:service:technical-polish:polimento-avaliacao"
+            ]
+          }
+        ],
+        "source": "aurora_active_graph_publication_v75_2026_09_23",
+        "status": "approved",
+        "question": "Precisa avaliar para polir?",
+        "branch_path": [
+          "product:technical-polish",
+          "faq:service:technical-polish:polimento-avaliacao"
+        ],
+        "source_node_id": "product:technical-polish",
+        "question_aliases": [
+          "precisa avaliar para polir",
+          "dá para orçar sem ver",
+          "avaliação do polimento",
+          "posso mandar fotos",
+          "como decidem o polimento"
+        ],
+        "source_node_type": "product",
+        "import_provenance": {
+          "source": "aurora_active_graph_publication_v75_2026_09_23",
+          "source_node_id": "aurora-faq-polimento-avaliacao",
+          "source_node_type": "faq",
+          "source_publication_id": "d5c7afd7-24ea-44d6-90e9-8532fd3fc303",
+          "source_validation_status": "approved",
+          "source_publication_version": 75,
+          "source_publication_checksum": "sha256:3f727095819f75836453af2e3bbee42c1138b50a6dc99a59f502b5a1917811ec"
+        },
+        "validation_status": "approved",
+        "graph_json_node_id": "faq:service:technical-polish:polimento-avaliacao"
+      },
+      "slug": "faq-service-technical-polish-polimento-avaliacao",
+      "tags": [],
+      "title": "Precisa avaliar para polir?",
+      "status": "approved",
+      "summary": "O polimento requer avaliação para relacionar objetivo, histórico e condição da pintura antes do orçamento.",
+      "node_type": "faq",
+      "projection_node_id": "e1a01745-fecc-5be1-adf6-deb581ade1a7"
+    },
+    {
+      "id": "faq:service:technical-polish:polimento-espelhamento",
+      "data": {
+        "answer": "“Espelhamento”, “pintura opaca” e “melhorar o brilho” são tratados como formas de descrever uma necessidade de polimento, sujeita a avaliação.",
+        "claims": [
+          {
+            "policy": "published_service_detail_with_source_provenance",
+            "claim_type": "service_detail",
+            "evidence_node_ids": [
+              "faq:service:technical-polish:polimento-espelhamento"
+            ]
+          }
+        ],
+        "source": "aurora_active_graph_publication_v75_2026_09_23",
+        "status": "approved",
+        "question": "Vocês fazem espelhamento?",
+        "branch_path": [
+          "product:technical-polish",
+          "faq:service:technical-polish:polimento-espelhamento"
+        ],
+        "source_node_id": "product:technical-polish",
+        "question_aliases": [
+          "vocês fazem espelhamento",
+          "minha pintura está opaca",
+          "quero mais brilho",
+          "carro sem brilho",
+          "como recuperar brilho"
+        ],
+        "source_node_type": "product",
+        "import_provenance": {
+          "source": "aurora_active_graph_publication_v75_2026_09_23",
+          "source_node_id": "aurora-faq-polimento-espelhamento",
+          "source_node_type": "faq",
+          "source_publication_id": "d5c7afd7-24ea-44d6-90e9-8532fd3fc303",
+          "source_validation_status": "approved",
+          "source_publication_version": 75,
+          "source_publication_checksum": "sha256:3f727095819f75836453af2e3bbee42c1138b50a6dc99a59f502b5a1917811ec"
+        },
+        "validation_status": "approved",
+        "graph_json_node_id": "faq:service:technical-polish:polimento-espelhamento"
+      },
+      "slug": "faq-service-technical-polish-polimento-espelhamento",
+      "tags": [],
+      "title": "Vocês fazem espelhamento?",
+      "status": "approved",
+      "summary": "“Espelhamento”, “pintura opaca” e “melhorar o brilho” são tratados como formas de descrever uma necessidade de polimento, sujeita a avaliação.",
+      "node_type": "faq",
+      "projection_node_id": "249c1377-662d-5b6b-b0a7-76db4517d747"
+    },
+    {
+      "id": "faq:service:technical-polish:polimento-foco",
+      "data": {
+        "answer": "Na qualificação do polimento, a assistente virtual diferencia se o foco principal é brilho, riscos ou ambos.",
+        "claims": [
+          {
+            "policy": "published_service_detail_with_source_provenance",
+            "claim_type": "service_detail",
+            "evidence_node_ids": [
+              "faq:service:technical-polish:polimento-foco"
+            ]
+          }
+        ],
+        "source": "aurora_active_graph_publication_v75_2026_09_23",
+        "status": "approved",
+        "question": "Quero tirar riscos?",
+        "branch_path": [
+          "product:technical-polish",
+          "faq:service:technical-polish:polimento-foco"
+        ],
+        "source_node_id": "product:technical-polish",
+        "question_aliases": [
+          "quero tirar riscos",
+          "quero só brilho",
+          "polimento resolve os dois",
+          "qual meu foco",
+          "diferença entre brilho e risco"
+        ],
+        "source_node_type": "product",
+        "import_provenance": {
+          "source": "aurora_active_graph_publication_v75_2026_09_23",
+          "source_node_id": "aurora-faq-polimento-foco",
+          "source_node_type": "faq",
+          "source_publication_id": "d5c7afd7-24ea-44d6-90e9-8532fd3fc303",
+          "source_validation_status": "approved",
+          "source_publication_version": 75,
+          "source_publication_checksum": "sha256:3f727095819f75836453af2e3bbee42c1138b50a6dc99a59f502b5a1917811ec"
+        },
+        "validation_status": "approved",
+        "graph_json_node_id": "faq:service:technical-polish:polimento-foco"
+      },
+      "slug": "faq-service-technical-polish-polimento-foco",
+      "tags": [],
+      "title": "Quero tirar riscos?",
+      "status": "approved",
+      "summary": "Na qualificação do polimento, a assistente virtual diferencia se o foco principal é brilho, riscos ou ambos.",
+      "node_type": "faq",
+      "projection_node_id": "c4e46d4f-1141-5445-b84d-b7f13de8e29f"
+    },
+    {
+      "id": "faq:service:vitrification:vitrificacao-avaliacao",
+      "data": {
+        "answer": "A indicação e o orçamento da vitrificação dependem da avaliação do veículo e do objetivo do cliente.",
+        "claims": [
+          {
+            "policy": "published_service_detail_with_source_provenance",
+            "claim_type": "service_detail",
+            "evidence_node_ids": [
+              "faq:service:vitrification:vitrificacao-avaliacao"
+            ]
+          }
+        ],
+        "source": "aurora_active_graph_publication_v75_2026_09_23",
+        "status": "approved",
+        "question": "Precisa avaliar para vitrificar?",
+        "branch_path": [
+          "product:vitrification",
+          "faq:service:vitrification:vitrificacao-avaliacao"
+        ],
+        "source_node_id": "product:vitrification",
+        "question_aliases": [
+          "precisa avaliar para vitrificar",
+          "vitrificação serve para mim",
+          "orçamento sem ver o carro",
+          "como saber se indica",
+          "podem avaliar a pintura"
+        ],
+        "source_node_type": "product",
+        "import_provenance": {
+          "source": "aurora_active_graph_publication_v75_2026_09_23",
+          "source_node_id": "aurora-faq-vitrificacao-avaliacao",
+          "source_node_type": "faq",
+          "source_publication_id": "d5c7afd7-24ea-44d6-90e9-8532fd3fc303",
+          "source_validation_status": "approved",
+          "source_publication_version": 75,
+          "source_publication_checksum": "sha256:3f727095819f75836453af2e3bbee42c1138b50a6dc99a59f502b5a1917811ec"
+        },
+        "validation_status": "approved",
+        "graph_json_node_id": "faq:service:vitrification:vitrificacao-avaliacao"
+      },
+      "slug": "faq-service-vitrification-vitrificacao-avaliacao",
+      "tags": [],
+      "title": "Precisa avaliar para vitrificar?",
+      "status": "approved",
+      "summary": "A indicação e o orçamento da vitrificação dependem da avaliação do veículo e do objetivo do cliente.",
+      "node_type": "faq",
+      "projection_node_id": "6bcc2954-2b04-5f93-8787-ac45b4b6ae57"
+    },
+    {
+      "id": "faq:service:vitrification:vitrificacao-preco-tempo",
+      "data": {
+        "answer": "Preço e duração da vitrificação são confirmados pela equipe humana; a assistente virtual não publica estimativa estática.",
+        "claims": [
+          {
+            "policy": "published_service_detail_with_source_provenance",
+            "claim_type": "service_detail",
+            "evidence_node_ids": [
+              "faq:service:vitrification:vitrificacao-preco-tempo"
+            ]
+          }
+        ],
+        "source": "aurora_active_graph_publication_v75_2026_09_23",
+        "status": "approved",
+        "question": "Valor da vitrificação?",
+        "branch_path": [
+          "product:vitrification",
+          "faq:service:vitrification:vitrificacao-preco-tempo"
+        ],
+        "source_node_id": "product:vitrification",
+        "question_aliases": [
+          "valor da vitrificação",
+          "demora quanto",
+          "preço para vitrificar",
+          "prazo do vitrificador",
+          "tabela de vitrificação"
+        ],
+        "source_node_type": "product",
+        "import_provenance": {
+          "source": "aurora_active_graph_publication_v75_2026_09_23",
+          "source_node_id": "aurora-faq-vitrificacao-preco-tempo",
+          "source_node_type": "faq",
+          "source_publication_id": "d5c7afd7-24ea-44d6-90e9-8532fd3fc303",
+          "source_validation_status": "approved",
+          "source_publication_version": 75,
+          "source_publication_checksum": "sha256:3f727095819f75836453af2e3bbee42c1138b50a6dc99a59f502b5a1917811ec"
+        },
+        "validation_status": "approved",
+        "graph_json_node_id": "faq:service:vitrification:vitrificacao-preco-tempo"
+      },
+      "slug": "faq-service-vitrification-vitrificacao-preco-tempo",
+      "tags": [],
+      "title": "Valor da vitrificação?",
+      "status": "approved",
+      "summary": "Preço e duração da vitrificação são confirmados pela equipe humana; a assistente virtual não publica estimativa estática.",
+      "node_type": "faq",
+      "projection_node_id": "aa1716ac-3024-581c-89b0-4e4b71ff8c45"
     }
   ],
   "edges": [
@@ -4414,14 +5808,6 @@
       "metadata": {}
     },
     {
-      "id": "edge:preservation-evaluation",
-      "source": "group:preservation",
-      "target": "product:evaluation",
-      "relation_type": "contains",
-      "weight": 1,
-      "metadata": {}
-    },
-    {
       "id": "edge:evaluation-copy",
       "source": "product:evaluation",
       "target": "copy:evaluation",
@@ -4446,14 +5832,6 @@
       "metadata": {
         "primary_tree": false
       }
-    },
-    {
-      "id": "edge:preservation-detailed-wash",
-      "source": "group:preservation",
-      "target": "product:detailed-wash",
-      "relation_type": "contains",
-      "weight": 1,
-      "metadata": {}
     },
     {
       "id": "edge:detailed-wash-copy",
@@ -4482,14 +5860,6 @@
       }
     },
     {
-      "id": "edge:preservation-interior-cleaning",
-      "source": "group:preservation",
-      "target": "product:interior-cleaning",
-      "relation_type": "contains",
-      "weight": 1,
-      "metadata": {}
-    },
-    {
       "id": "edge:interior-cleaning-copy",
       "source": "product:interior-cleaning",
       "target": "copy:interior-cleaning",
@@ -4514,14 +5884,6 @@
       "metadata": {
         "primary_tree": false
       }
-    },
-    {
-      "id": "edge:preservation-glass-polish",
-      "source": "group:preservation",
-      "target": "product:glass-polish",
-      "relation_type": "contains",
-      "weight": 1,
-      "metadata": {}
     },
     {
       "id": "edge:glass-polish-copy",
@@ -4550,14 +5912,6 @@
       }
     },
     {
-      "id": "edge:preservation-engine-bay-wash",
-      "source": "group:preservation",
-      "target": "product:engine-bay-wash",
-      "relation_type": "contains",
-      "weight": 1,
-      "metadata": {}
-    },
-    {
       "id": "edge:engine-bay-wash-copy",
       "source": "product:engine-bay-wash",
       "target": "copy:engine-bay-wash",
@@ -4582,14 +5936,6 @@
       "metadata": {
         "primary_tree": false
       }
-    },
-    {
-      "id": "edge:revitalization-technical-polish",
-      "source": "group:revitalization",
-      "target": "product:technical-polish",
-      "relation_type": "contains",
-      "weight": 1,
-      "metadata": {}
     },
     {
       "id": "edge:technical-polish-copy",
@@ -4618,14 +5964,6 @@
       }
     },
     {
-      "id": "edge:revitalization-commercial-polish",
-      "source": "group:revitalization",
-      "target": "product:commercial-polish",
-      "relation_type": "contains",
-      "weight": 1,
-      "metadata": {}
-    },
-    {
       "id": "edge:commercial-polish-copy",
       "source": "product:commercial-polish",
       "target": "copy:commercial-polish",
@@ -4650,14 +5988,6 @@
       "metadata": {
         "primary_tree": false
       }
-    },
-    {
-      "id": "edge:revitalization-headlight-restoration",
-      "source": "group:revitalization",
-      "target": "product:headlight-restoration",
-      "relation_type": "contains",
-      "weight": 1,
-      "metadata": {}
     },
     {
       "id": "edge:headlight-restoration-copy",
@@ -4686,14 +6016,6 @@
       }
     },
     {
-      "id": "edge:enhancement-vitrification",
-      "source": "group:enhancement",
-      "target": "product:vitrification",
-      "relation_type": "contains",
-      "weight": 1,
-      "metadata": {}
-    },
-    {
       "id": "edge:vitrification-copy",
       "source": "product:vitrification",
       "target": "copy:vitrification",
@@ -4718,14 +6040,6 @@
       "metadata": {
         "primary_tree": false
       }
-    },
-    {
-      "id": "edge:enhancement-ppf",
-      "source": "group:enhancement",
-      "target": "product:ppf",
-      "relation_type": "contains",
-      "weight": 1,
-      "metadata": {}
     },
     {
       "id": "edge:ppf-copy",
@@ -4754,14 +6068,6 @@
       }
     },
     {
-      "id": "edge:enhancement-bodywork",
-      "source": "group:enhancement",
-      "target": "product:bodywork",
-      "relation_type": "contains",
-      "weight": 1,
-      "metadata": {}
-    },
-    {
       "id": "edge:bodywork-copy",
       "source": "product:bodywork",
       "target": "copy:bodywork",
@@ -4786,14 +6092,6 @@
       "metadata": {
         "primary_tree": false
       }
-    },
-    {
-      "id": "edge:enhancement-painting",
-      "source": "group:enhancement",
-      "target": "product:painting",
-      "relation_type": "contains",
-      "weight": 1,
-      "metadata": {}
     },
     {
       "id": "edge:painting-copy",
@@ -5611,45 +6909,6 @@
       }
     },
     {
-      "id": "edge:public:07c63e77aeb8c3605a48",
-      "source": "group:preservation",
-      "target": "gallery:utzig",
-      "relation_type": "publishes_to",
-      "confidence": 1,
-      "weight": 1,
-      "metadata": {
-        "active": true,
-        "source": "utzig_public_site_approval_2026_09_23",
-        "primary_tree": false
-      }
-    },
-    {
-      "id": "edge:public:9284861bc7e93149fd70",
-      "source": "group:revitalization",
-      "target": "gallery:utzig",
-      "relation_type": "publishes_to",
-      "confidence": 1,
-      "weight": 1,
-      "metadata": {
-        "active": true,
-        "source": "utzig_public_site_approval_2026_09_23",
-        "primary_tree": false
-      }
-    },
-    {
-      "id": "edge:public:fa963e63f9a8f4870012",
-      "source": "group:enhancement",
-      "target": "gallery:utzig",
-      "relation_type": "publishes_to",
-      "confidence": 1,
-      "weight": 1,
-      "metadata": {
-        "active": true,
-        "source": "utzig_public_site_approval_2026_09_23",
-        "primary_tree": false
-      }
-    },
-    {
       "id": "edge:public:62659fd319b9b568b223",
       "source": "product:evaluation",
       "target": "gallery:utzig",
@@ -6014,220 +7273,1618 @@
       }
     },
     {
-      "id": "edge:service-image:3d982199e860180c1a63",
-      "source": "product:evaluation",
-      "target": "asset:process",
-      "relation_type": "uses_asset",
-      "confidence": 1,
-      "weight": 1,
+      "id": "edge:bodywork:chapeacao-preco-tempo",
+      "source": "product:bodywork",
+      "target": "faq:service:bodywork:chapeacao-preco-tempo",
+      "weight": 1.0,
+      "primary": false,
       "metadata": {
         "active": true,
-        "role": "product_image",
-        "primary_tree": false,
-        "page_binding": {
-          "slot_key": "product_image:evaluation",
-          "position": 0
-        },
-        "source": "utzig_public_site_approval_2026_09_23"
-      }
+        "graph_json_edge_id": "edge:bodywork:chapeacao-preco-tempo"
+      },
+      "relation_type": "answers_question"
     },
     {
-      "id": "edge:service-image:b17cec5c8c7e3e272417",
+      "id": "edge:bodywork:chapeacao-preco-tempo:contains",
+      "source": "product:bodywork",
+      "target": "faq:service:bodywork:chapeacao-preco-tempo",
+      "weight": 1.0,
+      "primary": true,
+      "metadata": {
+        "active": true,
+        "primary": true,
+        "graph_json_edge_id": "edge:bodywork:chapeacao-preco-tempo:contains"
+      },
+      "relation_type": "contains"
+    },
+    {
+      "id": "edge:bodywork:chapeacao-preco-tempo:embedded",
+      "source": "faq:service:bodywork:chapeacao-preco-tempo",
+      "target": "embedded:utzig",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:bodywork:chapeacao-preco-tempo:embedded"
+      },
+      "relation_type": "publishes_to"
+    },
+    {
+      "id": "edge:bodywork:chapeacao-remota",
+      "source": "product:bodywork",
+      "target": "faq:service:bodywork:chapeacao-remota",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:bodywork:chapeacao-remota"
+      },
+      "relation_type": "answers_question"
+    },
+    {
+      "id": "edge:bodywork:chapeacao-remota:contains",
+      "source": "product:bodywork",
+      "target": "faq:service:bodywork:chapeacao-remota",
+      "weight": 1.0,
+      "primary": true,
+      "metadata": {
+        "active": true,
+        "primary": true,
+        "graph_json_edge_id": "edge:bodywork:chapeacao-remota:contains"
+      },
+      "relation_type": "contains"
+    },
+    {
+      "id": "edge:bodywork:chapeacao-remota:embedded",
+      "source": "faq:service:bodywork:chapeacao-remota",
+      "target": "embedded:utzig",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:bodywork:chapeacao-remota:embedded"
+      },
+      "relation_type": "publishes_to"
+    },
+    {
+      "id": "edge:commercial-polish:polimento-comercial-diferenca",
+      "source": "product:commercial-polish",
+      "target": "faq:service:commercial-polish:polimento-comercial-diferenca",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:commercial-polish:polimento-comercial-diferenca"
+      },
+      "relation_type": "answers_question"
+    },
+    {
+      "id": "edge:commercial-polish:polimento-comercial-diferenca:contains",
+      "source": "product:commercial-polish",
+      "target": "faq:service:commercial-polish:polimento-comercial-diferenca",
+      "weight": 1.0,
+      "primary": true,
+      "metadata": {
+        "active": true,
+        "primary": true,
+        "graph_json_edge_id": "edge:commercial-polish:polimento-comercial-diferenca:contains"
+      },
+      "relation_type": "contains"
+    },
+    {
+      "id": "edge:commercial-polish:polimento-comercial-diferenca:embedded",
+      "source": "faq:service:commercial-polish:polimento-comercial-diferenca",
+      "target": "embedded:utzig",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:commercial-polish:polimento-comercial-diferenca:embedded"
+      },
+      "relation_type": "publishes_to"
+    },
+    {
+      "id": "edge:detailed-wash:lavagem-detalhada-objetivo",
       "source": "product:detailed-wash",
-      "target": "asset:engine-detail",
-      "relation_type": "uses_asset",
-      "confidence": 1,
-      "weight": 1,
+      "target": "faq:service:detailed-wash:lavagem-detalhada-objetivo",
+      "weight": 1.0,
+      "primary": false,
       "metadata": {
         "active": true,
-        "role": "product_image",
-        "primary_tree": false,
-        "page_binding": {
-          "slot_key": "product_image:detailed-wash",
-          "position": 0
-        },
-        "source": "utzig_public_site_approval_2026_09_23"
-      }
+        "graph_json_edge_id": "edge:detailed-wash:lavagem-detalhada-objetivo"
+      },
+      "relation_type": "answers_question"
     },
     {
-      "id": "edge:service-image:13f58fbd98dd155c629f",
-      "source": "product:interior-cleaning",
-      "target": "asset:interior",
-      "relation_type": "uses_asset",
-      "confidence": 1,
-      "weight": 1,
+      "id": "edge:detailed-wash:lavagem-detalhada-objetivo:contains",
+      "source": "product:detailed-wash",
+      "target": "faq:service:detailed-wash:lavagem-detalhada-objetivo",
+      "weight": 1.0,
+      "primary": true,
       "metadata": {
         "active": true,
-        "role": "product_image",
-        "primary_tree": false,
-        "page_binding": {
-          "slot_key": "product_image:interior-cleaning",
-          "position": 0
-        },
-        "source": "utzig_public_site_approval_2026_09_23"
-      }
+        "primary": true,
+        "graph_json_edge_id": "edge:detailed-wash:lavagem-detalhada-objetivo:contains"
+      },
+      "relation_type": "contains"
     },
     {
-      "id": "edge:service-image:4d944a3891354a16e4da",
+      "id": "edge:detailed-wash:lavagem-detalhada-objetivo:embedded",
+      "source": "faq:service:detailed-wash:lavagem-detalhada-objetivo",
+      "target": "embedded:utzig",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:detailed-wash:lavagem-detalhada-objetivo:embedded"
+      },
+      "relation_type": "publishes_to"
+    },
+    {
+      "id": "edge:detailed-wash:lavagem-detalhada-preco",
+      "source": "product:detailed-wash",
+      "target": "faq:service:detailed-wash:lavagem-detalhada-preco",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:detailed-wash:lavagem-detalhada-preco"
+      },
+      "relation_type": "answers_question"
+    },
+    {
+      "id": "edge:detailed-wash:lavagem-detalhada-preco:contains",
+      "source": "product:detailed-wash",
+      "target": "faq:service:detailed-wash:lavagem-detalhada-preco",
+      "weight": 1.0,
+      "primary": true,
+      "metadata": {
+        "active": true,
+        "primary": true,
+        "graph_json_edge_id": "edge:detailed-wash:lavagem-detalhada-preco:contains"
+      },
+      "relation_type": "contains"
+    },
+    {
+      "id": "edge:detailed-wash:lavagem-detalhada-preco:embedded",
+      "source": "faq:service:detailed-wash:lavagem-detalhada-preco",
+      "target": "embedded:utzig",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:detailed-wash:lavagem-detalhada-preco:embedded"
+      },
+      "relation_type": "publishes_to"
+    },
+    {
+      "id": "edge:engine-bay-wash:motor-estrada",
+      "source": "product:engine-bay-wash",
+      "target": "faq:service:engine-bay-wash:motor-estrada",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:engine-bay-wash:motor-estrada"
+      },
+      "relation_type": "answers_question"
+    },
+    {
+      "id": "edge:engine-bay-wash:motor-estrada:contains",
+      "source": "product:engine-bay-wash",
+      "target": "faq:service:engine-bay-wash:motor-estrada",
+      "weight": 1.0,
+      "primary": true,
+      "metadata": {
+        "active": true,
+        "primary": true,
+        "graph_json_edge_id": "edge:engine-bay-wash:motor-estrada:contains"
+      },
+      "relation_type": "contains"
+    },
+    {
+      "id": "edge:engine-bay-wash:motor-estrada:embedded",
+      "source": "faq:service:engine-bay-wash:motor-estrada",
+      "target": "embedded:utzig",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:engine-bay-wash:motor-estrada:embedded"
+      },
+      "relation_type": "publishes_to"
+    },
+    {
+      "id": "edge:engine-bay-wash:motor-vazamento",
+      "source": "product:engine-bay-wash",
+      "target": "faq:service:engine-bay-wash:motor-vazamento",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:engine-bay-wash:motor-vazamento"
+      },
+      "relation_type": "answers_question"
+    },
+    {
+      "id": "edge:engine-bay-wash:motor-vazamento:contains",
+      "source": "product:engine-bay-wash",
+      "target": "faq:service:engine-bay-wash:motor-vazamento",
+      "weight": 1.0,
+      "primary": true,
+      "metadata": {
+        "active": true,
+        "primary": true,
+        "graph_json_edge_id": "edge:engine-bay-wash:motor-vazamento:contains"
+      },
+      "relation_type": "contains"
+    },
+    {
+      "id": "edge:engine-bay-wash:motor-vazamento:embedded",
+      "source": "faq:service:engine-bay-wash:motor-vazamento",
+      "target": "embedded:utzig",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:engine-bay-wash:motor-vazamento:embedded"
+      },
+      "relation_type": "publishes_to"
+    },
+    {
+      "id": "edge:glass-polish:vidros-orcamento",
       "source": "product:glass-polish",
-      "target": "asset:glass-before-after",
-      "relation_type": "uses_asset",
-      "confidence": 1,
-      "weight": 1,
+      "target": "faq:service:glass-polish:vidros-orcamento",
+      "weight": 1.0,
+      "primary": false,
       "metadata": {
         "active": true,
-        "role": "product_image",
-        "primary_tree": false,
-        "page_binding": {
-          "slot_key": "product_image:glass-polish",
-          "position": 0
-        },
-        "source": "utzig_public_site_approval_2026_09_23"
+        "graph_json_edge_id": "edge:glass-polish:vidros-orcamento"
+      },
+      "relation_type": "answers_question"
+    },
+    {
+      "id": "edge:glass-polish:vidros-orcamento:contains",
+      "source": "product:glass-polish",
+      "target": "faq:service:glass-polish:vidros-orcamento",
+      "weight": 1.0,
+      "primary": true,
+      "metadata": {
+        "active": true,
+        "primary": true,
+        "graph_json_edge_id": "edge:glass-polish:vidros-orcamento:contains"
+      },
+      "relation_type": "contains"
+    },
+    {
+      "id": "edge:glass-polish:vidros-orcamento:embedded",
+      "source": "faq:service:glass-polish:vidros-orcamento",
+      "target": "embedded:utzig",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:glass-polish:vidros-orcamento:embedded"
+      },
+      "relation_type": "publishes_to"
+    },
+    {
+      "id": "edge:headlight-restoration:farois-resultado",
+      "source": "product:headlight-restoration",
+      "target": "faq:service:headlight-restoration:farois-resultado",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:headlight-restoration:farois-resultado"
+      },
+      "relation_type": "answers_question"
+    },
+    {
+      "id": "edge:headlight-restoration:farois-resultado:contains",
+      "source": "product:headlight-restoration",
+      "target": "faq:service:headlight-restoration:farois-resultado",
+      "weight": 1.0,
+      "primary": true,
+      "metadata": {
+        "active": true,
+        "primary": true,
+        "graph_json_edge_id": "edge:headlight-restoration:farois-resultado:contains"
+      },
+      "relation_type": "contains"
+    },
+    {
+      "id": "edge:headlight-restoration:farois-resultado:embedded",
+      "source": "faq:service:headlight-restoration:farois-resultado",
+      "target": "embedded:utzig",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:headlight-restoration:farois-resultado:embedded"
+      },
+      "relation_type": "publishes_to"
+    },
+    {
+      "id": "edge:headlight-restoration:farois-uv",
+      "source": "product:headlight-restoration",
+      "target": "faq:service:headlight-restoration:farois-uv",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:headlight-restoration:farois-uv"
+      },
+      "relation_type": "answers_question"
+    },
+    {
+      "id": "edge:headlight-restoration:farois-uv:contains",
+      "source": "product:headlight-restoration",
+      "target": "faq:service:headlight-restoration:farois-uv",
+      "weight": 1.0,
+      "primary": true,
+      "metadata": {
+        "active": true,
+        "primary": true,
+        "graph_json_edge_id": "edge:headlight-restoration:farois-uv:contains"
+      },
+      "relation_type": "contains"
+    },
+    {
+      "id": "edge:headlight-restoration:farois-uv:embedded",
+      "source": "faq:service:headlight-restoration:farois-uv",
+      "target": "embedded:utzig",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:headlight-restoration:farois-uv:embedded"
+      },
+      "relation_type": "publishes_to"
+    },
+    {
+      "id": "edge:interior-cleaning:higienizacao-estrada",
+      "source": "product:interior-cleaning",
+      "target": "faq:service:interior-cleaning:higienizacao-estrada",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:interior-cleaning:higienizacao-estrada"
+      },
+      "relation_type": "answers_question"
+    },
+    {
+      "id": "edge:interior-cleaning:higienizacao-estrada:contains",
+      "source": "product:interior-cleaning",
+      "target": "faq:service:interior-cleaning:higienizacao-estrada",
+      "weight": 1.0,
+      "primary": true,
+      "metadata": {
+        "active": true,
+        "primary": true,
+        "graph_json_edge_id": "edge:interior-cleaning:higienizacao-estrada:contains"
+      },
+      "relation_type": "contains"
+    },
+    {
+      "id": "edge:interior-cleaning:higienizacao-estrada:embedded",
+      "source": "faq:service:interior-cleaning:higienizacao-estrada",
+      "target": "embedded:utzig",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:interior-cleaning:higienizacao-estrada:embedded"
+      },
+      "relation_type": "publishes_to"
+    },
+    {
+      "id": "edge:interior-cleaning:higienizacao-preco-tempo",
+      "source": "product:interior-cleaning",
+      "target": "faq:service:interior-cleaning:higienizacao-preco-tempo",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:interior-cleaning:higienizacao-preco-tempo"
+      },
+      "relation_type": "answers_question"
+    },
+    {
+      "id": "edge:interior-cleaning:higienizacao-preco-tempo:contains",
+      "source": "product:interior-cleaning",
+      "target": "faq:service:interior-cleaning:higienizacao-preco-tempo",
+      "weight": 1.0,
+      "primary": true,
+      "metadata": {
+        "active": true,
+        "primary": true,
+        "graph_json_edge_id": "edge:interior-cleaning:higienizacao-preco-tempo:contains"
+      },
+      "relation_type": "contains"
+    },
+    {
+      "id": "edge:interior-cleaning:higienizacao-preco-tempo:embedded",
+      "source": "faq:service:interior-cleaning:higienizacao-preco-tempo",
+      "target": "embedded:utzig",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:interior-cleaning:higienizacao-preco-tempo:embedded"
+      },
+      "relation_type": "publishes_to"
+    },
+    {
+      "id": "edge:interior-cleaning:higienizacao-revestimento",
+      "source": "product:interior-cleaning",
+      "target": "faq:service:interior-cleaning:higienizacao-revestimento",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:interior-cleaning:higienizacao-revestimento"
+      },
+      "relation_type": "answers_question"
+    },
+    {
+      "id": "edge:interior-cleaning:higienizacao-revestimento:contains",
+      "source": "product:interior-cleaning",
+      "target": "faq:service:interior-cleaning:higienizacao-revestimento",
+      "weight": 1.0,
+      "primary": true,
+      "metadata": {
+        "active": true,
+        "primary": true,
+        "graph_json_edge_id": "edge:interior-cleaning:higienizacao-revestimento:contains"
+      },
+      "relation_type": "contains"
+    },
+    {
+      "id": "edge:interior-cleaning:higienizacao-revestimento:embedded",
+      "source": "faq:service:interior-cleaning:higienizacao-revestimento",
+      "target": "embedded:utzig",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:interior-cleaning:higienizacao-revestimento:embedded"
+      },
+      "relation_type": "publishes_to"
+    },
+    {
+      "id": "edge:painting:pintura-preco-tempo",
+      "source": "product:painting",
+      "target": "faq:service:painting:pintura-preco-tempo",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:painting:pintura-preco-tempo"
+      },
+      "relation_type": "answers_question"
+    },
+    {
+      "id": "edge:painting:pintura-preco-tempo:contains",
+      "source": "product:painting",
+      "target": "faq:service:painting:pintura-preco-tempo",
+      "weight": 1.0,
+      "primary": true,
+      "metadata": {
+        "active": true,
+        "primary": true,
+        "graph_json_edge_id": "edge:painting:pintura-preco-tempo:contains"
+      },
+      "relation_type": "contains"
+    },
+    {
+      "id": "edge:painting:pintura-preco-tempo:embedded",
+      "source": "faq:service:painting:pintura-preco-tempo",
+      "target": "embedded:utzig",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:painting:pintura-preco-tempo:embedded"
+      },
+      "relation_type": "publishes_to"
+    },
+    {
+      "id": "edge:painting:pintura-remota",
+      "source": "product:painting",
+      "target": "faq:service:painting:pintura-remota",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:painting:pintura-remota"
+      },
+      "relation_type": "answers_question"
+    },
+    {
+      "id": "edge:painting:pintura-remota:contains",
+      "source": "product:painting",
+      "target": "faq:service:painting:pintura-remota",
+      "weight": 1.0,
+      "primary": true,
+      "metadata": {
+        "active": true,
+        "primary": true,
+        "graph_json_edge_id": "edge:painting:pintura-remota:contains"
+      },
+      "relation_type": "contains"
+    },
+    {
+      "id": "edge:painting:pintura-remota:embedded",
+      "source": "faq:service:painting:pintura-remota",
+      "target": "embedded:utzig",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:painting:pintura-remota:embedded"
+      },
+      "relation_type": "publishes_to"
+    },
+    {
+      "id": "edge:ppf:ppf-avaliacao",
+      "source": "product:ppf",
+      "target": "faq:service:ppf:ppf-avaliacao",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:ppf:ppf-avaliacao"
+      },
+      "relation_type": "answers_question"
+    },
+    {
+      "id": "edge:ppf:ppf-avaliacao:contains",
+      "source": "product:ppf",
+      "target": "faq:service:ppf:ppf-avaliacao",
+      "weight": 1.0,
+      "primary": true,
+      "metadata": {
+        "active": true,
+        "primary": true,
+        "graph_json_edge_id": "edge:ppf:ppf-avaliacao:contains"
+      },
+      "relation_type": "contains"
+    },
+    {
+      "id": "edge:ppf:ppf-avaliacao:embedded",
+      "source": "faq:service:ppf:ppf-avaliacao",
+      "target": "embedded:utzig",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:ppf:ppf-avaliacao:embedded"
+      },
+      "relation_type": "publishes_to"
+    },
+    {
+      "id": "edge:ppf:ppf-preco-tempo",
+      "source": "product:ppf",
+      "target": "faq:service:ppf:ppf-preco-tempo",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:ppf:ppf-preco-tempo"
+      },
+      "relation_type": "answers_question"
+    },
+    {
+      "id": "edge:ppf:ppf-preco-tempo:contains",
+      "source": "product:ppf",
+      "target": "faq:service:ppf:ppf-preco-tempo",
+      "weight": 1.0,
+      "primary": true,
+      "metadata": {
+        "active": true,
+        "primary": true,
+        "graph_json_edge_id": "edge:ppf:ppf-preco-tempo:contains"
+      },
+      "relation_type": "contains"
+    },
+    {
+      "id": "edge:ppf:ppf-preco-tempo:embedded",
+      "source": "faq:service:ppf:ppf-preco-tempo",
+      "target": "embedded:utzig",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:ppf:ppf-preco-tempo:embedded"
+      },
+      "relation_type": "publishes_to"
+    },
+    {
+      "id": "edge:technical-polish:polimento-anterior",
+      "source": "product:technical-polish",
+      "target": "faq:service:technical-polish:polimento-anterior",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:technical-polish:polimento-anterior"
+      },
+      "relation_type": "answers_question"
+    },
+    {
+      "id": "edge:technical-polish:polimento-anterior:contains",
+      "source": "product:technical-polish",
+      "target": "faq:service:technical-polish:polimento-anterior",
+      "weight": 1.0,
+      "primary": true,
+      "metadata": {
+        "active": true,
+        "primary": true,
+        "graph_json_edge_id": "edge:technical-polish:polimento-anterior:contains"
+      },
+      "relation_type": "contains"
+    },
+    {
+      "id": "edge:technical-polish:polimento-anterior:embedded",
+      "source": "faq:service:technical-polish:polimento-anterior",
+      "target": "embedded:utzig",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:technical-polish:polimento-anterior:embedded"
+      },
+      "relation_type": "publishes_to"
+    },
+    {
+      "id": "edge:technical-polish:polimento-avaliacao",
+      "source": "product:technical-polish",
+      "target": "faq:service:technical-polish:polimento-avaliacao",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:technical-polish:polimento-avaliacao"
+      },
+      "relation_type": "answers_question"
+    },
+    {
+      "id": "edge:technical-polish:polimento-avaliacao:contains",
+      "source": "product:technical-polish",
+      "target": "faq:service:technical-polish:polimento-avaliacao",
+      "weight": 1.0,
+      "primary": true,
+      "metadata": {
+        "active": true,
+        "primary": true,
+        "graph_json_edge_id": "edge:technical-polish:polimento-avaliacao:contains"
+      },
+      "relation_type": "contains"
+    },
+    {
+      "id": "edge:technical-polish:polimento-avaliacao:embedded",
+      "source": "faq:service:technical-polish:polimento-avaliacao",
+      "target": "embedded:utzig",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:technical-polish:polimento-avaliacao:embedded"
+      },
+      "relation_type": "publishes_to"
+    },
+    {
+      "id": "edge:technical-polish:polimento-espelhamento",
+      "source": "product:technical-polish",
+      "target": "faq:service:technical-polish:polimento-espelhamento",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:technical-polish:polimento-espelhamento"
+      },
+      "relation_type": "answers_question"
+    },
+    {
+      "id": "edge:technical-polish:polimento-espelhamento:contains",
+      "source": "product:technical-polish",
+      "target": "faq:service:technical-polish:polimento-espelhamento",
+      "weight": 1.0,
+      "primary": true,
+      "metadata": {
+        "active": true,
+        "primary": true,
+        "graph_json_edge_id": "edge:technical-polish:polimento-espelhamento:contains"
+      },
+      "relation_type": "contains"
+    },
+    {
+      "id": "edge:technical-polish:polimento-espelhamento:embedded",
+      "source": "faq:service:technical-polish:polimento-espelhamento",
+      "target": "embedded:utzig",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:technical-polish:polimento-espelhamento:embedded"
+      },
+      "relation_type": "publishes_to"
+    },
+    {
+      "id": "edge:technical-polish:polimento-foco",
+      "source": "product:technical-polish",
+      "target": "faq:service:technical-polish:polimento-foco",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:technical-polish:polimento-foco"
+      },
+      "relation_type": "answers_question"
+    },
+    {
+      "id": "edge:technical-polish:polimento-foco:contains",
+      "source": "product:technical-polish",
+      "target": "faq:service:technical-polish:polimento-foco",
+      "weight": 1.0,
+      "primary": true,
+      "metadata": {
+        "active": true,
+        "primary": true,
+        "graph_json_edge_id": "edge:technical-polish:polimento-foco:contains"
+      },
+      "relation_type": "contains"
+    },
+    {
+      "id": "edge:technical-polish:polimento-foco:embedded",
+      "source": "faq:service:technical-polish:polimento-foco",
+      "target": "embedded:utzig",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:technical-polish:polimento-foco:embedded"
+      },
+      "relation_type": "publishes_to"
+    },
+    {
+      "id": "edge:vitrification:vitrificacao-avaliacao",
+      "source": "product:vitrification",
+      "target": "faq:service:vitrification:vitrificacao-avaliacao",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:vitrification:vitrificacao-avaliacao"
+      },
+      "relation_type": "answers_question"
+    },
+    {
+      "id": "edge:vitrification:vitrificacao-avaliacao:contains",
+      "source": "product:vitrification",
+      "target": "faq:service:vitrification:vitrificacao-avaliacao",
+      "weight": 1.0,
+      "primary": true,
+      "metadata": {
+        "active": true,
+        "primary": true,
+        "graph_json_edge_id": "edge:vitrification:vitrificacao-avaliacao:contains"
+      },
+      "relation_type": "contains"
+    },
+    {
+      "id": "edge:vitrification:vitrificacao-avaliacao:embedded",
+      "source": "faq:service:vitrification:vitrificacao-avaliacao",
+      "target": "embedded:utzig",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:vitrification:vitrificacao-avaliacao:embedded"
+      },
+      "relation_type": "publishes_to"
+    },
+    {
+      "id": "edge:vitrification:vitrificacao-preco-tempo",
+      "source": "product:vitrification",
+      "target": "faq:service:vitrification:vitrificacao-preco-tempo",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:vitrification:vitrificacao-preco-tempo"
+      },
+      "relation_type": "answers_question"
+    },
+    {
+      "id": "edge:vitrification:vitrificacao-preco-tempo:contains",
+      "source": "product:vitrification",
+      "target": "faq:service:vitrification:vitrificacao-preco-tempo",
+      "weight": 1.0,
+      "primary": true,
+      "metadata": {
+        "active": true,
+        "primary": true,
+        "graph_json_edge_id": "edge:vitrification:vitrificacao-preco-tempo:contains"
+      },
+      "relation_type": "contains"
+    },
+    {
+      "id": "edge:vitrification:vitrificacao-preco-tempo:embedded",
+      "source": "faq:service:vitrification:vitrificacao-preco-tempo",
+      "target": "embedded:utzig",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:vitrification:vitrificacao-preco-tempo:embedded"
+      },
+      "relation_type": "publishes_to"
+    },
+    {
+      "id": "edge:preservation-evaluation",
+      "source": "group:preservation",
+      "target": "product:evaluation",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true,
+        "position": 0
       }
     },
     {
-      "id": "edge:service-image:0aecc10205a472577671",
+      "id": "edge:group-cover:preservation",
+      "source": "group:preservation",
+      "target": "asset:process",
+      "relation_type": "category_has_asset",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "primary_tree": false,
+        "source": "utzig_visual_reconciliation_2026_09_23",
+        "media_assignment": {
+          "active": true,
+          "position": 0,
+          "purpose": "public_catalog",
+          "fallback_allowed": true
+        },
+        "page_binding": {
+          "slot_key": "product_group_cover:preservation",
+          "position": 0
+        }
+      }
+    },
+    {
+      "id": "edge:public-group:preservation",
+      "source": "group:preservation",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "primary_tree": false,
+        "source": "utzig_visual_reconciliation_2026_09_23"
+      }
+    },
+    {
+      "id": "edge:brand-cleaning",
+      "source": "brand:utzig-garage",
+      "target": "group:cleaning",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:cleaning-detailed-wash",
+      "source": "group:cleaning",
+      "target": "product:detailed-wash",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true,
+        "position": 0
+      }
+    },
+    {
+      "id": "edge:cleaning-engine-bay-wash",
+      "source": "group:cleaning",
+      "target": "product:engine-bay-wash",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true,
+        "position": 1
+      }
+    },
+    {
+      "id": "edge:cleaning-interior-cleaning",
+      "source": "group:cleaning",
+      "target": "product:interior-cleaning",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true,
+        "position": 2
+      }
+    },
+    {
+      "id": "edge:group-cover:cleaning",
+      "source": "group:cleaning",
+      "target": "asset:extractor",
+      "relation_type": "category_has_asset",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "primary_tree": false,
+        "source": "utzig_visual_reconciliation_2026_09_23",
+        "media_assignment": {
+          "active": true,
+          "position": 1,
+          "purpose": "public_catalog",
+          "fallback_allowed": true
+        },
+        "page_binding": {
+          "slot_key": "product_group_cover:cleaning",
+          "position": 1
+        }
+      }
+    },
+    {
+      "id": "edge:public-group:cleaning",
+      "source": "group:cleaning",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "primary_tree": false,
+        "source": "utzig_visual_reconciliation_2026_09_23"
+      }
+    },
+    {
+      "id": "edge:revitalization-commercial-polish",
+      "source": "group:revitalization",
+      "target": "product:commercial-polish",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true,
+        "position": 0
+      }
+    },
+    {
+      "id": "edge:revitalization-technical-polish",
+      "source": "group:revitalization",
+      "target": "product:technical-polish",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true,
+        "position": 1
+      }
+    },
+    {
+      "id": "edge:revitalization-glass-polish",
+      "source": "group:revitalization",
+      "target": "product:glass-polish",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true,
+        "position": 2
+      }
+    },
+    {
+      "id": "edge:revitalization-headlight-restoration",
+      "source": "group:revitalization",
+      "target": "product:headlight-restoration",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true,
+        "position": 3
+      }
+    },
+    {
+      "id": "edge:group-cover:revitalization",
+      "source": "group:revitalization",
+      "target": "asset:headlight-before",
+      "relation_type": "category_has_asset",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "primary_tree": false,
+        "source": "utzig_visual_reconciliation_2026_09_23",
+        "media_assignment": {
+          "active": true,
+          "position": 2,
+          "purpose": "public_catalog",
+          "fallback_allowed": true
+        },
+        "page_binding": {
+          "slot_key": "product_group_cover:revitalization",
+          "position": 2
+        }
+      }
+    },
+    {
+      "id": "edge:public-group:revitalization",
+      "source": "group:revitalization",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "primary_tree": false,
+        "source": "utzig_visual_reconciliation_2026_09_23"
+      }
+    },
+    {
+      "id": "edge:brand-repair-paint",
+      "source": "brand:utzig-garage",
+      "target": "group:repair-paint",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:repair-paint-bodywork",
+      "source": "group:repair-paint",
+      "target": "product:bodywork",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true,
+        "position": 0
+      }
+    },
+    {
+      "id": "edge:repair-paint-painting",
+      "source": "group:repair-paint",
+      "target": "product:painting",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true,
+        "position": 1
+      }
+    },
+    {
+      "id": "edge:group-cover:repair-paint",
+      "source": "group:repair-paint",
+      "target": "asset:process",
+      "relation_type": "category_has_asset",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "primary_tree": false,
+        "source": "utzig_visual_reconciliation_2026_09_23",
+        "media_assignment": {
+          "active": true,
+          "position": 3,
+          "purpose": "public_catalog",
+          "fallback_allowed": true
+        },
+        "page_binding": {
+          "slot_key": "product_group_cover:repair-paint",
+          "position": 3
+        }
+      }
+    },
+    {
+      "id": "edge:public-group:repair-paint",
+      "source": "group:repair-paint",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "primary_tree": false,
+        "source": "utzig_visual_reconciliation_2026_09_23"
+      }
+    },
+    {
+      "id": "edge:enhancement-ppf",
+      "source": "group:enhancement",
+      "target": "product:ppf",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true,
+        "position": 0
+      }
+    },
+    {
+      "id": "edge:enhancement-vitrification",
+      "source": "group:enhancement",
+      "target": "product:vitrification",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true,
+        "position": 1
+      }
+    },
+    {
+      "id": "edge:enhancement-windshield-crystallization",
+      "source": "group:enhancement",
+      "target": "product:windshield-crystallization",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true,
+        "position": 2
+      }
+    },
+    {
+      "id": "edge:group-cover:enhancement",
+      "source": "group:enhancement",
+      "target": "asset:glass-before",
+      "relation_type": "category_has_asset",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "primary_tree": false,
+        "source": "utzig_visual_reconciliation_2026_09_23",
+        "media_assignment": {
+          "active": true,
+          "position": 4,
+          "purpose": "public_catalog",
+          "fallback_allowed": true
+        },
+        "page_binding": {
+          "slot_key": "product_group_cover:enhancement",
+          "position": 4
+        }
+      }
+    },
+    {
+      "id": "edge:public-group:enhancement",
+      "source": "group:enhancement",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "primary_tree": false,
+        "source": "utzig_visual_reconciliation_2026_09_23"
+      }
+    },
+    {
+      "id": "edge:direct-evidence:engine-bay-wash",
       "source": "product:engine-bay-wash",
       "target": "asset:engine-wash",
       "relation_type": "uses_asset",
-      "confidence": 1,
       "weight": 1,
       "metadata": {
         "active": true,
-        "role": "product_image",
         "primary_tree": false,
+        "source": "utzig_visual_reconciliation_2026_09_23",
+        "media_assignment": {
+          "active": true,
+          "position": 0,
+          "purpose": "public_catalog"
+        },
         "page_binding": {
           "slot_key": "product_image:engine-bay-wash",
           "position": 0
-        },
-        "source": "utzig_public_site_approval_2026_09_23"
+        }
       }
     },
     {
-      "id": "edge:service-image:ce55883a5bcef84c0564",
+      "id": "edge:direct-evidence:interior-cleaning",
+      "source": "product:interior-cleaning",
+      "target": "asset:interior",
+      "relation_type": "uses_asset",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "primary_tree": false,
+        "source": "utzig_visual_reconciliation_2026_09_23",
+        "media_assignment": {
+          "active": true,
+          "position": 0,
+          "purpose": "public_catalog"
+        },
+        "page_binding": {
+          "slot_key": "product_image:interior-cleaning",
+          "position": 0
+        }
+      }
+    },
+    {
+      "id": "edge:direct-evidence:technical-polish",
       "source": "product:technical-polish",
       "target": "asset:work-polish",
       "relation_type": "uses_asset",
-      "confidence": 1,
       "weight": 1,
       "metadata": {
         "active": true,
-        "role": "product_image",
         "primary_tree": false,
+        "source": "utzig_visual_reconciliation_2026_09_23",
+        "media_assignment": {
+          "active": true,
+          "position": 0,
+          "purpose": "public_catalog"
+        },
         "page_binding": {
           "slot_key": "product_image:technical-polish",
           "position": 0
-        },
-        "source": "utzig_public_site_approval_2026_09_23"
+        }
       }
     },
     {
-      "id": "edge:service-image:da279ea5eefcfc011bb7",
-      "source": "product:commercial-polish",
-      "target": "asset:process",
+      "id": "edge:direct-evidence:glass-polish",
+      "source": "product:glass-polish",
+      "target": "asset:glass-before-after",
       "relation_type": "uses_asset",
-      "confidence": 1,
       "weight": 1,
       "metadata": {
         "active": true,
-        "role": "product_image",
         "primary_tree": false,
-        "page_binding": {
-          "slot_key": "product_image:commercial-polish",
-          "position": 0
+        "source": "utzig_visual_reconciliation_2026_09_23",
+        "media_assignment": {
+          "active": true,
+          "position": 0,
+          "purpose": "public_catalog"
         },
-        "source": "utzig_public_site_approval_2026_09_23"
+        "page_binding": {
+          "slot_key": "product_image:glass-polish",
+          "position": 0
+        }
       }
     },
     {
-      "id": "edge:service-image:4d4cfae2c5b4212c21e0",
+      "id": "edge:direct-evidence:headlight-restoration",
       "source": "product:headlight-restoration",
       "target": "asset:headlight-ready",
       "relation_type": "uses_asset",
-      "confidence": 1,
       "weight": 1,
       "metadata": {
         "active": true,
-        "role": "product_image",
         "primary_tree": false,
+        "source": "utzig_visual_reconciliation_2026_09_23",
+        "media_assignment": {
+          "active": true,
+          "position": 0,
+          "purpose": "public_catalog"
+        },
         "page_binding": {
           "slot_key": "product_image:headlight-restoration",
           "position": 0
-        },
-        "source": "utzig_public_site_approval_2026_09_23"
+        }
       }
     },
     {
-      "id": "edge:service-image:db58742048a00443220a",
-      "source": "product:vitrification",
-      "target": "asset:work-polish",
+      "id": "edge:direct-evidence:windshield-crystallization",
+      "source": "product:windshield-crystallization",
+      "target": "asset:glass-before",
       "relation_type": "uses_asset",
-      "confidence": 1,
       "weight": 1,
       "metadata": {
         "active": true,
-        "role": "product_image",
         "primary_tree": false,
-        "page_binding": {
-          "slot_key": "product_image:vitrification",
-          "position": 0
+        "source": "utzig_visual_reconciliation_2026_09_23",
+        "media_assignment": {
+          "active": true,
+          "position": 0,
+          "purpose": "public_catalog"
         },
-        "source": "utzig_public_site_approval_2026_09_23"
+        "page_binding": {
+          "slot_key": "product_image:windshield-crystallization",
+          "position": 0
+        }
       }
     },
     {
-      "id": "edge:service-image:c1542270886c69e4a836",
-      "source": "product:ppf",
-      "target": "asset:hero",
-      "relation_type": "uses_asset",
-      "confidence": 1,
+      "id": "edge:primary:windshield-crystallization-copy",
+      "source": "product:windshield-crystallization",
+      "target": "copy:windshield-crystallization",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:primary:windshield-crystallization-faq",
+      "source": "copy:windshield-crystallization",
+      "target": "faq:service:windshield-crystallization",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:windshield-crystallization-copy",
+      "source": "product:windshield-crystallization",
+      "target": "copy:windshield-crystallization",
+      "relation_type": "supports_copy",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:copy-faq-windshield-crystallization",
+      "source": "copy:windshield-crystallization",
+      "target": "faq:service:windshield-crystallization",
+      "relation_type": "answers_question",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:faq-embed-windshield-crystallization",
+      "source": "faq:service:windshield-crystallization",
+      "target": "embedded:utzig",
+      "relation_type": "publishes_to",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:campaign-fallback:automotive-detailing",
+      "source": "campaign:automotive-detailing",
+      "target": "asset:process",
+      "relation_type": "campaign_has_asset",
       "weight": 1,
       "metadata": {
         "active": true,
-        "role": "product_image",
         "primary_tree": false,
-        "page_binding": {
-          "slot_key": "product_image:ppf",
-          "position": 0
+        "source": "utzig_visual_reconciliation_2026_09_23",
+        "media_assignment": {
+          "active": true,
+          "position": 0,
+          "purpose": "public_catalog",
+          "fallback_allowed": true
         },
-        "source": "utzig_public_site_approval_2026_09_23"
+        "page_binding": {
+          "slot_key": "hero",
+          "position": 0
+        }
       }
+    },
+    {
+      "id": "edge:public-product:windshield-crystallization",
+      "source": "product:windshield-crystallization",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "primary_tree": false,
+        "source": "utzig_visual_reconciliation_2026_09_23"
+      }
+    },
+    {
+      "id": "edge:enhancement-bodywork",
+      "source": "group:enhancement",
+      "target": "product:bodywork",
+      "weight": 1.0,
+      "primary": true,
+      "metadata": {
+        "active": false,
+        "graph_json_edge_id": "edge:enhancement-bodywork",
+        "primary_tree": false,
+        "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
+      },
+      "relation_type": "contains"
+    },
+    {
+      "id": "edge:enhancement-painting",
+      "source": "group:enhancement",
+      "target": "product:painting",
+      "weight": 1.0,
+      "primary": true,
+      "metadata": {
+        "active": false,
+        "graph_json_edge_id": "edge:enhancement-painting",
+        "primary_tree": false,
+        "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
+      },
+      "relation_type": "contains"
+    },
+    {
+      "id": "edge:preservation-detailed-wash",
+      "source": "group:preservation",
+      "target": "product:detailed-wash",
+      "weight": 1.0,
+      "primary": true,
+      "metadata": {
+        "active": false,
+        "graph_json_edge_id": "edge:preservation-detailed-wash",
+        "primary_tree": false,
+        "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
+      },
+      "relation_type": "contains"
+    },
+    {
+      "id": "edge:preservation-engine-bay-wash",
+      "source": "group:preservation",
+      "target": "product:engine-bay-wash",
+      "weight": 1.0,
+      "primary": true,
+      "metadata": {
+        "active": false,
+        "graph_json_edge_id": "edge:preservation-engine-bay-wash",
+        "primary_tree": false,
+        "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
+      },
+      "relation_type": "contains"
+    },
+    {
+      "id": "edge:preservation-glass-polish",
+      "source": "group:preservation",
+      "target": "product:glass-polish",
+      "weight": 1.0,
+      "primary": true,
+      "metadata": {
+        "active": false,
+        "graph_json_edge_id": "edge:preservation-glass-polish",
+        "primary_tree": false,
+        "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
+      },
+      "relation_type": "contains"
+    },
+    {
+      "id": "edge:preservation-interior-cleaning",
+      "source": "group:preservation",
+      "target": "product:interior-cleaning",
+      "weight": 1.0,
+      "primary": true,
+      "metadata": {
+        "active": false,
+        "graph_json_edge_id": "edge:preservation-interior-cleaning",
+        "primary_tree": false,
+        "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
+      },
+      "relation_type": "contains"
+    },
+    {
+      "id": "edge:service-image:3d982199e860180c1a63",
+      "source": "product:evaluation",
+      "target": "asset:process",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "role": "product_image",
+        "active": false,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "page_binding": {
+          "position": 0,
+          "slot_key": "product_image:evaluation"
+        },
+        "graph_json_edge_id": "edge:service-image:3d982199e860180c1a63",
+        "primary_tree": false,
+        "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
+      },
+      "relation_type": "uses_asset"
     },
     {
       "id": "edge:service-image:853fac9ecb4c6ee59497",
       "source": "product:bodywork",
       "target": "asset:process",
-      "relation_type": "uses_asset",
-      "confidence": 1,
-      "weight": 1,
+      "weight": 1.0,
+      "primary": false,
       "metadata": {
-        "active": true,
         "role": "product_image",
-        "primary_tree": false,
+        "active": false,
+        "source": "utzig_public_site_approval_2026_09_23",
         "page_binding": {
-          "slot_key": "product_image:bodywork",
-          "position": 0
+          "position": 0,
+          "slot_key": "product_image:bodywork"
         },
-        "source": "utzig_public_site_approval_2026_09_23"
-      }
+        "graph_json_edge_id": "edge:service-image:853fac9ecb4c6ee59497",
+        "primary_tree": false,
+        "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
+      },
+      "relation_type": "uses_asset"
+    },
+    {
+      "id": "edge:service-image:b17cec5c8c7e3e272417",
+      "source": "product:detailed-wash",
+      "target": "asset:engine-detail",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "role": "product_image",
+        "active": false,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "page_binding": {
+          "position": 0,
+          "slot_key": "product_image:detailed-wash"
+        },
+        "graph_json_edge_id": "edge:service-image:b17cec5c8c7e3e272417",
+        "primary_tree": false,
+        "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
+      },
+      "relation_type": "uses_asset"
+    },
+    {
+      "id": "edge:service-image:c1542270886c69e4a836",
+      "source": "product:ppf",
+      "target": "asset:hero",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "role": "product_image",
+        "active": false,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "page_binding": {
+          "position": 0,
+          "slot_key": "product_image:ppf"
+        },
+        "graph_json_edge_id": "edge:service-image:c1542270886c69e4a836",
+        "primary_tree": false,
+        "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
+      },
+      "relation_type": "uses_asset"
+    },
+    {
+      "id": "edge:service-image:da279ea5eefcfc011bb7",
+      "source": "product:commercial-polish",
+      "target": "asset:process",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "role": "product_image",
+        "active": false,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "page_binding": {
+          "position": 0,
+          "slot_key": "product_image:commercial-polish"
+        },
+        "graph_json_edge_id": "edge:service-image:da279ea5eefcfc011bb7",
+        "primary_tree": false,
+        "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
+      },
+      "relation_type": "uses_asset"
+    },
+    {
+      "id": "edge:service-image:db58742048a00443220a",
+      "source": "product:vitrification",
+      "target": "asset:work-polish",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "role": "product_image",
+        "active": false,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "page_binding": {
+          "position": 0,
+          "slot_key": "product_image:vitrification"
+        },
+        "graph_json_edge_id": "edge:service-image:db58742048a00443220a",
+        "primary_tree": false,
+        "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
+      },
+      "relation_type": "uses_asset"
     },
     {
       "id": "edge:service-image:f824190e46bd78fea83e",
       "source": "product:painting",
       "target": "asset:engine-final",
-      "relation_type": "uses_asset",
-      "confidence": 1,
-      "weight": 1,
+      "weight": 1.0,
+      "primary": false,
       "metadata": {
-        "active": true,
         "role": "product_image",
-        "primary_tree": false,
+        "active": false,
+        "source": "utzig_public_site_approval_2026_09_23",
         "page_binding": {
-          "slot_key": "product_image:painting",
-          "position": 0
+          "position": 0,
+          "slot_key": "product_image:painting"
         },
-        "source": "utzig_public_site_approval_2026_09_23"
-      }
+        "graph_json_edge_id": "edge:service-image:f824190e46bd78fea83e",
+        "primary_tree": false,
+        "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
+      },
+      "relation_type": "uses_asset"
     }
   ]
 }

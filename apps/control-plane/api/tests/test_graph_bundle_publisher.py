@@ -137,6 +137,35 @@ def test_stage_bundle_rejects_stale_human_approval_before_writes(monkeypatch):
     assert writes == []
 
 
+def test_inactive_edge_tombstone_is_valid_but_excluded_from_runtime():
+    bundle = _bundle()
+    persona_id = next(
+        node["id"] for node in bundle["nodes"] if node["node_type"] == "persona"
+    )
+    existing_parent = next(
+        edge for edge in bundle["edges"]
+        if edge.get("relation_type") == "contains" and edge.get("source") != persona_id
+    )
+    bundle["edges"].append({
+        "id": "edge:reviewed-soft-removal",
+        "source": persona_id,
+        "target": existing_parent["target"],
+        "relation_type": "contains",
+        "weight": 1,
+        "metadata": {"active": False, "removal_reason": "test"},
+    })
+
+    normalized = graph_bundle.normalize_bundle(bundle)
+    document = graph_bundle.compile_bundle(normalized)
+
+    assert any(
+        edge["id"] == "edge:reviewed-soft-removal"
+        and edge["metadata"]["active"] is False
+        for edge in normalized["edges"]
+    )
+    assert all(edge["id"] != "edge:reviewed-soft-removal" for edge in document["edges"])
+
+
 class _PublicationQuery:
     def __init__(self, publication: dict):
         self.publication = publication

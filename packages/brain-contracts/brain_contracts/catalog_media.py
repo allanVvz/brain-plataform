@@ -55,8 +55,19 @@ def _media(node):
             "bucket": bucket, "path": path, "url": url, "mime": mime or None}
 
 
+def _position(edge):
+    metadata = edge.get("metadata") or {}
+    assignment = metadata.get("media_assignment") or {}
+    binding = metadata.get("page_binding") or {}
+    value = assignment.get("position", binding.get("position"))
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def resolve_catalog_media(nodes, edges, *, persona_id, scoped_ids, owner_id,
-                          publication=None, available=None):
+                          publication=None, available=None, fallback_policy=None):
     """Pin > latest direct assignment > latest eligible catalog descendant.
 
     Pins only apply to the requested owner. Timestamp order never uses upload
@@ -66,7 +77,18 @@ def resolve_catalog_media(nodes, edges, *, persona_id, scoped_ids, owner_id,
     allowed = {str(i) for i in scoped_ids if str(i) in by_id
                and str(by_id[str(i)].get("persona_id") or persona_id) == str(persona_id)}
     if owner_id not in allowed or by_id[owner_id].get("node_type") not in CATALOG_TYPES:
-        return {"assets": [], "cover": None, "cover_origin": None}
+        return {"assets": [], "cover": None, "cover_origin": None, "media": {"primary": None}}
+    # The public-site fallback is deliberately opt-in.  The legacy resolver is
+    # also used by conversational tooling, where historical descendant
+    # inheritance remains the compatibility contract.
+    policy = fallback_policy if isinstance(fallback_policy, dict) and fallback_policy.get("enabled") is True else None
+    galleries = {node_id for node_id in allowed if by_id[node_id].get("node_type") == "gallery"}
+    gallery_assets = {
+        str(edge.get("source") or edge.get("source_node_id") or "")
+        for edge in edges
+        if active(edge) and edge.get("relation_type") == "gallery_asset"
+        and str(edge.get("target") or edge.get("target_node_id") or "") in galleries
+    }
     children, assignments = {}, {}
     for edge in edges:
         source = str(edge.get("source") or edge.get("source_node_id") or "")
@@ -80,6 +102,9 @@ def resolve_catalog_media(nodes, edges, *, persona_id, scoped_ids, owner_id,
             children.setdefault(source, []).append(target)
         if relation in ASSET_RELATIONS and by_id[target].get("node_type") == "asset":
             candidate = _media(by_id[target])
+            # A fallback cannot turn an uncurated upload into public media.
+            if policy and target not in gallery_assets:
+                continue
             if candidate is None or (available and not available(candidate)):
                 continue
             metadata = edge.get("metadata") or {}
@@ -88,9 +113,52 @@ def resolve_catalog_media(nodes, edges, *, persona_id, scoped_ids, owner_id,
                 continue
             candidate.update({"edge_id": edge.get("id"), "owner_node_id": source,
                               "assigned_at": assignment.get("assigned_at") or edge.get("created_at"),
+                              "position": _position(edge),
                               "pinned": assignment.get("pinned") is True,
                               "publication": publication})
             assignments.setdefault(source, []).append(candidate)
+    if policy:
+        # A candidate must state an explicit order.  Upload/creation time is
+        # never a visual priority in the public resolver.
+        for owner, candidates in list(assignments.items()):
+            assignments[owner] = [item for item in candidates if item["position"] is not None]
+
+        def ordered(candidates):
+            return sorted(candidates, key=lambda item: (item["position"], item["asset_node_id"], str(item["edge_id"] or "")))
+
+        direct = ordered(assignments.get(owner_id, []))
+        primary, origin = (direct[0], "product") if direct else (None, None)
+        if primary is None and by_id[owner_id].get("node_type") == "product":
+            parents_by_child = {child: parent for parent, values in children.items() for child in values}
+            ancestors, current = [], owner_id
+            while current in parents_by_child:
+                current = parents_by_child[current]
+                if current in ancestors:
+                    break
+                ancestors.append(current)
+            group_candidates = [item for parent in ancestors if by_id[parent].get("node_type") in GROUP_TYPES
+                                for item in assignments.get(parent, [])]
+            group_candidates = [item for item in group_candidates
+                                if (next((e for e in edges if str(e.get("id")) == str(item["edge_id"])), {}).get("metadata") or {}).get("media_assignment", {}).get("fallback_allowed") is True]
+            if group_candidates:
+                primary, origin = ordered(group_candidates)[0], "group"
+        if primary is None:
+            campaign_id = policy.get("campaign_id")
+            campaign_candidates = assignments.get(str(campaign_id), []) if campaign_id in allowed else []
+            campaign_candidates = [item for item in campaign_candidates
+                                   if (next((e for e in edges if str(e.get("id")) == str(item["edge_id"])), {}).get("metadata") or {}).get("media_assignment", {}).get("fallback_allowed") is True]
+            if campaign_candidates:
+                primary, origin = ordered(campaign_candidates)[0], "campaign"
+        primary_payload = None
+        if primary:
+            primary_payload = {**primary, "origin": origin,
+                               "representative": origin != "product",
+                               "dedupe_key": f"{origin}:{primary['owner_node_id']}:{primary['asset_node_id']}"}
+        # `assets` stays a list of direct images for callers that predate the
+        # richer public contract.  A representative image is only in media.
+        return {"assets": direct, "cover": direct[0] if direct else None,
+                "cover_origin": ({"kind": "direct", "owner_node_id": direct[0]["owner_node_id"], "edge_id": direct[0]["edge_id"]} if direct else None),
+                "media": {"primary": primary_payload}}
     direct = assignments.get(owner_id, [])
     inherited = []
     if not direct and by_id[owner_id].get("node_type") in GROUP_TYPES:

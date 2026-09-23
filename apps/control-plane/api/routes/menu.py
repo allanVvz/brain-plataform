@@ -964,6 +964,35 @@ def _compiled_catalog_payload(
         errors.append(f"{product_id}:published_group_relation_required")
 
     eligible_faq_ids = {str(value) for value in document.get("eligible_faq_node_ids") or []}
+    fallback_policy = (persona_node or {}).get("data", {}).get("public_site", {}).get("catalog_media_fallback") or {}
+    fallback_campaign_id = str(fallback_policy.get("campaign_id") or "")
+
+    def _public_campaign_fallback() -> Optional[dict]:
+        """The compiled path mirrors the opt-in catalog-media precedence.
+
+        It intentionally uses an explicit campaign id and page-binding position;
+        neither mutable node timestamps nor upload time participate.
+        """
+        if fallback_policy.get("enabled") is not True or fallback_campaign_id not in nodes:
+            return None
+        for edge in sorted(asset_edges_by_owner.get(fallback_campaign_id, []), key=lambda item: _read_int(
+            ((item.get("metadata") or {}).get("media_assignment") or {}).get(
+                "position", ((item.get("metadata") or {}).get("page_binding") or {}).get("position")
+            ), 0,
+        )):
+            assignment = (edge.get("metadata") or {}).get("media_assignment") or {}
+            if assignment.get("fallback_allowed") is not True:
+                continue
+            asset = asset_nodes.get(str(edge.get("target") or ""))
+            if asset and (payload := _compiled_asset_payload(
+                asset, edge, gallery_by_node=gallery_by_node, granted_node_ids=granted_node_ids,
+                granted_asset_ids=granted_asset_ids, alt=str(nodes[fallback_campaign_id].get("title") or ""),
+                path=f"{fallback_campaign_id}.fallback", errors=errors,
+            )):
+                return payload
+        return None
+
+    campaign_fallback = _public_campaign_fallback()
     compiled_products: dict[str, dict] = {}
     for product_id, node in product_nodes.items():
         data = node.get("data") or {}
@@ -1029,6 +1058,20 @@ def _compiled_catalog_payload(
         )
         if cover_payload is None:
             cover_payload = next((asset for product in products for asset in product["assets"]), None)
+        # Keep legacy `assets` as direct evidence only.  The complete public
+        # resolution lives in media.primary, so a shared group cover appears
+        # once on the group card instead of being repeated for every service.
+        for product in products:
+            direct = (product.get("assets") or [None])[0]
+            primary = direct or cover_payload or campaign_fallback
+            if primary:
+                origin = "product" if direct else "group" if cover_payload else "campaign"
+                product["media"] = {"primary": {**primary, "origin": origin,
+                    "owner_node_id": product["id"] if direct else group_id if cover_payload else fallback_campaign_id,
+                    "representative": origin != "product",
+                    "dedupe_key": f"{origin}:{product['id'] if direct else group_id if cover_payload else fallback_campaign_id}:{primary.get('asset_node_id') or primary.get('asset_id')}"}}
+            else:
+                product["media"] = {"primary": None}
         categories.append({
             "id": group_id,
             "slug": str(node.get("slug") or group_id),
@@ -1045,6 +1088,8 @@ def _compiled_catalog_payload(
             "position": _read_int(data.get("position") or data.get("sort_order"), 0),
             "cta": _site_cta(node),
             "assets": [cover_payload] if cover_payload else [],
+            "media": {"primary": ({**cover_payload, "origin": "group", "owner_node_id": group_id,
+                "representative": False, "dedupe_key": f"group:{group_id}:{cover_payload.get('asset_node_id') or cover_payload.get('asset_id')}"} if cover_payload else None)},
             "products": products,
         })
     categories.sort(key=lambda item: item["position"])

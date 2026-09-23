@@ -74,3 +74,47 @@ def test_model_selection_rejects_stale_duplicate_out_of_scope_and_over_limit():
                                    ([{"asset_node_id": "foreign"}], "v1", 3)]:
         with pytest.raises(ValueError):
             validate_image_selection(choices, assets, publication={"id": version}, max_images=limit)
+
+
+def test_opt_in_public_fallback_is_positioned_curated_and_never_repeats_as_direct_asset():
+    nodes, edges = fixture()
+    nodes.extend([
+        {"id": "gallery", "node_type": "gallery", "persona_id": "p", "data": {}},
+        {"id": "campaign", "node_type": "campaign", "persona_id": "p", "data": {}},
+        {"id": "fallback", "node_type": "asset", "persona_id": "p", "data": {"media": {"url": "https://cdn.example/fallback.jpg"}}},
+    ])
+    # Direct product evidence wins regardless of the edge list's upload dates.
+    for edge in edges:
+        if edge["source"] == "p":
+            edge["metadata"]["media_assignment"]["position"] = 9 if edge["target"] == "a" else 1
+        if edge["target"] in {"a", "b"}:
+            edges.append({"source": edge["target"], "target": "gallery", "relation_type": "gallery_asset"})
+    edges.extend([
+        {"id": "group-cover", "source": "g", "target": "fallback", "relation_type": "category_has_asset",
+         "metadata": {"media_assignment": {"position": 0, "fallback_allowed": True}}},
+        {"source": "fallback", "target": "gallery", "relation_type": "gallery_asset"},
+        {"id": "campaign-cover", "source": "campaign", "target": "fallback", "relation_type": "campaign_has_asset",
+         "metadata": {"media_assignment": {"position": 0, "fallback_allowed": True}}},
+    ])
+    scoped = {node["id"] for node in nodes}
+    policy = {"enabled": True, "campaign_id": "campaign"}
+    product = resolve_catalog_media(nodes, edges, persona_id="p", scoped_ids=scoped, owner_id="p", fallback_policy=policy)
+    assert [item["node_id"] for item in product["assets"]] == ["b", "a"]
+    assert product["media"]["primary"]["origin"] == "product"
+    # No product evidence: group cover is representative and does not enter
+    # legacy direct assets, which lets a grouped catalog render it once.
+    without_direct = [edge for edge in edges if not (edge.get("source") == "p" and edge.get("target") in {"a", "b"})]
+    fallback = resolve_catalog_media(nodes, without_direct, persona_id="p", scoped_ids=scoped, owner_id="p", fallback_policy=policy)
+    assert fallback["assets"] == []
+    assert fallback["media"]["primary"]["origin"] == "group"
+    assert fallback["media"]["primary"]["representative"] is True
+
+
+def test_opt_in_public_fallback_rejects_asset_without_gallery_or_position():
+    nodes, edges = fixture()
+    nodes.append({"id": "campaign", "node_type": "campaign", "persona_id": "p", "data": {}})
+    edges.append({"source": "campaign", "target": "a", "relation_type": "campaign_has_asset",
+                  "metadata": {"media_assignment": {"fallback_allowed": True}}})
+    result = resolve_catalog_media(nodes, edges, persona_id="p", scoped_ids={n["id"] for n in nodes}, owner_id="p",
+                                   fallback_policy={"enabled": True, "campaign_id": "campaign"})
+    assert result["media"]["primary"] is None

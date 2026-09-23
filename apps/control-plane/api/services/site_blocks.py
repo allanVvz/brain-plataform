@@ -237,6 +237,24 @@ def _resolve_groups(
     scoped: set[str],
 ) -> list[dict[str, Any]]:
     children, _ = _primary_tree([e for e in edges if active(e)])
+    persona = next((node for node in nodes.values()
+                    if node.get("node_type") == "persona"
+                    and str(node.get("slug") or "") == str(block.get("persona_slug") or "")), None)
+    public_site = _data(persona or {}).get("public_site") or {}
+    fallback_policy = public_site.get("catalog_media_fallback")
+    galleries = {node_id for node_id in scoped if (nodes.get(node_id) or {}).get("node_type") == "gallery"}
+    # Gallery is a terminal curation sink, so its assets are not primary-tree
+    # descendants.  Admit only its explicit Asset -> Gallery members for the
+    # opt-in public projection; unrelated branch nodes stay out of scope.
+    media_scoped = set(scoped)
+    if isinstance(fallback_policy, dict) and fallback_policy.get("enabled") is True:
+        campaign_id = fallback_policy.get("campaign_id")
+        if campaign_id in nodes:
+            media_scoped.add(campaign_id)
+        media_scoped |= {
+            edge["source"] for edge in edges if active(edge)
+            and edge.get("relation_type") == "gallery_asset" and edge.get("target") in galleries
+        }
     out = []
     for group_id in sorted(scoped):
         group = nodes.get(group_id) or {}
@@ -251,8 +269,8 @@ def _resolve_groups(
         prices = [p for p in prices if p is not None]
         def media(owner):
             return resolve_catalog_media(list(nodes.values()), edges,
-                persona_id=block["persona_id"], scoped_ids=scoped, owner_id=owner,
-                publication=block.get("publication"))
+                persona_id=block["persona_id"], scoped_ids=media_scoped, owner_id=owner,
+                publication=block.get("publication"), fallback_policy=fallback_policy)
         out.append({"node_id": group_id, "slug": group.get("slug"),
                     "title": group.get("title"), "summary": _meaningful_summary(group),
                     "product_count": len(product_ids),
@@ -382,7 +400,7 @@ def resolve_blocks(
                 "pricing_model": brand_data.get("pricing_model"),
             }
         elif kind == "group_index":
-            payload = {"groups": _resolve_groups({**spec, "persona_id": bundle["persona"]["id"], "publication": bundle.get("publication")}, nodes, edges, scoped)}
+            payload = {"groups": _resolve_groups({**spec, "persona_id": bundle["persona"]["id"], "persona_slug": bundle["persona"]["slug"], "publication": bundle.get("publication")}, nodes, edges, scoped)}
         elif kind == "price_range":
             payload = {
                 "min_cents": min(prices) if prices else None,

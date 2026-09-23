@@ -105,7 +105,7 @@ def test_utzig_candidate_compiles_as_publishable_approved_plan() -> None:
     assert plan["disposition"] == "awaiting_approval"
     assert plan["publication_allowed"] is True
     assert plan["approval_scope"] == "publication_plan"
-    assert len(plan["branches_affected"]) == 12
+    assert len(plan["branches_affected"]) == 13
     assert bundle["persona"] == {
         "id": "e7b7b2e8-859e-4185-b675-79bc0f3d846e",
         "slug": "utzig-garage",
@@ -116,12 +116,16 @@ def test_utzig_candidate_compiles_as_publishable_approved_plan() -> None:
         for edge in bundle["edges"]
         if edge["relation_type"] == "publishes_to" and edge["target"] == "gallery:utzig"
     }
-    assert len(public_grants) == 32
+    assert len(public_grants) == 35
     assert {
-        edge["source"]
-        for edge in bundle["edges"]
-        if edge["relation_type"] == "uses_asset"
-    } == {node["id"] for node in bundle["nodes"] if node["node_type"] == "product"}
+            edge["source"]
+            for edge in bundle["edges"]
+            if edge["relation_type"] == "uses_asset"
+            and edge.get("metadata", {}).get("active", True) is not False
+        } == {
+        "product:engine-bay-wash", "product:interior-cleaning", "product:technical-polish",
+        "product:glass-polish", "product:headlight-restoration", "product:windshield-crystallization",
+    }
 
 
 def test_appointment_fields_are_graph_owned_and_use_agentic_execution() -> None:
@@ -139,7 +143,7 @@ def test_appointment_fields_are_graph_owned_and_use_agentic_execution() -> None:
     assert policy["required_fields"] == ["nome_cliente", "servico"]
 
     products = [node for node in bundle["nodes"] if node["node_type"] == "product"]
-    assert len(products) == 12
+    assert len(products) == 13
     for product in products:
         required = product["data"]["booking"]["required_fields"]
         declared = {
