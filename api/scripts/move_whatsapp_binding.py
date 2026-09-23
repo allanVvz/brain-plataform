@@ -255,12 +255,22 @@ def main() -> None:
         {"process_mode": "n8n" if args.routing == "preserve_agentic" else "internal"},
     )
 
+    binding = result.data[0] if result.data else {}
+    # This command is commonly executed through CI.  Keep its audit output
+    # useful without serializing provider credentials or opaque metadata.
+    safe_binding = {
+        key: binding.get(key)
+        for key in (
+            "id", "persona_id", "channel", "provider", "whatsapp_number",
+            "active", "connection_status", "n8n_workflow_id",
+        )
+    }
     print(json.dumps({
         **plan,
         "ok": True,
         "applied": True,
         "detached_lead_ids": detached_lead_ids,
-        "updated_binding": result.data[0] if result.data else None,
+        "updated_binding": safe_binding,
     }, ensure_ascii=False, indent=2, default=str))
 
 

@@ -43,4 +43,5 @@ jobs:
             [[ "$(docker inspect -f '{{.State.Health.Status}}' "$control_container")" == healthy ]]
             args=(python scripts/move_whatsapp_binding.py --from-persona-slug aurora --to-persona-slug utzig-garage --provider meta_cloud --routing preserve_agentic)
             [[ "$REASSIGN_ACTION" == apply ]] && args+=(--apply)
-            docker compose --env-file .env.compose -f docker-compose.yml -f infra/microservices/docker-compose.blue-green.yml exec -T "$control_service" "${args[@]}"
+            docker compose --env-file .env.compose -f docker-compose.yml -f infra/microservices/docker-compose.blue-green.yml exec -T "$control_service" "${args[@]}" \
+              | jq 'if has("updated_binding") then .updated_binding |= {id, persona_id, channel, provider, whatsapp_number, active, connection_status, n8n_workflow_id} else . end'
