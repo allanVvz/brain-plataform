@@ -1,21 +1,17 @@
 {
   "bundle_version": "1.0",
   "persona": {
-    "id": "9872b103-fb68-51f0-bccc-2d9f5e1c2a58",
+    "id": "e7b7b2e8-859e-4185-b675-79bc0f3d846e",
     "slug": "utzig-garage"
   },
   "metadata": {
     "purpose": "utzig_garage_candidate_dry_run",
-    "publication_allowed": false,
-    "publication_blockers": [
-      "productive_persona_uuid_not_confirmed",
-      "approved_public_asset_registry_or_cdn_missing",
-      "quick_booking_public_phone_pending_binding_reassignment"
-    ],
+    "publication_allowed": true,
+    "publication_blockers": [],
     "draft_persona_id": {
-      "value": "9872b103-fb68-51f0-bccc-2d9f5e1c2a58",
-      "derivation": "uuid5(NAMESPACE_URL, brain-ai:persona:utzig-garage:draft)",
-      "productive": false
+      "value": "e7b7b2e8-859e-4185-b675-79bc0f3d846e",
+      "derivation": "production_persona_registry",
+      "productive": true
     },
     "asset_policy": {
       "allowlisted_google_drive_file_ids": [
@@ -36,7 +32,7 @@
         "1suHfmj5FCpNUa_yn_HpF0ug59pu9tjsj",
         "1xvwjYcfyGwsMEh2pVXNmWJ4NSc6MAl-n"
       ],
-      "web_derivatives": "pending_approved_asset_registry",
+      "web_derivatives": "approved_public_registry",
       "logo_transform_policy": "preserve_original_no_redraw_no_recolor"
     },
     "embedding_profile": {
@@ -168,8 +164,8 @@
           "brand_family": "utzig-garage",
           "brand_channel": "estetica-automotiva",
           "whatsapp": {
-            "phone": "5551997920242",
-            "message_template": "Olá, gostaria de falar com o Alemão."
+            "phone": "555131916538",
+            "message_template": "Olá! Gostaria de pedir uma avaliação na Utzig Garage."
           },
           "identity": {
             "logo_round": {
@@ -3494,10 +3490,27 @@
           "original_preserved": true
         },
         "web_derivative": {
-          "status": "pending_approved_asset_registry",
-          "url": null
+          "status": "approved",
+          "url": "https://storage.vzforeal.com/storage/v1/object/public/assets-derived/e7b7b2e8-859e-4185-b675-79bc0f3d846e/ef70c1ffbb915c68695bf500e087c79952f63a214978bb227d2fcea85d7dab33/logo.webp",
+          "content_sha256": "ef70c1ffbb915c68695bf500e087c79952f63a214978bb227d2fcea85d7dab33",
+          "width": 720,
+          "height": 720,
+          "mime_type": "image/webp",
+          "storage_bucket": "assets-derived",
+          "storage_path": "e7b7b2e8-859e-4185-b675-79bc0f3d846e/ef70c1ffbb915c68695bf500e087c79952f63a214978bb227d2fcea85d7dab33/logo.webp",
+          "profile": "webp_max_1600_q82_v1"
         },
-        "public_asset_ready": false
+        "public_asset_ready": true,
+        "registry_id": "8b69bcc1-cda0-56f1-b8ee-136538806173",
+        "asset_id": "8b69bcc1-cda0-56f1-b8ee-136538806173",
+        "content_sha256": "ef70c1ffbb915c68695bf500e087c79952f63a214978bb227d2fcea85d7dab33",
+        "media": {
+          "registry_id": "8b69bcc1-cda0-56f1-b8ee-136538806173",
+          "sha256": "ef70c1ffbb915c68695bf500e087c79952f63a214978bb227d2fcea85d7dab33",
+          "width": 720,
+          "height": 720,
+          "mime_type": "image/webp"
+        }
       }
     },
     {
@@ -3524,10 +3537,27 @@
           "original_preserved": true
         },
         "web_derivative": {
-          "status": "pending_approved_asset_registry",
-          "url": null
+          "status": "approved",
+          "url": "https://storage.vzforeal.com/storage/v1/object/public/assets-derived/e7b7b2e8-859e-4185-b675-79bc0f3d846e/3e7477ffd92d06c9b41414baa9f0ec5670b78041e9d8ee0e2c6b6159674e094a/alemao-perfil.webp",
+          "content_sha256": "3e7477ffd92d06c9b41414baa9f0ec5670b78041e9d8ee0e2c6b6159674e094a",
+          "width": 1600,
+          "height": 1065,
+          "mime_type": "image/webp",
+          "storage_bucket": "assets-derived",
+          "storage_path": "e7b7b2e8-859e-4185-b675-79bc0f3d846e/3e7477ffd92d06c9b41414baa9f0ec5670b78041e9d8ee0e2c6b6159674e094a/alemao-perfil.webp",
+          "profile": "webp_max_1600_q82_v1"
         },
-        "public_asset_ready": false
+        "public_asset_ready": true,
+        "registry_id": "35c3bf4f-f902-5666-bec8-229e9d1696ee",
+        "asset_id": "35c3bf4f-f902-5666-bec8-229e9d1696ee",
+        "content_sha256": "3e7477ffd92d06c9b41414baa9f0ec5670b78041e9d8ee0e2c6b6159674e094a",
+        "media": {
+          "registry_id": "35c3bf4f-f902-5666-bec8-229e9d1696ee",
+          "sha256": "3e7477ffd92d06c9b41414baa9f0ec5670b78041e9d8ee0e2c6b6159674e094a",
+          "width": 1600,
+          "height": 1065,
+          "mime_type": "image/webp"
+        }
       }
     },
     {
@@ -3554,10 +3584,27 @@
           "original_preserved": true
         },
         "web_derivative": {
-          "status": "pending_approved_asset_registry",
-          "url": null
+          "status": "approved",
+          "url": "https://storage.vzforeal.com/storage/v1/object/public/assets-derived/e7b7b2e8-859e-4185-b675-79bc0f3d846e/94fcbf1d4ad0526b140a608298999f393903159a7acfe4c4cc3317c2d400ec12/alemao-perfil-editorial.webp",
+          "content_sha256": "94fcbf1d4ad0526b140a608298999f393903159a7acfe4c4cc3317c2d400ec12",
+          "width": 1600,
+          "height": 1065,
+          "mime_type": "image/webp",
+          "storage_bucket": "assets-derived",
+          "storage_path": "e7b7b2e8-859e-4185-b675-79bc0f3d846e/94fcbf1d4ad0526b140a608298999f393903159a7acfe4c4cc3317c2d400ec12/alemao-perfil-editorial.webp",
+          "profile": "webp_max_1600_q82_v1"
         },
-        "public_asset_ready": false
+        "public_asset_ready": true,
+        "registry_id": "b4342c1a-4d1a-5be2-802a-0524f8e96145",
+        "asset_id": "b4342c1a-4d1a-5be2-802a-0524f8e96145",
+        "content_sha256": "94fcbf1d4ad0526b140a608298999f393903159a7acfe4c4cc3317c2d400ec12",
+        "media": {
+          "registry_id": "b4342c1a-4d1a-5be2-802a-0524f8e96145",
+          "sha256": "94fcbf1d4ad0526b140a608298999f393903159a7acfe4c4cc3317c2d400ec12",
+          "width": 1600,
+          "height": 1065,
+          "mime_type": "image/webp"
+        }
       }
     },
     {
@@ -3584,10 +3631,27 @@
           "original_preserved": true
         },
         "web_derivative": {
-          "status": "pending_approved_asset_registry",
-          "url": null
+          "status": "approved",
+          "url": "https://storage.vzforeal.com/storage/v1/object/public/assets-derived/e7b7b2e8-859e-4185-b675-79bc0f3d846e/3fba91b1109e63b8f94fa335e4f9c437201c2a5919bd0f550fc2de5ab66a8f90/alemao-polindo.webp",
+          "content_sha256": "3fba91b1109e63b8f94fa335e4f9c437201c2a5919bd0f550fc2de5ab66a8f90",
+          "width": 893,
+          "height": 1600,
+          "mime_type": "image/webp",
+          "storage_bucket": "assets-derived",
+          "storage_path": "e7b7b2e8-859e-4185-b675-79bc0f3d846e/3fba91b1109e63b8f94fa335e4f9c437201c2a5919bd0f550fc2de5ab66a8f90/alemao-polindo.webp",
+          "profile": "webp_max_1600_q82_v1"
         },
-        "public_asset_ready": false
+        "public_asset_ready": true,
+        "registry_id": "4452571a-a948-5d92-ad23-3cb59916496b",
+        "asset_id": "4452571a-a948-5d92-ad23-3cb59916496b",
+        "content_sha256": "3fba91b1109e63b8f94fa335e4f9c437201c2a5919bd0f550fc2de5ab66a8f90",
+        "media": {
+          "registry_id": "4452571a-a948-5d92-ad23-3cb59916496b",
+          "sha256": "3fba91b1109e63b8f94fa335e4f9c437201c2a5919bd0f550fc2de5ab66a8f90",
+          "width": 893,
+          "height": 1600,
+          "mime_type": "image/webp"
+        }
       }
     },
     {
@@ -3611,10 +3675,27 @@
           "original_preserved": true
         },
         "web_derivative": {
-          "status": "pending_approved_asset_registry",
-          "url": null
+          "status": "approved",
+          "url": "https://storage.vzforeal.com/storage/v1/object/public/assets-derived/e7b7b2e8-859e-4185-b675-79bc0f3d846e/7ce7e4a02df6d1f8ef588eb97cf769d6e3874a3316a0cc856bddb29868c02374/trabalho-polimento.webp",
+          "content_sha256": "7ce7e4a02df6d1f8ef588eb97cf769d6e3874a3316a0cc856bddb29868c02374",
+          "width": 893,
+          "height": 1600,
+          "mime_type": "image/webp",
+          "storage_bucket": "assets-derived",
+          "storage_path": "e7b7b2e8-859e-4185-b675-79bc0f3d846e/7ce7e4a02df6d1f8ef588eb97cf769d6e3874a3316a0cc856bddb29868c02374/trabalho-polimento.webp",
+          "profile": "webp_max_1600_q82_v1"
         },
-        "public_asset_ready": false
+        "public_asset_ready": true,
+        "registry_id": "d0035acb-8ba9-57f9-ab6d-42c5a7b78494",
+        "asset_id": "d0035acb-8ba9-57f9-ab6d-42c5a7b78494",
+        "content_sha256": "7ce7e4a02df6d1f8ef588eb97cf769d6e3874a3316a0cc856bddb29868c02374",
+        "media": {
+          "registry_id": "d0035acb-8ba9-57f9-ab6d-42c5a7b78494",
+          "sha256": "7ce7e4a02df6d1f8ef588eb97cf769d6e3874a3316a0cc856bddb29868c02374",
+          "width": 893,
+          "height": 1600,
+          "mime_type": "image/webp"
+        }
       }
     },
     {
@@ -3638,10 +3719,27 @@
           "original_preserved": true
         },
         "web_derivative": {
-          "status": "pending_approved_asset_registry",
-          "url": null
+          "status": "approved",
+          "url": "https://storage.vzforeal.com/storage/v1/object/public/assets-derived/e7b7b2e8-859e-4185-b675-79bc0f3d846e/8136bac95b9604db406b3eba45f9e2ec2e90c51c31a693b95e2de46257652f9b/farol-pronto.webp",
+          "content_sha256": "8136bac95b9604db406b3eba45f9e2ec2e90c51c31a693b95e2de46257652f9b",
+          "width": 914,
+          "height": 1600,
+          "mime_type": "image/webp",
+          "storage_bucket": "assets-derived",
+          "storage_path": "e7b7b2e8-859e-4185-b675-79bc0f3d846e/8136bac95b9604db406b3eba45f9e2ec2e90c51c31a693b95e2de46257652f9b/farol-pronto.webp",
+          "profile": "webp_max_1600_q82_v1"
         },
-        "public_asset_ready": false
+        "public_asset_ready": true,
+        "registry_id": "3a733202-a535-599e-9713-2a91911c5937",
+        "asset_id": "3a733202-a535-599e-9713-2a91911c5937",
+        "content_sha256": "8136bac95b9604db406b3eba45f9e2ec2e90c51c31a693b95e2de46257652f9b",
+        "media": {
+          "registry_id": "3a733202-a535-599e-9713-2a91911c5937",
+          "sha256": "8136bac95b9604db406b3eba45f9e2ec2e90c51c31a693b95e2de46257652f9b",
+          "width": 914,
+          "height": 1600,
+          "mime_type": "image/webp"
+        }
       }
     },
     {
@@ -3665,10 +3763,27 @@
           "original_preserved": true
         },
         "web_derivative": {
-          "status": "pending_approved_asset_registry",
-          "url": null
+          "status": "approved",
+          "url": "https://storage.vzforeal.com/storage/v1/object/public/assets-derived/e7b7b2e8-859e-4185-b675-79bc0f3d846e/61ac5cb127117d3ef9e736a80f23a85733bcd66bb83c9ca3ea1b712b735a37d2/lavagem-cofre.webp",
+          "content_sha256": "61ac5cb127117d3ef9e736a80f23a85733bcd66bb83c9ca3ea1b712b735a37d2",
+          "width": 914,
+          "height": 1600,
+          "mime_type": "image/webp",
+          "storage_bucket": "assets-derived",
+          "storage_path": "e7b7b2e8-859e-4185-b675-79bc0f3d846e/61ac5cb127117d3ef9e736a80f23a85733bcd66bb83c9ca3ea1b712b735a37d2/lavagem-cofre.webp",
+          "profile": "webp_max_1600_q82_v1"
         },
-        "public_asset_ready": false
+        "public_asset_ready": true,
+        "registry_id": "230c52ee-7429-558b-af8c-2f7f4cdad6c7",
+        "asset_id": "230c52ee-7429-558b-af8c-2f7f4cdad6c7",
+        "content_sha256": "61ac5cb127117d3ef9e736a80f23a85733bcd66bb83c9ca3ea1b712b735a37d2",
+        "media": {
+          "registry_id": "230c52ee-7429-558b-af8c-2f7f4cdad6c7",
+          "sha256": "61ac5cb127117d3ef9e736a80f23a85733bcd66bb83c9ca3ea1b712b735a37d2",
+          "width": 914,
+          "height": 1600,
+          "mime_type": "image/webp"
+        }
       }
     },
     {
@@ -3692,10 +3807,27 @@
           "original_preserved": true
         },
         "web_derivative": {
-          "status": "pending_approved_asset_registry",
-          "url": null
+          "status": "approved",
+          "url": "https://storage.vzforeal.com/storage/v1/object/public/assets-derived/e7b7b2e8-859e-4185-b675-79bc0f3d846e/037c5a136ad10ef2231977e0e403020ec668dec18c179ef13dc62b24e00170a7/farol-antes.webp",
+          "content_sha256": "037c5a136ad10ef2231977e0e403020ec668dec18c179ef13dc62b24e00170a7",
+          "width": 914,
+          "height": 1600,
+          "mime_type": "image/webp",
+          "storage_bucket": "assets-derived",
+          "storage_path": "e7b7b2e8-859e-4185-b675-79bc0f3d846e/037c5a136ad10ef2231977e0e403020ec668dec18c179ef13dc62b24e00170a7/farol-antes.webp",
+          "profile": "webp_max_1600_q82_v1"
         },
-        "public_asset_ready": false
+        "public_asset_ready": true,
+        "registry_id": "e6e320a1-f492-5e65-9380-f5114036e9ca",
+        "asset_id": "e6e320a1-f492-5e65-9380-f5114036e9ca",
+        "content_sha256": "037c5a136ad10ef2231977e0e403020ec668dec18c179ef13dc62b24e00170a7",
+        "media": {
+          "registry_id": "e6e320a1-f492-5e65-9380-f5114036e9ca",
+          "sha256": "037c5a136ad10ef2231977e0e403020ec668dec18c179ef13dc62b24e00170a7",
+          "width": 914,
+          "height": 1600,
+          "mime_type": "image/webp"
+        }
       }
     },
     {
@@ -3719,10 +3851,27 @@
           "original_preserved": true
         },
         "web_derivative": {
-          "status": "pending_approved_asset_registry",
-          "url": null
+          "status": "approved",
+          "url": "https://storage.vzforeal.com/storage/v1/object/public/assets-derived/e7b7b2e8-859e-4185-b675-79bc0f3d846e/c001d0b26d2ed65c8b524124a1f26ab2f40449623112f3c7e41a0ac8c8233353/cofre-final.webp",
+          "content_sha256": "c001d0b26d2ed65c8b524124a1f26ab2f40449623112f3c7e41a0ac8c8233353",
+          "width": 1600,
+          "height": 1068,
+          "mime_type": "image/webp",
+          "storage_bucket": "assets-derived",
+          "storage_path": "e7b7b2e8-859e-4185-b675-79bc0f3d846e/c001d0b26d2ed65c8b524124a1f26ab2f40449623112f3c7e41a0ac8c8233353/cofre-final.webp",
+          "profile": "webp_max_1600_q82_v1"
         },
-        "public_asset_ready": false
+        "public_asset_ready": true,
+        "registry_id": "175250a9-ea1a-5842-94b4-dffe6efc4724",
+        "asset_id": "175250a9-ea1a-5842-94b4-dffe6efc4724",
+        "content_sha256": "c001d0b26d2ed65c8b524124a1f26ab2f40449623112f3c7e41a0ac8c8233353",
+        "media": {
+          "registry_id": "175250a9-ea1a-5842-94b4-dffe6efc4724",
+          "sha256": "c001d0b26d2ed65c8b524124a1f26ab2f40449623112f3c7e41a0ac8c8233353",
+          "width": 1600,
+          "height": 1068,
+          "mime_type": "image/webp"
+        }
       }
     },
     {
@@ -3746,10 +3895,27 @@
           "original_preserved": true
         },
         "web_derivative": {
-          "status": "pending_approved_asset_registry",
-          "url": null
+          "status": "approved",
+          "url": "https://storage.vzforeal.com/storage/v1/object/public/assets-derived/e7b7b2e8-859e-4185-b675-79bc0f3d846e/0ddc4fef99f7b65038c2c6ed72a03d2cae8fd11c53e6cd526fbbaa387d0e78cd/cofre-antes.webp",
+          "content_sha256": "0ddc4fef99f7b65038c2c6ed72a03d2cae8fd11c53e6cd526fbbaa387d0e78cd",
+          "width": 1600,
+          "height": 800,
+          "mime_type": "image/webp",
+          "storage_bucket": "assets-derived",
+          "storage_path": "e7b7b2e8-859e-4185-b675-79bc0f3d846e/0ddc4fef99f7b65038c2c6ed72a03d2cae8fd11c53e6cd526fbbaa387d0e78cd/cofre-antes.webp",
+          "profile": "webp_max_1600_q82_v1"
         },
-        "public_asset_ready": false
+        "public_asset_ready": true,
+        "registry_id": "2b369fdf-e033-5163-8e6b-d748ba7c4adb",
+        "asset_id": "2b369fdf-e033-5163-8e6b-d748ba7c4adb",
+        "content_sha256": "0ddc4fef99f7b65038c2c6ed72a03d2cae8fd11c53e6cd526fbbaa387d0e78cd",
+        "media": {
+          "registry_id": "2b369fdf-e033-5163-8e6b-d748ba7c4adb",
+          "sha256": "0ddc4fef99f7b65038c2c6ed72a03d2cae8fd11c53e6cd526fbbaa387d0e78cd",
+          "width": 1600,
+          "height": 800,
+          "mime_type": "image/webp"
+        }
       }
     },
     {
@@ -3773,10 +3939,27 @@
           "original_preserved": true
         },
         "web_derivative": {
-          "status": "pending_approved_asset_registry",
-          "url": null
+          "status": "approved",
+          "url": "https://storage.vzforeal.com/storage/v1/object/public/assets-derived/e7b7b2e8-859e-4185-b675-79bc0f3d846e/1f0739fb8e4bec31cf2cf75c0143a3105064742a110e83a5a55f8ea3db23e2e5/interna.webp",
+          "content_sha256": "1f0739fb8e4bec31cf2cf75c0143a3105064742a110e83a5a55f8ea3db23e2e5",
+          "width": 1600,
+          "height": 1041,
+          "mime_type": "image/webp",
+          "storage_bucket": "assets-derived",
+          "storage_path": "e7b7b2e8-859e-4185-b675-79bc0f3d846e/1f0739fb8e4bec31cf2cf75c0143a3105064742a110e83a5a55f8ea3db23e2e5/interna.webp",
+          "profile": "webp_max_1600_q82_v1"
         },
-        "public_asset_ready": false
+        "public_asset_ready": true,
+        "registry_id": "e0cb077c-3450-569d-bf5c-75c30fc7f285",
+        "asset_id": "e0cb077c-3450-569d-bf5c-75c30fc7f285",
+        "content_sha256": "1f0739fb8e4bec31cf2cf75c0143a3105064742a110e83a5a55f8ea3db23e2e5",
+        "media": {
+          "registry_id": "e0cb077c-3450-569d-bf5c-75c30fc7f285",
+          "sha256": "1f0739fb8e4bec31cf2cf75c0143a3105064742a110e83a5a55f8ea3db23e2e5",
+          "width": 1600,
+          "height": 1041,
+          "mime_type": "image/webp"
+        }
       }
     },
     {
@@ -3800,10 +3983,27 @@
           "original_preserved": true
         },
         "web_derivative": {
-          "status": "pending_approved_asset_registry",
-          "url": null
+          "status": "approved",
+          "url": "https://storage.vzforeal.com/storage/v1/object/public/assets-derived/e7b7b2e8-859e-4185-b675-79bc0f3d846e/acbb2d2634b5d5c4f08448ac54b6e2ed64a62d844f529093b89cbd439fa2453c/cofre-detalhada.webp",
+          "content_sha256": "acbb2d2634b5d5c4f08448ac54b6e2ed64a62d844f529093b89cbd439fa2453c",
+          "width": 1600,
+          "height": 900,
+          "mime_type": "image/webp",
+          "storage_bucket": "assets-derived",
+          "storage_path": "e7b7b2e8-859e-4185-b675-79bc0f3d846e/acbb2d2634b5d5c4f08448ac54b6e2ed64a62d844f529093b89cbd439fa2453c/cofre-detalhada.webp",
+          "profile": "webp_max_1600_q82_v1"
         },
-        "public_asset_ready": false
+        "public_asset_ready": true,
+        "registry_id": "4f1be181-8131-5a12-8ecd-77c98d848031",
+        "asset_id": "4f1be181-8131-5a12-8ecd-77c98d848031",
+        "content_sha256": "acbb2d2634b5d5c4f08448ac54b6e2ed64a62d844f529093b89cbd439fa2453c",
+        "media": {
+          "registry_id": "4f1be181-8131-5a12-8ecd-77c98d848031",
+          "sha256": "acbb2d2634b5d5c4f08448ac54b6e2ed64a62d844f529093b89cbd439fa2453c",
+          "width": 1600,
+          "height": 900,
+          "mime_type": "image/webp"
+        }
       }
     },
     {
@@ -3827,10 +4027,27 @@
           "original_preserved": true
         },
         "web_derivative": {
-          "status": "pending_approved_asset_registry",
-          "url": null
+          "status": "approved",
+          "url": "https://storage.vzforeal.com/storage/v1/object/public/assets-derived/e7b7b2e8-859e-4185-b675-79bc0f3d846e/978c7962d08fe335eb4c1e3651c4e36e9b3366391211e954b927a234deed3ac5/extratora.webp",
+          "content_sha256": "978c7962d08fe335eb4c1e3651c4e36e9b3366391211e954b927a234deed3ac5",
+          "width": 1600,
+          "height": 900,
+          "mime_type": "image/webp",
+          "storage_bucket": "assets-derived",
+          "storage_path": "e7b7b2e8-859e-4185-b675-79bc0f3d846e/978c7962d08fe335eb4c1e3651c4e36e9b3366391211e954b927a234deed3ac5/extratora.webp",
+          "profile": "webp_max_1600_q82_v1"
         },
-        "public_asset_ready": false
+        "public_asset_ready": true,
+        "registry_id": "3f1e0bbb-53c6-5800-8f3b-ccb97e9c590e",
+        "asset_id": "3f1e0bbb-53c6-5800-8f3b-ccb97e9c590e",
+        "content_sha256": "978c7962d08fe335eb4c1e3651c4e36e9b3366391211e954b927a234deed3ac5",
+        "media": {
+          "registry_id": "3f1e0bbb-53c6-5800-8f3b-ccb97e9c590e",
+          "sha256": "978c7962d08fe335eb4c1e3651c4e36e9b3366391211e954b927a234deed3ac5",
+          "width": 1600,
+          "height": 900,
+          "mime_type": "image/webp"
+        }
       }
     },
     {
@@ -3854,10 +4071,27 @@
           "original_preserved": true
         },
         "web_derivative": {
-          "status": "pending_approved_asset_registry",
-          "url": null
+          "status": "approved",
+          "url": "https://storage.vzforeal.com/storage/v1/object/public/assets-derived/e7b7b2e8-859e-4185-b675-79bc0f3d846e/ef05c0e0e8f876bd71f66156a813304783b481c456684f867491543b62db8bb8/cuidado-interna.webp",
+          "content_sha256": "ef05c0e0e8f876bd71f66156a813304783b481c456684f867491543b62db8bb8",
+          "width": 1600,
+          "height": 1084,
+          "mime_type": "image/webp",
+          "storage_bucket": "assets-derived",
+          "storage_path": "e7b7b2e8-859e-4185-b675-79bc0f3d846e/ef05c0e0e8f876bd71f66156a813304783b481c456684f867491543b62db8bb8/cuidado-interna.webp",
+          "profile": "webp_max_1600_q82_v1"
         },
-        "public_asset_ready": false
+        "public_asset_ready": true,
+        "registry_id": "b9ded0bb-b87b-58e3-a113-bdcc966f3173",
+        "asset_id": "b9ded0bb-b87b-58e3-a113-bdcc966f3173",
+        "content_sha256": "ef05c0e0e8f876bd71f66156a813304783b481c456684f867491543b62db8bb8",
+        "media": {
+          "registry_id": "b9ded0bb-b87b-58e3-a113-bdcc966f3173",
+          "sha256": "ef05c0e0e8f876bd71f66156a813304783b481c456684f867491543b62db8bb8",
+          "width": 1600,
+          "height": 1084,
+          "mime_type": "image/webp"
+        }
       }
     },
     {
@@ -3881,10 +4115,27 @@
           "original_preserved": true
         },
         "web_derivative": {
-          "status": "pending_approved_asset_registry",
-          "url": null
+          "status": "approved",
+          "url": "https://storage.vzforeal.com/storage/v1/object/public/assets-derived/e7b7b2e8-859e-4185-b675-79bc0f3d846e/427e68d6bae9c2294fad83e2462b413ea3eb47112eb9c228b110e8a0a63902a0/vidro-antes.webp",
+          "content_sha256": "427e68d6bae9c2294fad83e2462b413ea3eb47112eb9c228b110e8a0a63902a0",
+          "width": 1600,
+          "height": 1067,
+          "mime_type": "image/webp",
+          "storage_bucket": "assets-derived",
+          "storage_path": "e7b7b2e8-859e-4185-b675-79bc0f3d846e/427e68d6bae9c2294fad83e2462b413ea3eb47112eb9c228b110e8a0a63902a0/vidro-antes.webp",
+          "profile": "webp_max_1600_q82_v1"
         },
-        "public_asset_ready": false
+        "public_asset_ready": true,
+        "registry_id": "266c839d-1275-5d22-99dc-96285acb0c7e",
+        "asset_id": "266c839d-1275-5d22-99dc-96285acb0c7e",
+        "content_sha256": "427e68d6bae9c2294fad83e2462b413ea3eb47112eb9c228b110e8a0a63902a0",
+        "media": {
+          "registry_id": "266c839d-1275-5d22-99dc-96285acb0c7e",
+          "sha256": "427e68d6bae9c2294fad83e2462b413ea3eb47112eb9c228b110e8a0a63902a0",
+          "width": 1600,
+          "height": 1067,
+          "mime_type": "image/webp"
+        }
       }
     },
     {
@@ -3908,10 +4159,27 @@
           "original_preserved": true
         },
         "web_derivative": {
-          "status": "pending_approved_asset_registry",
-          "url": null
+          "status": "approved",
+          "url": "https://storage.vzforeal.com/storage/v1/object/public/assets-derived/e7b7b2e8-859e-4185-b675-79bc0f3d846e/80adfc93a5d76d26f8555cbae67b0c968175a34dad5d3efe83a7546e455cdc68/vidro-antes-depois.webp",
+          "content_sha256": "80adfc93a5d76d26f8555cbae67b0c968175a34dad5d3efe83a7546e455cdc68",
+          "width": 1600,
+          "height": 1600,
+          "mime_type": "image/webp",
+          "storage_bucket": "assets-derived",
+          "storage_path": "e7b7b2e8-859e-4185-b675-79bc0f3d846e/80adfc93a5d76d26f8555cbae67b0c968175a34dad5d3efe83a7546e455cdc68/vidro-antes-depois.webp",
+          "profile": "webp_max_1600_q82_v1"
         },
-        "public_asset_ready": false
+        "public_asset_ready": true,
+        "registry_id": "b79beec8-343c-5176-beb1-66a65bbaa1d0",
+        "asset_id": "b79beec8-343c-5176-beb1-66a65bbaa1d0",
+        "content_sha256": "80adfc93a5d76d26f8555cbae67b0c968175a34dad5d3efe83a7546e455cdc68",
+        "media": {
+          "registry_id": "b79beec8-343c-5176-beb1-66a65bbaa1d0",
+          "sha256": "80adfc93a5d76d26f8555cbae67b0c968175a34dad5d3efe83a7546e455cdc68",
+          "width": 1600,
+          "height": 1600,
+          "mime_type": "image/webp"
+        }
       }
     },
     {
@@ -5007,34 +5275,869 @@
         "primary_tree": false
       }
     },
-    {"id":"edge:brand-contact-human","source":"brand:utzig-garage","target":"copy:contact-human","relation_type":"contains","weight":1,"metadata":{}},
-    {"id":"edge:primary:evaluation-copy","source":"product:evaluation","target":"copy:evaluation","relation_type":"contains","weight":1,"metadata":{}},
-    {"id":"edge:primary:evaluation-faq","source":"copy:evaluation","target":"faq:service:evaluation","relation_type":"contains","weight":1,"metadata":{}},
-    {"id":"edge:primary:detailed-wash-copy","source":"product:detailed-wash","target":"copy:detailed-wash","relation_type":"contains","weight":1,"metadata":{}},
-    {"id":"edge:primary:detailed-wash-faq","source":"copy:detailed-wash","target":"faq:service:detailed-wash","relation_type":"contains","weight":1,"metadata":{}},
-    {"id":"edge:primary:interior-cleaning-copy","source":"product:interior-cleaning","target":"copy:interior-cleaning","relation_type":"contains","weight":1,"metadata":{}},
-    {"id":"edge:primary:interior-cleaning-faq","source":"copy:interior-cleaning","target":"faq:service:interior-cleaning","relation_type":"contains","weight":1,"metadata":{}},
-    {"id":"edge:primary:glass-polish-copy","source":"product:glass-polish","target":"copy:glass-polish","relation_type":"contains","weight":1,"metadata":{}},
-    {"id":"edge:primary:glass-polish-faq","source":"copy:glass-polish","target":"faq:service:glass-polish","relation_type":"contains","weight":1,"metadata":{}},
-    {"id":"edge:primary:engine-bay-wash-copy","source":"product:engine-bay-wash","target":"copy:engine-bay-wash","relation_type":"contains","weight":1,"metadata":{}},
-    {"id":"edge:primary:engine-bay-wash-faq","source":"copy:engine-bay-wash","target":"faq:service:engine-bay-wash","relation_type":"contains","weight":1,"metadata":{}},
-    {"id":"edge:primary:technical-polish-copy","source":"product:technical-polish","target":"copy:technical-polish","relation_type":"contains","weight":1,"metadata":{}},
-    {"id":"edge:primary:technical-polish-faq","source":"copy:technical-polish","target":"faq:service:technical-polish","relation_type":"contains","weight":1,"metadata":{}},
-    {"id":"edge:primary:commercial-polish-copy","source":"product:commercial-polish","target":"copy:commercial-polish","relation_type":"contains","weight":1,"metadata":{}},
-    {"id":"edge:primary:commercial-polish-faq","source":"copy:commercial-polish","target":"faq:service:commercial-polish","relation_type":"contains","weight":1,"metadata":{}},
-    {"id":"edge:primary:headlight-restoration-copy","source":"product:headlight-restoration","target":"copy:headlight-restoration","relation_type":"contains","weight":1,"metadata":{}},
-    {"id":"edge:primary:headlight-restoration-faq","source":"copy:headlight-restoration","target":"faq:service:headlight-restoration","relation_type":"contains","weight":1,"metadata":{}},
-    {"id":"edge:primary:vitrification-copy","source":"product:vitrification","target":"copy:vitrification","relation_type":"contains","weight":1,"metadata":{}},
-    {"id":"edge:primary:vitrification-faq","source":"copy:vitrification","target":"faq:service:vitrification","relation_type":"contains","weight":1,"metadata":{}},
-    {"id":"edge:primary:ppf-copy","source":"product:ppf","target":"copy:ppf","relation_type":"contains","weight":1,"metadata":{}},
-    {"id":"edge:primary:ppf-faq","source":"copy:ppf","target":"faq:service:ppf","relation_type":"contains","weight":1,"metadata":{}},
-    {"id":"edge:primary:bodywork-copy","source":"product:bodywork","target":"copy:bodywork","relation_type":"contains","weight":1,"metadata":{}},
-    {"id":"edge:primary:bodywork-faq","source":"copy:bodywork","target":"faq:service:bodywork","relation_type":"contains","weight":1,"metadata":{}},
-    {"id":"edge:primary:painting-copy","source":"product:painting","target":"copy:painting","relation_type":"contains","weight":1,"metadata":{}},
-    {"id":"edge:primary:painting-faq","source":"copy:painting","target":"faq:service:painting","relation_type":"contains","weight":1,"metadata":{}},
-    {"id":"edge:primary:rule-faq-price-and-schedule","source":"rule:human-handoff","target":"faq:price-and-schedule","relation_type":"contains","weight":1,"metadata":{}},
-    {"id":"edge:primary:rule-faq-photos","source":"rule:human-handoff","target":"faq:photos","relation_type":"contains","weight":1,"metadata":{}},
-    {"id":"edge:primary:rule-faq-assessment","source":"rule:human-handoff","target":"faq:assessment","relation_type":"contains","weight":1,"metadata":{}},
-    {"id":"edge:primary:rule-faq-location","source":"rule:human-handoff","target":"faq:location","relation_type":"contains","weight":1,"metadata":{}}
+    {
+      "id": "edge:brand-contact-human",
+      "source": "brand:utzig-garage",
+      "target": "copy:contact-human",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:primary:evaluation-copy",
+      "source": "product:evaluation",
+      "target": "copy:evaluation",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:primary:evaluation-faq",
+      "source": "copy:evaluation",
+      "target": "faq:service:evaluation",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:primary:detailed-wash-copy",
+      "source": "product:detailed-wash",
+      "target": "copy:detailed-wash",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:primary:detailed-wash-faq",
+      "source": "copy:detailed-wash",
+      "target": "faq:service:detailed-wash",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:primary:interior-cleaning-copy",
+      "source": "product:interior-cleaning",
+      "target": "copy:interior-cleaning",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:primary:interior-cleaning-faq",
+      "source": "copy:interior-cleaning",
+      "target": "faq:service:interior-cleaning",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:primary:glass-polish-copy",
+      "source": "product:glass-polish",
+      "target": "copy:glass-polish",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:primary:glass-polish-faq",
+      "source": "copy:glass-polish",
+      "target": "faq:service:glass-polish",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:primary:engine-bay-wash-copy",
+      "source": "product:engine-bay-wash",
+      "target": "copy:engine-bay-wash",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:primary:engine-bay-wash-faq",
+      "source": "copy:engine-bay-wash",
+      "target": "faq:service:engine-bay-wash",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:primary:technical-polish-copy",
+      "source": "product:technical-polish",
+      "target": "copy:technical-polish",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:primary:technical-polish-faq",
+      "source": "copy:technical-polish",
+      "target": "faq:service:technical-polish",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:primary:commercial-polish-copy",
+      "source": "product:commercial-polish",
+      "target": "copy:commercial-polish",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:primary:commercial-polish-faq",
+      "source": "copy:commercial-polish",
+      "target": "faq:service:commercial-polish",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:primary:headlight-restoration-copy",
+      "source": "product:headlight-restoration",
+      "target": "copy:headlight-restoration",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:primary:headlight-restoration-faq",
+      "source": "copy:headlight-restoration",
+      "target": "faq:service:headlight-restoration",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:primary:vitrification-copy",
+      "source": "product:vitrification",
+      "target": "copy:vitrification",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:primary:vitrification-faq",
+      "source": "copy:vitrification",
+      "target": "faq:service:vitrification",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:primary:ppf-copy",
+      "source": "product:ppf",
+      "target": "copy:ppf",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:primary:ppf-faq",
+      "source": "copy:ppf",
+      "target": "faq:service:ppf",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:primary:bodywork-copy",
+      "source": "product:bodywork",
+      "target": "copy:bodywork",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:primary:bodywork-faq",
+      "source": "copy:bodywork",
+      "target": "faq:service:bodywork",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:primary:painting-copy",
+      "source": "product:painting",
+      "target": "copy:painting",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:primary:painting-faq",
+      "source": "copy:painting",
+      "target": "faq:service:painting",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:primary:rule-faq-price-and-schedule",
+      "source": "rule:human-handoff",
+      "target": "faq:price-and-schedule",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:primary:rule-faq-photos",
+      "source": "rule:human-handoff",
+      "target": "faq:photos",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:primary:rule-faq-assessment",
+      "source": "rule:human-handoff",
+      "target": "faq:assessment",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:primary:rule-faq-location",
+      "source": "rule:human-handoff",
+      "target": "faq:location",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:public:c53fefc50bf5dcc04346",
+      "source": "brand:utzig-garage",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:public:07c63e77aeb8c3605a48",
+      "source": "group:preservation",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:public:9284861bc7e93149fd70",
+      "source": "group:revitalization",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:public:fa963e63f9a8f4870012",
+      "source": "group:enhancement",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:public:62659fd319b9b568b223",
+      "source": "product:evaluation",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:public:bee8c2f09cb10da9c3a6",
+      "source": "product:detailed-wash",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:public:774899b3ab1a47771b0d",
+      "source": "product:interior-cleaning",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:public:24d5c230d61a1fbc16b8",
+      "source": "product:glass-polish",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:public:ce74b59ebd679bc7d4df",
+      "source": "product:engine-bay-wash",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:public:4af47b51822af119c16f",
+      "source": "product:technical-polish",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:public:5b9c574c44dfbd0551e3",
+      "source": "product:commercial-polish",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:public:c40ed16e1d8f8e551d1e",
+      "source": "product:headlight-restoration",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:public:05c8f5d814cbf63d7dd2",
+      "source": "product:vitrification",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:public:ef673bfd532e12884171",
+      "source": "product:ppf",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:public:f3326cdb1851ecc4536c",
+      "source": "product:bodywork",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:public:a89bc65897263c664979",
+      "source": "product:painting",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:public:7ed2fe6b4d37011603d6",
+      "source": "asset:logo",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:public:b23be94439ff47d2f1a3",
+      "source": "asset:hero",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:public:32cc59ab151a9ec4885d",
+      "source": "asset:editorial",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:public:7db9ab6dcbabd78bc434",
+      "source": "asset:process",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:public:e13f5ef9afbfbc3a7481",
+      "source": "asset:work-polish",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:public:8e8e2374913e4f01c45c",
+      "source": "asset:headlight-ready",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:public:9696e0c4294d5457543e",
+      "source": "asset:engine-wash",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:public:19dc2e53e9d7b5f05ca8",
+      "source": "asset:headlight-before",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:public:1fbd0d91dd42779ada9e",
+      "source": "asset:engine-final",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:public:862992a390ebdce3cc75",
+      "source": "asset:engine-before",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:public:240ca040969e1804f25f",
+      "source": "asset:interior",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:public:3461ef1603e488fb461a",
+      "source": "asset:engine-detail",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:public:b0667fe6b20fc0c6b31c",
+      "source": "asset:extractor",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:public:4258a68cd7d27f83cdd4",
+      "source": "asset:interior-care",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:public:c4d814a58161af7fbb78",
+      "source": "asset:glass-before",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:public:afd751a65b0a730b5811",
+      "source": "asset:glass-before-after",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "source": "utzig_public_site_approval_2026_09_23",
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:service-image:3d982199e860180c1a63",
+      "source": "product:evaluation",
+      "target": "asset:process",
+      "relation_type": "uses_asset",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "role": "product_image",
+        "primary_tree": false,
+        "page_binding": {
+          "slot_key": "product_image:evaluation",
+          "position": 0
+        },
+        "source": "utzig_public_site_approval_2026_09_23"
+      }
+    },
+    {
+      "id": "edge:service-image:b17cec5c8c7e3e272417",
+      "source": "product:detailed-wash",
+      "target": "asset:engine-detail",
+      "relation_type": "uses_asset",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "role": "product_image",
+        "primary_tree": false,
+        "page_binding": {
+          "slot_key": "product_image:detailed-wash",
+          "position": 0
+        },
+        "source": "utzig_public_site_approval_2026_09_23"
+      }
+    },
+    {
+      "id": "edge:service-image:13f58fbd98dd155c629f",
+      "source": "product:interior-cleaning",
+      "target": "asset:interior",
+      "relation_type": "uses_asset",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "role": "product_image",
+        "primary_tree": false,
+        "page_binding": {
+          "slot_key": "product_image:interior-cleaning",
+          "position": 0
+        },
+        "source": "utzig_public_site_approval_2026_09_23"
+      }
+    },
+    {
+      "id": "edge:service-image:4d944a3891354a16e4da",
+      "source": "product:glass-polish",
+      "target": "asset:glass-before-after",
+      "relation_type": "uses_asset",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "role": "product_image",
+        "primary_tree": false,
+        "page_binding": {
+          "slot_key": "product_image:glass-polish",
+          "position": 0
+        },
+        "source": "utzig_public_site_approval_2026_09_23"
+      }
+    },
+    {
+      "id": "edge:service-image:0aecc10205a472577671",
+      "source": "product:engine-bay-wash",
+      "target": "asset:engine-wash",
+      "relation_type": "uses_asset",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "role": "product_image",
+        "primary_tree": false,
+        "page_binding": {
+          "slot_key": "product_image:engine-bay-wash",
+          "position": 0
+        },
+        "source": "utzig_public_site_approval_2026_09_23"
+      }
+    },
+    {
+      "id": "edge:service-image:ce55883a5bcef84c0564",
+      "source": "product:technical-polish",
+      "target": "asset:work-polish",
+      "relation_type": "uses_asset",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "role": "product_image",
+        "primary_tree": false,
+        "page_binding": {
+          "slot_key": "product_image:technical-polish",
+          "position": 0
+        },
+        "source": "utzig_public_site_approval_2026_09_23"
+      }
+    },
+    {
+      "id": "edge:service-image:da279ea5eefcfc011bb7",
+      "source": "product:commercial-polish",
+      "target": "asset:process",
+      "relation_type": "uses_asset",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "role": "product_image",
+        "primary_tree": false,
+        "page_binding": {
+          "slot_key": "product_image:commercial-polish",
+          "position": 0
+        },
+        "source": "utzig_public_site_approval_2026_09_23"
+      }
+    },
+    {
+      "id": "edge:service-image:4d4cfae2c5b4212c21e0",
+      "source": "product:headlight-restoration",
+      "target": "asset:headlight-ready",
+      "relation_type": "uses_asset",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "role": "product_image",
+        "primary_tree": false,
+        "page_binding": {
+          "slot_key": "product_image:headlight-restoration",
+          "position": 0
+        },
+        "source": "utzig_public_site_approval_2026_09_23"
+      }
+    },
+    {
+      "id": "edge:service-image:db58742048a00443220a",
+      "source": "product:vitrification",
+      "target": "asset:work-polish",
+      "relation_type": "uses_asset",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "role": "product_image",
+        "primary_tree": false,
+        "page_binding": {
+          "slot_key": "product_image:vitrification",
+          "position": 0
+        },
+        "source": "utzig_public_site_approval_2026_09_23"
+      }
+    },
+    {
+      "id": "edge:service-image:c1542270886c69e4a836",
+      "source": "product:ppf",
+      "target": "asset:hero",
+      "relation_type": "uses_asset",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "role": "product_image",
+        "primary_tree": false,
+        "page_binding": {
+          "slot_key": "product_image:ppf",
+          "position": 0
+        },
+        "source": "utzig_public_site_approval_2026_09_23"
+      }
+    },
+    {
+      "id": "edge:service-image:853fac9ecb4c6ee59497",
+      "source": "product:bodywork",
+      "target": "asset:process",
+      "relation_type": "uses_asset",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "role": "product_image",
+        "primary_tree": false,
+        "page_binding": {
+          "slot_key": "product_image:bodywork",
+          "position": 0
+        },
+        "source": "utzig_public_site_approval_2026_09_23"
+      }
+    },
+    {
+      "id": "edge:service-image:f824190e46bd78fea83e",
+      "source": "product:painting",
+      "target": "asset:engine-final",
+      "relation_type": "uses_asset",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "role": "product_image",
+        "primary_tree": false,
+        "page_binding": {
+          "slot_key": "product_image:painting",
+          "position": 0
+        },
+        "source": "utzig_public_site_approval_2026_09_23"
+      }
+    }
   ]
 }

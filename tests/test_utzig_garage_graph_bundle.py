@@ -49,24 +49,31 @@ def _nodes(bundle: dict) -> dict[str, dict]:
     return {node["id"]: node for node in bundle["nodes"]}
 
 
-def test_utzig_candidate_compiles_as_non_publishable_dry_run() -> None:
+def test_utzig_candidate_compiles_as_publishable_approved_plan() -> None:
     bundle = _bundle()
     plan = build_publication_plan(bundle)
 
     assert plan["validation_errors"] == []
-    assert plan["disposition"] == "dry_run_complete"
-    assert plan["publication_allowed"] is False
-    assert plan["approval_scope"] == "dry_run_only"
+    assert plan["disposition"] == "awaiting_approval"
+    assert plan["publication_allowed"] is True
+    assert plan["approval_scope"] == "publication_plan"
     assert len(plan["branches_affected"]) == 12
     assert bundle["persona"] == {
-        "id": "9872b103-fb68-51f0-bccc-2d9f5e1c2a58",
+        "id": "e7b7b2e8-859e-4185-b675-79bc0f3d846e",
         "slug": "utzig-garage",
     }
-    assert set(bundle["metadata"]["publication_blockers"]) == {
-        "productive_persona_uuid_not_confirmed",
-        "approved_public_asset_registry_or_cdn_missing",
-        "quick_booking_public_phone_pending_binding_reassignment",
+    assert bundle["metadata"]["publication_blockers"] == []
+    public_grants = {
+        edge["source"]
+        for edge in bundle["edges"]
+        if edge["relation_type"] == "publishes_to" and edge["target"] == "gallery:utzig"
     }
+    assert len(public_grants) == 32
+    assert {
+        edge["source"]
+        for edge in bundle["edges"]
+        if edge["relation_type"] == "uses_asset"
+    } == {node["id"] for node in bundle["nodes"] if node["node_type"] == "product"}
 
 
 def test_appointment_fields_are_graph_owned_and_use_agentic_execution() -> None:
@@ -171,7 +178,7 @@ def test_private_value_bands_do_not_reach_site_rag_or_runtime_contract_text() ->
         assert token not in public_authored_text
 
 
-def test_assets_are_strictly_allowlisted_and_not_yet_public_urls() -> None:
+def test_assets_are_strictly_allowlisted_and_have_approved_public_derivatives() -> None:
     bundle = _bundle()
     assets = [node for node in bundle["nodes"] if node["node_type"] == "asset"]
 
@@ -179,10 +186,17 @@ def test_assets_are_strictly_allowlisted_and_not_yet_public_urls() -> None:
         asset["data"]["provenance"]["file_id"] for asset in assets
     } == EXPECTED_ASSET_IDS
     assert set(bundle["metadata"]["asset_policy"]["allowlisted_google_drive_file_ids"]) == EXPECTED_ASSET_IDS
-    assert all(asset["data"]["web_derivative"]["url"] is None for asset in assets)
+    assert all(
+        asset["data"]["web_derivative"]["url"].startswith(
+            "https://storage.vzforeal.com/storage/v1/object/public/assets-derived/"
+        )
+        for asset in assets
+    )
+    assert all(asset["data"]["public_asset_ready"] is True for asset in assets)
+    assert all(asset["data"]["registry_id"] for asset in assets)
     assert all(
         asset["data"]["web_derivative"]["status"]
-        == "pending_approved_asset_registry"
+        == "approved"
         for asset in assets
     )
 
