@@ -5,14 +5,14 @@
     "slug": "utzig-garage"
   },
   "metadata": {
-    "purpose": "utzig_complete_approved_service_knowledge",
+    "purpose": "utzig_vehicle_journey_tracking_v6",
     "source": "authenticated_active_graph_publication_export",
     "publication_allowed": true,
     "internal_wa_validator_test_allowed": false,
     "baseline_publication": {
-      "publication_id": "4a3c5ee2-8656-45c3-ac36-62d7a259fc7e",
-      "version": 3,
-      "checksum": "sha256:24cf681e03ad96af9307f9c806f7446947a4d8f0dc0354368fa86ca07a0add8f"
+      "publication_id": "ab38794a-0580-4bd0-afe7-df6fcb7a0e58",
+      "version": 5,
+      "checksum": "sha256:af58d99ac5f3a9ba9afcf3918c18e22b7791ab71021662f442b9c82385c93a33"
     },
     "embedding_profile": {
       "embedding_provider": "local",
@@ -882,6 +882,48 @@
       }
     },
     {
+      "id": "audience:prepare-for-sale",
+      "node_type": "audience",
+      "slug": "preparar-para-venda",
+      "title": "Preparar para venda",
+      "summary": "Pessoas que querem apresentar melhor o carro antes de vender, anunciar ou entregar para uma loja.",
+      "tags": ["jornada", "venda", "apresentação"],
+      "status": "approved",
+      "projection_node_id": "6c1a4d67-4903-5d49-a05c-7a2f36b22f01",
+      "data": {
+        "source": "user_authorized_journey_taxonomy_2026_09_23",
+        "audience": {
+          "label": "Preparar para venda",
+          "matching_guidance": "Use somente quando o cliente disser que vai vender, anunciar, negociar, entregar para lojista ou preparar a apresentação do carro para venda.",
+          "evidence_examples": ["vou vender", "vou anunciar", "quero entregar na loja", "antes de colocar à venda"]
+        },
+        "capabilities": {"global_context": true},
+        "validation_status": "approved",
+        "graph_json_node_id": "audience:prepare-for-sale"
+      }
+    },
+    {
+      "id": "audience:continuous-care",
+      "node_type": "audience",
+      "slug": "cuidado-continuo",
+      "title": "Cuidado contínuo",
+      "summary": "Pessoas que querem conservar, proteger e manter o carro bem cuidado ao longo do tempo.",
+      "tags": ["jornada", "cuidado", "proteção"],
+      "status": "approved",
+      "projection_node_id": "4e9f0af2-e421-5b42-9aeb-8e3657c0cc12",
+      "data": {
+        "source": "user_authorized_journey_taxonomy_2026_09_23",
+        "audience": {
+          "label": "Cuidado contínuo",
+          "matching_guidance": "Use somente quando o cliente disser que vai ficar com o carro, conservar, proteger ou mantê-lo bem cuidado.",
+          "evidence_examples": ["quero cuidar", "vou ficar com ele", "quero proteger", "manter bem cuidado"]
+        },
+        "capabilities": {"global_context": true},
+        "validation_status": "approved",
+        "graph_json_node_id": "audience:continuous-care"
+      }
+    },
+    {
       "id": "audience:preservation",
       "node_type": "audience",
       "slug": "preservacao",
@@ -1083,6 +1125,38 @@
         "campaign_subtype": "public_site_page",
         "validation_status": "approved",
         "graph_json_node_id": "campaign:automotive-detailing"
+      }
+    },
+    {
+      "id": "campaign:prepare-for-sale",
+      "node_type": "campaign",
+      "slug": "preparacao-para-venda",
+      "title": "Preparação para venda",
+      "summary": "Jornada de atendimento para quem quer preparar a apresentação do carro antes de vender.",
+      "tags": ["jornada", "venda"],
+      "status": "approved",
+      "projection_node_id": "b1f2e6cc-ef6c-5c5c-a8e3-44842a311ea4",
+      "data": {
+        "source": "user_authorized_journey_taxonomy_2026_09_23",
+        "campaign": {"purpose": "journey_tracking", "inbound_only": true},
+        "validation_status": "approved",
+        "graph_json_node_id": "campaign:prepare-for-sale"
+      }
+    },
+    {
+      "id": "campaign:continuous-care",
+      "node_type": "campaign",
+      "slug": "cuidado-continuo",
+      "title": "Cuidado contínuo",
+      "summary": "Jornada de atendimento para quem quer conservar e proteger o carro ao longo do tempo.",
+      "tags": ["jornada", "cuidado"],
+      "status": "approved",
+      "projection_node_id": "71d3d823-2623-55c2-8896-1d50f34e543b",
+      "data": {
+        "source": "user_authorized_journey_taxonomy_2026_09_23",
+        "campaign": {"purpose": "journey_tracking", "inbound_only": true},
+        "validation_status": "approved",
+        "graph_json_node_id": "campaign:continuous-care"
       }
     },
     {
@@ -2271,9 +2345,9 @@
     {
       "id": "faq:qualification:objective",
       "node_type": "faq",
-      "slug": "qualification-objective",
-      "title": "objetivo",
-      "summary": "Pergunta de qualificação definida pelo grafo.",
+      "slug": "qualification-vehicle-journey-intent",
+      "title": "momento do veículo",
+      "summary": "Pergunta de qualificação que registra o motivo da jornada, sem presumir uso do veículo.",
       "tags": [],
       "status": "approved",
       "projection_node_id": "8354ade6-df57-5405-bd3f-c61bb2526613",
@@ -2282,9 +2356,23 @@
         "source": "user_provided_utzig_plan_2026_09_22",
         "metadata": {
           "role": "qualification_question",
-          "field_key": "objective"
+          "field_key": "objective",
+          "semantic_type": "vehicle_journey_intent"
         },
-        "question": "O que você espera melhorar ou preservar no veículo?",
+        "question": "Só pra eu entender melhor: a ideia é preparar o carro pra venda ou é pra manter ele bem cuidado?",
+        "paraphrases": [
+          "Esse cuidado é pensando em vender ou em continuar com ele por um bom tempo?"
+        ],
+        "journey_tracking": {
+          "field_key": "objective",
+          "semantic_type": "vehicle_journey_intent",
+          "preserve_customer_wording": true,
+          "audience_signal_required_when_evidence_is_explicit": true,
+          "classification": {
+            "prepare_for_sale": "O cliente menciona vender, anunciar, entregar para lojista ou melhorar a apresentação antes da venda.",
+            "continuous_care": "O cliente menciona ficar com o carro, conservar, proteger ou mantê-lo bem cuidado."
+          }
+        },
         "validation_status": "approved",
         "graph_json_node_id": "faq:qualification:objective"
       }
@@ -3109,7 +3197,7 @@
           "field_labels": {
             "servico": "serviço",
             "condicao": "condição atual",
-            "objective": "objetivo",
+            "objective": "momento do veículo",
             "nome_cliente": "nome",
             "vehicle_color": "cor do veículo",
             "modelo_veiculo": "modelo do veículo",
@@ -3125,7 +3213,7 @@
           "field_questions": {
             "servico": "Qual serviço você procura para o veículo?",
             "condicao": "Como está a condição atual do veículo nessa área?",
-            "objective": "O que você espera melhorar ou preservar no veículo?",
+            "objective": "Só pra eu entender melhor: a ideia é preparar o carro pra venda ou é pra manter ele bem cuidado?",
             "nome_cliente": "Como você prefere que eu te chame? O sobrenome é opcional.",
             "vehicle_color": "Qual é a cor do veículo?",
             "modelo_veiculo": "Qual é o modelo do veículo?",
@@ -3171,7 +3259,7 @@
           "field_labels": {
             "servico": "serviço",
             "condicao": "condição atual",
-            "objective": "objetivo",
+            "objective": "momento do veículo",
             "nome_cliente": "nome",
             "vehicle_color": "cor do veículo",
             "modelo_veiculo": "modelo do veículo",
@@ -4041,7 +4129,15 @@
                 "servico"
               ],
               "validation": {
-                "mode": "schema"
+                "mode": "semantic",
+                "semantic_type": "vehicle_journey_intent",
+                "description": "Motivo declarado para o cuidado do veículo: preparar para venda ou manter o carro bem cuidado.",
+                "examples": [
+                  "vou vender o carro",
+                  "quero anunciar",
+                  "vou ficar com ele e cuidar",
+                  "quero manter bem cuidado"
+                ]
               },
               "value_schema": {
                 "type": "string",
@@ -4988,7 +5084,15 @@
                 "servico"
               ],
               "validation": {
-                "mode": "schema"
+                "mode": "semantic",
+                "semantic_type": "vehicle_journey_intent",
+                "description": "Motivo declarado para o cuidado do veículo: preparar para venda ou manter o carro bem cuidado.",
+                "examples": [
+                  "vou vender o carro",
+                  "quero anunciar",
+                  "vou ficar com ele e cuidar",
+                  "quero manter bem cuidado"
+                ]
               },
               "value_schema": {
                 "type": "string",
@@ -5377,7 +5481,15 @@
                 "servico"
               ],
               "validation": {
-                "mode": "schema"
+                "mode": "semantic",
+                "semantic_type": "vehicle_journey_intent",
+                "description": "Motivo declarado para o cuidado do veículo: preparar para venda ou manter o carro bem cuidado.",
+                "examples": [
+                  "vou vender o carro",
+                  "quero anunciar",
+                  "vou ficar com ele e cuidar",
+                  "quero manter bem cuidado"
+                ]
               },
               "value_schema": {
                 "type": "string",
@@ -9709,6 +9821,74 @@
         "active": true,
         "graph_json_edge_id": "edge:detailed-wash:lavagem-detalhada-preco:embedded"
       }
+    },
+    {
+      "id": "edge:brand-campaign-prepare-for-sale",
+      "source": "brand:utzig-garage",
+      "target": "campaign:prepare-for-sale",
+      "relation_type": "contains",
+      "weight": 1.0,
+      "primary": true,
+      "metadata": {"active": true, "primary": true, "graph_json_edge_id": "edge:brand-campaign-prepare-for-sale"}
+    },
+    {
+      "id": "edge:campaign-prepare-for-sale-audience",
+      "source": "campaign:prepare-for-sale",
+      "target": "audience:prepare-for-sale",
+      "relation_type": "contains",
+      "weight": 1.0,
+      "primary": true,
+      "metadata": {"active": true, "primary": true, "graph_json_edge_id": "edge:campaign-prepare-for-sale-audience"}
+    },
+    {
+      "id": "edge:brand-campaign-continuous-care",
+      "source": "brand:utzig-garage",
+      "target": "campaign:continuous-care",
+      "relation_type": "contains",
+      "weight": 1.0,
+      "primary": true,
+      "metadata": {"active": true, "primary": true, "graph_json_edge_id": "edge:brand-campaign-continuous-care"}
+    },
+    {
+      "id": "edge:campaign-continuous-care-audience",
+      "source": "campaign:continuous-care",
+      "target": "audience:continuous-care",
+      "relation_type": "contains",
+      "weight": 1.0,
+      "primary": true,
+      "metadata": {"active": true, "primary": true, "graph_json_edge_id": "edge:campaign-continuous-care-audience"}
+    },
+    {
+      "id": "edge:prepare-for-sale-revitalization",
+      "source": "audience:prepare-for-sale",
+      "target": "group:revitalization",
+      "relation_type": "same_topic_as",
+      "weight": 0.9,
+      "metadata": {"active": true, "tracking_only": true, "graph_json_edge_id": "edge:prepare-for-sale-revitalization"}
+    },
+    {
+      "id": "edge:prepare-for-sale-enhancement",
+      "source": "audience:prepare-for-sale",
+      "target": "group:enhancement",
+      "relation_type": "same_topic_as",
+      "weight": 0.8,
+      "metadata": {"active": true, "tracking_only": true, "graph_json_edge_id": "edge:prepare-for-sale-enhancement"}
+    },
+    {
+      "id": "edge:continuous-care-preservation",
+      "source": "audience:continuous-care",
+      "target": "group:preservation",
+      "relation_type": "same_topic_as",
+      "weight": 0.9,
+      "metadata": {"active": true, "tracking_only": true, "graph_json_edge_id": "edge:continuous-care-preservation"}
+    },
+    {
+      "id": "edge:continuous-care-enhancement",
+      "source": "audience:continuous-care",
+      "target": "group:enhancement",
+      "relation_type": "same_topic_as",
+      "weight": 0.8,
+      "metadata": {"active": true, "tracking_only": true, "graph_json_edge_id": "edge:continuous-care-enhancement"}
     }
   ]
 }

@@ -19,6 +19,13 @@ BUNDLE_PATH = (
     / "utzig-garage"
     / "site-and-appointment-v1.DRAFT.json"
 )
+JOURNEY_BUNDLE_PATH = (
+    ROOT
+    / "data"
+    / "graph_bundles"
+    / "utzig-garage"
+    / "utzig-complete-knowledge-v5.DRAFT.json"
+)
 PRIVATE_BANDS = {"faixa_1", "faixa_2", "faixa_3"}
 PRIVATE_SOURCE = "estimated_from_service_name"
 EXPECTED_ASSET_IDS = {
@@ -47,6 +54,47 @@ def _bundle() -> dict:
 
 def _nodes(bundle: dict) -> dict[str, dict]:
     return {node["id"]: node for node in bundle["nodes"]}
+
+
+def test_vehicle_journey_intent_is_graph_owned_and_audience_tracked() -> None:
+    bundle = json.loads(JOURNEY_BUNDLE_PATH.read_text(encoding="utf-8"))
+    nodes = _nodes(bundle)
+    compiled = compile_bundle(bundle)
+    question = nodes["faq:qualification:objective"]["data"]
+
+    assert question["question"] == (
+        "Só pra eu entender melhor: a ideia é preparar o carro pra venda "
+        "ou é pra manter ele bem cuidado?"
+    )
+    assert question["journey_tracking"]["semantic_type"] == "vehicle_journey_intent"
+    assert question["journey_tracking"]["preserve_customer_wording"] is True
+    assert nodes["audience:prepare-for-sale"]["data"]["capabilities"]["global_context"]
+    assert nodes["audience:continuous-care"]["data"]["capabilities"]["global_context"]
+
+    for product_id in ("product:evaluation", "product:ppf", "product:vitrification"):
+        field = next(
+            field for field in nodes[product_id]["data"]["qualification"]["fields"]
+            if field["key"] == "objective"
+        )
+        assert field["validation"]["semantic_type"] == "vehicle_journey_intent"
+        assert field["question_node_id"] == "faq:qualification:objective"
+
+    tracking_edges = [
+        edge for edge in bundle["edges"]
+        if edge["metadata"].get("tracking_only") is True
+    ]
+    assert {edge["relation_type"] for edge in tracking_edges} == {"same_topic_as"}
+    assert {edge["source"] for edge in tracking_edges} == {
+        "audience:prepare-for-sale", "audience:continuous-care"
+    }
+    assert set(compiled["node_by_id"]) >= {
+        "audience:prepare-for-sale", "audience:continuous-care",
+        "campaign:prepare-for-sale", "campaign:continuous-care",
+    }
+    for contract in compiled["branch_contracts"].values():
+        assert {"audience:prepare-for-sale", "audience:continuous-care"} <= set(
+            contract["closure_node_ids"]
+        )
 
 
 def test_utzig_candidate_compiles_as_publishable_approved_plan() -> None:
