@@ -135,6 +135,8 @@ def test_understanding_instruction_extracts_a_direct_free_text_answer(monkeypatc
             inbound_buffer_id="inbound-1",
         )
     assert "Capture every stated fact" in captured["system"]
+    assert "expected_answer_field_key is set" in captured["system"]
+    assert "free-text field preserve" in captured["system"]
     assert "audience_signals are optional" in captured["system"]
 
 

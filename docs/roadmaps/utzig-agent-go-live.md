@@ -236,6 +236,29 @@ modelo, proof, runtime e WA Validator. O rollback do primeiro candidate foi
 confirmado; claims e workers permaneceram ativos e nenhum outro serviço sofreu
 cutover.
 
+### Segundo candidate e regressão de extração — 2026-09-23
+
+O candidate com a taxonomia alinhada comprovou a correção anterior: sessão
+interna `2c18465c-fed7-4332-b67d-dd97c1e45da4`, `technical_pass=true`, quatro
+inbounds canônicos, quatro decisões, quatro proofs válidos, quatro commits
+completos e no máximo um outbound interno por turno. A release não foi
+aprovada porque `quality_pass=false` no quarto turno; o rollback automático
+restaurou o slot azul.
+
+A falha foi `all_intended_facts_extracted`: após a pergunta publicada do campo
+`objective`, a resposta livre do cliente foi compreendida na copy, mas não foi
+emitida como fato estruturado. A investigação encontrou uma regressão simples:
+o payload ainda enviava `expected_answer_field_key`, porém uma refatoração do
+prompt havia removido a instrução genérica que obriga o interpretador a emitir
+esse campo quando a mensagem responde diretamente à pergunta anterior.
+
+A correção restaura essa instrução sem exemplo de Utzig, sem valor hardcoded e
+sem fallback determinístico: o modelo continua extraindo semanticamente e deve
+preservar a formulação do cliente nos campos livres. Os mesmos 65 testes
+focados passaram novamente. Por regra operacional, não haverá um terceiro
+cutover empilhado nesta rodada; o próximo SHA/digest deve entrar como uma nova
+release imutável com candidate isolado e um único canário.
+
 ## Matriz mínima do WA Validator
 
 | Jornada | Resultado seguro exigido |
