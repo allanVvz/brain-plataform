@@ -450,6 +450,42 @@ total, mesmo com o texto certo já calculado. Corrigido em três frentes:
    o lado Python; editar o workflow n8n é um tipo de risco à parte, fica
    como pendência conhecida pra próxima rodada.
 
+## Decisão de produto — Utzig Garage (2026-09-22)
+
+Foi criado um candidato graph-only para `utzig-garage`, sem publicação e sem
+estado produtivo. Ele usa UUID determinístico de rascunho e permanece com
+`publication_allowed=false` até confirmação do UUID produtivo e de um registry
+ou CDN aprovado para derivados web. O bundle contém marca, Alemão como
+`founder_specialist`, páginas, localização, audiências públicas, 12 serviços,
+políticas de agendamento e assets em allowlist. Não contém preço, horário,
+garantia ou promessa de resultado.
+
+As faixas comerciais estimadas são privadas e existem somente em
+`product.data.metadata.internal_commercial_value_band`; não entram no site,
+RAG nem contratos conversacionais. Audiências no site são links telemetrados,
+sem popular silenciosamente o CRM e sem vínculos serviço -> audiência.
+
+Próxima evolução de memória/atribuição:
+
+- tratar o grupo semântico de `/leads/import` como audiência canônica;
+- correlacionar futuramente site -> WhatsApp -> lead e escrever
+  `lead_audience_memberships` de forma idempotente, somente com identidade e
+  consentimento suficientes;
+- usar audiência como escopo de listas, disparos e templates Meta aprovados;
+- manter uma `audience_of_journey` por jornada e iniciar
+  `global_lead_audience` pela maior faixa observada entre jornadas;
+- permitir que classificador paralelo por média ponderada reclassifique a
+  audiência global, preservando notas comerciais e histórico;
+- suportar múltiplas jornadas por campanha e propostas Sofia de vínculos
+  serviço -> audiência com aprovação humana;
+- direcionar campanhas de maior valor a regiões maiores apenas com fonte e
+  aprovação;
+- manter Meta Pixel condicionado a consentimento, e distinguir evento anônimo
+  entregue de atribuição CRM ainda pendente;
+- manter depoimentos, certificações e design system Figma como pendências, não
+  como fatos publicados.
+
+
 ## Histórico removido
 
 A seção antiga sobre o WA Validator de 2026-08-12 foi removida porque descrevia

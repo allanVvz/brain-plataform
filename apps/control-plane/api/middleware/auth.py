@@ -89,7 +89,7 @@ def _auth_error(detail: str, status_code: int) -> JSONResponse:
     )
 
 
-def is_public_path(path: str) -> bool:
+def is_public_path(path: str, method: str = "GET") -> bool:
     if path.startswith("/webhooks/evolution/"):
         return True
     if path in PUBLIC_EXACT_PATHS:
@@ -119,9 +119,11 @@ def is_public_path(path: str) -> bool:
     if path.startswith("/api/menu/"):
         remainder = path.removeprefix("/api/menu/").strip("/")
         parts = remainder.split("/")
-        return (bool(remainder) and "/" not in remainder
-                or len(parts) == 2 and bool(parts[0]) and parts[1] == "blocks"
-                or len(parts) == 3 and bool(parts[0]) and parts[1] == "media" and bool(parts[2]))
+        verb = str(method or "GET").upper()
+        return (verb == "GET" and bool(remainder) and "/" not in remainder
+                or verb == "POST" and len(parts) == 2 and bool(parts[0]) and parts[1] == "events"
+                or verb == "GET" and len(parts) == 2 and bool(parts[0]) and parts[1] == "blocks"
+                or verb == "GET" and len(parts) == 3 and bool(parts[0]) and parts[1] == "media" and bool(parts[2]))
     return False
 
 
@@ -180,7 +182,7 @@ def _admin_test_token_user(request: Request) -> dict | None:
 async def auth_middleware(request: Request, call_next):
     path = request.url.path
     is_auth_path = path.startswith("/auth/")
-    if request.method == "OPTIONS" or is_public_path(path):
+    if request.method == "OPTIONS" or is_public_path(path, request.method):
         response = await call_next(request)
         return _disable_auth_response_cache(response) if is_auth_path else response
 

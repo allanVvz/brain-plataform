@@ -1446,3 +1446,32 @@ Metas de aceite: graph-only abaixo de 3 minutos sem pausa; servico compativel
 abaixo de 8 minutos no p95; zero repair; um inbound/decisao/proof/commit e no
 maximo um outbound; todo fato aceito presente no ledger antes do outbound;
 rollback automatico para o digest/publicacao anterior.
+
+## Roadmap — audiência, atribuição e site público Utzig Garage
+
+O candidato Utzig Garage mantém audiência pública como navegação do site, sem
+classificação automática ou mutação silenciosa do CRM nesta entrega. A evolução
+deve preservar estas decisões:
+
+- O grupo semântico criado por `/leads/import` é a audiência canônica; não criar
+  um segundo conceito concorrente para segmentação.
+- A correlação `site -> WhatsApp -> lead` continua futura. Evento anônimo
+  entregue é telemetria, não prova de atribuição CRM.
+- Quando houver consentimento e identidade suficientes, popular
+  `lead_audience_memberships` de forma idempotente. A audiência será escopo para
+  listas, disparos e templates Meta previamente aprovados.
+- `audience_of_journey` representa a única audiência da jornada atual.
+  `global_lead_audience` começa como a maior faixa observada entre jornadas,
+  preservando a evidência que levou à classificação.
+- Um classificador paralelo futuro poderá usar média ponderada e reclassificar
+  `global_lead_audience`; manter notas comerciais, histórico da classificação
+  e múltiplas jornadas por campanha.
+- Vínculos serviço -> audiência serão propostas da Sofia e só entram no grafo
+  depois de aprovação humana. Nenhum vínculo foi inferido no candidato Utzig.
+- Campanhas de maior valor podem ser direcionadas a regiões maiores, desde que
+  fonte, consentimento e aprovação comercial estejam registrados.
+- Meta Pixel permanece fora do lançamento até existir decisão de consentimento
+  e contrato de privacidade. Não confundir Pixel futuro com os eventos anônimos
+  mínimos do site.
+- Depoimentos, certificações e um design system no Figma permanecem roadmap;
+  nenhum deles pode ser inventado a partir do material atual.

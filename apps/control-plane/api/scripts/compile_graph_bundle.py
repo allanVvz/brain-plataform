@@ -42,6 +42,10 @@ def main() -> int:
         action="store_true",
         help="Include the complete compiled candidate document in stdout",
     )
+    parser.add_argument(
+        "--output",
+        help="Optional path for the rendered dry-run PublicationPlan JSON.",
+    )
     args = parser.parse_args()
 
     try:
@@ -59,7 +63,11 @@ def main() -> int:
     printable = dict(plan)
     if not args.include_document:
         printable.pop("candidate_document", None)
-    print(json.dumps(printable, ensure_ascii=False, indent=2, sort_keys=True))
+    rendered = json.dumps(printable, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    if args.output:
+        Path(args.output).write_text(rendered, encoding="utf-8")
+    else:
+        print(rendered, end="")
     return 0 if not plan["validation_errors"] else 1
 
 

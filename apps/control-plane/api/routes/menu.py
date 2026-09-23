@@ -4,11 +4,13 @@ import hashlib
 import json
 import os
 import re
+import time
+from collections import defaultdict, deque
 from datetime import datetime, timezone
 from typing import Any, Optional
 from urllib.parse import quote, urlsplit
 
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, Body, HTTPException, Query, Request, Response
 
 from brain_contracts.pricing import normalize_offer, offer_to_price_cents
 from core.landing_slots import LandingSlot, slot_for_metadata
@@ -27,6 +29,47 @@ _TECHNICAL_ID_PATTERN = re.compile(
     r"|audience|audiencia|campaign|campanha|copy|persona):[a-z0-9]",
     re.I,
 )
+_UNSAFE_AUTHORED_TEXT = re.compile(
+    r"<\s*/?\s*[a-z][^>]*>|\bjavascript\s*:|\bdata\s*:\s*text/html|"
+    r"(?:^|[;{}])\s*(?:@import|--[a-z0-9_-]+\s*:)|\b(?:expression|url)\s*\(",
+    re.I,
+)
+_PII_VALUE_PATTERN = re.compile(
+    r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b|(?:\+?\d[\s().-]*){10,}", re.I,
+)
+_PUBLISHED_NODE_STATUSES = frozenset({"approved", "active", "validated", "ativo", "embedded", "published"})
+_SITE_BLOCK_TYPES = frozenset({
+    "hero", "audience_links", "service_catalog", "process", "gallery",
+    "specialist", "location", "faq", "final_cta",
+})
+_SITE_BLOCK_NODE_TYPES = {
+    "hero": frozenset({"campaign", "copy", "entity"}),
+    "audience_links": frozenset({"audience"}),
+    "service_catalog": frozenset({"product_group", "product"}),
+    "process": frozenset({"copy", "rule"}),
+    "gallery": frozenset({"gallery"}),
+    "specialist": frozenset({"entity", "copy"}),
+    "location": frozenset({"campaign"}),
+    "faq": frozenset({"faq"}),
+    "final_cta": frozenset({"copy", "entity"}),
+}
+_SITE_BLOCK_KEYS = frozenset({
+    "id", "kind", "title", "eyebrow", "description", "cta_label",
+    "contact_key", "message_template", "node_ids", "asset_node_ids",
+})
+_EVENT_TYPES = frozenset({
+    "page_impression", "audience_impression", "audience_click",
+    "service_interest", "quick_booking_click", "human_contact_click",
+    "location_open", "location_copy", "location_route", "instagram_click",
+})
+_EVENT_KEYS = frozenset({
+    "event_type", "session_id", "page_route", "publication_id",
+    "graph_checksum", "node_ids", "utm",
+})
+_UTM_KEYS = frozenset({"source", "medium", "campaign", "term", "content"})
+_EVENT_WINDOWS: dict[str, deque[float]] = defaultdict(deque)
+_EVENT_WINDOW_SECONDS = 60.0
+_EVENT_LIMIT = 60
 
 
 def _canonical_json_checksum(value: dict) -> str:
@@ -391,6 +434,7 @@ def _site_asset(
     nodes: dict[str, dict],
     gallery_by_node: dict[str, dict],
     granted_asset_ids: set[str],
+    persona_id: str,
     path: str,
     errors: list[str],
 ) -> Optional[dict]:
@@ -399,6 +443,9 @@ def _site_asset(
         return None
     if node.get("node_type") != "asset":
         errors.append(f"{path}.node_type:asset_required")
+        return None
+    if not _node_is_public(node, persona_id):
+        errors.append(f"{path}.node:not_active_published_or_scoped")
         return None
     node_id = str(node.get("id") or "")
     registry_id = _asset_registry_id(node)
@@ -438,6 +485,209 @@ def _site_asset(
         "width": _positive_int(asset.get("width") or meta.get("width") or media.get("width")),
         "height": _positive_int(asset.get("height") or meta.get("height") or media.get("height")),
     }
+
+
+def _safe_authored_text(value: Any, path: str, errors: list[str], *, required: bool = False) -> Optional[str]:
+    if value is None:
+        if required:
+            errors.append(f"{path}:required")
+        return None
+    if not isinstance(value, str):
+        errors.append(f"{path}:string_required")
+        return None
+    text = value.strip()
+    if required and not text:
+        errors.append(f"{path}:required")
+    if len(text) > 1000:
+        errors.append(f"{path}:too_long")
+    if _UNSAFE_AUTHORED_TEXT.search(text):
+        errors.append(f"{path}:html_css_javascript_forbidden")
+    return text
+
+
+def _node_is_public(node: dict, persona_id: str) -> bool:
+    data = node.get("data") if isinstance(node.get("data"), dict) else {}
+    metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+    if metadata.get("active") is False or data.get("active") is False:
+        return False
+    status = str(node.get("status") or data.get("status") or "").lower()
+    if status and status not in _PUBLISHED_NODE_STATUSES:
+        return False
+    node_persona_id = str(node.get("persona_id") or data.get("persona_id") or "")
+    return not node_persona_id or node_persona_id == persona_id
+
+
+def _canonical_theme(raw: Any, errors: list[str]) -> Optional[dict]:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        errors.append("site.theme:object_required")
+        return None
+    unknown = set(raw) - {"mode", "colors", "typography", "texture"}
+    if unknown:
+        errors.extend(f"site.theme.{key}:unsupported" for key in sorted(unknown))
+    mode = str(raw.get("mode") or "")
+    texture = str(raw.get("texture") or "")
+    if mode not in {"dark", "light"}:
+        errors.append("site.theme.mode:invalid")
+    if texture not in {"matte_metal"}:
+        errors.append("site.theme.texture:invalid")
+    colors = raw.get("colors") if isinstance(raw.get("colors"), dict) else {}
+    color_keys = {"background", "surface", "text", "muted", "accent", "accent_reflection", "border"}
+    unknown_colors = set(colors) - color_keys
+    if unknown_colors:
+        errors.extend(f"site.theme.colors.{key}:unsupported" for key in sorted(unknown_colors))
+    normalized_colors = {}
+    for key in color_keys:
+        value = colors.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", value):
+            errors.append(f"site.theme.colors.{key}:hex_required")
+        else:
+            normalized_colors[key] = value.upper()
+    typography = raw.get("typography") if isinstance(raw.get("typography"), dict) else {}
+    if set(typography) - {"display", "body"}:
+        errors.extend(f"site.theme.typography.{key}:unsupported" for key in sorted(set(typography) - {"display", "body"}))
+    normalized_typography = {}
+    for role in ("display", "body"):
+        spec = typography.get(role) if isinstance(typography.get(role), dict) else {}
+        if set(spec) - {"family", "weights"}:
+            errors.extend(f"site.theme.typography.{role}.{key}:unsupported" for key in sorted(set(spec) - {"family", "weights"}))
+        family = _safe_authored_text(spec.get("family"), f"site.theme.typography.{role}.family", errors, required=True)
+        expected_family = "Barlow Condensed" if role == "display" else "Manrope"
+        if family and family != expected_family:
+            errors.append(f"site.theme.typography.{role}.family:unsupported")
+        weights = spec.get("weights")
+        expected_weights = [600, 700] if role == "display" else [400, 500, 600]
+        if weights != expected_weights:
+            errors.append(f"site.theme.typography.{role}.weights:invalid")
+            weights = []
+        normalized_typography[role] = {"family": family or "", "weights": weights}
+    return {
+        "mode": mode,
+        "colors": normalized_colors,
+        "typography": normalized_typography,
+        "texture": texture,
+    }
+
+
+def _canonical_page_blocks(
+    raw_blocks: Any,
+    *,
+    page_index: int,
+    nodes: dict[str, dict],
+    persona_id: str,
+    gallery_by_node: dict[str, dict],
+    granted_asset_ids: set[str],
+    errors: list[str],
+) -> list[dict]:
+    if raw_blocks is None:
+        return []
+    if not isinstance(raw_blocks, list):
+        errors.append(f"site.pages[{page_index}].blocks:list_required")
+        return []
+    result = []
+    seen_ids: set[str] = set()
+    for block_index, raw in enumerate(raw_blocks):
+        path = f"site.pages[{page_index}].blocks[{block_index}]"
+        if not isinstance(raw, dict):
+            errors.append(f"{path}:object_required")
+            continue
+        unknown = set(raw) - _SITE_BLOCK_KEYS
+        if unknown:
+            errors.extend(f"{path}.{key}:unsupported" for key in sorted(unknown))
+        block_id = _safe_authored_text(raw.get("id"), f"{path}.id", errors, required=True) or ""
+        if not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", block_id):
+            errors.append(f"{path}.id:invalid")
+        if block_id in seen_ids:
+            errors.append(f"{path}.id:duplicate")
+        seen_ids.add(block_id)
+        kind = str(raw.get("kind") or "")
+        if kind not in _SITE_BLOCK_TYPES:
+            errors.append(f"{path}.kind:invalid")
+        normalized: dict[str, Any] = {"id": block_id, "kind": kind}
+        for key in ("title", "eyebrow", "description", "cta_label", "contact_key", "message_template"):
+            if key in raw:
+                value = _safe_authored_text(raw.get(key), f"{path}.{key}", errors)
+                if key == "message_template" and value and _TECHNICAL_ID_PATTERN.search(value):
+                    errors.append(f"{path}.{key}:technical_id_forbidden")
+                normalized[key] = value
+        node_ids = raw.get("node_ids", [])
+        asset_node_ids = raw.get("asset_node_ids", [])
+        if not isinstance(node_ids, list) or any(not isinstance(item, str) for item in node_ids):
+            errors.append(f"{path}.node_ids:string_list_required")
+            node_ids = []
+        if not isinstance(asset_node_ids, list) or any(not isinstance(item, str) for item in asset_node_ids):
+            errors.append(f"{path}.asset_node_ids:string_list_required")
+            asset_node_ids = []
+        if len(node_ids) != len(set(node_ids)) or len(asset_node_ids) != len(set(asset_node_ids)):
+            errors.append(f"{path}:duplicate_references")
+        expected_types = _SITE_BLOCK_NODE_TYPES.get(kind, frozenset())
+        items = []
+        for node_id in node_ids:
+            node = nodes.get(node_id)
+            if not node:
+                errors.append(f"{path}.node_ids:{node_id}:missing")
+                continue
+            if not _node_is_public(node, persona_id):
+                errors.append(f"{path}.node_ids:{node_id}:not_active_published_or_scoped")
+            if expected_types and str(node.get("node_type") or "") not in expected_types:
+                errors.append(f"{path}.node_ids:{node_id}:node_type_invalid")
+            if kind == "location":
+                data = node.get("data") if isinstance(node.get("data"), dict) else {}
+                metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+                if str(data.get("campaign_subtype") or metadata.get("campaign_subtype") or "") != "physical_store":
+                    errors.append(f"{path}.node_ids:{node_id}:physical_store_required")
+            if node and kind in {"process", "specialist", "faq"}:
+                item_data = node.get("data") if isinstance(node.get("data"), dict) else {}
+                item = {
+                    "node_id": node_id,
+                    "node_type": str(node.get("node_type") or ""),
+                    "title": _safe_authored_text(
+                        node.get("title"), f"{path}.items[{len(items)}].title", errors,
+                        required=True,
+                    ) or "",
+                }
+                summary = _safe_authored_text(
+                    node.get("summary") or item_data.get("summary"),
+                    f"{path}.items[{len(items)}].summary", errors,
+                )
+                if summary:
+                    item["summary"] = summary
+                if kind == "faq":
+                    item["question"] = _safe_authored_text(
+                        item_data.get("question") or node.get("title"),
+                        f"{path}.items[{len(items)}].question", errors,
+                        required=True,
+                    ) or ""
+                    item["answer"] = _safe_authored_text(
+                        item_data.get("answer"),
+                        f"{path}.items[{len(items)}].answer", errors,
+                        required=True,
+                    ) or ""
+                items.append(item)
+        assets = []
+        for asset_index, asset_node_id in enumerate(asset_node_ids):
+            asset_node = nodes.get(asset_node_id)
+            if asset_node and not _node_is_public(asset_node, persona_id):
+                errors.append(f"{path}.asset_node_ids[{asset_index}]:not_active_published_or_scoped")
+            asset = _site_asset(
+                {"node_id": asset_node_id}, nodes=nodes, gallery_by_node=gallery_by_node,
+                granted_asset_ids=granted_asset_ids,
+                persona_id=persona_id,
+                path=f"{path}.asset_node_ids[{asset_index}]", errors=errors,
+            )
+            if asset:
+                assets.append(asset)
+        if kind in _SITE_BLOCK_TYPES and not node_ids and not asset_node_ids:
+            errors.append(f"{path}:graph_reference_required")
+        normalized["node_ids"] = node_ids
+        normalized["asset_node_ids"] = asset_node_ids
+        normalized["assets"] = assets
+        normalized["items"] = items
+        result.append(normalized)
+    return result
 
 
 def _site_cta_variant(raw: Any) -> Optional[dict]:
@@ -901,6 +1151,7 @@ def _canonical_site_from_publication(publication: dict, cache: dict) -> dict:
     default_collection_slug = _required_text(root, "default_collection_slug", "site", errors)
     brand_family = _required_text(root, "brand_family", "site", errors)
     brand_channel = _required_text(root, "brand_channel", "site", errors)
+    theme = _canonical_theme(root.get("theme"), errors)
 
     whatsapp_raw = root.get("whatsapp") if isinstance(root.get("whatsapp"), dict) else {}
     phone = public_site.normalize_whatsapp_phone(whatsapp_raw.get("phone"))
@@ -914,6 +1165,7 @@ def _canonical_site_from_publication(publication: dict, cache: dict) -> dict:
         asset = _site_asset(
             identity_raw.get(key), nodes=nodes, gallery_by_node=gallery_by_node,
             granted_asset_ids=granted_asset_ids,
+            persona_id=persona_id,
             path=f"site.identity.{key}", errors=errors,
         )
         if asset:
@@ -929,6 +1181,7 @@ def _canonical_site_from_publication(publication: dict, cache: dict) -> dict:
         short_asset = _site_asset(
             identity_raw.get("logo_short"), nodes=nodes, gallery_by_node=gallery_by_node,
             granted_asset_ids=granted_asset_ids,
+            persona_id=persona_id,
             path="site.identity.logo_short", errors=short_errors,
         )
         if short_asset:
@@ -943,31 +1196,65 @@ def _canonical_site_from_publication(publication: dict, cache: dict) -> dict:
             continue
         if node.get("node_type") != "campaign":
             errors.append(f"site.pages[{index}].node_type:campaign_required")
+        if not _node_is_public(node, persona_id):
+            errors.append(f"site.pages[{index}].node:not_active_published_or_scoped")
         route = _required_text(spec, "route", f"site.pages[{index}]", errors)
         kind = str(spec.get("kind") or "")
+        template_key = str(spec.get("template_key") or "")
         if not route.startswith("/"):
             errors.append(f"site.pages[{index}].route:invalid")
-        if kind not in {"linktree", "showcase"}:
+        if kind not in {"linktree", "showcase", "landing_page"}:
             errors.append(f"site.pages[{index}].kind:invalid")
+        if kind == "landing_page" and template_key != "automotive_detailing":
+            errors.append(f"site.pages[{index}].template_key:automotive_detailing_required")
+        if template_key and template_key not in {"linktree", "automotive_detailing"}:
+            errors.append(f"site.pages[{index}].template_key:invalid")
         actions = []
         for action_index, action in enumerate(spec.get("actions") or []):
             action = action if isinstance(action, dict) else {}
+            action_path = f"site.pages[{index}].actions[{action_index}]"
             action_kind = str(action.get("kind") or "")
-            if action_kind not in {"internal", "whatsapp", "location", "disabled"}:
+            if action_kind not in {"internal", "external", "social", "whatsapp", "location", "disabled"}:
                 errors.append(f"site.pages[{index}].actions[{action_index}].kind:invalid")
             action_node_id = action.get("node_id")
-            if action_node_id and str(action_node_id) not in nodes:
-                errors.append(f"site.pages[{index}].actions[{action_index}].node_id:missing")
-            if action.get("message_template") and _TECHNICAL_ID_PATTERN.search(str(action["message_template"])):
-                errors.append(f"site.pages[{index}].actions[{action_index}].message_template:technical_id_forbidden")
+            if action_node_id:
+                action_node = nodes.get(str(action_node_id))
+                if not action_node:
+                    errors.append(f"site.pages[{index}].actions[{action_index}].node_id:missing")
+                elif not _node_is_public(action_node, persona_id):
+                    errors.append(f"site.pages[{index}].actions[{action_index}].node_id:not_active_published_or_scoped")
+            action_id = _safe_authored_text(action.get("id"), f"{action_path}.id", errors, required=True) or ""
+            if not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", action_id):
+                errors.append(f"{action_path}.id:invalid")
+            action_label = _safe_authored_text(action.get("label"), f"{action_path}.label", errors, required=True) or ""
+            action_message = _safe_authored_text(
+                action.get("message_template"), f"{action_path}.message_template", errors,
+            )
+            if action_message and _TECHNICAL_ID_PATTERN.search(action_message):
+                errors.append(f"{action_path}.message_template:technical_id_forbidden")
+            action_href = action.get("href")
+            if action_kind == "internal" and (
+                not isinstance(action_href, str)
+                or not action_href.startswith("/")
+                or action_href.startswith("//")
+            ):
+                errors.append(f"site.pages[{index}].actions[{action_index}].href:internal_path_required")
+            if action_kind in {"external", "social"}:
+                parts = urlsplit(str(action_href or ""))
+                if parts.scheme != "https" or not parts.netloc or parts.username or parts.password:
+                    errors.append(f"site.pages[{index}].actions[{action_index}].href:https_required")
             actions.append({
-                "id": _required_text(action, "id", f"site.pages[{index}].actions[{action_index}]", errors),
+                "id": action_id,
                 "node_id": str(action_node_id) if action_node_id else None,
-                "label": _required_text(action, "label", f"site.pages[{index}].actions[{action_index}]", errors),
+                "label": action_label,
+                "description": _safe_authored_text(
+                    action.get("description"),
+                    f"{action_path}.description", errors,
+                ),
                 "kind": action_kind,
-                "href": action.get("href"),
+                "href": action_href,
                 "contact_key": action.get("contact_key"),
-                "message_template": action.get("message_template"),
+                "message_template": action_message,
                 "position": _read_int(action.get("position"), 0),
                 "disabled": bool(action.get("disabled", False)),
             })
@@ -991,18 +1278,44 @@ def _canonical_site_from_publication(publication: dict, cache: dict) -> dict:
                         for field in fields
                     }
                 sections = normalized_sections
-        pages.append({
+        blocks = _canonical_page_blocks(
+            spec.get("blocks"), page_index=index, nodes=nodes, persona_id=persona_id,
+            gallery_by_node=gallery_by_node, granted_asset_ids=granted_asset_ids,
+            errors=errors,
+        )
+        if kind == "landing_page" and not blocks:
+            errors.append(f"site.pages[{index}].blocks:required")
+        if kind == "landing_page" and template_key == "automotive_detailing":
+            block_kinds = [block.get("kind") for block in blocks]
+            missing_kinds = _SITE_BLOCK_TYPES - set(block_kinds)
+            if missing_kinds:
+                errors.extend(
+                    f"site.pages[{index}].blocks.{block_kind}:required"
+                    for block_kind in sorted(missing_kinds)
+                )
+            if len(block_kinds) != len(set(block_kinds)):
+                errors.append(f"site.pages[{index}].blocks:duplicate_kind")
+        page_title = _required_text(spec, "title", f"site.pages[{index}]", errors)
+        page_description = _required_text(spec, "description", f"site.pages[{index}]", errors)
+        _safe_authored_text(page_title, f"site.pages[{index}].title", errors, required=True)
+        _safe_authored_text(page_description, f"site.pages[{index}].description", errors, required=True)
+        page_payload = {
             "node_id": str(node["id"]),
             "route": route,
             "kind": kind,
             "eyebrow": spec.get("eyebrow"),
-            "title": _required_text(spec, "title", f"site.pages[{index}]", errors),
-            "description": _required_text(spec, "description", f"site.pages[{index}]", errors),
+            "title": page_title,
+            "description": page_description,
             "cta_label": spec.get("cta_label"),
             "ribbon_terms": [str(value) for value in spec.get("ribbon_terms") or [] if str(value).strip()],
             "actions": sorted(actions, key=lambda row: row["position"]),
             "sections": sections,
-        })
+        }
+        if template_key:
+            page_payload["template_key"] = template_key
+        if spec.get("blocks") is not None:
+            page_payload["blocks"] = blocks
+        pages.append(page_payload)
     if len(pages) < 2:
         errors.append("site.pages:min_2")
 
@@ -1013,6 +1326,8 @@ def _canonical_site_from_publication(publication: dict, cache: dict) -> dict:
             continue
         if node.get("node_type") != "copy":
             errors.append(f"site.contacts[{index}].node_type:copy_required")
+        if not _node_is_public(node, persona_id):
+            errors.append(f"site.contacts[{index}].node:not_active_published_or_scoped")
         contact_phone = public_site.normalize_whatsapp_phone(spec.get("phone"))
         if len(contact_phone) < 8:
             errors.append(f"site.contacts[{index}].phone:invalid")
@@ -1026,12 +1341,28 @@ def _canonical_site_from_publication(publication: dict, cache: dict) -> dict:
         })
     if not contacts:
         errors.append("site.contacts:min_1")
+    contact_by_key = {contact["key"]: contact for contact in contacts if contact.get("key")}
+    for page_index, page in enumerate(pages):
+        for action_index, action in enumerate(page.get("actions") or []):
+            contact_key = str(action.get("contact_key") or "")
+            if action.get("kind") == "whatsapp" and contact_key and (
+                contact_key != "quick_booking" and contact_key not in contact_by_key
+            ):
+                errors.append(
+                    f"site.pages[{page_index}].actions[{action_index}].contact_key:unknown"
+                )
+    if any(page.get("template_key") == "automotive_detailing" for page in pages):
+        quick_phone = str((contact_by_key.get("quick_booking") or {}).get("phone") or phone)
+        human_phone = str((contact_by_key.get("human") or {}).get("phone") or "")
+        if human_phone and quick_phone == human_phone:
+            errors.append("site.contacts.human.phone:must_differ_from_quick_booking")
 
     covers = []
     for index, raw in enumerate(root.get("covers") or []):
         asset = _site_asset(
             raw, nodes=nodes, gallery_by_node=gallery_by_node,
             granted_asset_ids=granted_asset_ids,
+            persona_id=persona_id,
             path=f"site.covers[{index}]", errors=errors,
         )
         if not asset:
@@ -1060,6 +1391,8 @@ def _canonical_site_from_publication(publication: dict, cache: dict) -> dict:
             continue
         if node.get("node_type") != "audience":
             errors.append(f"site.audiences[{index}].node_type:audience_required")
+        if not _node_is_public(node, persona_id):
+            errors.append(f"site.audiences[{index}].node:not_active_published_or_scoped")
         audiences.append({
             "node_id": str(node["id"]),
             "label": _required_text(spec, "label", f"site.audiences[{index}]", errors),
@@ -1074,6 +1407,8 @@ def _canonical_site_from_publication(publication: dict, cache: dict) -> dict:
         node, spec = _site_ref_spec(raw, nodes, "location", errors)
         if not node:
             continue
+        if not _node_is_public(node, persona_id):
+            errors.append(f"site.locations[{index}].node:not_active_published_or_scoped")
         node_data = node.get("data") or {}
         node_metadata = node_data.get("metadata") if isinstance(node_data.get("metadata"), dict) else {}
         if (
@@ -1148,7 +1483,7 @@ def _canonical_site_from_publication(publication: dict, cache: dict) -> dict:
             "graph_checksum": publication.get("checksum"),
             "errors": sorted(set(errors)),
         })
-    return {
+    result = {
         "slug": slug,
         "name": name,
         "format_key": format_key,
@@ -1167,6 +1502,9 @@ def _canonical_site_from_publication(publication: dict, cache: dict) -> dict:
         "audiences": sorted(audiences, key=lambda row: row["position"]),
         "locations": locations,
     }
+    if theme is not None:
+        result["theme"] = theme
+    return result
 
 
 def _copy_payload(node: dict) -> dict:
@@ -1930,6 +2268,103 @@ def _menu_response(persona_slug: str, collection_slug: Optional[str], response: 
     return payload
 
 
+def _check_event_rate_limit(persona_slug: str, session_id: str, request: Request) -> None:
+    client_host = request.client.host if request.client else "unknown"
+    key = hashlib.sha256(f"{persona_slug}:{session_id}:{client_host}".encode("utf-8")).hexdigest()
+    now = time.monotonic()
+    window = _EVENT_WINDOWS[key]
+    while window and window[0] <= now - _EVENT_WINDOW_SECONDS:
+        window.popleft()
+    if len(window) >= _EVENT_LIMIT:
+        raise HTTPException(status_code=429, detail={"code": "public_site_event_rate_limited"})
+    window.append(now)
+    if len(_EVENT_WINDOWS) > 10000:
+        removed = 0
+        for stale_key in list(_EVENT_WINDOWS)[:1000]:
+            if not _EVENT_WINDOWS[stale_key] or _EVENT_WINDOWS[stale_key][-1] <= now - _EVENT_WINDOW_SECONDS:
+                _EVENT_WINDOWS.pop(stale_key, None)
+                removed += 1
+        if not removed:
+            _EVENT_WINDOWS.pop(next(iter(_EVENT_WINDOWS)), None)
+
+
+def _validated_public_site_event(persona_slug: str, body: Any, request: Request) -> tuple[dict, dict]:
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail={"code": "public_site_event_object_required"})
+    unknown = set(body) - _EVENT_KEYS
+    if unknown:
+        raise HTTPException(status_code=422, detail={
+            "code": "public_site_event_fields_unsupported", "fields": sorted(unknown),
+        })
+    event_type = str(body.get("event_type") or "")
+    if event_type not in _EVENT_TYPES:
+        raise HTTPException(status_code=422, detail={"code": "public_site_event_type_invalid"})
+    session_id = str(body.get("session_id") or "")
+    if (not re.fullmatch(r"(?=.*[A-Za-z])(?=.*\d)[A-Za-z0-9_-]{16,128}", session_id)
+            or _PII_VALUE_PATTERN.search(session_id)):
+        raise HTTPException(status_code=422, detail={"code": "public_site_event_session_invalid"})
+    page_route = str(body.get("page_route") or "")
+    if not page_route.startswith("/") or len(page_route) > 160 or "?" in page_route or "#" in page_route:
+        raise HTTPException(status_code=422, detail={"code": "public_site_event_page_invalid"})
+    persona = _resolve_persona(persona_slug)
+    publication = _active_publication_context(str(persona["id"]), persona_slug)
+    if not publication:
+        raise HTTPException(status_code=409, detail={"code": "public_site_event_active_publication_required"})
+    if body.get("publication_id") != publication.get("publication_id"):
+        raise HTTPException(status_code=409, detail={"code": "public_site_event_publication_mismatch"})
+    if body.get("graph_checksum") != publication.get("checksum"):
+        raise HTTPException(status_code=409, detail={"code": "public_site_event_checksum_mismatch"})
+    document = publication.get("document") or {}
+    nodes = {
+        str(node.get("id")): node for node in
+        (document.get("nodes") or list((document.get("node_by_id") or {}).values()))
+        if node.get("id")
+    }
+    persona_id = str(persona["id"])
+    persona_node = next((node for node in nodes.values() if node.get("node_type") == "persona"), {})
+    site_root = ((persona_node.get("data") or {}).get("public_site") or {})
+    routes = set()
+    for raw_page in site_root.get("pages") or []:
+        ref = raw_page if isinstance(raw_page, str) else (raw_page or {}).get("node_id")
+        page_node = nodes.get(str(ref or ""))
+        if page_node:
+            routes.add(str(_site_node_spec(page_node, "page").get("route") or ""))
+    if page_route not in routes:
+        raise HTTPException(status_code=422, detail={"code": "public_site_event_page_not_published"})
+    node_ids = body.get("node_ids", [])
+    if not isinstance(node_ids, list) or len(node_ids) > 20 or any(not isinstance(value, str) for value in node_ids):
+        raise HTTPException(status_code=422, detail={"code": "public_site_event_node_ids_invalid"})
+    expected_types = {
+        "audience_impression": {"audience"}, "audience_click": {"audience"},
+        "service_interest": {"product", "product_group"},
+        "location_open": {"campaign"}, "location_copy": {"campaign"}, "location_route": {"campaign"},
+    }.get(event_type)
+    if expected_types and not node_ids:
+        raise HTTPException(status_code=422, detail={"code": "public_site_event_node_required"})
+    for node_id in node_ids:
+        node = nodes.get(node_id)
+        if not node or not _node_is_public(node, persona_id):
+            raise HTTPException(status_code=422, detail={"code": "public_site_event_node_not_published", "node_id": node_id})
+        if expected_types and str(node.get("node_type") or "") not in expected_types:
+            raise HTTPException(status_code=422, detail={"code": "public_site_event_node_type_invalid", "node_id": node_id})
+    utm = body.get("utm") or {}
+    if not isinstance(utm, dict) or set(utm) - _UTM_KEYS:
+        raise HTTPException(status_code=422, detail={"code": "public_site_event_utm_invalid"})
+    clean_utm = {}
+    for key, value in utm.items():
+        if (not isinstance(value, str) or len(value) > 200
+                or _UNSAFE_AUTHORED_TEXT.search(value) or _PII_VALUE_PATTERN.search(value)):
+            raise HTTPException(status_code=422, detail={"code": "public_site_event_utm_invalid", "field": key})
+        clean_utm[f"utm_{key}"] = value
+    _check_event_rate_limit(persona_slug, session_id, request)
+    payload = {
+        "session_id": session_id, "page_route": page_route,
+        "publication_id": publication["publication_id"], "graph_checksum": publication["checksum"],
+        "node_ids": node_ids, **clean_utm,
+    }
+    return persona, {"event_type": event_type, "payload": payload}
+
+
 @router.get("/api/menu/{persona_slug}")
 def get_api_menu(
     persona_slug: str,
@@ -1938,6 +2373,25 @@ def get_api_menu(
     nocache: int = Query(0, ge=0, le=1),
 ):
     return _menu_response(persona_slug, collection_slug, response, bool(nocache))
+
+
+@router.post("/api/menu/{persona_slug}/events", status_code=202)
+def post_api_menu_event(
+    persona_slug: str,
+    request: Request,
+    body: Any = Body(...),
+):
+    persona, event = _validated_public_site_event(persona_slug, body, request)
+    stored = supabase_client.insert_event({
+        "event_type": f"public_site.{event['event_type']}",
+        "entity_type": "public_site_session",
+        "entity_id": event["payload"]["session_id"],
+        "persona_id": persona["id"],
+        "payload": event["payload"],
+        "level": "info",
+        "source": "public_site",
+    })
+    return {"ok": True, "accepted": True, "persisted": stored is not None}
 
 
 @router.get("/menu/{persona_slug}")
