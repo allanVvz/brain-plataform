@@ -37,7 +37,7 @@ def test_complete_knowledge_candidate_is_publishable_and_source_backed() -> None
     }
     enriched = [node for node in bundle["nodes"] if node["id"].count(":") >= 3 and node["id"].startswith("faq:service:")]
     assert len(enriched) == 23
-    assert len(bundle["nodes"]) == 120
+    assert len(bundle["nodes"]) == 124
     assert all(node["status"] == "approved" for node in bundle["nodes"])
     assert all((node.get("data") or {}).get("source") != "pending_source" for node in bundle["nodes"])
     assert len({node["id"] for node in bundle["nodes"] if node["node_type"] == "faq"}) == 51
