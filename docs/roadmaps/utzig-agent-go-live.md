@@ -96,8 +96,29 @@ pausa de binding, pausa de persona ou reinício de worker.
   e runtime
   `sha256:af58d99ac5f3a9ba9afcf3918c18e22b7791ab71021662f442b9c82385c93a33`.
 - Aprovação: operador autorizou o conhecimento completo deste candidato. A
-  ativação deve usar stage + CAS; a publicação v4 permanece ativa diante de
-  qualquer falha.
+  ativação usou stage + CAS; a publicação v4 permaneceu ativa durante o stage.
+
+### Publicação e validação v5
+
+- Stage concluído na publicação `ab38794a-0580-4bd0-afe7-df6fcb7a0e58`,
+  versão 5; durante o stage, a v4 permaneceu ativa.
+- Uma sessão interna foi executada contra a publicação staged com uma abertura
+  sobre polimento comercial, diferente das perguntas FAQ adicionadas: sessão
+  `6dffd957-6e67-417a-97ef-d6db931b0892`, buffer
+  `83b55a8e-3867-4fcb-bf83-1678e0b7644b`.
+- Resultado conversacional: `technical_pass=false`, `quality_pass=false`, um
+  inbound, zero decisão, zero proof, zero commit e zero outbound. O buffer foi
+  terminalizado em `dead_letter`; nenhum WhatsApp real foi usado.
+- A falha ocorreu antes de recuperar ou avaliar as novas FAQs e, portanto, não
+  invalida os gates de estrutura, proveniência, segurança e publicação do
+  GraphBundle. Ela continua sendo o débito essencial do runtime descrito
+  abaixo.
+- Por orientação explícita do operador para publicar o grafo mesmo com a falha
+  técnica persistente, a v5 foi ativada por CAS. Auditoria pós-ativação:
+  publicação ativa `ab38794a-0580-4bd0-afe7-df6fcb7a0e58`, versão 5, checksum
+  `sha256:af58d99ac5f3a9ba9afcf3918c18e22b7791ab71021662f442b9c82385c93a33`.
+- Veredito separado: `graph/content pass`; `go-live conversacional não
+  aprovado` até um turno interno produzir decisão, proof e commit canônicos.
 
 ## Débitos de backend fora do escopo GraphBundle
 
