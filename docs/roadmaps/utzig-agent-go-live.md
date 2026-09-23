@@ -55,6 +55,21 @@ passou a suíte focada; ela exige uma release compatível apenas do
 `conversation-runtime` antes de voltar a executar a jornada sem usar fonte
 manual na VPS.
 
+## Candidate e rollback — 2026-09-23
+
+- Imagem candidata: `sha256:57805bfbed50fe37079ac21d1931d6e7fd9f359084bd501d1e38d1510505193f`.
+- Preflight e candidate blue/green passaram; somente o
+  `conversation-runtime` foi selecionado.
+- O canário interno `sdr_qualificacao_carro` criou a sessão
+  `dabfbfad-10b1-4dd5-91a7-cad9da9b0b02`, mas o inbound
+  `42e9ee75-ce05-467d-b231-d4f52f13bd76` foi terminalizado sem decisão,
+  proof, commit ou outbound.
+- O workflow efetuou rollback automático para o digest anterior. Gateway,
+  control-plane, transport e Tock Fatal permaneceram no slot original.
+- Veredito: `technical_pass=false`, `quality_pass=false`. Não repetir deploy
+  até que o estágio técnico entre transport e runtime seja diagnosticado e
+  corrigido por uma única alteração de serviço.
+
 ## Matriz mínima do WA Validator
 
 | Jornada | Resultado seguro exigido |
