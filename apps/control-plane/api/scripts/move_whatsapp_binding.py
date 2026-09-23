@@ -83,8 +83,8 @@ def main() -> None:
     parser.add_argument(
         "--routing",
         required=True,
-        choices=["deterministic", "clone"],
-        help="Choose the target routing explicitly; never retain source-persona routing.",
+        choices=["deterministic", "clone", "preserve_agentic"],
+        help="Choose the target routing explicitly; preserve_agentic requires an empty source channel and a valid generic agentic binding.",
     )
     parser.add_argument(
         "--routing-binding-id",
@@ -117,7 +117,7 @@ def main() -> None:
         for key in _STALE_ROUTING_KEYS:
             target_metadata.pop(key, None)
         routing_update = {"metadata": target_metadata, "n8n_workflow_id": None}
-    else:
+    elif args.routing == "clone":
         if not args.routing_binding_id:
             raise SystemExit("--routing-binding-id is required when --routing=clone")
         reference = supabase_client.get_workflow_binding_by_id(args.routing_binding_id) or {}
@@ -131,6 +131,22 @@ def main() -> None:
         routing_update = {
             "metadata": reference_metadata,
             "n8n_workflow_id": reference.get("n8n_workflow_id"),
+        }
+    else:
+        # The production conversation template is generic: it resolves the
+        # persona and graph at runtime.  Preserve only a fully configured
+        # agentic provider-direct binding; never synthesize a webhook or
+        # credential field, and refuse a move with historical leads because
+        # this legacy table API cannot make the lead detachment atomic.
+        if old_metadata.get("decision_owner") != "n8n_agents":
+            raise SystemExit("preserve_agentic requires decision_owner=n8n_agents")
+        if old_metadata.get("transport_mode") != "provider_direct":
+            raise SystemExit("preserve_agentic requires transport_mode=provider_direct")
+        if not source_binding.get("n8n_workflow_id") or not old_metadata.get("conversation_webhook_url"):
+            raise SystemExit("preserve_agentic requires workflow id and conversation webhook")
+        routing_update = {
+            "metadata": {**old_metadata, "conversation_mode": "n8n_agents"},
+            "n8n_workflow_id": source_binding.get("n8n_workflow_id"),
         }
 
     existing_target_binding = next(
@@ -171,6 +187,11 @@ def main() -> None:
             "provider; moving the source row in will leave two rows. Review "
             "before --apply."
         )
+
+    if args.routing == "preserve_agentic" and affected_leads:
+        raise SystemExit("preserve_agentic requires zero leads on the source binding")
+    if args.routing == "preserve_agentic" and existing_target_binding:
+        raise SystemExit("preserve_agentic requires no target WhatsApp binding")
 
     if not args.apply:
         print(json.dumps({**plan, "dry_run": True}, ensure_ascii=False, indent=2))
@@ -226,10 +247,13 @@ def main() -> None:
         },
         source="scripts.move_whatsapp_binding",
     )
-    # The source persona no longer has this channel; the target's routing
-    # still needs an explicit follow-up script (see the reminder above).
+    # The source persona no longer has this channel.  A generic agentic
+    # binding resolves its content from the target persona's publication.
     supabase_client.update_persona_routing(args.from_persona_slug, {"process_mode": "internal"})
-    supabase_client.update_persona_routing(args.to_persona_slug, {"process_mode": "internal"})
+    supabase_client.update_persona_routing(
+        args.to_persona_slug,
+        {"process_mode": "n8n" if args.routing == "preserve_agentic" else "internal"},
+    )
 
     print(json.dumps({
         **plan,
