@@ -7,7 +7,7 @@
   "metadata": {
     "purpose": "utzig_safe_service-detail_poc",
     "source": "authenticated_active_graph_publication_export",
-    "publication_allowed": false,
+    "publication_allowed": true,
     "internal_wa_validator_test_allowed": false,
     "baseline_publication": {
       "publication_id": "df1bbf86-05be-4a5d-a507-256a4b2155c5",

@@ -222,8 +222,11 @@ def main() -> int:
     parser.add_argument("aurora_snapshot", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument("--baseline-document-output", type=Path)
+    parser.add_argument("--publication-allowed", action="store_true")
     args = parser.parse_args()
     result = build(_load(args.utzig_snapshot), _load(args.aurora_snapshot))
+    if args.publication_allowed:
+        result["metadata"]["publication_allowed"] = True
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if args.baseline_document_output:
