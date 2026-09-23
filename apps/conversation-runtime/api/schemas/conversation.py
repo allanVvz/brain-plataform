@@ -186,7 +186,7 @@ class ExtractedFact(StrictModel):
 
 
 class CommercialClaim(StrictModel):
-    claim_type: str = Field(pattern="^(price|price_comparison|availability|schedule|stock|duration|service_detail|other)$")
+    claim_type: str = Field(pattern="^(price|price_comparison|availability|schedule|stock|duration|service_detail|public_information|other)$")
     value: dict[str, Any] = Field(default_factory=dict)
     evidence_node_ids: list[str] = Field(default_factory=list)
     evidence_chunk_ids: list[str] = Field(default_factory=list)

@@ -1868,8 +1868,77 @@ async def _wait_for_turn_audit_v3(
             and audit.get("commit_state") == "completed"
         ):
             return audit
+        technical_failure = _canonical_technical_failure(inbound_buffer_id)
+        if technical_failure:
+            return {**audit, "technical_failure": technical_failure}
         await asyncio.sleep(poll_interval_s)
     return audit
+
+
+def _canonical_technical_failure(inbound_buffer_id: str) -> dict | None:
+    """Read the terminal audit without leaking prompts, messages or secrets."""
+    try:
+        events = supabase_client.list_system_events(
+            entity_type="lead_buffer",
+            entity_id=inbound_buffer_id,
+            event_types=[
+                "conversation.technical_failure",
+                "conversation.technical_handoff",
+            ],
+            limit=1,
+        )
+    except Exception:
+        logger.exception(
+            "Could not read canonical technical failure buffer_id=%s",
+            inbound_buffer_id,
+        )
+        return None
+    if not events:
+        return None
+    payload = events[0].get("payload") or {}
+    diagnostic = payload.get("diagnostic") or {}
+    provider = diagnostic.get("proposal_summary") or {}
+    result = {
+        "stage": str(
+            payload.get("stage") or diagnostic.get("failed_node") or "unknown"
+        )[:100],
+        "reason": str(payload.get("reason") or "agentic_turn_failed")[:240],
+    }
+    if isinstance(diagnostic.get("http_code"), (str, int, float)):
+        result["http_status"] = str(diagnostic["http_code"])[:20]
+    if isinstance(diagnostic.get("message"), str):
+        result["technical_message"] = diagnostic["message"][:1000]
+    for key in (
+        "http_status",
+        "provider_error_type",
+        "provider_error_code",
+        "provider_message",
+        "transport_error",
+        "response_error",
+    ):
+        value = provider.get(key)
+        if isinstance(value, (str, int, float, bool)):
+            result[key] = str(value)[:240]
+    return result
+
+
+def _technical_failure_message(failure: dict) -> str:
+    stage = str(failure.get("stage") or "unknown")
+    details: list[str] = []
+    if failure.get("http_status"):
+        details.append(f"provider HTTP {failure['http_status']}")
+    if failure.get("provider_error_code"):
+        details.append(str(failure["provider_error_code"]))
+    if failure.get("provider_message"):
+        details.append(str(failure["provider_message"]))
+    if failure.get("transport_error"):
+        details.append(str(failure["transport_error"]))
+    if failure.get("response_error"):
+        details.append(str(failure["response_error"]))
+    if failure.get("technical_message"):
+        details.append(str(failure["technical_message"]))
+    suffix = f" ({'; '.join(details)})" if details else ""
+    return f"Canonical agentic turn failed at {stage}{suffix}"
 
 
 def _seed_known_name(
@@ -3164,6 +3233,12 @@ async def run_session_direct(
                                 _AGENTIC_CANONICAL_COMMIT_WAIT_SECONDS,
                             ),
                         )
+                        if turn_audit.get("technical_failure"):
+                            raise RuntimeError(
+                                _technical_failure_message(
+                                    turn_audit["technical_failure"]
+                                )
+                            )
                         committed_buffer = (
                             supabase_client.get_whatsapp_buffer_by_idempotency(
                                 f"inbound:wa-validator:{message_id}"

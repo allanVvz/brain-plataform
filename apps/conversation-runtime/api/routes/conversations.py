@@ -216,6 +216,9 @@ def execute_agentic(
         )
     except Exception as exc:  # every failed stage terminalizes exactly once
         stage = getattr(exc, "stage", None) or type(exc).__name__
+        failure_diagnostic = getattr(exc, "diagnostic", {})
+        if not isinstance(failure_diagnostic, dict):
+            failure_diagnostic = {}
         command = TechnicalConversationFailureV1(
             lead_ref=body.lead_ref,
             buffer_id=body.inbound_buffer_id,
@@ -227,7 +230,8 @@ def execute_agentic(
                 "execution_strategy": "interpret_then_respond",
                 "failed_node": str(stage)[:100],
                 "message": str(exc)[:1000],
-                "proposal_summary": getattr(exc, "diagnostic", {}),
+                "proposal_summary": failure_diagnostic,
+                "http_code": failure_diagnostic.get("http_status"),
             },
         )
         return _terminalize_technical_failure(command)

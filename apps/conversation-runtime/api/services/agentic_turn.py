@@ -51,6 +51,27 @@ class ModelBinding:
     structured_output_mode: str
 
 
+def _provider_http_diagnostic(response: httpx.Response) -> dict[str, Any]:
+    """Return an allowlisted provider error without headers, request or key."""
+    diagnostic: dict[str, Any] = {"http_status": int(response.status_code)}
+    try:
+        body = response.json()
+    except ValueError:
+        return diagnostic
+    error = body.get("error") if isinstance(body, dict) else None
+    if not isinstance(error, dict):
+        return diagnostic
+    for source_key, target_key in (
+        ("type", "provider_error_type"),
+        ("code", "provider_error_code"),
+        ("message", "provider_message"),
+    ):
+        value = error.get(source_key)
+        if isinstance(value, (str, int, float, bool)):
+            diagnostic[target_key] = str(value)[:240]
+    return diagnostic
+
+
 def _model_binding(persona_id: str) -> ModelBinding:
     connection = (
         supabase_client.get_persona_integration_connection(persona_id, "deepseek")
@@ -119,8 +140,37 @@ def _call_json(
             )
             response.raise_for_status()
             body = response.json()
-    except (httpx.HTTPError, ValueError) as exc:
-        raise AgenticTurnError(stage, f"model request failed: {type(exc).__name__}") from exc
+    except httpx.HTTPStatusError as exc:
+        diagnostic = _provider_http_diagnostic(exc.response)
+        provider_details = [
+            str(diagnostic[key])
+            for key in (
+                "provider_error_code",
+                "provider_error_type",
+                "provider_message",
+            )
+            if diagnostic.get(key)
+        ]
+        detail_suffix = (
+            f" ({'; '.join(provider_details)})" if provider_details else ""
+        )
+        raise AgenticTurnError(
+            stage,
+            f"model request failed: HTTP {exc.response.status_code}{detail_suffix}",
+            diagnostic=diagnostic,
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise AgenticTurnError(
+            stage,
+            f"model request failed: {type(exc).__name__}",
+            diagnostic={"transport_error": type(exc).__name__},
+        ) from exc
+    except ValueError as exc:
+        raise AgenticTurnError(
+            stage,
+            "model returned an invalid HTTP JSON document",
+            diagnostic={"response_error": type(exc).__name__},
+        ) from exc
     try:
         content = body["choices"][0]["message"]["content"]
         document = json.loads(content) if isinstance(content, str) else content
@@ -234,7 +284,7 @@ def _reply_schema() -> dict[str, Any]:
                 "type": "object", "additionalProperties": False,
                 "required": ["claim_type", "value", "evidence_node_ids", "evidence_chunk_ids"],
                 "properties": {
-                    "claim_type": {"enum": ["price", "price_comparison", "availability", "schedule", "stock", "duration", "service_detail", "other"]},
+                    "claim_type": {"enum": ["price", "price_comparison", "availability", "schedule", "stock", "duration", "service_detail", "public_information", "other"]},
                     "value": {"type": "object"},
                     "evidence_node_ids": {"type": "array", "items": {"type": "string"}},
                     "evidence_chunk_ids": {"type": "array", "items": {"type": "string"}},
@@ -633,7 +683,18 @@ def execute(
     try:
         reply = ConversationReplyV1.model_validate(reply_raw)
     except ValidationError as exc:
-        raise AgenticTurnError("reply_validation", "reply schema is invalid") from exc
+        validation_errors = [
+            {
+                "location": ".".join(str(part) for part in error.get("loc") or ()),
+                "type": str(error.get("type") or "validation_error"),
+            }
+            for error in exc.errors(include_url=False, include_input=False)[:8]
+        ]
+        raise AgenticTurnError(
+            "reply_validation",
+            "reply schema is invalid",
+            diagnostic={"validation_errors": validation_errors},
+        ) from exc
     try:
         decision, response = conversation_runtime.decide_agentic(
             context,

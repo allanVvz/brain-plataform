@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+import httpx
 from brain_contracts import ExecuteAgenticTurnV1
 from pydantic import ValidationError
 from routes import conversations
@@ -8,10 +9,25 @@ from schemas.conversation import (
     AgentResponse,
     ConversationContext,
     ConversationDecision,
+    ConversationReplyV1,
     ResolvedUnderstandingV1,
     TurnUnderstandingV1,
 )
 from services import agentic_turn, graph_agent_runtime_v3
+
+
+class _HttpClient:
+    def __init__(self, response: httpx.Response):
+        self.response = response
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return None
+
+    def post(self, *_args, **_kwargs):
+        return self.response
 
 
 def _context() -> ConversationContext:
@@ -41,6 +57,56 @@ def test_active_publication_is_not_a_shadow_session():
         {"id": "publication-candidate"}, active,
     )
     assert graph_agent_runtime_v3._is_shadow_publication(active, None)
+
+
+def test_model_http_failure_keeps_only_sanitized_provider_diagnostic(monkeypatch):
+    response = httpx.Response(
+        402,
+        request=httpx.Request("POST", "https://api.deepseek.com/chat/completions"),
+        json={
+            "error": {
+                "message": "Insufficient Balance",
+                "type": "unknown_error",
+                "code": "invalid_request_error",
+                "secret": "must-not-be-persisted",
+            },
+            "request": {"authorization": "Bearer must-not-be-persisted"},
+        },
+    )
+    monkeypatch.setattr(
+        agentic_turn.httpx,
+        "Client",
+        lambda **_kwargs: _HttpClient(response),
+    )
+
+    with pytest.raises(agentic_turn.AgenticTurnError) as raised:
+        agentic_turn._call_json(
+            agentic_turn.ModelBinding(
+                "deepseek-flash",
+                "https://api.deepseek.com/chat/completions",
+                "sk-must-not-be-persisted",
+                "json_object",
+            ),
+            stage="understanding_model",
+            system="Return JSON.",
+            payload={"value": "fixture"},
+            schema_name="fixture",
+            schema={"type": "object"},
+            temperature=0,
+        )
+
+    exc = raised.value
+    assert str(exc) == (
+        "model request failed: HTTP 402 "
+        "(invalid_request_error; unknown_error; Insufficient Balance)"
+    )
+    assert exc.diagnostic == {
+        "http_status": 402,
+        "provider_error_type": "unknown_error",
+        "provider_error_code": "invalid_request_error",
+        "provider_message": "Insufficient Balance",
+    }
+    assert "must-not-be-persisted" not in repr(exc.diagnostic)
 
 
 def test_understanding_instruction_extracts_a_direct_free_text_answer(monkeypatch):
@@ -239,6 +305,27 @@ def test_reply_claim_contract_exposes_only_retained_graph_claim_evidence():
     ]
 
 
+def test_public_information_claim_is_valid_in_reply_and_model_schema():
+    reply = ConversationReplyV1.model_validate({
+        "contract_version": "conversation_reply_v1",
+        "reply": "Conte o serviço e os dados do veículo para pedir a avaliação.",
+        "asked_field_key": None,
+        "claims": [{
+            "claim_type": "public_information",
+            "value": {"text": "Como pedir uma avaliação"},
+            "evidence_node_ids": ["faq:assessment"],
+            "evidence_chunk_ids": [],
+        }],
+        "cited_node_ids": ["faq:assessment"],
+        "cited_chunk_ids": [],
+        "handoff_requested": False,
+        "knowledge_gap": False,
+    })
+
+    assert reply.claims[0].claim_type == "public_information"
+    assert "public_information" in agentic_turn._reply_schema()["properties"]["claims"]["items"]["properties"]["claim_type"]["enum"]
+
+
 def test_non_literal_fact_evidence_fails_without_reply_call(monkeypatch):
     context = _context()
     monkeypatch.setattr(agentic_turn.conversation_runtime, "build_context", lambda **_kwargs: context)
@@ -332,17 +419,31 @@ def test_agentic_failure_returns_truthful_canonical_handoff(monkeypatch):
         conversations.agentic_turn,
         "execute",
         lambda **_kwargs: (_ for _ in ()).throw(
-            agentic_turn.AgenticTurnError("reply_model", "provider timeout")
+            agentic_turn.AgenticTurnError(
+                "reply_model",
+                "model request failed: HTTP 402",
+                diagnostic={
+                    "http_status": 402,
+                    "provider_error_code": "invalid_request_error",
+                    "provider_message": "Insufficient Balance",
+                },
+            )
         ),
     )
-    monkeypatch.setattr(
-        conversations,
-        "_terminalize_technical_failure",
-        lambda command: {
+    captured = {}
+
+    def fake_terminalize(command):
+        captured["command"] = command
+        return {
             "ok": False, "status": "technical_handoff",
             "technical_failure": True, "handoff": True,
             "outbound_enqueued": False, "stage": command.stage,
-        },
+        }
+
+    monkeypatch.setattr(
+        conversations,
+        "_terminalize_technical_failure",
+        fake_terminalize,
     )
 
     result = conversations.execute_agentic(body, x_webhook_token="token")
@@ -351,3 +452,10 @@ def test_agentic_failure_returns_truthful_canonical_handoff(monkeypatch):
     assert result["technical_failure"] is True
     assert result["outbound_enqueued"] is False
     assert result["stage"] == "reply_model"
+    assert captured["command"].diagnostic == {
+        "workflow_template": "runtime_agentic_v1",
+        "execution_strategy": "interpret_then_respond",
+        "failed_node": "reply_model",
+        "message": "model request failed: HTTP 402",
+        "http_code": 402,
+    }

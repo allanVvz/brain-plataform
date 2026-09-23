@@ -322,6 +322,77 @@ def test_price_comparison_rejects_a_model_invented_amount():
     assert "price_comparison_value_mismatch" in proof["errors"]
 
 
+def test_public_information_claim_passes_with_exact_graph_evidence():
+    document = {
+        "branch_anchors": ["service:assessment"],
+        "nodes": [
+            {
+                "id": "service:assessment",
+                "node_type": "service",
+                "status": "validated",
+                "data": {},
+            },
+            {
+                "id": "faq:assessment",
+                "node_type": "faq",
+                "status": "approved",
+                "data": {
+                    "claims": [{
+                        "claim_type": "public_information",
+                        "policy": {"mode": "informational"},
+                        "evidence_node_ids": ["faq:assessment"],
+                    }],
+                },
+            },
+        ],
+        "edges": [],
+    }
+    closure = {"service:assessment", "faq:assessment"}
+
+    proof = graph_proof_checker_v3.check(
+        publication={
+            "status": "active",
+            "checksum": "graph-checksum",
+            "document_json": document,
+        },
+        contract={
+            "branch_path_checksum": "checksum:assessment",
+            "closure_node_ids": sorted(closure),
+            "fields": [],
+            "questions": [],
+            "claims": [{
+                "claim_type": "public_information",
+                "policy": {"mode": "informational"},
+                "evidence_node_ids": ["faq:assessment"],
+            }],
+        },
+        ledger={"graph_checksum": "graph-checksum", "facts": {}},
+        proposal={
+            "reply": "Conte o serviço e os dados do veículo para pedir a avaliação.",
+            "branch_action": "keep",
+            "branch_anchor_node_id": "service:assessment",
+            "branch_path_checksum": "checksum:assessment",
+            "extracted_facts": [],
+            "claims": [{
+                "claim_type": "public_information",
+                "value": {"text": "Como pedir uma avaliação"},
+                "evidence_node_ids": ["faq:assessment"],
+                "evidence_chunk_ids": [],
+            }],
+        },
+        message="Como pedir uma avaliação?",
+        source_message_id="inbound:assessment",
+        package_node_ids={"faq:assessment"},
+        package_chunk_ids=set(),
+        active_branch_node_id="service:assessment",
+        active_branch_node_ids=["service:assessment"],
+        branch_selection_allowed=False,
+        branch_switch_allowed=False,
+    )
+
+    assert proof["valid"] is True
+
+
 def test_runtime_rejects_question_for_a_fact_resolved_in_the_same_turn():
     rejected = graph_agent_runtime_v3._rejected_qualification_question_id(
         "q:purchase-profile", {"q:sales-readiness", "q:fulfillment"},

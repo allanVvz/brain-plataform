@@ -140,6 +140,102 @@ candidate reprovado. Esse drift deve ser corrigido no pipeline/manifesto antes
 de uma futura release do runtime; ele não será “resolvido” por novo deploy no
 escopo desta publicação de grafo.
 
+## Causa raiz confirmada e auditoria de corrida — 2026-09-23
+
+A leitura do evento canônico da sessão
+`6dffd957-6e67-417a-97ef-d6db931b0892` corrigiu o diagnóstico anterior. O
+transport persistiu e reivindicou o inbound
+`83b55a8e-3867-4fcb-bf83-1678e0b7644b`; o runtime construiu o contexto e falhou
+na primeira chamada ao modelo, no estágio `understanding_model`. A API do
+provedor respondeu `HTTP 402`, código `invalid_request_error`, com saldo
+insuficiente. Por isso não poderiam existir decisão, proof, commit ou outbound.
+
+Não foi encontrada race condition nesse turno:
+
+- houve uma única tentativa e um único inbound canônico;
+- não houve claim concorrente, lock remanescente, replay ou outbound duplicado;
+- o buffer foi terminalizado em `dead_letter` e a falha técnica foi auditada;
+- a identidade idempotente do inbound, o claim atômico, `SKIP LOCKED`, o claim
+  de commit e o commit proof/outbox continuam sendo as proteções genéricas do
+  caminho de produção.
+
+O texto “Transport worker did not persist the canonical turn result” era um
+sintoma externo impreciso do WA Validator: ele só observava a ausência de
+commit e aguardava o limite inteiro, mesmo quando o evento terminal já existia.
+
+### Correlação Aurora / Tock / Utzig
+
+- Utzig e Aurora usam a mesma credencial DeepSeek. A inferência mínima dessa
+  credencial retorna `HTTP 402`; a Aurora não possui binding ativo atualmente e
+  sua configuração armazenada ainda usa um modelo legado fora do catálogo e
+  não declara `structured_output_mode`.
+- Tock Fatal possui outra credencial e binding ativo. O modelo e o contrato
+  estão atuais, mas uma inferência mínima dessa credencial também retorna
+  `HTTP 402` agora.
+- Os passes históricos de Aurora/Tock não provam a disponibilidade faturável
+  atual. O validador da integração consultava apenas `/models`, que retorna 200
+  para essas chaves mesmo quando `/chat/completions` rejeita por falta de saldo.
+
+### Correção genérica preparada
+
+Classificação: duas mudanças `service` independentes, sem migration e sem
+mudança de grafo, binding ou regras de persona.
+
+1. `control-plane`: validar cada integração DeepSeek com uma inferência JSON
+   mínima usando exatamente modelo, endpoint e modo estruturado configurados;
+   `/models` deixa de ser prova suficiente. O default passa a ser o modelo
+   atual `deepseek-flash`.
+2. `conversation-runtime`: preservar no evento técnico somente status HTTP,
+   tipo/código/mensagem do provedor em allowlist, sem chave, headers, prompt ou
+   conteúdo da conversa. O WA Validator reconhece esse evento e falha cedo com
+   o estágio real, sem esperar 150 segundos e sem atribuir a falha ao transport.
+
+Testes locais focados: 4 casos de integração, 17 casos do turno
+agentic/Validator/falha técnica, 34 contratos do transport, 28 contratos de
+exactly-once/stale claim e 25 contratos de arquitetura/cópias — todos aprovados.
+
+O código evita novos falsos “connected” e torna a falha acionável, mas não cria
+saldo. Para o go-live, ainda é necessário adicionar saldo a uma credencial ou
+informar uma credencial faturável, revalidá-la pela prova de inferência e então
+executar um único canário no WA Validator interno. O drift do manifesto deve
+ser resolvido antes de qualquer release; não fazer novo deploy corretivo sobre
+o candidate já revertido.
+
+### Saldo revalidado e primeiro candidate — 2026-09-23
+
+A mesma conexão da Utzig passou novamente pela API de saldo e por uma
+inferência JSON real com o modelo `deepseek-flash`. O saldo deixou de ser o
+bloqueio. O candidate imutável do runtime foi promovido em blue/green sem pausa
+global, mas o canário interno `c5904342-db5e-4d36-b1b8-8c78d5b67a44` reprovou
+no quarto inbound e acionou rollback automático para o slot azul anterior.
+
+Os três primeiros turnos do canário produziram exatamente um inbound, uma
+decisão, um proof válido, um commit completo e um outbound interno cada. No
+quarto, o DeepSeek interpretou a pergunta “Como pedir uma avaliação?”, mas a
+resposta foi terminalizada em `reply_validation`, antes de proof e commit. Não
+houve duplicidade, lock órfão nem disputa de claim.
+
+Causa raiz: o GraphBundle publicado autoriza a FAQ com
+`claim_type=public_information`; o contrato exposto ao modelo passou a mostrar
+corretamente essa autorização, porém o schema `conversation_reply_v1` ainda
+restringia a saída a uma enumeração que não continha `public_information`. A
+saída semanticamente correta era, portanto, inválida para o próprio runtime.
+
+Correção genérica preparada no `conversation-runtime`:
+
+- alinhar `CommercialClaim`, JSON Schema e o validador do grafo para aceitar
+  `public_information`;
+- manter o proof estrito: a claim somente passa com o mesmo tipo e os IDs de
+  evidência autorizados pelo grafo;
+- registrar apenas caminho/tipo dos erros de validação, sem prompt, mensagem ou
+  segredo, e fazer o WA Validator encerrar cedo quando o evento terminal já
+  existe.
+
+Validação local focada: 65 testes aprovados cobrindo schema, duas etapas do
+modelo, proof, runtime e WA Validator. O rollback do primeiro candidate foi
+confirmado; claims e workers permaneceram ativos e nenhum outro serviço sofreu
+cutover.
+
 ## Matriz mínima do WA Validator
 
 | Jornada | Resultado seguro exigido |
