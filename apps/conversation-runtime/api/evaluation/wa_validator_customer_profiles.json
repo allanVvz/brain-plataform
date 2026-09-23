@@ -26,6 +26,10 @@
         "text": "Não, uso principalmente vias pavimentadas",
         "value": false
       },
+      "vazamento_oleo": {
+        "text": "Não há vazamento de óleo no veículo",
+        "value": "sem vazamento de óleo"
+      },
       "revestimento_bancos": {
         "text": "Os bancos têm revestimento de tecido",
         "value": "tecido"
