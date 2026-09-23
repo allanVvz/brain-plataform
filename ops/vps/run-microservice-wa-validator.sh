@@ -13,7 +13,7 @@ STATE_FILE="$ROOT_DIR/.deploy/microservices/slots.json"
 MANIFEST="$ROOT_DIR/ops/microservices/release-manifest.json"
 
 [[ "$MODE" == "--dry-run" || "$MODE" == "--run" || "$MODE" == "--run-source" || "$MODE" == "--inspect" ]] || { echo "invalid mode" >&2; exit 2; }
-[[ "$PERSONA_SLUG" =~ ^(aurora|tock-fatal|vz-lupas)$ ]] || { echo "invalid persona slug" >&2; exit 2; }
+[[ "$PERSONA_SLUG" =~ ^(aurora|tock-fatal|vz-lupas|utzig-garage)$ ]] || { echo "invalid persona slug" >&2; exit 2; }
 [[ "$FLOW_ID" =~ ^[a-z0-9_]{2,100}$ ]] || { echo "invalid flow id" >&2; exit 2; }
 [[ "$INITIAL_STATE" == "cold" || "$INITIAL_STATE" == "known_name" ]] || { echo "invalid initial state" >&2; exit 2; }
 [[ "$VALIDATOR_TIMEOUT_SECONDS" =~ ^[0-9]+$ && "$VALIDATOR_TIMEOUT_SECONDS" -ge 60 ]] || { echo "invalid validator timeout" >&2; exit 2; }
