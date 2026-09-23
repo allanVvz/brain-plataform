@@ -26,8 +26,8 @@ from scripts.prepare_graph_bundle_candidate import (  # noqa: E402
 from services.graph_compiler_v3 import canonical_checksum  # noqa: E402
 
 
-UTZIG_PUBLICATION_ID = "df1bbf86-05be-4a5d-a507-256a4b2155c5"
-UTZIG_CHECKSUM = "sha256:6ded5d383b8cc455be3e937bb8e869041d7f654bbafa1d4ae3c80fa37dec14a4"
+UTZIG_PUBLICATION_ID = "4a3c5ee2-8656-45c3-ac36-62d7a259fc7e"
+UTZIG_CHECKSUM = "sha256:24cf681e03ad96af9307f9c806f7446947a4d8f0dc0354368fa86ca07a0add8f"
 AURORA_PUBLICATION_ID = "d5c7afd7-24ea-44d6-90e9-8532fd3fc303"
 AURORA_CHECKSUM = "sha256:3f727095819f75836453af2e3bbee42c1138b50a6dc99a59f502b5a1917811ec"
 IMPORT_SOURCE = "aurora_active_graph_publication_v75_2026_09_23"
@@ -120,11 +120,37 @@ def _safe_target_text(value: str, *, target_slug: str) -> str:
     return text
 
 
+def _enrich_graph_field_guidance(product: dict[str, Any]) -> None:
+    """Add graph-owned semantic hints for free-form vehicle facts."""
+    qualification = product.setdefault("data", {}).get("qualification")
+    if not isinstance(qualification, dict):
+        return
+    for field in qualification.get("fields") or []:
+        if not isinstance(field, dict):
+            continue
+        key = str(field.get("key") or "")
+        validation = field.setdefault("validation", {})
+        if key == "modelo_veiculo":
+            validation.update({
+                "mode": "semantic",
+                "semantic_type": "vehicle_model",
+                "description": "Modelo comercial do veículo informado pelo cliente.",
+                "examples": ["Onix", "Civic", "Corolla", "Gol"],
+            })
+        elif key == "vehicle_color":
+            validation.update({
+                "mode": "semantic",
+                "semantic_type": "vehicle_color",
+                "description": "Cor do veículo informada pelo cliente.",
+                "examples": ["prata", "preto", "branco", "vermelho"],
+            })
+
+
 def build(utzig_snapshot: dict[str, Any], aurora_snapshot: dict[str, Any]) -> dict[str, Any]:
     utzig_publication, utzig_document = validate_active_export(
         utzig_snapshot,
         expected_publication_id=UTZIG_PUBLICATION_ID,
-        expected_version=2,
+        expected_version=3,
         expected_runtime_checksum=UTZIG_CHECKSUM,
     )
     aurora_document = _validate_aurora_source(aurora_snapshot)
@@ -182,6 +208,7 @@ def build(utzig_snapshot: dict[str, Any], aurora_snapshot: dict[str, Any]) -> di
             "requires_in_person_evaluation": bool(factual_data.get("requires_in_person_evaluation")),
             "import_provenance": provenance,
         })
+        _enrich_graph_field_guidance(target_product)
         target_copy["summary"] = copy_content
         target_copy["data"].update({
             "source": IMPORT_SOURCE,
