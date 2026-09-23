@@ -47,6 +47,11 @@ jobs:
           script: |
             set -Eeuo pipefail
             cd "$VPS_APP_DIR"
-            docker compose --env-file .env.compose exec -T \
-              -e PERSONA_SLUG -e EXPECTED_PROCESS_MODE -e ROUTING_ACTION api \
+            control_slot="$(python3 -c 'import json; print(json.load(open(".deploy/microservices/slots.json", encoding="utf-8"))["control-plane"]["active"])')"
+            [[ "$control_slot" == blue || "$control_slot" == green ]]
+            control_service="control-plane-$control_slot"
+            control_container="brain-ai-control-plane-$control_slot-1"
+            [[ "$(docker inspect -f '{{.State.Health.Status}}' "$control_container")" == healthy ]]
+            docker compose --env-file .env.compose -f docker-compose.yml -f infra/microservices/docker-compose.blue-green.yml exec -T \
+              -e PERSONA_SLUG -e EXPECTED_PROCESS_MODE -e ROUTING_ACTION "$control_service" \
               python -c 'import json,os; from services import supabase_client; slug=os.environ["PERSONA_SLUG"]; expected=os.environ["EXPECTED_PROCESS_MODE"]; action=os.environ["ROUTING_ACTION"]; persona=supabase_client.get_persona(slug); assert persona, "persona_not_found"; routing=supabase_client.get_persona_routing(slug) or {}; current=str(routing.get("process_mode") or "internal"); assert current==expected, f"process_mode_mismatch:{current}"; bindings=[row for row in supabase_client.get_workflow_bindings(persona["id"]) if row.get("channel")=="whatsapp" and row.get("active")]; assert not bindings, "active_whatsapp_binding_exists"; result={"persona_slug":slug,"before":current,"after":"n8n","active_whatsapp_bindings":len(bindings),"applied":action=="apply"}; (supabase_client.update_persona_routing(slug,{"process_mode":"n8n"}) if action=="apply" else None); (supabase_client.insert_event({"event_type":"persona.routing_mode_configured","entity_type":"persona","entity_id":str(persona["id"]),"persona_id":persona["id"],"payload":{"before":current,"after":"n8n","reason":"utzig_internal_validator_prebinding"}},source="workflow.configure_persona_routing_mode") if action=="apply" else None); print("PERSONA_ROUTING_MODE="+json.dumps(result,sort_keys=True))'
