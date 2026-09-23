@@ -19,7 +19,7 @@
   "chunks_to_embed": 128,
   "compiler_version": "graph-compiler-v3.6.5",
   "disposition": "awaiting_approval",
-  "draft_checksum": "sha256:961a36ac394f213cbcf3c6639e01d1c96a579d8044017aa92ef8221e244e6f5b",
+  "draft_checksum": "sha256:97ca149aac1343161f06af2a9ee582511b9aaa377fa9e3325dc3d5d2b8e0e3f3",
   "edge_changes": {
     "added": [
       "edge:alemao-perfil-editorial-gallery",
@@ -341,6 +341,6 @@
   "nodes_removed": 0,
   "plan_version": "1.0",
   "publication_allowed": true,
-  "runtime_checksum": "sha256:1bbb5118ffbede20c10af1a7fe587661d849c76d3b0166bbc5d3d14025180d56",
+  "runtime_checksum": "sha256:6ded5d383b8cc455be3e937bb8e869041d7f654bbafa1d4ae3c80fa37dec14a4",
   "validation_errors": []
 }

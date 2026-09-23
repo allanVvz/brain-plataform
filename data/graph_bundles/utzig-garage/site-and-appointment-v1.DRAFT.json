@@ -693,7 +693,13 @@
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
-        "validation_status": "approved"
+        "validation_status": "approved",
+        "public_site": {
+          "cta": {
+            "label": "Explorar Preservação",
+            "message_template": "Olá! Quero entender quais serviços de preservação combinam com o meu carro."
+          }
+        }
       }
     },
     {
@@ -705,7 +711,13 @@
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
-        "validation_status": "approved"
+        "validation_status": "approved",
+        "public_site": {
+          "cta": {
+            "label": "Explorar Revitalização",
+            "message_template": "Olá! Quero entender quais serviços de revitalização combinam com o meu carro."
+          }
+        }
       }
     },
     {
@@ -717,7 +729,13 @@
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
-        "validation_status": "approved"
+        "validation_status": "approved",
+        "public_site": {
+          "cta": {
+            "label": "Explorar Aprimoramento",
+            "message_template": "Olá! Quero entender quais serviços de aprimoramento combinam com o meu carro."
+          }
+        }
       }
     },
     {
@@ -730,6 +748,12 @@
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
         "validation_status": "approved",
+        "public_site": {
+          "cta": {
+            "label": "Pedir uma avaliação",
+            "message_template": "Olá! Quero pedir uma avaliação para o meu carro."
+          }
+        },
         "aliases": [
           "Avaliação"
         ],
@@ -926,6 +950,12 @@
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
         "validation_status": "approved",
+        "public_site": {
+          "cta": {
+            "label": "Pedir uma avaliação",
+            "message_template": "Olá! Quero pedir uma avaliação para lavagem detalhada."
+          }
+        },
         "aliases": [
           "Lavagem detalhada"
         ],
@@ -1098,6 +1128,12 @@
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
         "validation_status": "approved",
+        "public_site": {
+          "cta": {
+            "label": "Pedir uma avaliação",
+            "message_template": "Olá! Quero pedir uma avaliação para higienização interna."
+          }
+        },
         "aliases": [
           "Higienização interna"
         ],
@@ -1294,6 +1330,12 @@
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
         "validation_status": "approved",
+        "public_site": {
+          "cta": {
+            "label": "Pedir uma avaliação",
+            "message_template": "Olá! Quero pedir uma avaliação para polimento de vidros."
+          }
+        },
         "aliases": [
           "Polimento de vidros"
         ],
@@ -1466,6 +1508,12 @@
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
         "validation_status": "approved",
+        "public_site": {
+          "cta": {
+            "label": "Pedir uma avaliação",
+            "message_template": "Olá! Quero pedir uma avaliação para lavagem de cofre."
+          }
+        },
         "aliases": [
           "Lavagem de cofre"
         ],
@@ -1662,6 +1710,12 @@
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
         "validation_status": "approved",
+        "public_site": {
+          "cta": {
+            "label": "Pedir uma avaliação",
+            "message_template": "Olá! Quero pedir uma avaliação para polimento técnico."
+          }
+        },
         "aliases": [
           "Polimento técnico"
         ],
@@ -1858,6 +1912,12 @@
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
         "validation_status": "approved",
+        "public_site": {
+          "cta": {
+            "label": "Pedir uma avaliação",
+            "message_template": "Olá! Quero pedir uma avaliação para polimento comercial."
+          }
+        },
         "aliases": [
           "Polimento comercial"
         ],
@@ -2030,6 +2090,12 @@
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
         "validation_status": "approved",
+        "public_site": {
+          "cta": {
+            "label": "Pedir uma avaliação",
+            "message_template": "Olá! Quero pedir uma avaliação para restauração de faróis."
+          }
+        },
         "aliases": [
           "Restauração de faróis"
         ],
@@ -2202,6 +2268,12 @@
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
         "validation_status": "approved",
+        "public_site": {
+          "cta": {
+            "label": "Pedir uma avaliação",
+            "message_template": "Olá! Quero pedir uma avaliação para vitrificação."
+          }
+        },
         "aliases": [
           "Vitrificação"
         ],
@@ -2398,6 +2470,12 @@
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
         "validation_status": "approved",
+        "public_site": {
+          "cta": {
+            "label": "Pedir uma avaliação",
+            "message_template": "Olá! Quero pedir uma avaliação para PPF."
+          }
+        },
         "aliases": [
           "PPF"
         ],
@@ -2594,6 +2672,12 @@
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
         "validation_status": "approved",
+        "public_site": {
+          "cta": {
+            "label": "Pedir uma avaliação",
+            "message_template": "Olá! Quero pedir uma avaliação para funilaria."
+          }
+        },
         "aliases": [
           "Funilaria"
         ],
@@ -2766,6 +2850,12 @@
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
         "validation_status": "approved",
+        "public_site": {
+          "cta": {
+            "label": "Pedir uma avaliação",
+            "message_template": "Olá! Quero pedir uma avaliação para pintura."
+          }
+        },
         "aliases": [
           "Pintura"
         ],
