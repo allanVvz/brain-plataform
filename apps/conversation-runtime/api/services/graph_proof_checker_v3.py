@@ -597,7 +597,6 @@ def check(
     validation_publication_id: str | None = None,
 ) -> dict[str, Any]:
     errors: list[str] = []
-    repair: list[dict[str, Any]] = []
     document = publication.get("document_json") or {}
     branch = str(proposal.get("branch_anchor_node_id") or "")
     action = str(proposal.get("branch_action") or "keep")
@@ -678,11 +677,9 @@ def check(
             errors.append(f"cited_node_outside_branch:{node_id}")
         elif node_id not in package_node_ids:
             errors.append(f"cited_node_outside_package:{node_id}")
-            repair.append({"kind": "node", "id": node_id})
     for chunk_id in proposal.get("cited_chunk_ids") or []:
         if chunk_id not in package_chunk_ids:
             errors.append(f"cited_chunk_outside_package:{chunk_id}")
-            repair.append({"kind": "chunk", "id": chunk_id})
         elif chunk_sources.get(chunk_id) and chunk_sources[chunk_id] not in closure:
             errors.append(f"cited_chunk_outside_branch:{chunk_id}")
 
@@ -963,7 +960,6 @@ def check(
     if _FINAL_CONFIRMATION.search(str(proposal.get("reply") or "")) and missing:
         errors.append("premature_final_confirmation")
 
-    repair = list({(item["kind"], item["id"]): item for item in repair if item.get("id")}.values())
     metadata_errors = [
         error for error in errors
         if error.startswith("next_question_")
@@ -987,9 +983,6 @@ def check(
         error for error in errors
         if error.startswith(hard_prefixes)
     ]
-    repair_only = bool(gating_errors) and all(
-        "outside_package" in error for error in gating_errors
-    )
     return {
         "valid": not gating_errors,
         "delivery_authorized": not gating_errors,
@@ -1001,8 +994,10 @@ def check(
             error for error in errors
             if error not in gating_errors
         ],
-        "repair_required": repair_only and bool(repair),
-        "repair_requirements": repair, "ledger": next_ledger,
+        # The active two-stage executor does not perform semantic repair.
+        # Preserve these response keys for callers of the proof contract.
+        "repair_required": False,
+        "repair_requirements": [], "ledger": next_ledger,
         "accepted_facts": accepted_facts, "missing_fields": missing_keys,
         "next_question_node_id": None if metadata_errors else question_id,
         "discarded_structured_components": discarded_metadata,

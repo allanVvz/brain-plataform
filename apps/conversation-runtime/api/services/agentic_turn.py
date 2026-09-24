@@ -808,7 +808,12 @@ def execute(
         system=(
             "Write one warm, concise reply using the resolved brief and authorized evidence. Answer the "
             "customer's question before qualification. You may ask one eligible field or none; guides are "
-            "not a script. Do not repeat an introduction, known fact, or earlier question. Use citations only "
+            "not a script. Use known_facts, previously_asked_field_key and recent_messages to avoid "
+            "reintroductions and repeated questions. When the customer interrupts with a question, answer it "
+            "without repeating the unanswered qualification question in the same reply. When the brief is in "
+            "confirmation mode, summarize the known request and ask for one clear final confirmation; do not "
+            "ask an unrelated follow-up. After an explicit confirmation, follow the resolved handoff policy "
+            "without asking for another confirmation. Use citations only "
             "for factual commercial claims. Past product interests are history until the customer brings "
             "them into this journey; do not include them in the current order by default. "
             "Ordinary conversation uses no claims. Follow claim_contract exactly: "
