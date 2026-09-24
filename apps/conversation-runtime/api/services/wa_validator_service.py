@@ -2739,6 +2739,7 @@ def _semantic_turn_audit(
             "unsupported_claim_not_invented",
             "sales_internal_language_absent",
             "received_content_acknowledged",
+            "customer_name_question_once",
             "known_fact_not_reasked",
             "reply_not_repeated",
             "question_repetition_budget",

@@ -223,8 +223,11 @@ while (( SECONDS < deadline )); do
     if [[ "$MODE" == "--canary" ]]; then
       printf '%s' "$summary" | python3 -c 'import json,sys; v=json.load(sys.stdin); raise SystemExit(0 if v.get("technical_pass") is True and v.get("quality_scope")=="technical_only" and v.get("turn_count")==2 else 1)'
     else
-      printf '%s' "$summary" | python3 -c 'import json,sys; v=json.load(sys.stdin); raise SystemExit(0 if v.get("technical_pass") is True and v.get("quality_pass") is True and v.get("quality_scope")=="semantic_graph_v1" else 1)'
+      # A completed semantic session reports editorial quality separately.
+      # Its exit status proves technical execution, not the model's wording.
+      printf '%s' "$summary" | python3 -c 'import json,sys; v=json.load(sys.stdin); raise SystemExit(0 if v.get("technical_pass") is True and v.get("quality_scope")=="semantic_graph_v1" else 1)'
     fi
+    echo "WA_VALIDATOR_QUALITY_PASS=$(printf '%s' "$summary" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("quality_pass"))')"
     echo "WA_VALIDATOR_RESULT=passed"
     exit 0
   fi

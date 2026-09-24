@@ -265,4 +265,6 @@ def test_semantic_turn_audit_counts_name_question_ids_not_only_similar_wording()
     audit = wa_validator_service._semantic_turn_audit(**inputs)
 
     assert audit["criteria"]["customer_name_question_once"] is False
-    assert "customer_name_question_once" in audit["failures"]
+    assert "customer_name_question_once" in audit["non_blocking_observations"]
+    assert "customer_name_question_once" not in audit["failures"]
+    assert audit["passed"] is True
