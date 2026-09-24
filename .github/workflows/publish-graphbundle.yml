@@ -137,7 +137,9 @@ jobs:
             "${compose[@]}" exec -T "$control_service" "${args[@]}"
             "${compose[@]}" exec -T "$control_service" python -c 'import json,sys; from services import supabase_client; slug=sys.argv[1]; expected=sys.argv[2]; persona=supabase_client.get_persona(slug); publication=supabase_client.get_active_graph_publication(str(persona["id"])); print("GRAPH_PUBLICATION_AUDIT="+json.dumps({"persona_slug":slug,"active_publication_id":(publication or {}).get("id"),"version":(publication or {}).get("version"),"checksum":(publication or {}).get("checksum")},sort_keys=True)); assert sys.argv[3] != "activate" or (publication or {}).get("checksum") == expected' "$PERSONA_SLUG" "$APPROVED_RUNTIME_CHECKSUM" "$GRAPH_ACTION"
             if [[ "$GRAPH_ACTION" == activate ]]; then
-              curl --fail --silent --show-error "https://api.vzforeal.com/api/menu/$PERSONA_SLUG" \
+              public_api_url="$(sed -n 's/^AI_BRAIN_PUBLIC_API_URL=//p' .env.compose | tail -n 1)"
+              [[ "$public_api_url" == https://* ]]
+              curl --fail --silent --show-error "${public_api_url%/}/api/menu/$PERSONA_SLUG" \
                 | python3 -c 'import json,sys; payload=json.load(sys.stdin); assert payload.get("ok") is True; assert payload.get("graph_checksum") == sys.argv[1]' "$APPROVED_RUNTIME_CHECKSUM"
             fi
             trap - ERR
