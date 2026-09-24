@@ -15,6 +15,33 @@ from services import wa_validator_service
 from routes.wa_validator import GenerateScriptRequest
 
 
+def test_release_canary_keeps_one_graph_opening_and_internal_transport(monkeypatch):
+    session = {
+        "id": "session-1", "status": "ready",
+        "script": {
+            "meta": {"pipeline_contract": "conversation_agentic_v1"},
+            "driver": {
+                "mode": "semantic_graph_v1",
+                "opening": {"text": "Quero conhecer o serviço."},
+            },
+            "steps": [{"text": "outro turno"}],
+        },
+    }
+    captured = {}
+    monkeypatch.setattr(wa_validator_service, "_session_get", lambda _id: session)
+    monkeypatch.setattr(
+        wa_validator_service, "_session_update",
+        lambda _id, **fields: captured.update(fields) or fields,
+    )
+
+    wa_validator_service.configure_single_turn_canary("session-1")
+
+    script = captured["script"]
+    assert script["steps"] == [{"text": "Quero conhecer o serviço.", "wait": 10}]
+    assert script["driver"] is None
+    assert script["meta"]["pipeline_contract"] == "conversation_agentic_v1"
+
+
 def test_validator_request_rejects_retired_n8n_candidate_webhook():
     with pytest.raises(ValidationError):
         GenerateScriptRequest.model_validate({

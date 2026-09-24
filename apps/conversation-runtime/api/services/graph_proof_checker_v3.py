@@ -589,6 +589,7 @@ def check(
     package_chunk_sources: dict[str, str] | None = None,
     active_branch_node_ids: list[str] | None = None,
     additional_fields: list[dict[str, Any]] | None = None,
+    validation_publication_id: str | None = None,
 ) -> dict[str, Any]:
     errors: list[str] = []
     repair: list[dict[str, Any]] = []
@@ -596,7 +597,12 @@ def check(
     branch = str(proposal.get("branch_anchor_node_id") or "")
     action = str(proposal.get("branch_action") or "keep")
     anchors = set(document.get("branch_anchors") or [])
-    if publication.get("status") != "active":
+    candidate_validation = bool(
+        validation_publication_id
+        and publication.get("status") == "compiled"
+        and str(publication.get("id") or "") == validation_publication_id
+    )
+    if publication.get("status") != "active" and not candidate_validation:
         errors.append("publication_not_active")
     if publication.get("checksum") != ledger.get("graph_checksum"):
         errors.append("publication_checksum_mismatch")

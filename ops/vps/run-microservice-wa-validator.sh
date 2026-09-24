@@ -12,7 +12,7 @@ VALIDATOR_TIMEOUT_SECONDS="${WA_VALIDATOR_TIMEOUT_SECONDS:-900}"
 STATE_FILE="$ROOT_DIR/.deploy/microservices/slots.json"
 MANIFEST="$ROOT_DIR/ops/microservices/release-manifest.json"
 
-[[ "$MODE" == "--dry-run" || "$MODE" == "--run" || "$MODE" == "--run-source" || "$MODE" == "--inspect" ]] || { echo "invalid mode" >&2; exit 2; }
+[[ "$MODE" == "--dry-run" || "$MODE" == "--run" || "$MODE" == "--run-source" || "$MODE" == "--canary" || "$MODE" == "--inspect" ]] || { echo "invalid mode" >&2; exit 2; }
 [[ "$PERSONA_SLUG" =~ ^(aurora|tock-fatal|vz-lupas|utzig-garage)$ ]] || { echo "invalid persona slug" >&2; exit 2; }
 [[ "$FLOW_ID" =~ ^[a-z0-9_]{2,100}$ ]] || { echo "invalid flow id" >&2; exit 2; }
 [[ "$INITIAL_STATE" == "cold" || "$INITIAL_STATE" == "known_name" ]] || { echo "invalid initial state" >&2; exit 2; }
@@ -209,7 +209,7 @@ fi
 
 session_container="$runtime_name"
 [[ "$MODE" == "--run-source" ]] && session_container="$validator_name"
-session_output="$(docker exec "$session_container" python -c 'import sys; from services import wa_validator_service as w; generated=w.generate_script(persona_slug=sys.argv[1], flow_id=sys.argv[2], target_contact="production-lifecycle", initial_state=sys.argv[3]); session_id=generated["session_id"]; w.enqueue_session_direct(session_id); print("WA_VALIDATOR_SESSION_ID=" + session_id)' "$PERSONA_SLUG" "$FLOW_ID" "$INITIAL_STATE")"
+session_output="$(docker exec "$session_container" python -c 'import sys; from services import wa_validator_service as w; generated=w.generate_script(persona_slug=sys.argv[1], flow_id=sys.argv[2], target_contact="production-lifecycle", initial_state=sys.argv[3]); session_id=generated["session_id"]; w.configure_single_turn_canary(session_id) if sys.argv[4] == "--canary" else None; w.enqueue_session_direct(session_id); print("WA_VALIDATOR_SESSION_ID=" + session_id)' "$PERSONA_SLUG" "$FLOW_ID" "$INITIAL_STATE" "$MODE")"
 printf '%s\n' "$session_output"
 session_id="$(printf '%s\n' "$session_output" | sed -n 's/^WA_VALIDATOR_SESSION_ID=//p' | tail -n 1)"
 [[ "$session_id" =~ ^[A-Za-z0-9_-]{8,160}$ ]] || { echo "invalid validator session id" >&2; exit 1; }
@@ -220,7 +220,11 @@ while (( SECONDS < deadline )); do
   printf 'WA_VALIDATOR_STATUS=%s\n' "$summary"
   status="$(printf '%s' "$summary" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status") or "")')"
   if [[ "$status" == "done" ]]; then
-    printf '%s' "$summary" | python3 -c 'import json,sys; v=json.load(sys.stdin); raise SystemExit(0 if v.get("technical_pass") is True and v.get("quality_pass") is True and v.get("quality_scope")=="semantic_graph_v1" else 1)'
+    if [[ "$MODE" == "--canary" ]]; then
+      printf '%s' "$summary" | python3 -c 'import json,sys; v=json.load(sys.stdin); raise SystemExit(0 if v.get("technical_pass") is True and v.get("quality_scope")=="technical_only" and v.get("turn_count")==2 else 1)'
+    else
+      printf '%s' "$summary" | python3 -c 'import json,sys; v=json.load(sys.stdin); raise SystemExit(0 if v.get("technical_pass") is True and v.get("quality_pass") is True and v.get("quality_scope")=="semantic_graph_v1" else 1)'
+    fi
     echo "WA_VALIDATOR_RESULT=passed"
     exit 0
   fi

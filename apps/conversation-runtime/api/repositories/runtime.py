@@ -3295,6 +3295,22 @@ def list_system_events(
         q = q.eq("level", level)
     return _q(q)
 
+
+def find_public_site_intent(persona_id: str, code_hash: str) -> Optional[dict]:
+    """Resolve one intent event by digest and persona; the plain code is never stored."""
+    if not persona_id or not re.fullmatch(r"[0-9a-f]{64}", code_hash or ""):
+        return None
+    rows = _q(
+        get_client().table("system_events")
+        .select("id,persona_id,created_at,payload")
+        .eq("event_type", "public_site.intent_selected")
+        .eq("persona_id", persona_id)
+        .eq("payload->>code_hash", code_hash)
+        .order("created_at", desc=True)
+        .limit(1)
+    )
+    return rows[0] if rows else None
+
 def update_pipeline_status(service: str, data: dict) -> None:
     get_client().table("pipeline_status").update(data).eq("service", service).execute()
 

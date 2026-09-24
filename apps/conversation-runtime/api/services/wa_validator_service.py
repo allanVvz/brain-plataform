@@ -1342,6 +1342,22 @@ def generate_script(
     return {"session_id": session_id, "script": script}
 
 
+def configure_single_turn_canary(session_id: str) -> dict:
+    """Use a graph-generated opening to prove one internal release turn."""
+    session = _session_get(session_id) or {}
+    if session.get("status") != "ready":
+        raise ValueError("Canary session must be ready")
+    script = dict(session.get("script") or {})
+    driver = script.get("driver") or {}
+    opening = driver.get("opening") or {}
+    if driver.get("mode") != "semantic_graph_v1" or not str(opening.get("text") or "").strip():
+        raise ValueError("Canary requires a graph-generated opening")
+    script["steps"] = [{"text": str(opening["text"]), "wait": 10}]
+    script["driver"] = None
+    script["meta"] = {**(script.get("meta") or {}), "classifier": "technical_canary_v1"}
+    return _session_update(session_id, script=script)
+
+
 def run_session(session_id: str) -> dict:
     claimed = supabase_client.claim_wa_validator_session(session_id)
     if not claimed.get("claimed"):

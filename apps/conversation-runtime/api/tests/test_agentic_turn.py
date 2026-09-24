@@ -13,7 +13,7 @@ from schemas.conversation import (
     ResolvedUnderstandingV1,
     TurnUnderstandingV1,
 )
-from services import agentic_turn, graph_agent_runtime_v3
+from services import agentic_turn, graph_agent_runtime_v3, graph_proof_checker_v3
 
 
 class _HttpClient:
@@ -145,15 +145,20 @@ def test_two_model_calls_resolve_facts_before_reply_and_commit_once(monkeypatch)
     calls: list[str] = []
     captured: dict = {}
 
-    monkeypatch.setattr(
-        agentic_turn.conversation_runtime,
-        "build_context",
-        lambda **_kwargs: context,
-    )
+    def fake_build_context(**kwargs):
+        captured["context_message"] = kwargs["message"]
+        return context
+
+    monkeypatch.setattr(agentic_turn.conversation_runtime, "build_context", fake_build_context)
     monkeypatch.setattr(
         agentic_turn.supabase_client,
         "get_lead_by_ref",
         lambda _lead_ref: {"persona_id": "persona-1"},
+    )
+    monkeypatch.setattr(
+        agentic_turn.site_origin,
+        "resolve",
+        lambda _message, _persona_id: {"event_id": "site-event-1", "audience_node_id": "audience:prepare-sale"},
     )
     monkeypatch.setattr(
         agentic_turn,
@@ -225,15 +230,18 @@ def test_two_model_calls_resolve_facts_before_reply_and_commit_once(monkeypatch)
     monkeypatch.setattr(agentic_turn.conversation_runtime, "commit", fake_commit)
 
     result = agentic_turn.execute(
-        persona_slug="fixture", lead_ref=7, message="uso proprio",
+        persona_slug="fixture", lead_ref=7,
+        message="uso proprio Código de atendimento: BI-0123456789ABCDEF",
         message_id="message-1", correlation_id="correlation-1",
         phone_number_id=None, channel_binding_id="binding-1",
         inbound_buffer_id="buffer-1",
     )
 
     assert calls == ["understanding_model", "reply_model"]
+    assert captured["context_message"] == "uso proprio"
     assert captured["understanding"].facts[0].owner_node_id == "audience:retail"
     assert captured["commit"]["inbound_buffer_id"] == "buffer-1"
+    assert captured["commit"]["site_origin"]["event_id"] == "site-event-1"
     assert captured["commit"]["expected_decision_owner"] == "n8n_agents"
     assert "warm, concise reply" in captured["reply_system"]
     assert "rather than guessing" in captured["reply_system"]
@@ -408,6 +416,62 @@ def test_staged_publication_is_internal_validator_only():
     assert ExecuteAgenticTurnV1(
         **payload, provider="internal_validator"
     ).publication_id == "staged"
+
+
+def test_candidate_proof_requires_matching_running_validator_session(monkeypatch):
+    session_id = "12345678-1234-1234-1234-123456789012"
+    session = {
+        "id": session_id, "status": "running", "persona_slug": "fixture",
+        "lead_ref": 7, "channel_binding_id": "binding-1",
+        "publication_id": "publication-1",
+        "script": {"meta": {
+            "publication_id": "publication-1", "graph_checksum": "sha256:fixture",
+        }},
+    }
+    monkeypatch.setattr(
+        agentic_turn.supabase_client, "get_wa_validator_session",
+        lambda _session_id: session,
+    )
+    lead = {
+        "lead_id": "validator_12345678",
+        "metadata": {"validation": {"is_validation": True, "session_id": session_id}},
+    }
+    values = dict(
+        publication_id="publication-1", context=_context(), lead=lead,
+        lead_ref=7, persona_slug="fixture", channel_binding_id="binding-1",
+    )
+    validator = agentic_turn._validated_candidate_publication_id
+    assert validator(provider="internal_validator", **values) == "publication-1"
+    assert validator(provider="meta_cloud", **values) is None
+    assert validator(provider="internal_validator", **{**values, "lead": {}}) is None
+    assert validator(provider="internal_validator", **{
+        **values, "channel_binding_id": "other-binding",
+    }) is None
+    session["publication_id"] = "another-publication"
+    assert validator(provider="internal_validator", **values) is None
+
+
+def test_compiled_proof_requires_exact_validator_publication_id():
+    def proof(status, candidate_id=None):
+        return graph_proof_checker_v3.check(
+            publication={
+                "id": "candidate-1", "status": status, "checksum": "sha256:fixture",
+                "document_json": {"branch_anchors": []},
+            },
+            contract={"fields": []},
+            ledger={"graph_checksum": "sha256:fixture", "facts": {}},
+            proposal={"branch_action": "none", "extracted_facts": [], "claims": []},
+            message="ola", source_message_id="message-1",
+            package_node_ids=set(), package_chunk_ids=set(),
+            active_branch_node_id=None, branch_selection_allowed=False,
+            branch_switch_allowed=False,
+            validation_publication_id=candidate_id,
+        )
+
+    assert "publication_not_active" in proof("compiled")["gating_errors"]
+    assert "publication_not_active" in proof("compiled", "other")["gating_errors"]
+    assert "publication_not_active" not in proof("compiled", "candidate-1")["errors"]
+    assert "publication_not_active" in proof("draft", "candidate-1")["gating_errors"]
 
 
 def test_agentic_failure_returns_truthful_canonical_handoff(monkeypatch):

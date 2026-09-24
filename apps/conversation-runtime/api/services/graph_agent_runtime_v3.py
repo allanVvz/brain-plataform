@@ -4064,6 +4064,7 @@ def _resolved_commercial_interests(
 def resolve_understanding(
     context: ConversationContext,
     understanding: TurnUnderstandingV1,
+    *, validation_publication_id: str | None = None,
 ) -> ResolvedUnderstandingV1:
     """Validate model understanding and compute prospective state without IO writes."""
     if context.execution_strategy != "interpret_then_respond":
@@ -4182,6 +4183,7 @@ def resolve_understanding(
         # Strategy ownership, not a fake retry counter, keeps this path fail-closed.
         "repair_attempt": 0,
         "execution_strategy": "interpret_then_respond",
+        "validation_publication_id": validation_publication_id,
     }
     decision, response = decide(focused_context, model_observation=observation)
     proof = response.proof or {}
@@ -4949,6 +4951,7 @@ def _decide(
         package_chunk_sources=chunk_sources,
         active_branch_node_ids=active_ids_for_fields,
         additional_fields=additional_fields,
+        validation_publication_id=observation.get("validation_publication_id"),
     )
     selected_images = []
     try:

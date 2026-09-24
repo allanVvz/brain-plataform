@@ -1610,6 +1610,7 @@ def decide_agentic(
     conversation_reply: ConversationReplyV1 | None = None,
     trace_id: str | None = None,
     lead_ref: int | None = None,
+    validation_publication_id: str | None = None,
 ) -> tuple[ConversationDecision, AgentResponse]:
     _started_at = time.monotonic()
     if resolved_understanding is not None or conversation_reply is not None:
@@ -1685,6 +1686,7 @@ def decide_agentic(
                 or []
             ),
             "token_usage": usage,
+            "validation_publication_id": validation_publication_id,
         }
         context = resolved_context
     if not isinstance(model_observation, dict):
@@ -1795,9 +1797,13 @@ def resolve_understanding(
     trace_id: str | None = None,
     lead_ref: int | None = None,
     token_usage: dict[str, Any] | None = None,
+    validation_publication_id: str | None = None,
 ) -> ResolvedUnderstandingV1:
     started = time.monotonic()
-    resolved = graph_agent_runtime_v3.resolve_understanding(context, understanding)
+    resolved = graph_agent_runtime_v3.resolve_understanding(
+        context, understanding,
+        validation_publication_id=validation_publication_id,
+    )
     if lead_ref is not None:
         resolved = resolved.model_copy(update={
             "conversation_brief": {
@@ -2747,6 +2753,7 @@ def commit(
     n8n_execution_id: str | None = None,
     outbound_initial_status: str = "awaiting_proof",
     queue_position_epoch: float | None = None,
+    site_origin: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     if outbound_initial_status not in {"awaiting_proof", "preview_ready"}:
         raise ValueError("unsupported outbound initial status")
@@ -3420,6 +3427,7 @@ def commit(
             "lead_ref": lead_ref,
             "publication_id": str(context.publication_id),
             "graph_checksum": context.graph_checksum,
+            "site_origin": site_origin,
             "active_branch_node_id": response.cart_state.get("active_branch_node_id"),
             "active_branch_node_ids": response.cart_state.get("active_branch_node_ids") or [],
             "confirmed_branch_node_ids": response.proof.get("confirmed_branch_node_ids") or [],
@@ -3452,6 +3460,7 @@ def commit(
             "role": response.role.value, "intent": decision.intent,
             "reply_text": response.reply_text, "graph_version": context.graph_version,
             "graph_checksum": context.graph_checksum, "stage": qualified_stage,
+            "site_origin": site_origin,
             "classifier": decision.classifier,
             "evidence_node_ids": decision.evidence_node_ids,
             "knowledge_context": knowledge_context,
@@ -3527,6 +3536,7 @@ def commit(
                 "handoff": response.handoff_required,
                 "graph_version": context.graph_version,
                 "graph_checksum": context.graph_checksum,
+                "site_origin": site_origin,
                 "outbound_buffer_id": (buffer or {}).get("id"),
                 "qualification": qualification,
             },

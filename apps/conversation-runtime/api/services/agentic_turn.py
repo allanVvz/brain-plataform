@@ -17,11 +17,12 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from schemas.conversation import (
+    ConversationContext,
     ConversationReplyV1,
     ExtractedFact,
     TurnUnderstandingV1,
 )
-from services import conversation_runtime, secret_store, supabase_client
+from services import conversation_runtime, secret_store, site_origin, supabase_client
 from utils.tls import get_ca_bundle_path
 
 
@@ -558,6 +559,39 @@ def _read_understanding(
         raise AgenticTurnError("understanding_validation", "understanding schema is invalid") from exc
 
 
+def _validated_candidate_publication_id(
+    *, provider: str | None, publication_id: str | None,
+    context: ConversationContext, lead: dict[str, Any], lead_ref: int,
+    persona_slug: str, channel_binding_id: str,
+) -> str | None:
+    """Bind a compiled publication to one running, synthetic Validator session."""
+    if provider != "internal_validator" or not publication_id:
+        return None
+    validation = (lead.get("metadata") or {}).get("validation") or {}
+    session_id = str(validation.get("session_id") or "")
+    if (
+        validation.get("is_validation") is not True
+        or not session_id
+        or str(lead.get("lead_id") or "") != f"validator_{session_id[:8]}"
+    ):
+        return None
+    session = supabase_client.get_wa_validator_session(session_id) or {}
+    script_meta = (session.get("script") or {}).get("meta") or {}
+    if (
+        session.get("status") == "running"
+        and str(session.get("id") or "") == session_id
+        and str(session.get("persona_slug") or "") == persona_slug
+        and str(session.get("lead_ref") or "") == str(lead_ref)
+        and str(session.get("channel_binding_id") or "") == channel_binding_id
+        and str(session.get("publication_id") or "") == publication_id
+        and str(script_meta.get("publication_id") or "") == publication_id
+        and str(script_meta.get("graph_checksum") or "") == context.graph_checksum
+        and str(context.publication_id or "") == publication_id
+    ):
+        return publication_id
+    return None
+
+
 def execute(
     *,
     persona_slug: str,
@@ -574,10 +608,11 @@ def execute(
     preview_only: bool = False,
     commit_result: bool = True,
 ) -> dict[str, Any]:
+    customer_message = site_origin.without_code(message)
     context = conversation_runtime.build_context(
         persona_slug=persona_slug,
         lead_ref=lead_ref,
-        message=message,
+        message=customer_message,
         message_id=message_id,
         trace_id=inbound_buffer_id,
         publication_id=publication_id,
@@ -585,6 +620,12 @@ def execute(
     if context.execution_strategy != "interpret_then_respond":
         raise AgenticTurnError("context", "published graph does not authorize two-stage execution")
     lead = supabase_client.get_lead_by_ref(lead_ref) or {}
+    validation_publication_id = _validated_candidate_publication_id(
+        provider=provider, publication_id=publication_id, context=context,
+        lead=lead, lead_ref=lead_ref, persona_slug=persona_slug,
+        channel_binding_id=channel_binding_id,
+    )
+    origin = site_origin.resolve(message, str(lead.get("persona_id") or ""))
     binding = _model_binding(str(lead.get("persona_id") or ""))
     fields = context.graph_contract.get("fields") or []
     understanding_raw, understanding_usage = _call_json(
@@ -606,7 +647,7 @@ def execute(
         ),
         payload={
             "contract": "turn_understanding_v1",
-            "customer_message": message,
+            "customer_message": customer_message,
             "fields": fields,
             "available_branches": context.available_services,
             "available_entity_nodes": [
@@ -638,7 +679,7 @@ def execute(
         },
     )
     understanding = _read_understanding(
-        understanding_raw, context=context, message=message, message_id=message_id
+        understanding_raw, context=context, message=customer_message, message_id=message_id
     )
     resolved = conversation_runtime.resolve_understanding(
         context,
@@ -646,6 +687,7 @@ def execute(
         trace_id=inbound_buffer_id,
         lead_ref=lead_ref,
         token_usage=understanding_usage,
+        validation_publication_id=validation_publication_id,
     )
     price_estimate = _published_price_estimate(resolved)
     if price_estimate is not None:
@@ -675,7 +717,7 @@ def execute(
         ),
         payload={
             "contract": "conversation_reply_v1",
-            "customer_message": message,
+            "customer_message": customer_message,
             "understanding": understanding.model_dump(mode="json"),
             "conversation_brief": resolved.conversation_brief,
             "context_manifest": resolved.context_manifest,
@@ -711,6 +753,7 @@ def execute(
             },
             trace_id=inbound_buffer_id,
             lead_ref=lead_ref,
+            validation_publication_id=validation_publication_id,
         )
     except RuntimeError as exc:
         raise AgenticTurnError(
@@ -766,6 +809,7 @@ def execute(
         phone_number_id=phone_number_id,
         channel_binding_id=channel_binding_id,
         inbound_buffer_id=inbound_buffer_id,
+        site_origin=origin,
         queue_position_epoch=queue_position_epoch,
         # Database metadata keeps this historical value until a schema-neutral
         # rename is possible. It no longer means that n8n executes the turn.
