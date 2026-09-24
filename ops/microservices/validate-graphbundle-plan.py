@@ -101,11 +101,50 @@ def _validate_public_site_projection(bundle: dict) -> None:
         node_id for node_id in published
         if (nodes.get(node_id) or {}).get("node_type") == "product"
     }
+    persona_node = next(
+        (node for node in nodes.values() if node.get("node_type") == "persona"), {}
+    )
+    fallback_policy = (
+        ((persona_node.get("data") or {}).get("public_site") or {}).get("catalog_media_fallback") or {}
+    )
+    fallback_products: set[str] = set()
+    if fallback_policy.get("enabled") is True:
+        group_fallbacks = {
+            str(edge.get("source"))
+            for edge in bundle.get("edges") or []
+            if isinstance(edge, dict)
+            and edge.get("relation_type") == "category_has_asset"
+            and (nodes.get(str(edge.get("source"))) or {}).get("node_type") == "product_group"
+            and str(edge.get("target")) in published_assets
+            and ((edge.get("metadata") or {}).get("media_assignment") or {}).get("fallback_allowed") is True
+            and ((edge.get("metadata") or {}).get("media_assignment") or {}).get("position") is not None
+        }
+        fallback_products |= {
+            str(edge.get("target"))
+            for edge in bundle.get("edges") or []
+            if isinstance(edge, dict)
+            and edge.get("relation_type") == "contains"
+            and str(edge.get("source")) in group_fallbacks
+            and (nodes.get(str(edge.get("target"))) or {}).get("node_type") == "product"
+        }
+        campaign_id = str(fallback_policy.get("campaign_id") or "")
+        campaign_fallback = any(
+            isinstance(edge, dict)
+            and edge.get("source") == campaign_id
+            and edge.get("relation_type") == "campaign_has_asset"
+            and str(edge.get("target")) in published_assets
+            and ((edge.get("metadata") or {}).get("media_assignment") or {}).get("fallback_allowed") is True
+            and ((edge.get("metadata") or {}).get("media_assignment") or {}).get("position") is not None
+            for edge in bundle.get("edges") or []
+        )
+        if campaign_fallback:
+            fallback_products |= published_products
+    visually_resolved_products = image_products | fallback_products
     _require(
-        published_products == image_products,
-        "public site Product grants must equal products with published images; "
-        f"missing={','.join(sorted(image_products - published_products))};"
-        f"without_image={','.join(sorted(published_products - image_products))}",
+        published_products == visually_resolved_products,
+        "public site Product grants must equal products with direct or explicitly allowed fallback images; "
+        f"missing={','.join(sorted(visually_resolved_products - published_products))};"
+        f"without_image={','.join(sorted(published_products - visually_resolved_products))}",
     )
     minimums = ((bundle.get("metadata") or {}).get("public_site_invariants") or {}).get("product_carousel_minimums") or {}
     for group_id, minimum in minimums.items():
@@ -118,7 +157,7 @@ def _validate_public_site_projection(bundle: dict) -> None:
             and edge.get("relation_type") == "contains"
             and (nodes.get(str(edge.get("target"))) or {}).get("node_type") == "product"
         }
-        visible = group_products & image_products
+        visible = group_products & visually_resolved_products
         _require(
             len(visible) >= int(minimum),
             f"ProductGroup {group_id} requires at least {minimum} product slides; found {len(visible)}",

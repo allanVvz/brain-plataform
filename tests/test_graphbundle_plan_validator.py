@@ -116,3 +116,27 @@ def test_public_site_preflight_requires_all_groups_and_only_imaged_products() ->
         {"source": "product:dress", "target": "gallery:default", "relation_type": "publishes_to", "metadata": {"active": True}}
     )
     MODULE._validate_public_site_projection(bundle)
+
+
+def test_public_site_preflight_accepts_curated_positioned_group_fallback() -> None:
+    bundle = _public_site_bundle(publish_brand=True)
+    bundle["nodes"].extend([
+        {"id": "persona:test", "node_type": "persona", "data": {"public_site": {"catalog_media_fallback": {
+            "enabled": True, "campaign_id": "campaign:page",
+        }}}},
+        {"id": "group:care", "node_type": "product_group", "data": {}},
+        {"id": "product:ppf", "node_type": "product", "data": {}},
+        {"id": "asset:care", "node_type": "asset", "data": {}},
+    ])
+    bundle["edges"].extend([
+        {"source": "group:care", "target": "gallery:default", "relation_type": "publishes_to", "metadata": {"active": True}},
+        {"source": "product:ppf", "target": "gallery:default", "relation_type": "publishes_to", "metadata": {"active": True}},
+        {"source": "asset:care", "target": "gallery:default", "relation_type": "publishes_to", "metadata": {"active": True}},
+        {"source": "asset:care", "target": "gallery:default", "relation_type": "gallery_asset", "metadata": {"active": True}},
+        {"source": "group:care", "target": "product:ppf", "relation_type": "contains", "metadata": {"active": True}},
+        {"source": "group:care", "target": "asset:care", "relation_type": "category_has_asset", "metadata": {
+            "media_assignment": {"fallback_allowed": True, "position": 0},
+        }},
+    ])
+
+    MODULE._validate_public_site_projection(bundle)
