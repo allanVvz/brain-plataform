@@ -2411,9 +2411,15 @@ def _semantic_turn_audit(
         )
         for fact in proof.get("accepted_facts") or []
     )
-    resolved_operations = (
-        (proof.get("service_resolution") or {}).get("operations") or []
+    # interpret_then_respond resolves branch changes during understanding.
+    # The reply stage sees the resulting state and intentionally has no
+    # operations to replay, so its service_resolution is not the source for
+    # checking the operations that were committed.
+    operation_resolution = (
+        proof.get("understanding_service_resolution")
+        or proof.get("service_resolution") or {}
     )
+    resolved_operations = operation_resolution.get("operations") or []
     applied_operations = (
         proof.get("applied_service_operations")
         if isinstance(proof.get("applied_service_operations"), list)
@@ -2438,7 +2444,10 @@ def _semantic_turn_audit(
         deterministic_field_confirmation
         or applied_signatures == resolved_signatures
     )
-    consumed_spans = proof.get("consumed_service_spans") or []
+    consumed_spans = (
+        operation_resolution.get("consumed_spans")
+        or proof.get("consumed_service_spans") or []
+    )
     operations_have_authorized_evidence = all(
         str(operation.get("evidence_type") or "")
         in {"exact_catalog", "confirmed_candidate", "explicit_change"}
@@ -2852,6 +2861,7 @@ def _semantic_failure_records(
         "status": "error",
         "technical_pass": True,
         "quality_pass": False,
+        "quality_scope": "semantic_graph_v1",
         "failed_turn": turn_index,
         "failure": failure,
     }

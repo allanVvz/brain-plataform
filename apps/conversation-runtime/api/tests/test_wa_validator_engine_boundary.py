@@ -189,6 +189,34 @@ def test_agentic_validator_accepts_optional_collect_once_name_before_required_fi
     assert audit["criteria"]["question_semantically_askable"] is True
 
 
+def test_validator_uses_understanding_resolution_for_committed_branch_operation():
+    inputs = _audit_inputs(conversation_mode="n8n_agents")
+    operation = {
+        "action": "add",
+        "branch_anchor_node_id": "branch:one",
+        "branch_path_checksum": "sha256:branch",
+        "evidence_span": "uso prÃ³prio",
+        "evidence_type": "confirmed_candidate",
+    }
+    inputs["proof_record"]["proof_result"].update({
+        "service_resolution": {"operations": [], "consumed_spans": []},
+        "understanding_service_resolution": {
+            "operations": [operation],
+            "consumed_spans": [
+                {"text": "uso prÃ³prio", "evidence_type": "confirmed_candidate"},
+            ],
+        },
+        "applied_service_operations": [operation],
+        "consumed_service_spans": [],
+    })
+
+    audit = wa_validator_service._semantic_turn_audit(**inputs)
+
+    assert audit["criteria"]["service_operations_match_resolution"] is True
+    assert audit["criteria"]["service_operations_have_authorized_evidence"] is True
+    assert audit["passed"] is True
+
+
 def test_agentic_validator_accepts_consultative_turn_when_no_field_is_askable():
     inputs = _audit_inputs(conversation_mode="n8n_agents")
     inputs["contract"]["fields"] = []
