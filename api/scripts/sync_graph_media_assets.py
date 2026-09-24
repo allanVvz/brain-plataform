@@ -13,7 +13,14 @@ import sys
 from pathlib import Path
 
 
-API_DIR = Path(__file__).resolve().parents[1]
+API_DIR = next(
+    (
+        candidate
+        for candidate in (Path(__file__).resolve().parents[1], Path.cwd())
+        if (candidate / "services").is_dir()
+    ),
+    Path(__file__).resolve().parents[1],
+)
 ROOT = API_DIR.parent
 if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
@@ -28,8 +35,9 @@ def _load(path: Path) -> dict:
     return value
 
 
-def _candidate_rows(bundle_path: Path) -> tuple[dict, list[dict]]:
+def _candidate_rows(bundle_path: Path, *, asset_root: Path | None = None) -> tuple[dict, list[dict]]:
     normalized = graph_bundle.normalize_bundle(_load(bundle_path))
+    evidence_root = (asset_root or ROOT).resolve()
     nodes = {str(node["id"]): node for node in normalized["nodes"]}
     edges = normalized["edges"]
     rows: list[dict] = []
@@ -41,23 +49,25 @@ def _candidate_rows(bundle_path: Path) -> tuple[dict, list[dict]]:
         local_value = str(data.get("local_evidence_path") or "")
         if not local_value:
             continue
-        local_path = (ROOT / local_value).resolve()
-        local_path.relative_to(ROOT.resolve())
+        local_path = (evidence_root / local_value).resolve()
+        local_path.relative_to(evidence_root)
         if not local_path.is_file():
             raise FileNotFoundError(local_path)
         digest = hashlib.sha256(local_path.read_bytes()).hexdigest()
         if digest != str(media.get("sha256") or "").lower():
             raise ValueError(f"checksum mismatch: {node['id']}")
-        parents = [
+        parents = sorted({
             edge["source"] for edge in edges
-            if edge["target"] == node["id"] and edge["relation_type"] in {"contains", "uses_asset"}
-        ]
+            if edge["target"] == node["id"]
+            and edge["relation_type"] in {"contains", "uses_asset", "category_has_asset"}
+        })
         galleries = [
             edge["target"] for edge in edges
             if edge["source"] == node["id"] and edge["relation_type"] == "gallery_asset"
         ]
-        if len(parents) != 1 or nodes.get(parents[0], {}).get("node_type") != "product":
-            raise ValueError(f"asset must have exactly one product parent: {node['id']}")
+        parent_type = nodes.get(parents[0], {}).get("node_type") if len(parents) == 1 else None
+        if parent_type not in {"product", "product_group"}:
+            raise ValueError(f"asset must have exactly one product or product_group owner: {node['id']}")
         if len(galleries) != 1 or nodes.get(galleries[0], {}).get("node_type") != "gallery":
             raise ValueError(f"asset must link to exactly one gallery: {node['id']}")
         rows.append({
@@ -65,6 +75,9 @@ def _candidate_rows(bundle_path: Path) -> tuple[dict, list[dict]]:
             "projection_node_id": node["projection_node_id"],
             "product_node_id": parents[0],
             "gallery_node_id": galleries[0],
+            "owner_node_id": parents[0],
+            "owner_node_type": parent_type,
+            "registry_id": str(data.get("registry_id") or media.get("registry_id") or ""),
             "title": node["title"],
             "source": data.get("source"),
             "asset_role": data.get("asset_role"),
@@ -84,6 +97,7 @@ def main() -> int:
     parser.add_argument("bundle")
     parser.add_argument("--expected-file-sha256")
     parser.add_argument("--expected-count", type=int)
+    parser.add_argument("--asset-root", type=Path)
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
     bundle_path = Path(args.bundle).resolve()
@@ -91,7 +105,7 @@ def main() -> int:
     file_sha = hashlib.sha256(bundle_path.read_bytes()).hexdigest()
     if args.expected_file_sha256 and file_sha != args.expected_file_sha256.lower():
         raise RuntimeError("bundle file checksum mismatch")
-    normalized, rows = _candidate_rows(bundle_path)
+    normalized, rows = _candidate_rows(bundle_path, asset_root=args.asset_root)
     if args.expected_count is not None and len(rows) != args.expected_count:
         raise RuntimeError(f"expected {args.expected_count} assets, found {len(rows)}")
     result = {
@@ -140,7 +154,9 @@ def main() -> int:
                 "source": row["source"], "sha256": row["sha256"],
                 "asset_role": row["asset_role"], "graph_node_id": row["node_id"],
                 "projection_node_id": row["projection_node_id"],
-                "product_node_id": row["product_node_id"],
+                "owner_node_id": row["owner_node_id"],
+                "owner_node_type": row["owner_node_type"],
+                "product_node_id": row["owner_node_id"] if row["owner_node_type"] == "product" else None,
                 "gallery_node_id": row["gallery_node_id"],
                 "validation_status": "validated",
             },
@@ -151,6 +167,8 @@ def main() -> int:
             .eq("storage_path", row["path"]).limit(1).execute().data or []
         )
         if existing:
+            if row["registry_id"] and str(existing[0]["id"]) != row["registry_id"]:
+                raise RuntimeError(f"existing asset registry id mismatch: {row['node_id']}")
             payload["metadata"] = {
                 **(existing[0].get("metadata") or {}),
                 **payload["metadata"],
@@ -158,6 +176,8 @@ def main() -> int:
             saved = supabase_client.update_asset(str(existing[0]["id"]), payload)
             action = "updated"
         else:
+            if row["registry_id"]:
+                payload["id"] = row["registry_id"]
             saved = supabase_client.insert_asset(payload)
             action = "inserted"
         mutations.append({

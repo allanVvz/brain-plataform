@@ -116,7 +116,7 @@ def test_utzig_candidate_compiles_as_publishable_approved_plan() -> None:
         for edge in bundle["edges"]
         if edge["relation_type"] == "publishes_to" and edge["target"] == "gallery:utzig"
     }
-    assert len(public_grants) == 35
+    assert len(public_grants) == 36
     assert {
             edge["source"]
             for edge in bundle["edges"]
@@ -234,9 +234,17 @@ def test_assets_are_strictly_allowlisted_and_have_approved_public_derivatives() 
     bundle = _bundle()
     assets = [node for node in bundle["nodes"] if node["node_type"] == "asset"]
 
+    source_assets = [asset for asset in assets if not asset["data"].get("synthetic")]
+    representative_assets = [asset for asset in assets if asset["data"].get("synthetic")]
     assert {
-        asset["data"]["provenance"]["file_id"] for asset in assets
+        asset["data"]["provenance"]["file_id"] for asset in source_assets
     } == EXPECTED_ASSET_IDS
+    assert [asset["id"] for asset in representative_assets] == [
+        "asset:repair-paint-representative-v1"
+    ]
+    assert representative_assets[0]["data"]["representative"] is True
+    assert representative_assets[0]["data"]["not_direct_evidence"] is True
+    assert representative_assets[0]["data"]["asset_role"] == "representative_group_cover"
     assert set(bundle["metadata"]["asset_policy"]["allowlisted_google_drive_file_ids"]) == EXPECTED_ASSET_IDS
     assert all(
         asset["data"]["web_derivative"]["url"].startswith(

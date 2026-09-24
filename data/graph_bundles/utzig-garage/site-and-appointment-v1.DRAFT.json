@@ -64,100 +64,8 @@
         "product:evaluation"
       ],
       "preserved_active_faq_count": 0,
-      "soft_disabled_edges": [
-        {
-          "id": "edge:enhancement-bodywork",
-          "source": "group:enhancement",
-          "target": "product:bodywork",
-          "relation_type": "contains",
-          "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
-        },
-        {
-          "id": "edge:enhancement-painting",
-          "source": "group:enhancement",
-          "target": "product:painting",
-          "relation_type": "contains",
-          "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
-        },
-        {
-          "id": "edge:preservation-detailed-wash",
-          "source": "group:preservation",
-          "target": "product:detailed-wash",
-          "relation_type": "contains",
-          "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
-        },
-        {
-          "id": "edge:preservation-engine-bay-wash",
-          "source": "group:preservation",
-          "target": "product:engine-bay-wash",
-          "relation_type": "contains",
-          "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
-        },
-        {
-          "id": "edge:preservation-glass-polish",
-          "source": "group:preservation",
-          "target": "product:glass-polish",
-          "relation_type": "contains",
-          "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
-        },
-        {
-          "id": "edge:preservation-interior-cleaning",
-          "source": "group:preservation",
-          "target": "product:interior-cleaning",
-          "relation_type": "contains",
-          "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
-        },
-        {
-          "id": "edge:service-image:3d982199e860180c1a63",
-          "source": "product:evaluation",
-          "target": "asset:process",
-          "relation_type": "uses_asset",
-          "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
-        },
-        {
-          "id": "edge:service-image:853fac9ecb4c6ee59497",
-          "source": "product:bodywork",
-          "target": "asset:process",
-          "relation_type": "uses_asset",
-          "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
-        },
-        {
-          "id": "edge:service-image:b17cec5c8c7e3e272417",
-          "source": "product:detailed-wash",
-          "target": "asset:engine-detail",
-          "relation_type": "uses_asset",
-          "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
-        },
-        {
-          "id": "edge:service-image:c1542270886c69e4a836",
-          "source": "product:ppf",
-          "target": "asset:hero",
-          "relation_type": "uses_asset",
-          "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
-        },
-        {
-          "id": "edge:service-image:da279ea5eefcfc011bb7",
-          "source": "product:commercial-polish",
-          "target": "asset:process",
-          "relation_type": "uses_asset",
-          "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
-        },
-        {
-          "id": "edge:service-image:db58742048a00443220a",
-          "source": "product:vitrification",
-          "target": "asset:work-polish",
-          "relation_type": "uses_asset",
-          "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
-        },
-        {
-          "id": "edge:service-image:f824190e46bd78fea83e",
-          "source": "product:painting",
-          "target": "asset:engine-final",
-          "relation_type": "uses_asset",
-          "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
-        }
-      ],
-      "soft_disabled_edge_count": 13
+      "soft_disabled_edges": [],
+      "soft_disabled_edge_count": 0
     }
   },
   "nodes": [
@@ -5785,6 +5693,57 @@
       "summary": "Preço e duração da vitrificação são confirmados pela equipe humana; a assistente virtual não publica estimativa estática.",
       "node_type": "faq",
       "projection_node_id": "aa1716ac-3024-581c-89b0-4e4b71ff8c45"
+    },
+    {
+      "id": "asset:repair-paint-representative-v1",
+      "node_type": "asset",
+      "slug": "repair-paint-representative-v1",
+      "title": "Reparo e pintura — imagem representativa",
+      "summary": "Capa editorial representativa do grupo Reparo e pintura; não é evidência de um serviço executado pela Utzig Garage.",
+      "tags": [
+        "public-site",
+        "representative",
+        "synthetic",
+        "repair-paint"
+      ],
+      "status": "approved",
+      "projection_node_id": "0c91f50c-1b7c-59c8-9416-422d6632c7b1",
+      "data": {
+        "source": "openai_imagegen_operator_approved_2026_09_23",
+        "validation_status": "approved",
+        "asset_role": "representative_group_cover",
+        "representative": true,
+        "synthetic": true,
+        "not_direct_evidence": true,
+        "public_asset_ready": true,
+        "registry_id": "97d1b29c-e689-5fd4-a501-bab2336b2bea",
+        "asset_id": "97d1b29c-e689-5fd4-a501-bab2336b2bea",
+        "content_sha256": "e92dcd20548ddc32567529488ca88bac724ab1dab0628be7cd602c1feb0d56be",
+        "local_evidence_path": "docs/public-sites/utzig-garage/media/repair-paint-representative-v1.webp",
+        "web_derivative": {
+          "status": "approved",
+          "url": "https://storage.vzforeal.com/storage/v1/object/public/assets-derived/e7b7b2e8-859e-4185-b675-79bc0f3d846e/e92dcd20548ddc32567529488ca88bac724ab1dab0628be7cd602c1feb0d56be/repair-paint-representative-v1.webp",
+          "content_sha256": "e92dcd20548ddc32567529488ca88bac724ab1dab0628be7cd602c1feb0d56be",
+          "width": 1600,
+          "height": 900,
+          "mime_type": "image/webp",
+          "storage_bucket": "assets-derived",
+          "storage_path": "e7b7b2e8-859e-4185-b675-79bc0f3d846e/e92dcd20548ddc32567529488ca88bac724ab1dab0628be7cd602c1feb0d56be/repair-paint-representative-v1.webp",
+          "profile": "webp_max_1600_q82_v1"
+        },
+        "media": {
+          "kind": "image",
+          "registry_id": "97d1b29c-e689-5fd4-a501-bab2336b2bea",
+          "sha256": "e92dcd20548ddc32567529488ca88bac724ab1dab0628be7cd602c1feb0d56be",
+          "width": 1600,
+          "height": 900,
+          "mime": "image/webp",
+          "mime_type": "image/webp",
+          "bucket": "assets-derived",
+          "path": "e7b7b2e8-859e-4185-b675-79bc0f3d846e/e92dcd20548ddc32567529488ca88bac724ab1dab0628be7cd602c1feb0d56be/repair-paint-representative-v1.webp",
+          "filename": "repair-paint-representative-v1.webp"
+        }
+      }
     }
   ],
   "edges": [
@@ -8217,6 +8176,42 @@
       "relation_type": "publishes_to"
     },
     {
+      "id": "edge:primary:repair-paint-representative-v1",
+      "source": "group:repair-paint",
+      "target": "asset:repair-paint-representative-v1",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "primary_tree": true,
+        "source": "utzig_visual_reconciliation_2026_09_23"
+      }
+    },
+    {
+      "id": "edge:repair-paint-representative-gallery",
+      "source": "asset:repair-paint-representative-v1",
+      "target": "gallery:utzig",
+      "relation_type": "gallery_asset",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "primary_tree": false,
+        "source": "utzig_visual_reconciliation_2026_09_23"
+      }
+    },
+    {
+      "id": "edge:public:repair-paint-representative-v1",
+      "source": "asset:repair-paint-representative-v1",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "primary_tree": false,
+        "source": "utzig_public_site_approval_2026_09_23"
+      }
+    },
+    {
       "id": "edge:preservation-evaluation",
       "source": "group:preservation",
       "target": "product:evaluation",
@@ -8451,7 +8446,7 @@
     {
       "id": "edge:group-cover:repair-paint",
       "source": "group:repair-paint",
-      "target": "asset:process",
+      "target": "asset:repair-paint-representative-v1",
       "relation_type": "category_has_asset",
       "weight": 1,
       "metadata": {

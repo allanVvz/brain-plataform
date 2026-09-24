@@ -36,13 +36,67 @@ def main(active_export: Path | None = None) -> None:
     bundle = json.loads(PATH.read_text(encoding="utf-8"))
     nodes = {node["id"]: node for node in bundle["nodes"]}
 
+    repair_asset_id = "asset:repair-paint-representative-v1"
+    repair_asset_sha = "e92dcd20548ddc32567529488ca88bac724ab1dab0628be7cd602c1feb0d56be"
+    repair_registry_id = "97d1b29c-e689-5fd4-a501-bab2336b2bea"
+    repair_storage_path = (
+        "e7b7b2e8-859e-4185-b675-79bc0f3d846e/"
+        f"{repair_asset_sha}/repair-paint-representative-v1.webp"
+    )
+    nodes[repair_asset_id] = {
+        "id": repair_asset_id,
+        "node_type": "asset",
+        "slug": "repair-paint-representative-v1",
+        "title": "Reparo e pintura — imagem representativa",
+        "summary": "Capa editorial representativa do grupo Reparo e pintura; não é evidência de um serviço executado pela Utzig Garage.",
+        "tags": ["public-site", "representative", "synthetic", "repair-paint"],
+        "status": "approved",
+        "projection_node_id": "0c91f50c-1b7c-59c8-9416-422d6632c7b1",
+        "data": {
+            "source": "openai_imagegen_operator_approved_2026_09_23",
+            "validation_status": "approved",
+            "asset_role": "representative_group_cover",
+            "representative": True,
+            "synthetic": True,
+            "not_direct_evidence": True,
+            "public_asset_ready": True,
+            "registry_id": repair_registry_id,
+            "asset_id": repair_registry_id,
+            "content_sha256": repair_asset_sha,
+            "local_evidence_path": "docs/public-sites/utzig-garage/media/repair-paint-representative-v1.webp",
+            "web_derivative": {
+                "status": "approved",
+                "url": f"https://storage.vzforeal.com/storage/v1/object/public/assets-derived/{repair_storage_path}",
+                "content_sha256": repair_asset_sha,
+                "width": 1600,
+                "height": 900,
+                "mime_type": "image/webp",
+                "storage_bucket": "assets-derived",
+                "storage_path": repair_storage_path,
+                "profile": "webp_max_1600_q82_v1",
+            },
+            "media": {
+                "kind": "image",
+                "registry_id": repair_registry_id,
+                "sha256": repair_asset_sha,
+                "width": 1600,
+                "height": 900,
+                "mime": "image/webp",
+                "mime_type": "image/webp",
+                "bucket": "assets-derived",
+                "path": repair_storage_path,
+                "filename": "repair-paint-representative-v1.webp",
+            },
+        },
+    }
+
     # Five public navigation groups.  The former marketing audiences stay
     # untouched; these are catalog owners, not audience claims.
     groups = {
         "group:preservation": ("Avaliação e orientação", "assessment-guidance", "asset:process", 0),
         "group:cleaning": ("Limpeza e higienização", "cleaning-hygiene", "asset:extractor", 1),
         "group:revitalization": ("Correção e acabamento", "correction-finish", "asset:headlight-before", 2),
-        "group:repair-paint": ("Reparo e pintura", "repair-paint", "asset:process", 3),
+        "group:repair-paint": ("Reparo e pintura", "repair-paint", repair_asset_id, 3),
         "group:enhancement": ("Proteção e conservação", "protection-conservation", "asset:glass-before", 4),
     }
     template = copy.deepcopy(nodes["group:preservation"])
@@ -94,11 +148,26 @@ def main(active_export: Path | None = None) -> None:
     # canonical Asset -> Gallery and public publication grants are retained.
     bundle["edges"] = [item for item in bundle["edges"] if not (
         item.get("id", "").startswith("edge:service-image:")
+        or item.get("id", "").startswith(("edge:primary:repair-paint-representative", "edge:repair-paint-representative-gallery", "edge:public:repair-paint-representative"))
         or item.get("id", "").startswith(("edge:brand-cleaning", "edge:brand-repair-paint", "edge:primary:windshield-", "edge:windshield-crystallization-", "edge:copy-faq-windshield-", "edge:faq-embed-windshield-"))
         or item.get("metadata", {}).get("source") == "utzig_visual_reconciliation_2026_09_23"
         or (item.get("source", "").startswith("group:") and item.get("relation_type") == "contains")
         or (item.get("source", "").startswith("group:") and item.get("relation_type") == "publishes_to")
     )]
+    bundle["edges"].extend([
+        {"id": "edge:primary:repair-paint-representative-v1", "source": "group:repair-paint",
+         "target": repair_asset_id, "relation_type": "contains", "weight": 1,
+         "metadata": {"active": True, "primary_tree": True,
+                      "source": "utzig_visual_reconciliation_2026_09_23"}},
+        {"id": "edge:repair-paint-representative-gallery", "source": repair_asset_id,
+         "target": "gallery:utzig", "relation_type": "gallery_asset", "weight": 1,
+         "metadata": {"active": True, "primary_tree": False,
+                      "source": "utzig_visual_reconciliation_2026_09_23"}},
+        {"id": "edge:public:repair-paint-representative-v1", "source": repair_asset_id,
+         "target": "gallery:utzig", "relation_type": "publishes_to", "weight": 1,
+         "metadata": {"active": True, "primary_tree": False,
+                      "source": "utzig_public_site_approval_2026_09_23"}},
+    ])
 
     membership = {
         "group:preservation": ["product:evaluation"],

@@ -52,6 +52,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Package checksum-declared local media
+        run: python api/scripts/package_graph_media_assets.py "${{ inputs.bundle_path }}" graphbundle-media.tar.gz
       - name: Copy the checksum-approved bundle to the production host
         uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345
         with:
@@ -59,7 +61,7 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
-          source: ${{ inputs.bundle_path }},api/scripts/apply_graph_edge_tombstones.py
+          source: ${{ inputs.bundle_path }},api/scripts/apply_graph_edge_tombstones.py,api/scripts/sync_graph_media_assets.py,graphbundle-media.tar.gz
           target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           overwrite: true
       - name: Stage or activate through the active control plane
@@ -94,6 +96,18 @@ jobs:
             compose=(docker compose --env-file .env.compose -f docker-compose.yml -f infra/microservices/docker-compose.blue-green.yml)
             docker cp "$BUNDLE_PATH" "$control_container:/tmp/approved-graphbundle.json"
             docker cp api/scripts/apply_graph_edge_tombstones.py "$control_container:/tmp/apply_graph_edge_tombstones.py"
+            docker cp api/scripts/sync_graph_media_assets.py "$control_container:/tmp/sync_graph_media_assets.py"
+            run_id="${PUBLISH_ACTOR##*:}"
+            media_root="/tmp/graphbundle-media-$run_id"
+            docker cp graphbundle-media.tar.gz "$control_container:/tmp/graphbundle-media-$run_id.tar.gz"
+            "${compose[@]}" exec -T "$control_service" mkdir -p "$media_root"
+            "${compose[@]}" exec -T "$control_service" tar -xzf "/tmp/graphbundle-media-$run_id.tar.gz" -C "$media_root"
+            media_args=(
+              python /tmp/sync_graph_media_assets.py /tmp/approved-graphbundle.json
+              --asset-root "$media_root"
+            )
+            "${compose[@]}" exec -T "$control_service" "${media_args[@]}"
+            "${compose[@]}" exec -T "$control_service" "${media_args[@]}" --apply
             tombstone_args=(
               python /tmp/apply_graph_edge_tombstones.py /tmp/approved-graphbundle.json
               --approved-draft-checksum "$APPROVED_DRAFT_CHECKSUM"
