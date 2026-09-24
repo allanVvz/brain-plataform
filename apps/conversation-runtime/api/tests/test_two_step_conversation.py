@@ -198,6 +198,67 @@ def test_final_reply_reuses_resolved_facts_and_never_requests_repair(monkeypatch
     assert response.proof["execution_strategy"] == "interpret_then_respond"
 
 
+def test_final_proof_keeps_understanding_facts_branch_change_and_reply_question(monkeypatch):
+    original = _context()
+    understanding = TurnUnderstandingV1(
+        validation_observations=["understanding_metadata_discarded:customer_question"],
+    )
+    fact = {
+        "field_key": "vehicle", "owner_node_id": "branch:new", "status": "known",
+        "value": "Ford Ka", "source_message_id": "m1", "evidence_span": "Ford Ka",
+    }
+    carried = {
+        "field_key": "name", "owner_node_id": "persona:generic", "status": "known",
+        "value": "Ana Souza", "source_message_id": "m0",
+        "metadata": {"reuse_policy": "carry_over"},
+    }
+    resolved = ResolvedUnderstandingV1(
+        understanding=understanding, context=original,
+        prospective_state={}, conversation_brief={},
+        eligible_fields=[{"key": "year", "question_node_id": "q:year"}],
+        resolution_proof={
+            "accepted_facts": [fact],
+            "applied_service_operations": [{"action": "add", "branch_anchor_node_id": "branch:new"}],
+            "service_resolution": {"focused_branch_node_id": "branch:new"},
+        },
+    )
+    reply = ConversationReplyV1(reply="E o ano do carro?", asked_field_key="year")
+
+    def fake_decide(_context, *, model_observation):
+        assert model_observation["proposal"]["next_question_node_id"] == "q:year"
+        return (
+            ConversationDecision(
+                intent="collect_graph_fields", route="SDR", confidence=1,
+                lead_stage="engajado",
+            ),
+            AgentResponse(
+                reply_text=reply.reply, role="SDR", cart_state={
+                    "active_branch_node_id": "branch:new", "asked_question_node_ids": ["q:year"],
+                },
+                proof={
+                    "valid": True, "delivery_authorized": True,
+                    "accepted_facts": [carried], "asked_field_key": "year",
+                    "next_question_node_id": "q:year", "quality_pass": True,
+                },
+            ),
+        )
+
+    monkeypatch.setattr(graph_agent_runtime_v3, "decide", fake_decide)
+    _decision, response = conversation_runtime.decide_agentic(
+        original, resolved_understanding=resolved, conversation_reply=reply,
+    )
+    assert {item["field_key"] for item in response.proof["accepted_facts"]} == {
+        "vehicle", "name",
+    }
+    assert response.proof["applied_service_operations"][0]["branch_anchor_node_id"] == "branch:new"
+    assert response.proof["asked_field_key"] == "year"
+    assert response.proof["next_question_node_id"] == "q:year"
+    assert response.proof["quality_pass"] is False
+    assert response.proof["quality_warnings"] == [
+        "understanding_metadata_discarded:customer_question"
+    ]
+
+
 def test_two_step_proof_failure_preserves_sanitized_reason(monkeypatch):
     original = _context()
     resolved = ResolvedUnderstandingV1(

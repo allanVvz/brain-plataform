@@ -333,13 +333,7 @@ def _time_since_last_client_message(
 def _known_facts_payload(
     facts: dict[str, Any], current_message_id: str | None
 ) -> list[dict[str, Any]]:
-    """Every resolved fact (not just the active branch's own fields),
-    tagged with whether it was confirmed in this exact turn ("esta_conversa")
-    or is being carried over from an earlier one ("anterior") -- so the
-    model can reference known context from other branches/sessions (e.g. a
-    previously known service when the current branch is a complaint) while
-    knowing which facts it should confirm rather than silently assume.
-    """
+    """Current-ledger facts and graph-authorized profile carry-over only."""
     payload = []
     for key, stored in (facts or {}).items():
         values = stored if isinstance(stored, list) else [stored]
@@ -347,10 +341,14 @@ def _known_facts_payload(
             if not isinstance(fact, dict) or fact.get("status") != "known":
                 continue
             source_id = str(fact.get("source_message_id") or "")
+            carried = bool(
+                fact.get("carried_from_journey")
+                or (fact.get("metadata") or {}).get("reuse_policy") == "carry_over"
+            )
             origem = (
-                "esta_conversa"
-                if current_message_id and source_id == str(current_message_id)
-                else "anterior"
+                "pedido_anterior" if carried else
+                "esta_mensagem" if current_message_id and source_id == str(current_message_id)
+                else "esta_conversa"
             )
             payload.append({
                 "chave": key,
@@ -361,7 +359,7 @@ def _known_facts_payload(
                 # fields the compiled contract marked carry_over=true (see
                 # _carry_over_field_keys) -- i.e. this is never a
                 # this-order fact, always customer identity.
-                "carregado_do_pedido_anterior": bool(fact.get("carried_from_journey")),
+                "carregado_do_pedido_anterior": carried,
             })
     return payload
 
@@ -2587,7 +2585,7 @@ SYSTEM_PROMPT = (
     "cliente quis dizer, tudo o que ele informou de uma vez, com que "
     "confiança, e em que voz responder. O BACKEND prova: evidência "
     "literal, escopo do galho, idempotência e segurança -- ele valida a "
-    "sua proposta contra a publicação e substitui o que não puder provar. "
+    "sua proposta contra a publicação e registra divergências editoriais. "
     "O GRAFO manda no conteúdo: serviços, perguntas, regras, identidade e "
     "copy. Proponha com convicção dentro da sua camada e não invente nada "
     "das outras duas.\n\n"
@@ -2659,9 +2657,8 @@ SYSTEM_PROMPT = (
     "respostas curtas, cite evidence_span literal e retorne "
     "exclusivamente o JSON Schema fornecido. Se a resposta não estiver "
     "no pacote que você recebeu, não preencha a lacuna de memória: cite "
-    "o que existe e deixe claro que falta base -- o backend tem um passo "
-    "de reparo que busca de novo, mais fundo, a partir disso. Se nem "
-    "assim houver fonte, pergunte ao cliente, com uma pergunta curta e "
+    "o que existe e deixe claro que falta base. Nesse caso, pergunte ao "
+    "cliente, com uma pergunta curta e "
     "específica, em vez de escolher no achismo.\n\n"
 
     "Você é um SDR de verdade conversando por WhatsApp, não um "
@@ -2781,6 +2778,14 @@ SYSTEM_PROMPT = (
     "pedindo confirmação. Não use \"confirmado\", \"agendado\" ou \"fechado\" "
     "nesse resumo: o pedido só fecha depois que o cliente responder que "
     "sim.\n\n"
+
+    "No resumo de fatos, origem esta_conversa significa um dado aceito nesta "
+    "jornada, mesmo quando veio de uma mensagem anterior. Origem "
+    "pedido_anterior aparece apenas em campos carry_over do grafo e tambem "
+    "pode ser usada sem reconfirmar. Interesses e servicos de jornadas "
+    "concluidas sao historico para consulta, nunca um pedido ativo. Se um "
+    "veiculo foi identificado com clareza, inclua-o no resumo final sem "
+    "criar uma pergunta intermediaria so para confirmar o modelo.\n\n"
 )
 
 
@@ -2849,9 +2854,8 @@ def _seed_carried_facts(
 ) -> dict:
     """Semeia no ledger vazio do ciclo novo os fatos herdados do lead.
 
-    Eles entram com `carried_from_journey`, entao `_known_facts_payload` os
-    rotula como `origem: "anterior"` e o prompt ja manda confirmar antes de
-    usar -- e a diferenca entre reperguntar o nome e conferi-lo.
+    Eles entram com `carried_from_journey`; o contrato publicado permite
+    reutiliza-los diretamente, sem uma pergunta de confirmacao extra.
 
     A busca cobre o historico completo do lead (toda jornada/pedido ja
     registrado), nao so a jornada anterior imediata -- um ponteiro de uma
@@ -4348,6 +4352,20 @@ def resolve_understanding(
     ]
     conversation_brief = {
         "identity_and_tone": identity_and_tone,
+        "known_facts": _known_facts_payload(
+            grouped, _source_message_id(resolved_context.messages),
+        ),
+        "previously_asked_field_key": next(
+            (
+                str(field.get("key"))
+                for field in resolved_context.graph_contract.get("fields") or []
+                if field.get("question_node_id")
+                and str(field["question_node_id"]) == str(
+                    (context.cart.get("asked_question_node_ids") or [None])[-1]
+                )
+            ),
+            None,
+        ),
         "customer_questions": [
             item.model_dump(mode="json") for item in understanding.customer_questions
         ],
@@ -4360,6 +4378,9 @@ def resolve_understanding(
         ),
         "recent_messages": recent_messages,
         "commercial_interests": commercial_interests,
+        "historical_commercial_interests": (
+            shared_lead_memory.historical_product_interests(resolved_context.shared_memory)
+        ),
         "authorized_nodes": authorized_nodes,
         "authorized_chunks": authorized_chunks,
         "price_comparison_catalog": (

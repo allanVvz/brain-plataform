@@ -69,7 +69,10 @@ def _latest_current_facts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         (row for row in rows if row.get("is_current") is not False), key=_row_marker,
     )
     latest = {
-        (_text(row.get("field_key")), _text(row.get("owner_node_id"))): row
+        (
+            _text(row.get("journey_id")), _text(row.get("field_key")),
+            _text(row.get("owner_node_id")),
+        ): row
         for row in current
     }
     return list(latest.values())
@@ -78,7 +81,7 @@ def _latest_current_facts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _partition_facts(
     facts: list[dict[str, Any]], carry_over: set[str], selection_keys: set[str],
 ) -> tuple[list[SharedMemoryFact], list[SharedMemoryFact]]:
-    profile: list[SharedMemoryFact] = []
+    profile_by_identity: dict[tuple[str, str], SharedMemoryFact] = {}
     historical: list[SharedMemoryFact] = []
     for row in facts:
         key = _text(row.get("field_key"))
@@ -86,10 +89,14 @@ def _partition_facts(
         policy = "carry_over" if reusable else (
             "branch_history_only" if key in selection_keys else "historical_only"
         )
-        (profile if reusable else historical).append(
-            _memory_fact(row, reuse_policy=policy)
-        )
-    return profile, historical
+        fact = _memory_fact(row, reuse_policy=policy)
+        if reusable:
+            # The latest profile value wins across journeys; earlier orders
+            # remain separate in storage but cannot rename this customer.
+            profile_by_identity[(key, fact.owner_node_id)] = fact
+        else:
+            historical.append(fact)
+    return list(profile_by_identity.values()), historical
 
 
 def _agent_activity(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -146,12 +153,18 @@ def _outcomes(batch: dict[str, Any]) -> list[dict[str, Any]]:
     return list(values if values is not None else batch.get("journeys") or [])
 
 
-def _commercial_interests(facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Project the single composite observational fact without leaking claims."""
+def _commercial_interests(
+    facts: list[dict[str, Any]], current_journey: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Only the open journey's product interests can shape the current order."""
+    journey_id = _text((current_journey or {}).get("id"))
+    if not journey_id or (current_journey or {}).get("is_current") is False:
+        return []
     current = [
         row for row in facts
         if _text(row.get("field_key")) == "commercial_interests"
         and row.get("status") == "known"
+        and _text(row.get("journey_id")) == journey_id
     ]
     if not current:
         return []
@@ -186,7 +199,7 @@ def project_shared_lead_memory(
         pending_items=_pending_items(profile, historical, current),
         recent_messages=_bounded_messages(messages),
         agent_activity=_agent_activity(list(batch.get("agent_activity") or [])),
-        commercial_interests=_commercial_interests(facts),
+        commercial_interests=_commercial_interests(facts, current),
         policy_version=POLICY_VERSION,
     )
 
@@ -206,3 +219,27 @@ def facts_by_key(memory: SharedLeadMemory) -> dict[str, list[dict[str, Any]]]:
             "journey_id": fact.journey_id,
         })
     return grouped
+
+
+def historical_product_interests(memory: SharedLeadMemory) -> list[dict[str, Any]]:
+    """Past selections for reference, never the active commercial order."""
+    current_id = _text((memory.current_journey or {}).get("id"))
+    result: list[dict[str, Any]] = []
+    for fact in memory.historical_facts:
+        if fact.key != "commercial_interests" or fact.status.value != "known":
+            continue
+        if current_id and fact.journey_id == current_id:
+            continue
+        products = fact.value.get("products") if isinstance(fact.value, dict) else fact.value
+        if not isinstance(products, list):
+            continue
+        for item in products:
+            if not isinstance(item, dict) or not item.get("product_node_id"):
+                continue
+            result.append({
+                "product_node_id": str(item["product_node_id"]),
+                "title": _text(item.get("title")),
+                "journey_id": fact.journey_id,
+                "memory_status": "historical_only",
+            })
+    return result[-12:]

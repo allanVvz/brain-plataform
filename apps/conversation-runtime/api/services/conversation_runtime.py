@@ -1627,15 +1627,16 @@ def decide_agentic(
             or resolved_context.persona_slug != context.persona_slug
         ):
             raise RuntimeError("resolved understanding does not belong to turn context")
-        question_id = next(
-            (
-                field.get("question_node_id")
-                for field in resolved_context.graph_contract.get("fields") or []
-                if str(field.get("key") or "")
-                == str(conversation_reply.asked_field_key or "")
-            ),
-            None,
-        )
+        matching_questions = {
+            str(field.get("question_node_id"))
+            for field in resolved_understanding.eligible_fields
+            if str(field.get("key") or "") == str(conversation_reply.asked_field_key or "")
+            and field.get("question_node_id")
+        }
+        # Eligibility is computed across every active branch after the
+        # understanding stage. A question on a second active branch must keep
+        # its authored ID in the same atomic turn as the accepted facts.
+        question_id = next(iter(matching_questions)) if len(matching_questions) == 1 else None
         active_branch = resolved_context.active_branch_node_id
         proposal = ConversationProposal(
             interaction_observation=(
@@ -1716,10 +1717,42 @@ def decide_agentic(
         accepted = list(
             resolved_understanding.resolution_proof.get("accepted_facts") or []
         )
+        accepted_ids = {
+            (str(fact.get("field_key") or ""), str(fact.get("owner_node_id") or ""))
+            for fact in accepted
+        }
+        accepted.extend(
+            fact for fact in response.proof.get("accepted_facts") or []
+            if (str(fact.get("field_key") or ""), str(fact.get("owner_node_id") or ""))
+            not in accepted_ids
+        )
+        understanding_warnings = list(
+            resolved_understanding.understanding.validation_observations
+        )
+        quality_warnings = list(dict.fromkeys([
+            *(response.proof.get("quality_warnings") or []),
+            *(resolved_understanding.resolution_proof.get("quality_warnings") or []),
+            *understanding_warnings,
+        ]))
         response = response.model_copy(update={
             "proof": {
                 **response.proof,
                 "accepted_facts": accepted,
+                "applied_service_operations": list(
+                    resolved_understanding.resolution_proof.get("applied_service_operations")
+                    or response.proof.get("applied_service_operations") or []
+                ),
+                "understanding_service_resolution": (
+                    resolved_understanding.resolution_proof.get("service_resolution") or {}
+                ),
+                "field_validation": list(
+                    resolved_understanding.resolution_proof.get("field_validation")
+                    or response.proof.get("field_validation") or []
+                ),
+                "quality_warnings": quality_warnings,
+                "quality_pass": bool(
+                    response.proof.get("quality_pass", True) and not quality_warnings
+                ),
                 "understanding_contract": "turn_understanding_v1",
                 "reply_contract": "conversation_reply_v1",
                 "execution_strategy": "interpret_then_respond",
