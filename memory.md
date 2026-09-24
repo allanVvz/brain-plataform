@@ -499,3 +499,11 @@ Próxima evolução de memória/atribuição:
 A seção antiga sobre o WA Validator de 2026-08-12 foi removida porque descrevia
 um estado operacional que já não vale. O estado corrente deve ser obtido pelas
 auditorias oficiais e pelos handoffs indicados no roadmap.
+
+## Runtime e proof publicados em 2026-09-24
+
+- O usuário confirmou a fronteira: prompt e condução pertencem ao modelo; a chamada ao modelo continua no `conversation-runtime`. O n8n fica em automações auxiliares e transporte, sem modelo, proof, repair ou commit no caminho síncrono. `n8n_agents` é apenas um valor legado de binding; o template em `apps/conversation-runtime/n8n/` é fixture de auditoria, não é provisionável.
+- Release compatível do runtime: fonte `5d4af4d51e3eeaf6d73f4fd743b12617e4269f2a`, digest `sha256:d0a8ea096cfc65b25f5dc86883e8e9b6d9d91ea5e690df6ef9172b73452adad5`, workflow `36070246557`, slot green. Dry-run `36070094854`, candidate, cutover e canário WA interno passaram. Sem migration, pausa de claims, WhatsApp real ou deploy de outro serviço.
+- O prompt agora aponta explicitamente para fatos conhecidos, pergunta anterior, mensagens recentes, interrupção por dúvida e confirmação final. O checker removeu acúmulo de repair inalcançável; publicação errada continua bloqueante e divergências editoriais seguem em `quality_warnings`.
+- WA Validator completo após release: Utzig `b1ee258b-2659-4955-b257-513bde54c698` teve 6 inbounds, 6 decisões/proofs/commits/outbounds, `technical_pass=true`, `quality_pass=false`: repetiu o nome após uma dúvida e não fez handoff após “Sim” para confirmação final. Tock `81b5cdd6-cf49-43ac-8793-ac25897ff581` teve 4 inbounds e 4 decisões/proofs/commits/outbounds, `technical_pass=true`, `quality_pass=false`: interrompeu a qualificação com `forma_recebimento` pendente e fez pergunta consultiva sem `asked_field_key`. Nenhum dos dois teve repair ou handoff.
+- O workflow oficial confirmou digest ativo, checksums e zero outbound sem proof. O primeiro sinal de necessidade de outro redeploy corretivo encerra esta operação de release; as falhas de qualidade devem ser corrigidas e validadas como nova mudança, sem empilhar deploys.

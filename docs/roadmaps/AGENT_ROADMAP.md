@@ -1475,3 +1475,12 @@ deve preservar estas decisões:
   mínimos do site.
 - Depoimentos, certificações e um design system no Figma permanecem roadmap;
   nenhum deles pode ser inventado a partir do material atual.
+
+## Próxima correção conversacional após release 5d4af4d
+
+Evidência: WA Validator interno Utzig `b1ee258b-2659-4955-b257-513bde54c698` e Tock `81b5cdd6-cf49-43ac-8793-ac25897ff581`, ambos com integridade técnica aprovada e qualidade reprovada. A publicação ativa continua segura; a falha é de condução e transição de jornada.
+
+1. **P0 — confirmação para handoff:** quando a publicação exige confirmação final e o cliente afirma a pergunta pendente, persistir a confirmação, concluir a jornada e mudar a rota para humano no mesmo commit. A Utzig respondeu “vou encaminhar” após “Sim”, mas permaneceu em `awaiting_confirmation`/SDR. O caminho agentic de `graph_agent_runtime_v3._decide` calcula `terminal_intent` apenas para qualificação incompleta e grava `explicit_confirmation=False` na resposta; comparar a interpretação do modelo, o target da confirmação e a regra publicada antes de alterar a transição. Testar também recusa e correção, sem handoff precoce.
+2. **P1 — interrupção por dúvida:** uma pergunta do cliente enquanto aguarda nome recebe resposta útil sem repetir a mesma pergunta no mesmo turno. A Utzig respondeu à dúvida, mas repetiu o nome e excedeu o orçamento de tentativas. Ajustar o contexto/prompt e medir com o histórico persistido; não substituir o texto do modelo no proof.
+3. **P1 — avanço de campo em vendas:** com `forma_recebimento` ainda perguntável, a Tock fez uma pergunta consultiva sobre peças e não registrou `asked_field_key`; o Validator parou em `collecting`. Esclarecer no prompt quando continuar a qualificação e quando oferecer suporte consultivo, respeitando a política publicada do grafo. Não impor `missing_fields[0]` como roteiro.
+4. **Gate da próxima release:** testar Utzig e Tock em sessões completas, nome espontâneo, dúvida, confirmação/handoff, nova jornada e inbound duplicado. Exigir proof/ledger/um outbound por inbound e avaliar `quality_pass` separadamente. Preparar uma única release nova com candidate e rollback próprios; não fazer segundo redeploy corretivo nesta operação.
