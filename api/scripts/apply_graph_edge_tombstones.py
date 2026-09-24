@@ -38,6 +38,8 @@ def plan_tombstones(
     reconciliation = (
         (bundle.get("metadata") or {}).get("visual_media_reconciliation") or {}
     )
+    if not reconciliation:
+        return []
     tombstones = reconciliation.get("soft_disabled_edges") or []
     if not isinstance(tombstones, list):
         raise RuntimeError("soft_disabled_edges_must_be_a_list")
