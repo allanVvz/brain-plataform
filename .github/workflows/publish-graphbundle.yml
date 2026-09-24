@@ -94,6 +94,17 @@ jobs:
             control_container="brain-ai-control-plane-$control_slot-1"
             [[ "$(docker inspect -f '{{.State.Health.Status}}' "$control_container")" == healthy ]]
             compose=(docker compose --env-file .env.compose -f docker-compose.yml -f infra/microservices/docker-compose.blue-green.yml)
+            previous_publication_id="$("${compose[@]}" exec -T "$control_service" python -c 'import sys; from services import supabase_client; persona=supabase_client.get_persona(sys.argv[1]); publication=supabase_client.get_active_graph_publication(str(persona["id"])); print((publication or {}).get("id") or "")' "$PERSONA_SLUG")"
+            rollback_on_error() {
+              exit_code=$?
+              trap - ERR
+              current_publication_id="$("${compose[@]}" exec -T "$control_service" python -c 'import sys; from services import supabase_client; persona=supabase_client.get_persona(sys.argv[1]); publication=supabase_client.get_active_graph_publication(str(persona["id"])); print((publication or {}).get("id") or "")' "$PERSONA_SLUG" || true)"
+              if [[ -n "$previous_publication_id" && "$current_publication_id" != "$previous_publication_id" ]]; then
+                "${compose[@]}" exec -T "$control_service" python -c 'import json,sys; from services import supabase_client; result=supabase_client.get_client().rpc("activate_graph_publication_v3", {"p_publication_id":sys.argv[1]}).execute().data; print("GRAPH_PUBLICATION_ROLLBACK="+json.dumps(result,sort_keys=True,default=str))' "$previous_publication_id"
+              fi
+              exit "$exit_code"
+            }
+            trap rollback_on_error ERR
             docker cp "$BUNDLE_PATH" "$control_container:/tmp/approved-graphbundle.json"
             docker cp api/scripts/apply_graph_edge_tombstones.py "$control_container:/tmp/apply_graph_edge_tombstones.py"
             docker cp api/scripts/sync_graph_media_assets.py "$control_container:/tmp/sync_graph_media_assets.py"
@@ -125,3 +136,8 @@ jobs:
             [[ "$GRAPH_ACTION" == activate ]] && args+=(--activate)
             "${compose[@]}" exec -T "$control_service" "${args[@]}"
             "${compose[@]}" exec -T "$control_service" python -c 'import json,sys; from services import supabase_client; slug=sys.argv[1]; expected=sys.argv[2]; persona=supabase_client.get_persona(slug); publication=supabase_client.get_active_graph_publication(str(persona["id"])); print("GRAPH_PUBLICATION_AUDIT="+json.dumps({"persona_slug":slug,"active_publication_id":(publication or {}).get("id"),"version":(publication or {}).get("version"),"checksum":(publication or {}).get("checksum")},sort_keys=True)); assert sys.argv[3] != "activate" or (publication or {}).get("checksum") == expected' "$PERSONA_SLUG" "$APPROVED_RUNTIME_CHECKSUM" "$GRAPH_ACTION"
+            if [[ "$GRAPH_ACTION" == activate ]]; then
+              curl --fail --silent --show-error "https://api.vzforeal.com/api/menu/$PERSONA_SLUG" \
+                | python3 -c 'import json,sys; payload=json.load(sys.stdin); assert payload.get("ok") is True; assert payload.get("graph_checksum") == sys.argv[1]' "$APPROVED_RUNTIME_CHECKSUM"
+            fi
+            trap - ERR

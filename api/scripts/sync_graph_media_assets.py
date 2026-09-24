@@ -149,7 +149,7 @@ def main() -> int:
             "url": url, "source": "imported", "storage_bucket": row["bucket"],
             "storage_path": row["path"], "mime_type": row["mime"],
             "file_size": row["size"], "original_filename": row["filename"],
-            "status": "ready", "upload_context": "imported",
+            "status": "ready", "approval_status": "approved", "upload_context": "imported",
             "metadata": {
                 "source": row["source"], "sha256": row["sha256"],
                 "asset_role": row["asset_role"], "graph_node_id": row["node_id"],
