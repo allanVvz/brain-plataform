@@ -1,0 +1,66 @@
+{
+  "source": "operator_approved_aura_public_reference_2026_09_23",
+  "reference_url": "https://auradetail.com.br/",
+  "policy": "operator_approved_commercial_adaptation",
+  "hero": {
+    "source": "operator_approved_customer_feedback_2026_09_23",
+    "eyebrow": "Estética Automotiva Premium",
+    "title": "Mais de 20 serviços que valorizam e deixam o seu carro na melhor versão",
+    "description": "Tudo o que seu carro precisa, em um só lugar."
+  },
+  "specialist": {
+    "name": "Wilian",
+    "subtitle": "O Alemão da Utzig",
+    "copy_title": "Wilian — O Alemão da Utzig",
+    "summary": "Fundador e especialista à frente dos cuidados realizados na Utzig Garage.",
+    "asset_titles": {
+      "asset:hero": "Wilian — o Alemão da Utzig",
+      "asset:editorial": "Wilian — retrato editorial",
+      "asset:process": "Wilian trabalhando na Utzig Garage"
+    }
+  },
+  "process_summary": "Agende pelo WhatsApp, apresente o que deseja melhorar e passe pela avaliação do veículo. A execução é definida conforme a necessidade, e a entrega inclui orientações para conservar o resultado.",
+  "product_descriptions": {
+    "product:evaluation": "O atendimento começa pelo WhatsApp e segue com uma avaliação do veículo para entender a necessidade, indicar o cuidado adequado e organizar a execução. Diagnóstico, valor e próximos passos são confirmados por Wilian, com orientações para conservar o resultado.",
+    "product:detailed-wash": "Lavagem premium com técnica de dois baldes, produtos próprios para detalhamento, trabalho com pincel e atenção a pneus e rodas. O serviço leva em média de 1 a 2 horas e parte de R$ 259,90.",
+    "product:engine-bay-wash": "Limpeza profunda e segura do compartimento do motor, realizada conforme a condição observada e com atenção aos componentes. Possíveis sinais de vazamento precisam ser informados antes da avaliação.",
+    "product:interior-cleaning": "Limpeza profunda e sanitização do interior com produtos e equipamentos específicos. Inclui tratamento compatível com couro ou tecido, cuidado com odores e proteção antimicrobiana; leva em média 6 horas e parte de R$ 600.",
+    "product:commercial-polish": "Polimento voltado à recuperação visual e ao ganho de brilho, indicado conforme o objetivo e a condição da pintura. A equipe orienta se o comercial ou o técnico é mais adequado.",
+    "product:glass-polish": "Tratamento para melhorar o acabamento de vidros com marcas ou manchas compatíveis com polimento. O resultado possível e a combinação com cristalização dependem da avaliação da superfície.",
+    "product:headlight-restoration": "Restauração do acabamento dos faróis para recuperar transparência e apresentação visual dentro do que a peça permite. Resultado e proteção aplicável são confirmados após avaliação.",
+    "product:technical-polish": "Correção profissional da pintura para tratar microrriscos, hologramas e oxidação compatíveis com o processo, recuperar o brilho e preparar a superfície para proteção. Leva em média 1 dia e parte de R$ 700.",
+    "product:bodywork": "Correção de danos de carroceria e recuperação do alinhamento visual conforme a extensão e a localização do reparo. Quando indicado, pequenos amassados podem ser tratados sem danificar a pintura original; fotos iniciam a análise e a equipe confirma o diagnóstico.",
+    "product:painting": "Reparo, pintura e personalização para recuperar o acabamento ou adaptar a apresentação do veículo. Cor, modelo, ano e condição da área afetada orientam a avaliação de resultado, prazo e orçamento.",
+    "product:ppf": "Película transparente e autorreparável para proteger áreas selecionadas contra riscos, pedras, raios UV e intempéries, preservando a pintura original. A duração é personalizada, a garantia é de 10 anos e a aplicação parte de R$ 499,90.",
+    "product:vitrification": "Revestimento cerâmico para brilho intenso, proteção química e limpeza mais fácil. A durabilidade informada é de até 3 anos, a execução leva de 1 a 3 dias e o serviço parte de R$ 999,90.",
+    "product:windshield-crystallization": "Tratamento do para-brisa voltado à proteção da superfície e à repelência de água para favorecer a visibilidade. A aplicação e o resultado esperado são confirmados conforme a condição do vidro."
+  },
+  "offers": {
+    "product:detailed-wash": {
+      "amount": 259.9,
+      "duration": "1 a 2 horas"
+    },
+    "product:interior-cleaning": {
+      "amount": 600.0,
+      "duration": "6 horas"
+    },
+    "product:technical-polish": {
+      "amount": 700.0,
+      "duration": "1 dia"
+    },
+    "product:ppf": {
+      "amount": 499.9,
+      "duration": "duração personalizada"
+    },
+    "product:vitrification": {
+      "amount": 999.9,
+      "duration": "1 a 3 dias"
+    }
+  },
+  "price_answers": {
+    "faq:service:detailed-wash:lavagem-detalhada-preco": "A lavagem detalhada parte de R$ 259,90 e leva em média de 1 a 2 horas. O valor final é confirmado conforme o veículo e a condição observada.",
+    "faq:service:interior-cleaning:higienizacao-preco-tempo": "A higienização interna parte de R$ 600 e leva em média 6 horas. O valor final é confirmado conforme o veículo, os revestimentos e a condição do interior.",
+    "faq:service:ppf:ppf-preco-tempo": "A aplicação de PPF parte de R$ 499,90 e tem duração personalizada conforme as áreas escolhidas. Cobertura, prazo e valor final são confirmados após a avaliação.",
+    "faq:service:vitrification:vitrificacao-preco-tempo": "A vitrificação parte de R$ 999,90 e leva em média de 1 a 3 dias. O valor final depende da condição do veículo e do preparo indicado."
+  }
+}
