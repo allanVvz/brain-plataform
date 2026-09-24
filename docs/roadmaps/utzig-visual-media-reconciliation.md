@@ -8,6 +8,8 @@ O mesmo candidato v12 inclui o bloco `home-featured-evaluation` com `node_ids=["
 
 O primeiro stage (`36065838076`) falhou no preflight `source_graph_has_unplanned_edges`: as duas relações antigas de capa ainda estavam ativas no grafo fonte. Não houve ativação; a v11 permaneceu ativa. O candidato declara agora as duas tombstones exatas em `visual_media_reconciliation`; o workflow restaura essas relações se a etapa de publicação falhar. O checksum do draft mudou, mas o runtime candidato permaneceu igual. Executar novo stage antes de qualquer CAS.
 
+O novo stage `36066539661` passou; a ativação CAS `36066764144` publicou a v12 (`46925297-f966-42cc-a33a-bd031fa1ded5`, checksum `sha256:a5bfac4a813f9c7c357910371d70a8e8a2df14e86d93c4374aa4e2f322b1c553`). O endpoint público com requisição atualizada mostrou `product:evaluation` no bloco da home, a copy humana aprovada e os IDs das capas invertidos. O Preview `dpl_5knZzTPyNY74gGWEKgfraJya6NeB` foi promovido como deployment de produção `dpl_7CRTHGaRwEq2JV2sZ3ySUgAH7uTf`. Em produção, o linktree passou no navegador a 1440 e 390 px: card sempre aberto, navegação até o catálogo, zero overflow horizontal e zero erro de página. O WA Validator interno de um turno `d5c3ea73-3328-4643-bf5c-91d6eadf0401` provou exatamente um inbound, uma decisão, um proof válido, commit completo e um outbound interno; nenhum WhatsApp real.
+
 Status: reconciliação visual e enriquecimento editorial ativos na publicação v9 (`2f51e762-4d5d-452c-808d-1c9149fd466d`), checksum `sha256:5101c7565b789111e36fa5d80ad26b64d13efd57fe87536163041e378582c83b`. O frontend promovido em 2026-09-23 consome essa publicação sem alterar binding, WhatsApp ou envio de mídia pelo agente.
 
 ## Enriquecimento editorial aprovado
