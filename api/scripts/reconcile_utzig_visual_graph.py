@@ -55,6 +55,7 @@ def main(active_export: Path | None = None) -> None:
         "data": {
             "source": "openai_imagegen_operator_approved_2026_09_23",
             "validation_status": "approved",
+            "approval_status": "approved",
             "asset_role": "representative_group_cover",
             "representative": True,
             "synthetic": True,

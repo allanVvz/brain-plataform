@@ -252,6 +252,7 @@ def test_assets_are_strictly_allowlisted_and_have_approved_public_derivatives() 
     ]
     assert representative_assets[0]["data"]["representative"] is True
     assert representative_assets[0]["data"]["not_direct_evidence"] is True
+    assert representative_assets[0]["data"]["approval_status"] == "approved"
     assert representative_assets[0]["data"]["asset_role"] == "representative_group_cover"
     assert set(bundle["metadata"]["asset_policy"]["allowlisted_google_drive_file_ids"]) == EXPECTED_ASSET_IDS
     assert all(
