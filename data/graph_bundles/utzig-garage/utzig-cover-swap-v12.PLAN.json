@@ -12,7 +12,7 @@
   "chunks_to_embed": 0,
   "compiler_version": "graph-compiler-v3.6.5",
   "disposition": "awaiting_approval",
-  "draft_checksum": "sha256:25050bb87bd7046c4b6a8373d09a2bb817bf05fe36cbaddc6ec54a431edd6cb6",
+  "draft_checksum": "sha256:4067aaea9516c7ff2eda74728b01c7702324fb5df7d0d4069538057575ca456c",
   "edge_changes": {
     "added": [],
     "changed": [
@@ -32,14 +32,17 @@
   "next_version": 12,
   "node_changes": {
     "added": [],
-    "changed": [],
+    "changed": [
+      "campaign:home",
+      "copy:contact-human"
+    ],
     "removed": []
   },
   "nodes_added": 0,
-  "nodes_changed": 0,
+  "nodes_changed": 2,
   "nodes_removed": 0,
   "plan_version": "1.0",
   "publication_allowed": true,
-  "runtime_checksum": "sha256:cfe626eb4a0651588943b3d688102d361e689bd7c9cbfaff3aa82e69670a559a",
+  "runtime_checksum": "sha256:a5bfac4a813f9c7c357910371d70a8e8a2df14e86d93c4374aa4e2f322b1c553",
   "validation_errors": []
 }

@@ -6,10 +6,152 @@
     "checksum": "sha256:658229a5356e6876c297aa68641755b3bf3f88d29a58bf12e290462dae3a89de"
   },
   "metadata": {
-    "purpose": "swap_utzig_preservation_revitalization_group_covers",
+    "purpose": "utzig_group_covers_and_linktree_evaluation_feature",
     "source": "operator_request_2026_09_24"
   },
-  "patch_nodes": [],
+  "patch_nodes": [
+    {
+      "id": "campaign:home",
+      "patch": {
+        "data": {
+          "page": {
+            "blocks": [
+              {
+                "id": "home-hero",
+                "kind": "hero",
+                "title": "Encontre o cuidado certo para o seu carro.",
+                "node_ids": [
+                  "copy:home-hero"
+                ],
+                "asset_node_ids": [
+                  "asset:hero"
+                ]
+              },
+              {
+                "id": "home-featured-evaluation",
+                "kind": "service_catalog",
+                "eyebrow": "POR ONDE COMEÇAR",
+                "title": "Comece por uma avaliação",
+                "description": "Um primeiro olhar para entender o carro e escolher o cuidado adequado.",
+                "node_ids": [
+                  "product:evaluation"
+                ]
+              },
+              {
+                "id": "home-services",
+                "kind": "service_catalog",
+                "title": "Conheça nossos serviços",
+                "node_ids": [
+                  "group:preservation",
+                  "group:revitalization",
+                  "group:enhancement"
+                ],
+                "cta_label": "Conheça nossos serviços"
+              },
+              {
+                "id": "home-work",
+                "kind": "gallery",
+                "title": "Trabalhos reais",
+                "node_ids": [
+                  "gallery:utzig"
+                ],
+                "asset_node_ids": [
+                  "asset:work-polish",
+                  "asset:headlight-ready",
+                  "asset:engine-final"
+                ]
+              },
+              {
+                "id": "home-quick",
+                "kind": "final_cta",
+                "title": "Agendamento rápido",
+                "node_ids": [
+                  "copy:final-cta"
+                ],
+                "cta_label": "Agendamento rápido",
+                "contact_key": "quick_booking",
+                "description": "Um agente entende sua necessidade e encaminha para o Alemão",
+                "message_template": "Olá, gostaria de pedir uma avaliação."
+              },
+              {
+                "id": "home-human",
+                "kind": "final_cta",
+                "title": "Falar com o Alemão",
+                "node_ids": [
+                  "copy:contact-human"
+                ],
+                "cta_label": "Falar com o Alemão",
+                "contact_key": "human",
+                "description": "O retorno pode não ser imediato.",
+                "message_template": "Olá, gostaria de falar com o Alemão."
+              },
+              {
+                "id": "home-location",
+                "kind": "location",
+                "title": "Como chegar",
+                "node_ids": [
+                  "campaign:physical-store"
+                ],
+                "cta_label": "Como chegar"
+              }
+            ],
+            "actions": [
+              {
+                "id": "services",
+                "href": "/estetica-automotiva",
+                "kind": "internal",
+                "label": "Conheça nossos serviços",
+                "node_id": "campaign:automotive-detailing",
+                "position": 0,
+                "description": "Explore serviços, benefícios e valores iniciais"
+              },
+              {
+                "id": "quick-booking",
+                "kind": "whatsapp",
+                "label": "Agendamento rápido",
+                "position": 1,
+                "contact_key": "quick_booking",
+                "description": "Conte o que seu carro precisa e receba orientação",
+                "message_template": "Olá, gostaria de pedir uma avaliação."
+              },
+              {
+                "id": "human",
+                "kind": "whatsapp",
+                "label": "Fale com o Wilian",
+                "node_id": "copy:contact-human",
+                "position": 2,
+                "contact_key": "human",
+                "description": "Deixe sua mensagem para o Wilian. Ele responde pessoalmente assim que puder.",
+                "message_template": "Olá, Wilian! Vim pelo site da Utzig."
+              },
+              {
+                "id": "location",
+                "kind": "location",
+                "label": "Como chegar",
+                "node_id": "campaign:physical-store",
+                "position": 3,
+                "description": "Santa Maria do Herval"
+              },
+              {
+                "id": "instagram",
+                "href": "https://www.instagram.com/utziggarage",
+                "kind": "social",
+                "label": "@utziggarage",
+                "node_id": "brand:utzig-garage",
+                "position": 4
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "copy:contact-human",
+      "patch": {
+        "summary": "Deixe sua mensagem para o Wilian. Ele responde pessoalmente assim que puder."
+      }
+    }
+  ],
   "upsert_nodes": [],
   "upsert_edges": [
     {

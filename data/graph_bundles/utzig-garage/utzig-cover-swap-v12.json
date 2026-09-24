@@ -4350,7 +4350,7 @@
     },
     "internal_wa_validator_test_allowed": false,
     "publication_allowed": true,
-    "purpose": "swap_utzig_preservation_revitalization_group_covers",
+    "purpose": "utzig_group_covers_and_linktree_evaluation_feature",
     "source": "operator_request_2026_09_24"
   },
   "nodes": [
@@ -5595,10 +5595,10 @@
             },
             {
               "contact_key": "human",
-              "description": "O retorno pode não ser imediato",
+              "description": "Deixe sua mensagem para o Wilian. Ele responde pessoalmente assim que puder.",
               "id": "human",
               "kind": "whatsapp",
-              "label": "Falar com Wilian",
+              "label": "Fale com o Wilian",
               "message_template": "Olá, Wilian! Vim pelo site da Utzig.",
               "node_id": "copy:contact-human",
               "position": 2
@@ -5631,6 +5631,16 @@
                 "copy:home-hero"
               ],
               "title": "Encontre o cuidado certo para o seu carro."
+            },
+            {
+              "description": "Um primeiro olhar para entender o carro e escolher o cuidado adequado.",
+              "eyebrow": "POR ONDE COMEÇAR",
+              "id": "home-featured-evaluation",
+              "kind": "service_catalog",
+              "node_ids": [
+                "product:evaluation"
+              ],
+              "title": "Comece por uma avaliação"
             },
             {
               "cta_label": "Conheça nossos serviços",
@@ -5965,7 +5975,7 @@
       "projection_node_id": "242e9651-549d-58e9-a064-5a92da1cef4f",
       "slug": "contato-humano",
       "status": "approved",
-      "summary": "Canal humano da Utzig Garage; o retorno pode não ser imediato.",
+      "summary": "Deixe sua mensagem para o Wilian. Ele responde pessoalmente assim que puder.",
       "tags": [],
       "title": "Falar com o Alemão"
     },
