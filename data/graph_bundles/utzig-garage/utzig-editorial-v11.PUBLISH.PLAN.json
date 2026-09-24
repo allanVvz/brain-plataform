@@ -1,0 +1,79 @@
+{
+  "approval_scope": "publication_plan",
+  "branches_affected": [
+    "product:bodywork",
+    "product:commercial-polish",
+    "product:detailed-wash",
+    "product:engine-bay-wash",
+    "product:evaluation",
+    "product:glass-polish",
+    "product:headlight-restoration",
+    "product:interior-cleaning",
+    "product:painting",
+    "product:ppf",
+    "product:technical-polish",
+    "product:vitrification",
+    "product:windshield-crystallization"
+  ],
+  "breaking_contract_changes": [],
+  "chunks_reused": 171,
+  "chunks_to_embed": 0,
+  "compiler_version": "graph-compiler-v3.6.5",
+  "disposition": "awaiting_approval",
+  "draft_checksum": "sha256:11ae3c5a90eff365de8753ebfe323a1563bb1b5321b18609817f1e97eefbf886",
+  "edge_changes": {
+    "added": [
+      "edge:brand-audience-daily-care",
+      "edge:brand-audience-prepare-sale",
+      "edge:brand-editorial-enhancement",
+      "edge:brand-editorial-preservation",
+      "edge:brand-editorial-revitalization",
+      "edge:editorial-enhancement-glass-polish",
+      "edge:editorial-enhancement-painting",
+      "edge:editorial-enhancement-vehicle-wrap",
+      "edge:editorial-preservation-detailed-wash",
+      "edge:editorial-preservation-leather-conditioning",
+      "edge:editorial-preservation-vitrification",
+      "edge:editorial-revitalization-headlight-restoration",
+      "edge:editorial-revitalization-interior-cleaning",
+      "edge:editorial-revitalization-technical-polish",
+      "edge:intent-daily-care-editorial-enhancement",
+      "edge:intent-daily-care-editorial-preservation",
+      "edge:intent-prepare-sale-editorial-enhancement",
+      "edge:intent-prepare-sale-editorial-revitalization"
+    ],
+    "changed": [],
+    "removed": []
+  },
+  "edges_added": 18,
+  "edges_changed": 0,
+  "edges_removed": 0,
+  "estimated_embedding_cost": {
+    "amount": null,
+    "currency": "USD",
+    "reason": "provider_pricing_not_configured"
+  },
+  "next_version": 11,
+  "node_changes": {
+    "added": [
+      "audience:daily-care",
+      "audience:prepare-sale",
+      "campaign:editorial-enhancement",
+      "campaign:editorial-preservation",
+      "campaign:editorial-revitalization"
+    ],
+    "changed": [
+      "campaign:automotive-detailing",
+      "campaign:home",
+      "persona:utzig-garage"
+    ],
+    "removed": []
+  },
+  "nodes_added": 5,
+  "nodes_changed": 3,
+  "nodes_removed": 0,
+  "plan_version": "1.0",
+  "publication_allowed": true,
+  "runtime_checksum": "sha256:658229a5356e6876c297aa68641755b3bf3f88d29a58bf12e290462dae3a89de",
+  "validation_errors": []
+}
