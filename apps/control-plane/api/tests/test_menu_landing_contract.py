@@ -86,6 +86,32 @@ def test_landing_page_theme_and_typed_blocks_are_compiled(monkeypatch) -> None:
     assert instagram["description"] == "Perfil oficial"
 
 
+def test_editorial_campaign_products_are_projected_from_graph_edges(monkeypatch) -> None:
+    publication = _landing_publication(monkeypatch)
+    publication["document"]["nodes"].append({
+        "id": "campaign:editorial-wash", "node_type": "campaign", "status": "approved",
+        "title": "Preservacao", "summary": "Cuidados do dia a dia.",
+        "data": {"campaign_subtype": "editorial_service_collection", "public_site": {"position": 0}},
+    })
+    publication["document"].setdefault("edges", []).append({
+        "source": "product:wash", "target": "campaign:editorial-wash",
+        "relation_type": "part_of_campaign", "metadata": {"active": True, "position": 0},
+    })
+    page = next(node for node in publication["document"]["nodes"] if node["id"] == "campaign:showcase")
+    page["data"]["page"]["blocks"].insert(1, {
+        "id": "campaigns", "kind": "campaign_showcase",
+        "node_ids": ["campaign:editorial-wash"], "title": "Trilhas de cuidado",
+    })
+    site = menu_route._canonical_site_from_publication(publication, {})
+    landing = next(page for page in site["pages"] if page["kind"] == "landing_page")
+    campaign_block = next(block for block in landing["blocks"] if block["kind"] == "campaign_showcase")
+    assert campaign_block["campaigns"] == [{
+        "node_id": "campaign:editorial-wash", "title": "Preservacao",
+        "summary": "Cuidados do dia a dia.", "position": 0,
+        "product_node_ids": ["product:wash"],
+    }]
+
+
 @pytest.mark.parametrize("unsafe", ["<script>alert(1)</script>", "javascript:alert(1)", "url(evil.example)"])
 def test_landing_blocks_reject_html_css_and_javascript(monkeypatch, unsafe: str) -> None:
     publication = _landing_publication(monkeypatch)
@@ -201,5 +227,40 @@ def test_event_persistence_is_best_effort_and_contains_no_free_form_content(monk
 
 def test_events_auth_allowlist_is_method_exact() -> None:
     assert is_public_path("/api/menu/utzig-garage/events", "POST")
+    assert is_public_path("/api/menu/utzig-garage/intent", "POST")
+    assert not is_public_path("/api/menu/utzig-garage/intent", "GET")
     assert not is_public_path("/api/menu/utzig-garage/events", "GET")
     assert not is_public_path("/api/menu/utzig-garage/admin-assets", "POST")
+
+
+def test_intent_code_requires_graph_intent_and_durable_event(monkeypatch) -> None:
+    publication = _landing_publication(monkeypatch)
+    audience = next(node for node in publication["document"]["nodes"] if node["id"] == "audience:comfort")
+    audience["tags"] = ["vehicle_journey_intent"]
+    monkeypatch.setattr(menu_route, "_resolve_persona", lambda _slug: {"id": "persona-id"})
+    monkeypatch.setattr(menu_route, "_active_publication_context", lambda *_args: publication)
+    captured = {}
+    monkeypatch.setattr(menu_route.supabase_client, "insert_event", lambda row: captured.update(row) or {"id": "event-1"})
+    request = Request({"type": "http", "method": "POST", "path": "/", "headers": [], "client": ("127.0.0.1", 1)})
+    body = {
+        "session_id": "anonymous_session_1234", "page_route": "/estetica-automotiva",
+        "publication_id": "publication-tock", "graph_checksum": "sha256:tock",
+        "audience_node_id": "audience:comfort",
+    }
+    result = menu_route.post_api_menu_intent("tock-fatal", request, body)
+    assert result["code"].startswith("BI-")
+    assert result["code"] not in str(captured)
+    assert captured["persona_id"] == "persona-id"
+    assert captured["payload"]["audience_node_id"] == "audience:comfort"
+    assert len(captured["payload"]["code_hash"]) == 64
+
+    audience["tags"] = []
+    with pytest.raises(HTTPException) as exc:
+        menu_route.post_api_menu_intent("tock-fatal", request, body)
+    assert exc.value.detail["code"] == "public_site_intent_not_published"
+
+    audience["tags"] = ["vehicle_journey_intent"]
+    monkeypatch.setattr(menu_route.supabase_client, "insert_event", lambda _row: None)
+    with pytest.raises(HTTPException) as exc:
+        menu_route.post_api_menu_intent("tock-fatal", request, body)
+    assert exc.value.status_code == 503

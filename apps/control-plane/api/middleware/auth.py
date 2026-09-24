@@ -121,7 +121,7 @@ def is_public_path(path: str, method: str = "GET") -> bool:
         parts = remainder.split("/")
         verb = str(method or "GET").upper()
         return (verb == "GET" and bool(remainder) and "/" not in remainder
-                or verb == "POST" and len(parts) == 2 and bool(parts[0]) and parts[1] == "events"
+                or verb == "POST" and len(parts) == 2 and bool(parts[0]) and parts[1] in {"events", "intent"}
                 or verb == "GET" and len(parts) == 2 and bool(parts[0]) and parts[1] == "blocks"
                 or verb == "GET" and len(parts) == 3 and bool(parts[0]) and parts[1] == "media" and bool(parts[2]))
     return False

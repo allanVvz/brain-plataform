@@ -4,9 +4,10 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import time
 from collections import defaultdict, deque
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 from urllib.parse import quote, urlsplit
 
@@ -42,6 +43,7 @@ _SITE_BLOCK_TYPES = frozenset({
     "hero", "audience_links", "service_catalog", "process", "gallery",
     "specialist", "location", "faq", "final_cta",
 })
+_SITE_OPTIONAL_BLOCK_TYPES = frozenset({"campaign_showcase"})
 _SITE_BLOCK_NODE_TYPES = {
     "hero": frozenset({"campaign", "copy", "entity"}),
     "audience_links": frozenset({"audience"}),
@@ -52,6 +54,7 @@ _SITE_BLOCK_NODE_TYPES = {
     "location": frozenset({"campaign"}),
     "faq": frozenset({"faq"}),
     "final_cta": frozenset({"copy", "entity"}),
+    "campaign_showcase": frozenset({"campaign"}),
 }
 _SITE_BLOCK_KEYS = frozenset({
     "id", "kind", "title", "eyebrow", "description", "cta_label",
@@ -70,6 +73,7 @@ _UTM_KEYS = frozenset({"source", "medium", "campaign", "term", "content"})
 _EVENT_WINDOWS: dict[str, deque[float]] = defaultdict(deque)
 _EVENT_WINDOW_SECONDS = 60.0
 _EVENT_LIMIT = 60
+_INTENT_CORRELATION_TTL = timedelta(minutes=30)
 
 
 def _canonical_json_checksum(value: dict) -> str:
@@ -577,6 +581,7 @@ def _canonical_page_blocks(
     *,
     page_index: int,
     nodes: dict[str, dict],
+    edges: list[dict],
     persona_id: str,
     gallery_by_node: dict[str, dict],
     granted_asset_ids: set[str],
@@ -604,7 +609,7 @@ def _canonical_page_blocks(
             errors.append(f"{path}.id:duplicate")
         seen_ids.add(block_id)
         kind = str(raw.get("kind") or "")
-        if kind not in _SITE_BLOCK_TYPES:
+        if kind not in _SITE_BLOCK_TYPES | _SITE_OPTIONAL_BLOCK_TYPES:
             errors.append(f"{path}.kind:invalid")
         normalized: dict[str, Any] = {"id": block_id, "kind": kind}
         for key in ("title", "eyebrow", "description", "cta_label", "contact_key", "message_template"):
@@ -680,12 +685,46 @@ def _canonical_page_blocks(
             )
             if asset:
                 assets.append(asset)
-        if kind in _SITE_BLOCK_TYPES and not node_ids and not asset_node_ids:
+        if kind in _SITE_BLOCK_TYPES | _SITE_OPTIONAL_BLOCK_TYPES and not node_ids and not asset_node_ids:
             errors.append(f"{path}:graph_reference_required")
+        campaigns = []
+        if kind == "campaign_showcase":
+            for campaign_id in node_ids:
+                campaign = nodes.get(campaign_id) or {}
+                campaign_data = campaign.get("data") or {}
+                if campaign_data.get("campaign_subtype") != "editorial_service_collection":
+                    errors.append(f"{path}.node_ids:{campaign_id}:editorial_campaign_required")
+                    continue
+                product_edges = sorted(
+                    (edge for edge in edges
+                     if edge.get("target") == campaign_id
+                     and edge.get("relation_type") == "part_of_campaign"
+                     and (edge.get("metadata") or {}).get("active") is not False),
+                    key=lambda edge: int((edge.get("metadata") or {}).get("position") or 0),
+                )
+                products = []
+                for edge in product_edges:
+                    product_id = str(edge.get("source") or "")
+                    product = nodes.get(product_id) or {}
+                    if product.get("node_type") != "product" or not _node_is_public(product, persona_id):
+                        errors.append(f"{path}.campaigns:{campaign_id}:product_invalid:{product_id}")
+                    elif product_id not in products:
+                        products.append(product_id)
+                if not products:
+                    errors.append(f"{path}.campaigns:{campaign_id}:products_required")
+                public_data = campaign_data.get("public_site") or {}
+                campaigns.append({
+                    "node_id": campaign_id,
+                    "title": _safe_authored_text(campaign.get("title"), f"{path}.campaigns.title", errors, required=True),
+                    "summary": _safe_authored_text(campaign.get("summary"), f"{path}.campaigns.summary", errors),
+                    "position": int(public_data.get("position") or 0),
+                    "product_node_ids": products,
+                })
         normalized["node_ids"] = node_ids
         normalized["asset_node_ids"] = asset_node_ids
         normalized["assets"] = assets
         normalized["items"] = items
+        normalized["campaigns"] = sorted(campaigns, key=lambda item: item["position"])
         result.append(normalized)
     return result
 
@@ -1324,7 +1363,7 @@ def _canonical_site_from_publication(publication: dict, cache: dict) -> dict:
                     }
                 sections = normalized_sections
         blocks = _canonical_page_blocks(
-            spec.get("blocks"), page_index=index, nodes=nodes, persona_id=persona_id,
+            spec.get("blocks"), page_index=index, nodes=nodes, edges=document.get("edges") or [], persona_id=persona_id,
             gallery_by_node=gallery_by_node, granted_asset_ids=granted_asset_ids,
             errors=errors,
         )
@@ -1441,8 +1480,17 @@ def _canonical_site_from_publication(publication: dict, cache: dict) -> dict:
         audiences.append({
             "node_id": str(node["id"]),
             "label": _required_text(spec, "label", f"site.audiences[{index}]", errors),
+            "summary": _safe_authored_text(node.get("summary"), f"site.audiences[{index}].summary", errors),
             "message_template": _required_natural_message(spec, "message_template", f"site.audiences[{index}]", errors),
             "position": _read_int(spec.get("position"), 0),
+            "related_campaign_node_ids": [
+                str(edge.get("target")) for edge in document.get("edges") or []
+                if edge.get("source") == node["id"]
+                and edge.get("relation_type") == "same_topic_as"
+                and (edge.get("metadata") or {}).get("active") is not False
+                and (nodes.get(str(edge.get("target"))) or {}).get("node_type") == "campaign"
+                and _node_is_public(nodes[str(edge.get("target"))], persona_id)
+            ],
         })
     if not audiences:
         errors.append("site.audiences:min_1")
@@ -2437,6 +2485,59 @@ def post_api_menu_event(
         "source": "public_site",
     })
     return {"ok": True, "accepted": True, "persisted": stored is not None}
+
+
+@router.post("/api/menu/{persona_slug}/intent")
+def post_api_menu_intent(
+    persona_slug: str,
+    request: Request,
+    body: Any = Body(...),
+):
+    """Issue a short-lived, persona-scoped origin reference for a published intent."""
+    if not isinstance(body, dict) or set(body) != {
+        "session_id", "page_route", "publication_id", "graph_checksum", "audience_node_id",
+    }:
+        raise HTTPException(status_code=422, detail={"code": "public_site_intent_fields_invalid"})
+    audience_id = body.get("audience_node_id")
+    if not isinstance(audience_id, str):
+        raise HTTPException(status_code=422, detail={"code": "public_site_intent_audience_invalid"})
+    persona, event = _validated_public_site_event(persona_slug, {
+        "event_type": "audience_click", "session_id": body["session_id"],
+        "page_route": body["page_route"], "publication_id": body["publication_id"],
+        "graph_checksum": body["graph_checksum"], "node_ids": [audience_id],
+    }, request)
+    publication = _active_publication_context(str(persona["id"]), persona_slug) or {}
+    if (publication.get("publication_id") != event["payload"]["publication_id"]
+            or publication.get("checksum") != event["payload"]["graph_checksum"]):
+        raise HTTPException(status_code=409, detail={"code": "public_site_intent_publication_changed"})
+    document = publication.get("document") or {}
+    nodes = document.get("node_by_id") or {node["id"]: node for node in document.get("nodes") or []}
+    persona_node = next((node for node in nodes.values() if node.get("node_type") == "persona"), {})
+    site_audiences = {
+        str(ref if isinstance(ref, str) else (ref or {}).get("node_id") or "")
+        for ref in ((persona_node.get("data") or {}).get("public_site") or {}).get("audiences") or []
+    }
+    audience_node = nodes.get(audience_id) or {}
+    if (audience_id not in site_audiences
+            or "vehicle_journey_intent" not in (audience_node.get("tags") or [])):
+        raise HTTPException(status_code=422, detail={"code": "public_site_intent_not_published"})
+    code = "BI-" + secrets.token_hex(8).upper()
+    expires_at = datetime.now(timezone.utc) + _INTENT_CORRELATION_TTL
+    stored = supabase_client.insert_event({
+        "event_type": "public_site.intent_selected",
+        "entity_type": "public_site_session",
+        "entity_id": event["payload"]["session_id"],
+        "persona_id": persona["id"],
+        "payload": {
+            **event["payload"], "audience_node_id": audience_id,
+            "code_hash": hashlib.sha256(code.encode("ascii")).hexdigest(),
+            "expires_at": expires_at.isoformat(),
+        },
+        "level": "info", "source": "public_site",
+    })
+    if stored is None:
+        raise HTTPException(status_code=503, detail={"code": "public_site_intent_persistence_failed"})
+    return {"code": code, "expires_at": expires_at.isoformat()}
 
 
 @router.get("/menu/{persona_slug}")
