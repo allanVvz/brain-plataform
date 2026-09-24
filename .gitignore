@@ -98,6 +98,7 @@ dashboard/modes.json
 # Local agent/runtime state
 .codex/
 .codex-run/
+.references/
 .agents/*
 !.agents/skills/
 .agents/skills/*
