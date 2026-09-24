@@ -280,6 +280,30 @@ def test_sales_driver_answers_unresolved_question_without_requiring_branch_switc
     }
 
 
+def test_sales_driver_answers_optional_name_before_final_confirmation():
+    driver = {
+        "answers": {
+            "nome_cliente": {"text": "Pode me chamar de Beatriz", "value": "Beatriz"},
+        },
+        "confirmation": {"text": "Sim"},
+    }
+    state = {}
+
+    step = wa_validator_service._next_semantic_driver_step(
+        driver=driver,
+        state=state,
+        asked_field="nome_cliente",
+        answered_fields=set(),
+        active_anchor="branch:retail",
+        expected_active_branches=["branch:retail"],
+        qualification_complete=True,
+    )
+
+    assert step["kind"] == "field_answer"
+    assert step["intended_facts"] == {"nome_cliente": "Beatriz"}
+    assert state.get("confirmation_sent") is None
+
+
 def test_semantic_turn_audit_counts_name_question_ids_not_only_similar_wording():
     inputs = _audit_inputs(conversation_mode="n8n_agents")
     inputs["contract"]["fields"][0]["key"] = "nome_cliente"

@@ -33,6 +33,7 @@ NAME_MAX_TOKENS = 6
 _NON_NAME_PHRASES = {
     "oi", "ola", "bom dia", "boa tarde", "boa noite", "tudo bem",
     "e ai", "e ae", "eai", "eae",
+    "sim", "nao", "yes", "no", "ok", "okay",
 }
 
 
@@ -489,7 +490,11 @@ def _canonical_field_value(
         elif semantic_type == "human_name":
             folded = _fold(value)
             tokens = folded.split()
-            if not (1 <= len(tokens) <= 6) or any(any(char.isdigit() for char in token) for token in tokens):
+            if (
+                folded in _NON_NAME_PHRASES
+                or not (1 <= len(tokens) <= 6)
+                or any(any(char.isdigit() for char in token) for token in tokens)
+            ):
                 return value, "value is not a plausible human name"
         schema_error = _schema_error(field.get("value_schema") or {}, value)
         return value.strip(), schema_error

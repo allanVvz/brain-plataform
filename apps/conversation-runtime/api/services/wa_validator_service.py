@@ -2911,6 +2911,24 @@ def _next_semantic_driver_step(
     sends a pure interruption, verifies one contextual resumption, then
     ignores that field again to require an incomplete terminal handoff.
     """
+    # Required fields may already be complete while the agent has just asked
+    # an optional field (notably the customer's name). Answer that question
+    # before sending a generic confirmation such as "Sim".
+    pending_answer = (driver.get("answers") or {}).get(asked_field)
+    if (
+        qualification_complete
+        and asked_field
+        and asked_field not in answered_fields
+        and isinstance(pending_answer, dict)
+        and str(pending_answer.get("text") or "").strip()
+    ):
+        return {
+            "text": str(pending_answer["text"]),
+            "kind": "field_answer",
+            "intended_facts": {asked_field: pending_answer.get("value")},
+            "expected_branch_node_id": active_anchor,
+            "expected_active_branch_node_ids": list(expected_active_branches),
+        }
     if qualification_complete and not state.get("confirmation_sent"):
         confirmation = driver.get("confirmation") or {}
         text = str(confirmation.get("text") or "").strip()
