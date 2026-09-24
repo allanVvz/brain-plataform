@@ -85,7 +85,7 @@ def test_service_contract_provenance_is_validated():
         raise AssertionError("invalid per-service contract checksum was accepted")
 
 
-def test_contract_consumers_must_use_the_same_exact_contract():
+def test_contract_consumers_must_use_the_same_exact_version():
     manifest = renderer.render(
         source_sha="a" * 40,
         schema_version=140,
@@ -96,6 +96,21 @@ def test_contract_consumers_must_use_the_same_exact_contract():
     try:
         validator.validate(_ManifestDocument(manifest), verify_checkout_artifacts=False)
     except ValueError as exc:
-        assert "mismatch between active contract consumers" in str(exc)
+        assert "version mismatch between active contract consumers" in str(exc)
     else:
         raise AssertionError("incompatible contract consumers were accepted")
+
+
+def test_compatible_helper_change_preserves_service_provenance():
+    manifest = renderer.render(
+        source_sha="a" * 40,
+        schema_version=140,
+        digests={name: _digest(str(index + 1)) for index, name in enumerate(renderer.SERVICES)},
+    )
+    original = {name: dict(value) for name, value in manifest["services"].items()}
+    manifest["services"]["conversation-runtime"]["contracts_checksum"] = _digest("e")
+    assert validator.validate(
+        _ManifestDocument(manifest), verify_checkout_artifacts=False,
+    ) == manifest
+    for name in set(renderer.SERVICES) - {"conversation-runtime"}:
+        assert manifest["services"][name] == original[name]

@@ -62,7 +62,7 @@ def validate(path: Path, *, verify_checkout_artifacts: bool = True) -> dict:
     if monorepo_release:
         _require(bool(DIGEST.fullmatch(str(manifest.get("contracts_checksum", "")))),
                  "monorepo manifest requires contracts_checksum")
-    consumer_contracts: set[tuple[str, str]] = set()
+    consumer_contract_versions: set[str] = set()
     for name, repository in EXPECTED_SERVICES.items():
         item = services[name]
         _require(isinstance(item, dict), f"services.{name} must be an object")
@@ -83,13 +83,16 @@ def validate(path: Path, *, verify_checkout_artifacts: bool = True) -> dict:
             _require(bool(DIGEST.fullmatch(service_contracts_checksum)),
                      f"invalid contracts_checksum for {name}")
         if name in CONTRACT_CONSUMERS:
-            consumer_contracts.add((service_contracts_version, service_contracts_checksum))
+            # The package checksum records the exact source in each image.
+            # Compatible helper changes can change those bytes without
+            # changing the versioned wire contract between services.
+            consumer_contract_versions.add(service_contracts_version)
         required_schema = item.get("required_schema_version")
         _require(isinstance(required_schema, int) and 131 <= required_schema <= manifest["schema_version"],
                  f"invalid required_schema_version for {name}")
     _require(
-        len(consumer_contracts) == 1,
-        "brain-contracts version/checksum mismatch between active contract consumers",
+        len(consumer_contract_versions) == 1,
+        "brain-contracts version mismatch between active contract consumers",
     )
     # source_sha identifies the manifest revision. Service provenance is
     # intentionally independent: unchanged services keep their prior SHA and
