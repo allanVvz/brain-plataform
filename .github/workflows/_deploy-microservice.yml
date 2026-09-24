@@ -144,3 +144,21 @@ jobs:
                 exit 1
               fi
             fi
+            if [[ "${{ inputs.action }}" == "deploy" ]]; then
+              canonical=ops/microservices/release-manifest.json
+              previous_manifest="$(mktemp)"
+              next_manifest="${canonical}.next-${{ github.run_id }}"
+              cp "$canonical" "$previous_manifest"
+              cp "${{ inputs.manifest_path }}" "$next_manifest"
+              mv "$next_manifest" "$canonical"
+              if ! status_output="$(bash ops/vps/rollout-microservices.sh status)" \
+                || [[ "$status_output" == *BEHIND* ]]; then
+                cp "$previous_manifest" "$canonical"
+                echo "manifest promotion verification failed; rolling back service" >&2
+                bash ops/vps/deploy-microservice-blue-green.sh \
+                  "${{ inputs.manifest_path }}" "${{ inputs.service }}" --rollback
+                exit 1
+              fi
+              rm "$previous_manifest"
+              printf '%s\n' "$status_output"
+            fi
