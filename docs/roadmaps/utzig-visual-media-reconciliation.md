@@ -1,5 +1,9 @@
 # Reconciliação visual — Utzig Garage
 
+## Pedido de 2026-09-24: inversão das capas
+
+Trocar os destinos das edges `edge:group-cover:preservation` e `edge:group-cover:revitalization`: Preservação deve exibir `asset:headlight-before` e Revitalização deve exibir `asset:process`. Preservar `source`, `slot_key`, posição e natureza representativa de cada capa. Preparar a mudança sobre o export autenticado da publicação ativa; os bundles editoriais v11 gerados da v10 não são baseline para uma v12. Validar o payload público e os dois cards depois da ativação CAS. Não alterar evidência direta dos produtos.
+
 Status: reconciliação visual e enriquecimento editorial ativos na publicação v9 (`2f51e762-4d5d-452c-808d-1c9149fd466d`), checksum `sha256:5101c7565b789111e36fa5d80ad26b64d13efd57fe87536163041e378582c83b`. O frontend promovido em 2026-09-23 consome essa publicação sem alterar binding, WhatsApp ou envio de mídia pelo agente.
 
 ## Enriquecimento editorial aprovado

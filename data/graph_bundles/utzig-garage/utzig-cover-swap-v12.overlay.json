@@ -1,0 +1,64 @@
+{
+  "overlay_version": "1.0",
+  "base_publication": {
+    "publication_id": "2a2fa0a6-1dc0-4b2e-b903-343323720e63",
+    "version": 11,
+    "checksum": "sha256:658229a5356e6876c297aa68641755b3bf3f88d29a58bf12e290462dae3a89de"
+  },
+  "metadata": {
+    "purpose": "swap_utzig_preservation_revitalization_group_covers",
+    "source": "operator_request_2026_09_24"
+  },
+  "patch_nodes": [],
+  "upsert_nodes": [],
+  "upsert_edges": [
+    {
+      "id": "edge:group-cover:preservation",
+      "source": "group:preservation",
+      "target": "asset:headlight-before",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "source": "utzig_visual_reconciliation_2026_09_23",
+        "page_binding": {
+          "position": 0,
+          "slot_key": "product_group_cover:preservation"
+        },
+        "media_assignment": {
+          "active": true,
+          "purpose": "public_catalog",
+          "position": 0,
+          "fallback_allowed": true
+        },
+        "graph_json_edge_id": "edge:group-cover:preservation"
+      },
+      "relation_type": "category_has_asset"
+    },
+    {
+      "id": "edge:group-cover:revitalization",
+      "source": "group:revitalization",
+      "target": "asset:process",
+      "weight": 1.0,
+      "primary": false,
+      "metadata": {
+        "active": true,
+        "source": "utzig_visual_reconciliation_2026_09_23",
+        "page_binding": {
+          "position": 2,
+          "slot_key": "product_group_cover:revitalization"
+        },
+        "media_assignment": {
+          "active": true,
+          "purpose": "public_catalog",
+          "position": 2,
+          "fallback_allowed": true
+        },
+        "graph_json_edge_id": "edge:group-cover:revitalization"
+      },
+      "relation_type": "category_has_asset"
+    }
+  ],
+  "remove_edge_ids": [],
+  "remove_node_ids": []
+}

@@ -486,6 +486,12 @@ Próxima evolução de memória/atribuição:
   como fatos publicados.
 
 
+## Estado conversacional e Utzig (2026-09-24)
+
+- A ordem das perguntas da qualificação agentic não é um roteiro hardcoded: `appointment_policy.field_questions` e dependências dos campos pertencem à publicação ativa do grafo; `missing_fields` mede completude. O modelo escolhe um campo ainda perguntável. Apenas o motor `deterministic`, se explicitamente selecionado, usa `field_questions[missing_fields[0]]`. O WA Validator possui respostas de teste por campo e confirmação sintética; isso não é a ordem produtiva.
+- O runtime e Validator publicados na release `a57bc8e` passaram no gate técnico. O E2E interno de 24/09 encontrou qualidade pendente: Utzig repetiu o nome e não concluiu o handoff; Tock aceitou `Sim` como nome e voltou a perguntar. O commit local `cabfded` corrige a aceitação de confirmações como nomes no Validator, mas precisa de release e novo canário antes de ser considerado produtivo.
+- Para a Utzig, a instrução atual é trocar somente as capas representativas: Preservação recebe `asset:headlight-before` e Revitalização recebe `asset:process`. As imagens continuam representativas de grupo, sem virar prova direta de serviço. Qualquer publicação nova deve partir de export autenticado da publicação ativa e passar por plan, stage e ativação CAS; os arquivos editoriais v11 baseados na v10 são históricos se a v11 já estiver ativa.
+
 ## Histórico removido
 
 A seção antiga sobre o WA Validator de 2026-08-12 foi removida porque descrevia

@@ -1,0 +1,45 @@
+{
+  "approval_scope": "publication_plan",
+  "branches_affected": [
+    "product:commercial-polish",
+    "product:evaluation",
+    "product:glass-polish",
+    "product:headlight-restoration",
+    "product:technical-polish"
+  ],
+  "breaking_contract_changes": [],
+  "chunks_reused": 171,
+  "chunks_to_embed": 0,
+  "compiler_version": "graph-compiler-v3.6.5",
+  "disposition": "awaiting_approval",
+  "draft_checksum": "sha256:25050bb87bd7046c4b6a8373d09a2bb817bf05fe36cbaddc6ec54a431edd6cb6",
+  "edge_changes": {
+    "added": [],
+    "changed": [
+      "edge:group-cover:preservation",
+      "edge:group-cover:revitalization"
+    ],
+    "removed": []
+  },
+  "edges_added": 0,
+  "edges_changed": 2,
+  "edges_removed": 0,
+  "estimated_embedding_cost": {
+    "amount": null,
+    "currency": "USD",
+    "reason": "provider_pricing_not_configured"
+  },
+  "next_version": 12,
+  "node_changes": {
+    "added": [],
+    "changed": [],
+    "removed": []
+  },
+  "nodes_added": 0,
+  "nodes_changed": 0,
+  "nodes_removed": 0,
+  "plan_version": "1.0",
+  "publication_allowed": true,
+  "runtime_checksum": "sha256:cfe626eb4a0651588943b3d688102d361e689bd7c9cbfaff3aa82e69670a559a",
+  "validation_errors": []
+}

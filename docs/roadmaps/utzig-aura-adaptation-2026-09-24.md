@@ -1,5 +1,9 @@
 # Utzig Garage — adaptação editorial da referência Aura
 
+## Atualização de 2026-09-24
+
+O operador pediu a inversão das capas de Preservação e Revitalização e a retomada da edição dos campos do grafo. A inversão será uma publicação graph-only baseada na publicação ativa, com plan, stage e CAS. Os campos e perguntas de agendamento permanecem no node Persona e nos produtos do grafo; no modo agentic sua lista define cobertura e completude, sem impor ordem fixa. A publicação editorial v11 local tem baseline v10 e não deve ser reutilizada como fonte ativa sem novo export. Pendem o canário conversacional de qualidade, a promoção do contrato `media.primary` no control plane e fontes reais para depoimentos. A release de runtime do commit local `cabfded` ainda depende de candidate isolado e canário interno.
+
 Estado: GraphBundle v10 ativo e frontend público promovido em 2026-09-24. Fonte observada em 2026-09-24: <https://auradetail.com.br/>. O repositório MIT `JCodesMore/ai-website-cloner-template` foi instalado em `.references/ai-website-cloner-template` e usado como roteiro de inspeção visual, sem copiar seus componentes para o produto.
 
 ## Decisões do operador
