@@ -1,6 +1,15 @@
 # Reconciliação visual — Utzig Garage
 
-Status: reconciliação principal ativa na publicação v6. A capa representativa exclusiva de Reparo e pintura segue como incremento v7, aguardando stage/CAS. Não altera runtime, transport, binding, WhatsApp ou envio de mídia pelo agente.
+Status: reconciliação visual ativa na publicação v8. O incremento editorial seguinte parte exatamente dessa fonte comprovada e aguarda stage/CAS; não altera runtime, transport, binding, WhatsApp ou envio de mídia pelo agente.
+
+## Enriquecimento editorial aprovado
+
+- A primeira dobra do linktree e da landing usa “Estética Automotiva Premium” e “Mais de 20 serviços que valorizam e deixam o seu carro na melhor versão”, com a linha de apoio “Tudo o que seu carro precisa, em um só lugar.” A afirmação foi aprovada diretamente a partir do feedback comercial de 2026-09-23.
+- O catálogo continua destacando os 13 serviços graph-backed em cinco jornadas; o contador do frontend é calculado pelo payload e deixa explícito que são serviços em destaque, não a totalidade da oferta.
+- Os 13 produtos recebem descrições editoriais próprias. A Aura Detail é referência autorizada de conteúdo comercial, mas identidade, telefone, endereço, avaliações e depoimentos da concorrente não são fatos da Utzig.
+- Cinco preços iniciais aprovados são nós `Offer`: lavagem detalhada R$ 259,90; higienização interna R$ 600; polimento técnico R$ 700; PPF R$ 499,90; vitrificação R$ 999,90. A interface sempre apresenta “A partir de”, e avaliação continua definindo o valor final.
+- O especialista passa a ser identificado como “Wilian”, com o subtítulo “O Alemão da Utzig”. O apelido permanece nos CTAs compactos já reconhecidos pelo público.
+- O resumo de produto exibe texto e preço, sem ícone de fotografia. Mídia direta continua visível somente ao expandir o serviço, e capas representativas preservam sua identificação de fallback.
 
 ## Regra pública
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -28,6 +29,10 @@ JOURNEY_BUNDLE_PATH = (
 )
 PRIVATE_BANDS = {"faixa_1", "faixa_2", "faixa_3"}
 PRIVATE_SOURCE = "estimated_from_service_name"
+FORBIDDEN_COMPETITOR_CLAIMS = {
+    "redução térmica 70%",
+    "proteção uv 99%",
+}
 EXPECTED_ASSET_IDS = {
     "1Gjn0p1Ku0W2XKUnALXhIvF2lW5rG9Euc",
     "1UKQvGeqcaJUGwmSMYHD7gujJ8z9eln9F",
@@ -134,6 +139,75 @@ def test_utzig_candidate_compiles_as_publishable_approved_plan() -> None:
         "product:engine-bay-wash", "product:interior-cleaning", "product:technical-polish",
         "product:glass-polish", "product:headlight-restoration", "product:windshield-crystallization",
     }
+
+
+def test_public_product_descriptions_and_specialist_identity_are_approved() -> None:
+    bundle = _bundle()
+    nodes = _nodes(bundle)
+    products = [node for node in bundle["nodes"] if node["node_type"] == "product"]
+
+    assert len(products) == 13
+    for product in products:
+        assert len(product["summary"]) >= 100
+        assert not product["summary"].startswith("Serviço de ")
+        provenance = product["data"]["public_site"]["description_source"]
+        assert provenance == {
+            "source": "operator_approved_aura_public_reference_2026_09_23",
+            "reference_url": "https://auradetail.com.br/",
+            "policy": "operator_approved_commercial_adaptation",
+            "validation_status": "approved",
+        }
+        normalized = product["summary"].casefold()
+        assert re.search(r"\baura\b", normalized) is None
+        assert all(claim not in normalized for claim in FORBIDDEN_COMPETITOR_CLAIMS)
+
+    entity = nodes["entity:alemao"]
+    assert entity["title"] == "Wilian"
+    assert entity["data"]["public_subtitle"] == "O Alemão da Utzig"
+    page = nodes["campaign:automotive-detailing"]["data"]["page"]
+    specialist = next(block for block in page["blocks"] if block["id"] == "lp-specialist")
+    assert specialist["title"] == "Wilian"
+    assert specialist["description"] == "O Alemão da Utzig"
+    expected_hero = {
+        "eyebrow": "Estética Automotiva Premium",
+        "title": "Mais de 20 serviços que valorizam e deixam o seu carro na melhor versão",
+        "description": "Tudo o que seu carro precisa, em um só lugar.",
+    }
+    home = nodes["campaign:home"]["data"]["page"]
+    assert {key: home[key] for key in expected_hero} == expected_hero
+    landing_hero = next(block for block in page["blocks"] if block["id"] == "lp-hero")
+    assert {key: landing_hero[key] for key in expected_hero} == expected_hero
+
+
+def test_operator_approved_starting_prices_are_graph_owned() -> None:
+    bundle = _bundle()
+    nodes = _nodes(bundle)
+    expected = {
+        "offer:detailed-wash:starting-price": 259.90,
+        "offer:interior-cleaning:starting-price": 600.00,
+        "offer:technical-polish:starting-price": 700.00,
+        "offer:ppf:starting-price": 499.90,
+        "offer:vitrification:starting-price": 999.90,
+    }
+
+    assert {
+        node_id: nodes[node_id]["data"]["offer"]["amount"]
+        for node_id in expected
+    } == expected
+    for offer_id in expected:
+        offer = nodes[offer_id]
+        assert offer["status"] == "approved"
+        assert offer["data"]["source"] == "operator_approved_aura_public_reference_2026_09_23"
+        assert offer["data"]["price_qualifier"] == "a_partir_de"
+
+    relations = {
+        (edge["source"], edge["target"], edge["relation_type"])
+        for edge in bundle["edges"]
+    }
+    for offer_id in expected:
+        product_id = f"product:{offer_id.split(':')[1]}"
+        assert (product_id, offer_id, "contains") in relations
+        assert (offer_id, product_id, "about_product") in relations
 
 
 def test_appointment_fields_are_graph_owned_and_use_agentic_execution() -> None:
@@ -269,8 +343,8 @@ def test_assets_are_strictly_allowlisted_and_have_approved_public_derivatives() 
         for asset in assets
     )
 
-    authored = BUNDLE_PATH.read_text(encoding="utf-8").casefold()
-    assert "r$" not in authored
+    authored_assets = json.dumps(assets, ensure_ascii=False).casefold()
+    assert "r$" not in authored_assets
 
 
 def test_public_site_root_is_canonical_and_graph_referenced() -> None:

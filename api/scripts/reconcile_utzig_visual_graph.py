@@ -14,6 +14,73 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 PATH = ROOT / "data/graph_bundles/utzig-garage/site-and-appointment-v1.DRAFT.json"
 
+PUBLIC_SERVICE_DESCRIPTIONS = {
+    "product:evaluation": (
+        "O atendimento começa pelo WhatsApp e segue com uma avaliação do veículo para entender a necessidade, "
+        "indicar o cuidado adequado e organizar a execução. Diagnóstico, valor e próximos passos são confirmados "
+        "por Wilian, com orientações para conservar o resultado."
+    ),
+    "product:detailed-wash": (
+        "Lavagem premium com técnica de dois baldes, produtos próprios para detalhamento, trabalho com pincel e "
+        "atenção a pneus e rodas. O serviço leva em média de 1 a 2 horas e parte de R$ 259,90."
+    ),
+    "product:engine-bay-wash": (
+        "Limpeza profunda e segura do compartimento do motor, realizada conforme a condição observada e com "
+        "atenção aos componentes. Possíveis sinais de vazamento precisam ser informados antes da avaliação."
+    ),
+    "product:interior-cleaning": (
+        "Limpeza profunda e sanitização do interior com produtos e equipamentos específicos. Inclui tratamento "
+        "compatível com couro ou tecido, cuidado com odores e proteção antimicrobiana; leva em média 6 horas e "
+        "parte de R$ 600."
+    ),
+    "product:commercial-polish": (
+        "Polimento voltado à recuperação visual e ao ganho de brilho, indicado conforme o objetivo e a condição "
+        "da pintura. A equipe orienta se o comercial ou o técnico é mais adequado."
+    ),
+    "product:glass-polish": (
+        "Tratamento para melhorar o acabamento de vidros com marcas ou manchas compatíveis com polimento. O "
+        "resultado possível e a combinação com cristalização dependem da avaliação da superfície."
+    ),
+    "product:headlight-restoration": (
+        "Restauração do acabamento dos faróis para recuperar transparência e apresentação visual dentro do que a "
+        "peça permite. Resultado e proteção aplicável são confirmados após avaliação."
+    ),
+    "product:technical-polish": (
+        "Correção profissional da pintura para tratar microrriscos, hologramas e oxidação compatíveis com o "
+        "processo, recuperar o brilho e preparar a superfície para proteção. Leva em média 1 dia e parte de R$ 700."
+    ),
+    "product:bodywork": (
+        "Correção de danos de carroceria e recuperação do alinhamento visual conforme a extensão e a localização "
+        "do reparo. Quando indicado, pequenos amassados podem ser tratados sem danificar a pintura original; fotos "
+        "iniciam a análise e a equipe confirma o diagnóstico."
+    ),
+    "product:painting": (
+        "Reparo, pintura e personalização para recuperar o acabamento ou adaptar a apresentação do veículo. Cor, "
+        "modelo, ano e condição da área afetada orientam a avaliação de resultado, prazo e orçamento."
+    ),
+    "product:ppf": (
+        "Película transparente e autorreparável para proteger áreas selecionadas contra riscos, pedras, raios UV "
+        "e intempéries, preservando a pintura original. A duração é personalizada, a garantia é de 10 anos e a "
+        "aplicação parte de R$ 499,90."
+    ),
+    "product:vitrification": (
+        "Revestimento cerâmico para brilho intenso, proteção química e limpeza mais fácil. A durabilidade informada "
+        "é de até 3 anos, a execução leva de 1 a 3 dias e o serviço parte de R$ 999,90."
+    ),
+    "product:windshield-crystallization": (
+        "Tratamento do para-brisa voltado à proteção da superfície e à repelência de água para favorecer a "
+        "visibilidade. A aplicação e o resultado esperado são confirmados conforme a condição do vidro."
+    ),
+}
+
+PUBLIC_SERVICE_OFFERS = {
+    "product:detailed-wash": (259.90, "1 a 2 horas"),
+    "product:interior-cleaning": (600.00, "6 horas"),
+    "product:technical-polish": (700.00, "1 dia"),
+    "product:ppf": (499.90, "duração personalizada"),
+    "product:vitrification": (999.90, "1 a 3 dias"),
+}
+
 
 def edge(edge_id, source, target, relation, *, position=0, fallback=False):
     assignment = {"active": True, "position": position, "purpose": "public_catalog"}
@@ -34,6 +101,9 @@ def edge(edge_id, source, target, relation, *, position=0, fallback=False):
 
 def main(active_export: Path | None = None) -> None:
     bundle = json.loads(PATH.read_text(encoding="utf-8"))
+    previous_visual_metadata = copy.deepcopy(
+        bundle.get("metadata", {}).get("visual_media_reconciliation") or {}
+    )
     nodes = {node["id"]: node for node in bundle["nodes"]}
 
     repair_asset_id = "asset:repair-paint-representative-v1"
@@ -136,6 +206,56 @@ def main(active_export: Path | None = None) -> None:
     nodes[source_copy["id"]] = source_copy
     nodes[source_faq["id"]] = source_faq
 
+    # Public descriptions and the matching commercial facts were explicitly
+    # approved by the operator. They are adapted to Utzig's existing catalog;
+    # Aura identity, contact data, reviews and testimonials remain excluded.
+    for product_id, description in PUBLIC_SERVICE_DESCRIPTIONS.items():
+        nodes[product_id]["summary"] = description
+        nodes[product_id]["data"].setdefault("public_site", {})["description_source"] = {
+            "source": "operator_approved_aura_public_reference_2026_09_23",
+            "reference_url": "https://auradetail.com.br/",
+            "policy": "operator_approved_commercial_adaptation",
+            "validation_status": "approved",
+        }
+
+    for product_id, (amount, duration) in PUBLIC_SERVICE_OFFERS.items():
+        product_slug = product_id.removeprefix("product:")
+        offer_id = f"offer:{product_slug}:starting-price"
+        nodes[offer_id] = {
+            "id": offer_id,
+            "node_type": "offer",
+            "slug": f"{product_slug}-starting-price",
+            "title": f"Preço inicial — {nodes[product_id]['title']}",
+            "summary": f"{nodes[product_id]['title']} a partir de R$ {amount:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+            "status": "approved",
+            "data": {
+                "source": "operator_approved_aura_public_reference_2026_09_23",
+                "validation_status": "approved",
+                "offer": {"amount": amount, "currency": "BRL"},
+                "price_qualifier": "a_partir_de",
+                "duration": duration,
+                "reference_url": "https://auradetail.com.br/",
+                "reference_scope": "operator_approved_commercial_catalog",
+            },
+        }
+
+    nodes["entity:alemao"].update({
+        "title": "Wilian",
+        "summary": "Fundador e especialista à frente dos cuidados realizados na Utzig Garage.",
+    })
+    nodes["entity:alemao"]["data"].update({
+        "public_name": "Wilian",
+        "public_subtitle": "O Alemão da Utzig",
+        "validation_status": "approved",
+    })
+    nodes["copy:specialist"].update({
+        "title": "Wilian — O Alemão da Utzig",
+        "summary": "Fundador e especialista à frente dos cuidados realizados na Utzig Garage.",
+    })
+    nodes["asset:hero"]["title"] = "Wilian — o Alemão da Utzig"
+    nodes["asset:editorial"]["title"] = "Wilian — retrato editorial"
+    nodes["asset:process"]["title"] = "Wilian trabalhando na Utzig Garage"
+
     # The Gallery is the curation gate for opt-in public fallback resolution.
     nodes["gallery:utzig"]["data"].setdefault("capabilities", {})["global_context"] = True
     persona = nodes["persona:utzig-garage"]
@@ -144,6 +264,16 @@ def main(active_export: Path | None = None) -> None:
         "precedence": ["product", "group", "campaign"],
         "direct_assets_compatibility": True,
     }
+
+    hero_eyebrow = "Estética Automotiva Premium"
+    hero_title = "Mais de 20 serviços que valorizam e deixam o seu carro na melhor versão"
+    hero_description = "Tudo o que seu carro precisa, em um só lugar."
+    home_page = nodes["campaign:home"]["data"]["page"]
+    home_page.update({
+        "eyebrow": hero_eyebrow,
+        "title": hero_title,
+        "description": hero_description,
+    })
 
     # Remove the old product-image guesses and the old three-group tree.  The
     # canonical Asset -> Gallery and public publication grants are retained.
@@ -230,16 +360,110 @@ def main(active_export: Path | None = None) -> None:
                             "metadata": {"active": True, "primary_tree": False,
                                          "source": "utzig_visual_reconciliation_2026_09_23"}})
 
+    # Offer nodes remain graph-owned commercial facts. The public menu chooses
+    # them through `about_product`; the primary tree keeps Product -> Offer.
+    bundle["edges"] = [item for item in bundle["edges"] if not (
+        item.get("id", "").startswith("edge:public-offer:")
+        or item.get("id", "").startswith("edge:primary-offer:")
+    )]
+    for product_id in PUBLIC_SERVICE_OFFERS:
+        product_slug = product_id.removeprefix("product:")
+        offer_id = f"offer:{product_slug}:starting-price"
+        bundle["edges"].extend([
+            {
+                "id": f"edge:primary-offer:{product_slug}",
+                "source": product_id,
+                "target": offer_id,
+                "relation_type": "contains",
+                "weight": 1,
+                "metadata": {"active": True, "primary_tree": True},
+            },
+            {
+                "id": f"edge:public-offer:{product_slug}",
+                "source": offer_id,
+                "target": product_id,
+                "relation_type": "about_product",
+                "weight": 1,
+                "metadata": {"active": True, "primary_tree": False},
+            },
+        ])
+
+    approved_price_answers = {
+        "faq:service:detailed-wash:lavagem-detalhada-preco": (
+            "A lavagem detalhada parte de R$ 259,90 e leva em média de 1 a 2 horas. O valor final é confirmado "
+            "conforme o veículo e a condição observada."
+        ),
+        "faq:service:interior-cleaning:higienizacao-preco-tempo": (
+            "A higienização interna parte de R$ 600 e leva em média 6 horas. O valor final é confirmado conforme "
+            "o veículo, os revestimentos e a condição do interior."
+        ),
+        "faq:service:ppf:ppf-preco-tempo": (
+            "A aplicação de PPF parte de R$ 499,90 e tem duração personalizada conforme as áreas escolhidas. "
+            "Cobertura, prazo e valor final são confirmados após a avaliação."
+        ),
+        "faq:service:vitrification:vitrificacao-preco-tempo": (
+            "A vitrificação parte de R$ 999,90 e leva em média de 1 a 3 dias. O valor final depende da condição "
+            "do veículo e do preparo indicado."
+        ),
+    }
+    for faq_id, answer in approved_price_answers.items():
+        nodes[faq_id]["summary"] = answer
+        nodes[faq_id]["data"]["answer"] = answer
+        nodes[faq_id]["data"]["source"] = "operator_approved_aura_public_reference_2026_09_23"
+        nodes[faq_id]["data"]["validation_status"] = "approved"
+        nodes[faq_id]["data"]["reference_url"] = "https://auradetail.com.br/"
+
     page = nodes["campaign:automotive-detailing"]["data"]["page"]
+    page.update({
+        "eyebrow": hero_eyebrow,
+        "title": hero_title,
+        "description": hero_description,
+    })
+    landing_hero = next(block for block in page["blocks"] if block["id"] == "lp-hero")
+    landing_hero.update({
+        "eyebrow": hero_eyebrow,
+        "title": hero_title,
+        "description": hero_description,
+    })
     catalog = next(block for block in page["blocks"] if block["id"] == "lp-services")
     catalog["node_ids"] = list(groups) + [item for values in membership.values() for item in values]
-    bundle["metadata"]["purpose"] = "utzig_visual_media_reconciliation_candidate"
+    specialist = next(block for block in page["blocks"] if block["id"] == "lp-specialist")
+    specialist.update({
+        "eyebrow": "Quem está por trás",
+        "title": "Wilian",
+        "description": "O Alemão da Utzig",
+    })
+    process_copy = nodes["copy:process"]
+    process_copy["summary"] = (
+        "Agende pelo WhatsApp, apresente o que deseja melhorar e passe pela avaliação do veículo. A execução é "
+        "definida conforme a necessidade, e a entrega inclui orientações para conservar o resultado."
+    )
+    process_copy["data"].update({
+        "source": "operator_approved_aura_public_reference_2026_09_23",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+    })
+    bundle["metadata"]["purpose"] = "utzig_public_editorial_content_enrichment"
+    bundle["metadata"]["public_content_enrichment"] = {
+        "status": "operator_approved",
+        "source": "operator_approved_aura_public_reference_2026_09_23",
+        "reference_url": "https://auradetail.com.br/",
+        "policy": "operator_approved_commercial_adaptation",
+        "product_description_count": len(PUBLIC_SERVICE_DESCRIPTIONS),
+        "published_starting_price_count": len(PUBLIC_SERVICE_OFFERS),
+        "specialist_public_name": "Wilian",
+        "specialist_public_subtitle": "O Alemão da Utzig",
+        "hero_claim_source": "operator_approved_customer_feedback_2026_09_23",
+    }
     bundle["metadata"]["visual_media_reconciliation"] = {
         "status": "operator_review_required", "source": "approved_utzig_drive_folder",
         "pending_validation": ["EDIÇÃO assets are excluded from public media and RAG"],
         "direct_evidence_services": sorted(direct),
         "representative_only_services": ["product:ppf", "product:vitrification", "product:bodywork", "product:painting", "product:commercial-polish", "product:detailed-wash", "product:evaluation"],
     }
+    for key in ("preserved_active_faq_count", "soft_disabled_edges", "soft_disabled_edge_count"):
+        if key in previous_visual_metadata:
+            bundle["metadata"]["visual_media_reconciliation"][key] = previous_visual_metadata[key]
     if active_export:
         active = json.loads(active_export.read_text(encoding="utf-8"))
         active_nodes = active.get("nodes") or list((active.get("node_by_id") or {}).values())
@@ -269,7 +493,14 @@ def main(active_export: Path | None = None) -> None:
             (str(item.get("source")), str(item.get("target")), str(item.get("relation_type")))
             for item in bundle["edges"]
         }
-        soft_disabled_edges = []
+        inherited_tombstones = (
+            (active.get("metadata") or {}).get("visual_media_reconciliation") or {}
+        ).get("soft_disabled_edges") or previous_visual_metadata.get("soft_disabled_edges") or []
+        soft_disabled_edges = [copy.deepcopy(item) for item in inherited_tombstones]
+        tombstone_keys = {
+            (str(item.get("source")), str(item.get("target")), str(item.get("relation_type")))
+            for item in soft_disabled_edges
+        }
         for item in active.get("edges") or []:
             logical_edge = (
                 str(item.get("source")),
@@ -280,6 +511,7 @@ def main(active_export: Path | None = None) -> None:
                 logical_edge in desired_logical_edges
                 or item.get("source") not in known
                 or item.get("target") not in known
+                or logical_edge in tombstone_keys
             ):
                 continue
             soft_disabled_edges.append({

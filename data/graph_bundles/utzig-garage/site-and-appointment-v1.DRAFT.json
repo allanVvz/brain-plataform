@@ -5,7 +5,7 @@
     "slug": "utzig-garage"
   },
   "metadata": {
-    "purpose": "utzig_visual_media_reconciliation_candidate",
+    "purpose": "utzig_public_editorial_content_enrichment",
     "publication_allowed": true,
     "publication_blockers": [],
     "draft_persona_id": {
@@ -74,6 +74,17 @@
         }
       ],
       "soft_disabled_edge_count": 1
+    },
+    "public_content_enrichment": {
+      "status": "operator_approved",
+      "source": "operator_approved_aura_public_reference_2026_09_23",
+      "reference_url": "https://auradetail.com.br/",
+      "policy": "operator_approved_commercial_adaptation",
+      "product_description_count": 13,
+      "published_starting_price_count": 5,
+      "specialist_public_name": "Wilian",
+      "specialist_public_subtitle": "O Alemão da Utzig",
+      "hero_claim_source": "operator_approved_customer_feedback_2026_09_23"
     }
   },
   "nodes": [
@@ -314,13 +325,15 @@
       "id": "entity:alemao",
       "node_type": "entity",
       "slug": "alemao",
-      "title": "Alemão",
-      "summary": "Fundador e especialista apresentado pela Utzig Garage.",
+      "title": "Wilian",
+      "summary": "Fundador e especialista à frente dos cuidados realizados na Utzig Garage.",
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
         "validation_status": "approved",
-        "entity_role": "founder_specialist"
+        "entity_role": "founder_specialist",
+        "public_name": "Wilian",
+        "public_subtitle": "O Alemão da Utzig"
       }
     },
     {
@@ -338,8 +351,8 @@
           "route": "/",
           "kind": "linktree",
           "template_key": "automotive_detailing",
-          "title": "Cuidado técnico, resultado que aparece.",
-          "description": "Escolha como quer cuidar do seu carro.",
+          "title": "Mais de 20 serviços que valorizam e deixam o seu carro na melhor versão",
+          "description": "Tudo o que seu carro precisa, em um só lugar.",
           "actions": [
             {
               "id": "services",
@@ -455,7 +468,8 @@
                 "campaign:physical-store"
               ]
             }
-          ]
+          ],
+          "eyebrow": "Estética Automotiva Premium"
         }
       }
     },
@@ -474,14 +488,14 @@
           "route": "/estetica-automotiva",
           "kind": "landing_page",
           "template_key": "automotive_detailing",
-          "title": "SEU CARRO, EM SUA MELHOR VERSÃO",
-          "description": "Serviços e avaliação da Utzig Garage.",
+          "title": "Mais de 20 serviços que valorizam e deixam o seu carro na melhor versão",
+          "description": "Tudo o que seu carro precisa, em um só lugar.",
           "actions": [],
           "blocks": [
             {
               "id": "lp-hero",
               "kind": "hero",
-              "title": "SEU CARRO, EM SUA MELHOR VERSÃO",
+              "title": "Mais de 20 serviços que valorizam e deixam o seu carro na melhor versão",
               "cta_label": "Pedir uma avaliação",
               "contact_key": "quick_booking",
               "message_template": "Olá, gostaria de pedir uma avaliação.",
@@ -490,7 +504,9 @@
               ],
               "asset_node_ids": [
                 "asset:hero"
-              ]
+              ],
+              "eyebrow": "Estética Automotiva Premium",
+              "description": "Tudo o que seu carro precisa, em um só lugar."
             },
             {
               "id": "lp-audiences",
@@ -559,13 +575,15 @@
             {
               "id": "lp-specialist",
               "kind": "specialist",
-              "title": "Alemão",
+              "title": "Wilian",
               "node_ids": [
                 "entity:alemao"
               ],
               "asset_node_ids": [
                 "asset:editorial"
-              ]
+              ],
+              "eyebrow": "Quem está por trás",
+              "description": "O Alemão da Utzig"
             },
             {
               "id": "lp-location",
@@ -598,7 +616,8 @@
                 "copy:final-cta"
               ]
             }
-          ]
+          ],
+          "eyebrow": "Estética Automotiva Premium"
         }
       }
     },
@@ -797,7 +816,7 @@
       "node_type": "product",
       "slug": "evaluation",
       "title": "Avaliação",
-      "summary": "Serviço de avaliação oferecido pela Utzig Garage.",
+      "summary": "O atendimento começa pelo WhatsApp e segue com uma avaliação do veículo para entender a necessidade, indicar o cuidado adequado e organizar a execução. Diagnóstico, valor e próximos passos são confirmados por Wilian, com orientações para conservar o resultado.",
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
@@ -806,6 +825,12 @@
           "cta": {
             "label": "Pedir uma avaliação",
             "message_template": "Olá! Quero pedir uma avaliação para o meu carro."
+          },
+          "description_source": {
+            "source": "operator_approved_aura_public_reference_2026_09_23",
+            "reference_url": "https://auradetail.com.br/",
+            "policy": "operator_approved_commercial_adaptation",
+            "validation_status": "approved"
           }
         },
         "aliases": [
@@ -999,7 +1024,7 @@
       "node_type": "product",
       "slug": "detailed-wash",
       "title": "Lavagem detalhada",
-      "summary": "Serviço de lavagem detalhada oferecido pela Utzig Garage.",
+      "summary": "Lavagem premium com técnica de dois baldes, produtos próprios para detalhamento, trabalho com pincel e atenção a pneus e rodas. O serviço leva em média de 1 a 2 horas e parte de R$ 259,90.",
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
@@ -1008,6 +1033,12 @@
           "cta": {
             "label": "Pedir uma avaliação",
             "message_template": "Olá! Quero pedir uma avaliação para lavagem detalhada."
+          },
+          "description_source": {
+            "source": "operator_approved_aura_public_reference_2026_09_23",
+            "reference_url": "https://auradetail.com.br/",
+            "policy": "operator_approved_commercial_adaptation",
+            "validation_status": "approved"
           }
         },
         "aliases": [
@@ -1177,7 +1208,7 @@
       "node_type": "product",
       "slug": "interior-cleaning",
       "title": "Higienização interna",
-      "summary": "Serviço de higienização interna oferecido pela Utzig Garage.",
+      "summary": "Limpeza profunda e sanitização do interior com produtos e equipamentos específicos. Inclui tratamento compatível com couro ou tecido, cuidado com odores e proteção antimicrobiana; leva em média 6 horas e parte de R$ 600.",
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
@@ -1186,6 +1217,12 @@
           "cta": {
             "label": "Pedir uma avaliação",
             "message_template": "Olá! Quero pedir uma avaliação para higienização interna."
+          },
+          "description_source": {
+            "source": "operator_approved_aura_public_reference_2026_09_23",
+            "reference_url": "https://auradetail.com.br/",
+            "policy": "operator_approved_commercial_adaptation",
+            "validation_status": "approved"
           }
         },
         "aliases": [
@@ -1379,7 +1416,7 @@
       "node_type": "product",
       "slug": "glass-polish",
       "title": "Polimento de vidros",
-      "summary": "Serviço de polimento de vidros oferecido pela Utzig Garage.",
+      "summary": "Tratamento para melhorar o acabamento de vidros com marcas ou manchas compatíveis com polimento. O resultado possível e a combinação com cristalização dependem da avaliação da superfície.",
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
@@ -1388,6 +1425,12 @@
           "cta": {
             "label": "Pedir uma avaliação",
             "message_template": "Olá! Quero pedir uma avaliação para polimento de vidros."
+          },
+          "description_source": {
+            "source": "operator_approved_aura_public_reference_2026_09_23",
+            "reference_url": "https://auradetail.com.br/",
+            "policy": "operator_approved_commercial_adaptation",
+            "validation_status": "approved"
           }
         },
         "aliases": [
@@ -1557,7 +1600,7 @@
       "node_type": "product",
       "slug": "engine-bay-wash",
       "title": "Lavagem de cofre",
-      "summary": "Serviço de lavagem de cofre oferecido pela Utzig Garage.",
+      "summary": "Limpeza profunda e segura do compartimento do motor, realizada conforme a condição observada e com atenção aos componentes. Possíveis sinais de vazamento precisam ser informados antes da avaliação.",
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
@@ -1566,6 +1609,12 @@
           "cta": {
             "label": "Pedir uma avaliação",
             "message_template": "Olá! Quero pedir uma avaliação para lavagem de cofre."
+          },
+          "description_source": {
+            "source": "operator_approved_aura_public_reference_2026_09_23",
+            "reference_url": "https://auradetail.com.br/",
+            "policy": "operator_approved_commercial_adaptation",
+            "validation_status": "approved"
           }
         },
         "aliases": [
@@ -1759,7 +1808,7 @@
       "node_type": "product",
       "slug": "technical-polish",
       "title": "Polimento técnico",
-      "summary": "Serviço de polimento técnico oferecido pela Utzig Garage.",
+      "summary": "Correção profissional da pintura para tratar microrriscos, hologramas e oxidação compatíveis com o processo, recuperar o brilho e preparar a superfície para proteção. Leva em média 1 dia e parte de R$ 700.",
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
@@ -1768,6 +1817,12 @@
           "cta": {
             "label": "Pedir uma avaliação",
             "message_template": "Olá! Quero pedir uma avaliação para polimento técnico."
+          },
+          "description_source": {
+            "source": "operator_approved_aura_public_reference_2026_09_23",
+            "reference_url": "https://auradetail.com.br/",
+            "policy": "operator_approved_commercial_adaptation",
+            "validation_status": "approved"
           }
         },
         "aliases": [
@@ -1961,7 +2016,7 @@
       "node_type": "product",
       "slug": "commercial-polish",
       "title": "Polimento comercial",
-      "summary": "Serviço de polimento comercial oferecido pela Utzig Garage.",
+      "summary": "Polimento voltado à recuperação visual e ao ganho de brilho, indicado conforme o objetivo e a condição da pintura. A equipe orienta se o comercial ou o técnico é mais adequado.",
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
@@ -1970,6 +2025,12 @@
           "cta": {
             "label": "Pedir uma avaliação",
             "message_template": "Olá! Quero pedir uma avaliação para polimento comercial."
+          },
+          "description_source": {
+            "source": "operator_approved_aura_public_reference_2026_09_23",
+            "reference_url": "https://auradetail.com.br/",
+            "policy": "operator_approved_commercial_adaptation",
+            "validation_status": "approved"
           }
         },
         "aliases": [
@@ -2139,7 +2200,7 @@
       "node_type": "product",
       "slug": "headlight-restoration",
       "title": "Restauração de faróis",
-      "summary": "Serviço de restauração de faróis oferecido pela Utzig Garage.",
+      "summary": "Restauração do acabamento dos faróis para recuperar transparência e apresentação visual dentro do que a peça permite. Resultado e proteção aplicável são confirmados após avaliação.",
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
@@ -2148,6 +2209,12 @@
           "cta": {
             "label": "Pedir uma avaliação",
             "message_template": "Olá! Quero pedir uma avaliação para restauração de faróis."
+          },
+          "description_source": {
+            "source": "operator_approved_aura_public_reference_2026_09_23",
+            "reference_url": "https://auradetail.com.br/",
+            "policy": "operator_approved_commercial_adaptation",
+            "validation_status": "approved"
           }
         },
         "aliases": [
@@ -2317,7 +2384,7 @@
       "node_type": "product",
       "slug": "vitrification",
       "title": "Vitrificação",
-      "summary": "Serviço de vitrificação oferecido pela Utzig Garage.",
+      "summary": "Revestimento cerâmico para brilho intenso, proteção química e limpeza mais fácil. A durabilidade informada é de até 3 anos, a execução leva de 1 a 3 dias e o serviço parte de R$ 999,90.",
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
@@ -2326,6 +2393,12 @@
           "cta": {
             "label": "Pedir uma avaliação",
             "message_template": "Olá! Quero pedir uma avaliação para vitrificação."
+          },
+          "description_source": {
+            "source": "operator_approved_aura_public_reference_2026_09_23",
+            "reference_url": "https://auradetail.com.br/",
+            "policy": "operator_approved_commercial_adaptation",
+            "validation_status": "approved"
           }
         },
         "aliases": [
@@ -2519,7 +2592,7 @@
       "node_type": "product",
       "slug": "ppf",
       "title": "PPF",
-      "summary": "Serviço de ppf oferecido pela Utzig Garage.",
+      "summary": "Película transparente e autorreparável para proteger áreas selecionadas contra riscos, pedras, raios UV e intempéries, preservando a pintura original. A duração é personalizada, a garantia é de 10 anos e a aplicação parte de R$ 499,90.",
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
@@ -2528,6 +2601,12 @@
           "cta": {
             "label": "Pedir uma avaliação",
             "message_template": "Olá! Quero pedir uma avaliação para PPF."
+          },
+          "description_source": {
+            "source": "operator_approved_aura_public_reference_2026_09_23",
+            "reference_url": "https://auradetail.com.br/",
+            "policy": "operator_approved_commercial_adaptation",
+            "validation_status": "approved"
           }
         },
         "aliases": [
@@ -2721,7 +2800,7 @@
       "node_type": "product",
       "slug": "bodywork",
       "title": "Funilaria",
-      "summary": "Serviço de funilaria oferecido pela Utzig Garage.",
+      "summary": "Correção de danos de carroceria e recuperação do alinhamento visual conforme a extensão e a localização do reparo. Quando indicado, pequenos amassados podem ser tratados sem danificar a pintura original; fotos iniciam a análise e a equipe confirma o diagnóstico.",
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
@@ -2730,6 +2809,12 @@
           "cta": {
             "label": "Pedir uma avaliação",
             "message_template": "Olá! Quero pedir uma avaliação para funilaria."
+          },
+          "description_source": {
+            "source": "operator_approved_aura_public_reference_2026_09_23",
+            "reference_url": "https://auradetail.com.br/",
+            "policy": "operator_approved_commercial_adaptation",
+            "validation_status": "approved"
           }
         },
         "aliases": [
@@ -2899,7 +2984,7 @@
       "node_type": "product",
       "slug": "painting",
       "title": "Pintura",
-      "summary": "Serviço de pintura oferecido pela Utzig Garage.",
+      "summary": "Reparo, pintura e personalização para recuperar o acabamento ou adaptar a apresentação do veículo. Cor, modelo, ano e condição da área afetada orientam a avaliação de resultado, prazo e orçamento.",
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
@@ -2908,6 +2993,12 @@
           "cta": {
             "label": "Pedir uma avaliação",
             "message_template": "Olá! Quero pedir uma avaliação para pintura."
+          },
+          "description_source": {
+            "source": "operator_approved_aura_public_reference_2026_09_23",
+            "reference_url": "https://auradetail.com.br/",
+            "policy": "operator_approved_commercial_adaptation",
+            "validation_status": "approved"
           }
         },
         "aliases": [
@@ -3425,20 +3516,21 @@
       "node_type": "copy",
       "slug": "processo",
       "title": "Processo e avaliação",
-      "summary": "O atendimento começa entendendo o veículo e o que você busca. Fotos podem ajudar como contexto; a avaliação e os próximos passos são confirmados pelo Alemão.",
+      "summary": "Agende pelo WhatsApp, apresente o que deseja melhorar e passe pela avaliação do veículo. A execução é definida conforme a necessidade, e a entrega inclui orientações para conservar o resultado.",
       "status": "approved",
       "data": {
-        "source": "user_provided_utzig_plan_2026_09_22",
+        "source": "operator_approved_aura_public_reference_2026_09_23",
         "validation_status": "approved",
-        "channel": "public_site"
+        "channel": "public_site",
+        "reference_url": "https://auradetail.com.br/"
       }
     },
     {
       "id": "copy:specialist",
       "node_type": "copy",
       "slug": "especialista",
-      "title": "Sobre o Alemão",
-      "summary": "Alemão é o fundador e especialista à frente da Utzig Garage.",
+      "title": "Wilian — O Alemão da Utzig",
+      "summary": "Fundador e especialista à frente dos cuidados realizados na Utzig Garage.",
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
@@ -3661,7 +3753,7 @@
       "id": "asset:hero",
       "node_type": "asset",
       "slug": "alemao-perfil",
-      "title": "Alemão — retrato principal",
+      "title": "Wilian — o Alemão da Utzig",
       "summary": "Asset original aprovado para a identidade e o site da Utzig Garage.",
       "status": "approved",
       "data": {
@@ -3708,7 +3800,7 @@
       "id": "asset:editorial",
       "node_type": "asset",
       "slug": "alemao-perfil-editorial",
-      "title": "Alemão — retrato editorial",
+      "title": "Wilian — retrato editorial",
       "summary": "Asset original aprovado para a identidade e o site da Utzig Garage.",
       "status": "approved",
       "data": {
@@ -3755,7 +3847,7 @@
       "id": "asset:process",
       "node_type": "asset",
       "slug": "alemao-polindo",
-      "title": "Alemão polindo",
+      "title": "Wilian trabalhando na Utzig Garage",
       "summary": "Asset original aprovado para a identidade e o site da Utzig Garage.",
       "status": "approved",
       "data": {
@@ -4401,7 +4493,7 @@
       "node_type": "product",
       "slug": "windshield-crystallization",
       "title": "Cristalização de para-brisa",
-      "summary": "Serviço de cristalização de para-brisa oferecido pela Utzig Garage.",
+      "summary": "Tratamento do para-brisa voltado à proteção da superfície e à repelência de água para favorecer a visibilidade. A aplicação e o resultado esperado são confirmados conforme a condição do vidro.",
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
@@ -4410,6 +4502,12 @@
           "cta": {
             "label": "Pedir uma avaliação",
             "message_template": "Olá! Quero pedir uma avaliação para cristalização de para-brisa."
+          },
+          "description_source": {
+            "source": "operator_approved_aura_public_reference_2026_09_23",
+            "reference_url": "https://auradetail.com.br/",
+            "policy": "operator_approved_commercial_adaptation",
+            "validation_status": "approved"
           }
         },
         "aliases": [
@@ -4774,7 +4872,7 @@
     {
       "id": "faq:service:detailed-wash:lavagem-detalhada-preco",
       "data": {
-        "answer": "O valor da lavagem técnica detalhada é confirmado pela equipe humana após os dados necessários do veículo.",
+        "answer": "A lavagem detalhada parte de R$ 259,90 e leva em média de 1 a 2 horas. O valor final é confirmado conforme o veículo e a condição observada.",
         "claims": [
           {
             "policy": "published_service_detail_with_source_provenance",
@@ -4784,7 +4882,7 @@
             ]
           }
         ],
-        "source": "aurora_active_graph_publication_v75_2026_09_23",
+        "source": "operator_approved_aura_public_reference_2026_09_23",
         "status": "approved",
         "question": "Preço da lavagem detalhada?",
         "branch_path": [
@@ -4810,13 +4908,14 @@
           "source_publication_checksum": "sha256:3f727095819f75836453af2e3bbee42c1138b50a6dc99a59f502b5a1917811ec"
         },
         "validation_status": "approved",
-        "graph_json_node_id": "faq:service:detailed-wash:lavagem-detalhada-preco"
+        "graph_json_node_id": "faq:service:detailed-wash:lavagem-detalhada-preco",
+        "reference_url": "https://auradetail.com.br/"
       },
       "slug": "faq-service-detailed-wash-lavagem-detalhada-preco",
       "tags": [],
       "title": "Preço da lavagem detalhada?",
       "status": "approved",
-      "summary": "O valor da lavagem técnica detalhada é confirmado pela equipe humana após os dados necessários do veículo.",
+      "summary": "A lavagem detalhada parte de R$ 259,90 e leva em média de 1 a 2 horas. O valor final é confirmado conforme o veículo e a condição observada.",
       "node_type": "faq",
       "projection_node_id": "f181987b-14dd-5a55-87f9-9fb57347bf91"
     },
@@ -5117,7 +5216,7 @@
     {
       "id": "faq:service:interior-cleaning:higienizacao-preco-tempo",
       "data": {
-        "answer": "Preço e duração da higienização são confirmados pela equipe conforme o veículo e sua condição.",
+        "answer": "A higienização interna parte de R$ 600 e leva em média 6 horas. O valor final é confirmado conforme o veículo, os revestimentos e a condição do interior.",
         "claims": [
           {
             "policy": "published_service_detail_with_source_provenance",
@@ -5127,7 +5226,7 @@
             ]
           }
         ],
-        "source": "aurora_active_graph_publication_v75_2026_09_23",
+        "source": "operator_approved_aura_public_reference_2026_09_23",
         "status": "approved",
         "question": "Quanto custa higienizar?",
         "branch_path": [
@@ -5153,13 +5252,14 @@
           "source_publication_checksum": "sha256:3f727095819f75836453af2e3bbee42c1138b50a6dc99a59f502b5a1917811ec"
         },
         "validation_status": "approved",
-        "graph_json_node_id": "faq:service:interior-cleaning:higienizacao-preco-tempo"
+        "graph_json_node_id": "faq:service:interior-cleaning:higienizacao-preco-tempo",
+        "reference_url": "https://auradetail.com.br/"
       },
       "slug": "faq-service-interior-cleaning-higienizacao-preco-tempo",
       "tags": [],
       "title": "Quanto custa higienizar?",
       "status": "approved",
-      "summary": "Preço e duração da higienização são confirmados pela equipe conforme o veículo e sua condição.",
+      "summary": "A higienização interna parte de R$ 600 e leva em média 6 horas. O valor final é confirmado conforme o veículo, os revestimentos e a condição do interior.",
       "node_type": "faq",
       "projection_node_id": "1cc78621-bcc1-526c-901e-27828c7d05f0"
     },
@@ -5362,7 +5462,7 @@
     {
       "id": "faq:service:ppf:ppf-preco-tempo",
       "data": {
-        "answer": "O orçamento e o prazo do PPF são confirmados pela equipe após a avaliação necessária.",
+        "answer": "A aplicação de PPF parte de R$ 499,90 e tem duração personalizada conforme as áreas escolhidas. Cobertura, prazo e valor final são confirmados após a avaliação.",
         "claims": [
           {
             "policy": "published_service_detail_with_source_provenance",
@@ -5372,7 +5472,7 @@
             ]
           }
         ],
-        "source": "aurora_active_graph_publication_v75_2026_09_23",
+        "source": "operator_approved_aura_public_reference_2026_09_23",
         "status": "approved",
         "question": "Quanto custa ppf?",
         "branch_path": [
@@ -5398,13 +5498,14 @@
           "source_publication_checksum": "sha256:3f727095819f75836453af2e3bbee42c1138b50a6dc99a59f502b5a1917811ec"
         },
         "validation_status": "approved",
-        "graph_json_node_id": "faq:service:ppf:ppf-preco-tempo"
+        "graph_json_node_id": "faq:service:ppf:ppf-preco-tempo",
+        "reference_url": "https://auradetail.com.br/"
       },
       "slug": "faq-service-ppf-ppf-preco-tempo",
       "tags": [],
       "title": "Quanto custa ppf?",
       "status": "approved",
-      "summary": "O orçamento e o prazo do PPF são confirmados pela equipe após a avaliação necessária.",
+      "summary": "A aplicação de PPF parte de R$ 499,90 e tem duração personalizada conforme as áreas escolhidas. Cobertura, prazo e valor final são confirmados após a avaliação.",
       "node_type": "faq",
       "projection_node_id": "d5fcdc8d-6e70-5f21-b97f-ee94ee2f8b94"
     },
@@ -5656,7 +5757,7 @@
     {
       "id": "faq:service:vitrification:vitrificacao-preco-tempo",
       "data": {
-        "answer": "Preço e duração da vitrificação são confirmados pela equipe humana; a assistente virtual não publica estimativa estática.",
+        "answer": "A vitrificação parte de R$ 999,90 e leva em média de 1 a 3 dias. O valor final depende da condição do veículo e do preparo indicado.",
         "claims": [
           {
             "policy": "published_service_detail_with_source_provenance",
@@ -5666,7 +5767,7 @@
             ]
           }
         ],
-        "source": "aurora_active_graph_publication_v75_2026_09_23",
+        "source": "operator_approved_aura_public_reference_2026_09_23",
         "status": "approved",
         "question": "Valor da vitrificação?",
         "branch_path": [
@@ -5692,13 +5793,14 @@
           "source_publication_checksum": "sha256:3f727095819f75836453af2e3bbee42c1138b50a6dc99a59f502b5a1917811ec"
         },
         "validation_status": "approved",
-        "graph_json_node_id": "faq:service:vitrification:vitrificacao-preco-tempo"
+        "graph_json_node_id": "faq:service:vitrification:vitrificacao-preco-tempo",
+        "reference_url": "https://auradetail.com.br/"
       },
       "slug": "faq-service-vitrification-vitrificacao-preco-tempo",
       "tags": [],
       "title": "Valor da vitrificação?",
       "status": "approved",
-      "summary": "Preço e duração da vitrificação são confirmados pela equipe humana; a assistente virtual não publica estimativa estática.",
+      "summary": "A vitrificação parte de R$ 999,90 e leva em média de 1 a 3 dias. O valor final depende da condição do veículo e do preparo indicado.",
       "node_type": "faq",
       "projection_node_id": "aa1716ac-3024-581c-89b0-4e4b71ff8c45"
     },
@@ -5752,6 +5854,106 @@
           "path": "e7b7b2e8-859e-4185-b675-79bc0f3d846e/e92dcd20548ddc32567529488ca88bac724ab1dab0628be7cd602c1feb0d56be/repair-paint-representative-v1.webp",
           "filename": "repair-paint-representative-v1.webp"
         }
+      }
+    },
+    {
+      "id": "offer:detailed-wash:starting-price",
+      "node_type": "offer",
+      "slug": "detailed-wash-starting-price",
+      "title": "Preço inicial — Lavagem detalhada",
+      "summary": "Lavagem detalhada a partir de R$ 259,90",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_public_reference_2026_09_23",
+        "validation_status": "approved",
+        "offer": {
+          "amount": 259.9,
+          "currency": "BRL"
+        },
+        "price_qualifier": "a_partir_de",
+        "duration": "1 a 2 horas",
+        "reference_url": "https://auradetail.com.br/",
+        "reference_scope": "operator_approved_commercial_catalog"
+      }
+    },
+    {
+      "id": "offer:interior-cleaning:starting-price",
+      "node_type": "offer",
+      "slug": "interior-cleaning-starting-price",
+      "title": "Preço inicial — Higienização interna",
+      "summary": "Higienização interna a partir de R$ 600,00",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_public_reference_2026_09_23",
+        "validation_status": "approved",
+        "offer": {
+          "amount": 600.0,
+          "currency": "BRL"
+        },
+        "price_qualifier": "a_partir_de",
+        "duration": "6 horas",
+        "reference_url": "https://auradetail.com.br/",
+        "reference_scope": "operator_approved_commercial_catalog"
+      }
+    },
+    {
+      "id": "offer:technical-polish:starting-price",
+      "node_type": "offer",
+      "slug": "technical-polish-starting-price",
+      "title": "Preço inicial — Polimento técnico",
+      "summary": "Polimento técnico a partir de R$ 700,00",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_public_reference_2026_09_23",
+        "validation_status": "approved",
+        "offer": {
+          "amount": 700.0,
+          "currency": "BRL"
+        },
+        "price_qualifier": "a_partir_de",
+        "duration": "1 dia",
+        "reference_url": "https://auradetail.com.br/",
+        "reference_scope": "operator_approved_commercial_catalog"
+      }
+    },
+    {
+      "id": "offer:ppf:starting-price",
+      "node_type": "offer",
+      "slug": "ppf-starting-price",
+      "title": "Preço inicial — PPF",
+      "summary": "PPF a partir de R$ 499,90",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_public_reference_2026_09_23",
+        "validation_status": "approved",
+        "offer": {
+          "amount": 499.9,
+          "currency": "BRL"
+        },
+        "price_qualifier": "a_partir_de",
+        "duration": "duração personalizada",
+        "reference_url": "https://auradetail.com.br/",
+        "reference_scope": "operator_approved_commercial_catalog"
+      }
+    },
+    {
+      "id": "offer:vitrification:starting-price",
+      "node_type": "offer",
+      "slug": "vitrification-starting-price",
+      "title": "Preço inicial — Vitrificação",
+      "summary": "Vitrificação a partir de R$ 999,90",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_public_reference_2026_09_23",
+        "validation_status": "approved",
+        "offer": {
+          "amount": 999.9,
+          "currency": "BRL"
+        },
+        "price_qualifier": "a_partir_de",
+        "duration": "1 a 3 dias",
+        "reference_url": "https://auradetail.com.br/",
+        "reference_scope": "operator_approved_commercial_catalog"
       }
     }
   ],
@@ -8757,6 +8959,116 @@
         "active": true,
         "primary_tree": false,
         "source": "utzig_visual_reconciliation_2026_09_23"
+      }
+    },
+    {
+      "id": "edge:primary-offer:detailed-wash",
+      "source": "product:detailed-wash",
+      "target": "offer:detailed-wash:starting-price",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:public-offer:detailed-wash",
+      "source": "offer:detailed-wash:starting-price",
+      "target": "product:detailed-wash",
+      "relation_type": "about_product",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:primary-offer:interior-cleaning",
+      "source": "product:interior-cleaning",
+      "target": "offer:interior-cleaning:starting-price",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:public-offer:interior-cleaning",
+      "source": "offer:interior-cleaning:starting-price",
+      "target": "product:interior-cleaning",
+      "relation_type": "about_product",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:primary-offer:technical-polish",
+      "source": "product:technical-polish",
+      "target": "offer:technical-polish:starting-price",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:public-offer:technical-polish",
+      "source": "offer:technical-polish:starting-price",
+      "target": "product:technical-polish",
+      "relation_type": "about_product",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:primary-offer:ppf",
+      "source": "product:ppf",
+      "target": "offer:ppf:starting-price",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:public-offer:ppf",
+      "source": "offer:ppf:starting-price",
+      "target": "product:ppf",
+      "relation_type": "about_product",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "primary_tree": false
+      }
+    },
+    {
+      "id": "edge:primary-offer:vitrification",
+      "source": "product:vitrification",
+      "target": "offer:vitrification:starting-price",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:public-offer:vitrification",
+      "source": "offer:vitrification:starting-price",
+      "target": "product:vitrification",
+      "relation_type": "about_product",
+      "weight": 1,
+      "metadata": {
+        "active": true,
+        "primary_tree": false
       }
     }
   ]

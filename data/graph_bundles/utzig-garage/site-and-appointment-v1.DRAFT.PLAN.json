@@ -15,44 +15,85 @@
     "product:vitrification",
     "product:windshield-crystallization"
   ],
-  "breaking_contract_changes": [],
-  "chunks_reused": 162,
-  "chunks_to_embed": 0,
+  "breaking_contract_changes": [
+    "branch_structure_changed:product:detailed-wash",
+    "branch_structure_changed:product:interior-cleaning",
+    "branch_structure_changed:product:ppf",
+    "branch_structure_changed:product:technical-polish",
+    "branch_structure_changed:product:vitrification"
+  ],
+  "chunks_reused": 145,
+  "chunks_to_embed": 27,
   "compiler_version": "graph-compiler-v3.6.5",
   "disposition": "awaiting_approval",
-  "draft_checksum": "sha256:3f9aed6ef11b3d818d437d2982d71ed69051ba31ce0042e5aba773b60080c230",
+  "draft_checksum": "sha256:b7e7ab9bbdf508844957052fd8aae05e09bc1e98fec91eccb56d5a84ca610c6a",
   "edge_changes": {
     "added": [
-      "edge:primary:repair-paint-representative-v1",
-      "edge:public:repair-paint-representative-v1",
-      "edge:repair-paint-representative-gallery"
+      "edge:primary-offer:detailed-wash",
+      "edge:primary-offer:interior-cleaning",
+      "edge:primary-offer:ppf",
+      "edge:primary-offer:technical-polish",
+      "edge:primary-offer:vitrification",
+      "edge:public-offer:detailed-wash",
+      "edge:public-offer:interior-cleaning",
+      "edge:public-offer:ppf",
+      "edge:public-offer:technical-polish",
+      "edge:public-offer:vitrification"
     ],
-    "changed": [
-      "edge:group-cover:repair-paint"
-    ],
+    "changed": [],
     "removed": []
   },
-  "edges_added": 3,
-  "edges_changed": 1,
+  "edges_added": 10,
+  "edges_changed": 0,
   "edges_removed": 0,
   "estimated_embedding_cost": {
     "amount": null,
     "currency": "USD",
     "reason": "provider_pricing_not_configured"
   },
-  "next_version": 8,
+  "next_version": 1,
   "node_changes": {
     "added": [
-      "asset:repair-paint-representative-v1"
+      "offer:detailed-wash:starting-price",
+      "offer:interior-cleaning:starting-price",
+      "offer:ppf:starting-price",
+      "offer:technical-polish:starting-price",
+      "offer:vitrification:starting-price"
     ],
-    "changed": [],
+    "changed": [
+      "asset:editorial",
+      "asset:hero",
+      "asset:process",
+      "campaign:automotive-detailing",
+      "campaign:home",
+      "copy:process",
+      "copy:specialist",
+      "entity:alemao",
+      "faq:service:detailed-wash:lavagem-detalhada-preco",
+      "faq:service:interior-cleaning:higienizacao-preco-tempo",
+      "faq:service:ppf:ppf-preco-tempo",
+      "faq:service:vitrification:vitrificacao-preco-tempo",
+      "product:bodywork",
+      "product:commercial-polish",
+      "product:detailed-wash",
+      "product:engine-bay-wash",
+      "product:evaluation",
+      "product:glass-polish",
+      "product:headlight-restoration",
+      "product:interior-cleaning",
+      "product:painting",
+      "product:ppf",
+      "product:technical-polish",
+      "product:vitrification",
+      "product:windshield-crystallization"
+    ],
     "removed": []
   },
-  "nodes_added": 1,
-  "nodes_changed": 0,
+  "nodes_added": 5,
+  "nodes_changed": 25,
   "nodes_removed": 0,
   "plan_version": "1.0",
   "publication_allowed": true,
-  "runtime_checksum": "sha256:da6536e744715392a81b6ae36ef3394db21c46cd85b2b9a8249864472499b17a",
+  "runtime_checksum": "sha256:5101c7565b789111e36fa5d80ad26b64d13efd57fe87536163041e378582c83b",
   "validation_errors": []
 }
