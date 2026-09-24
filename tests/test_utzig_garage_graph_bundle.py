@@ -111,6 +111,7 @@ def test_utzig_candidate_compiles_as_publishable_approved_plan() -> None:
     assert plan["publication_allowed"] is True
     assert plan["approval_scope"] == "publication_plan"
     assert len(plan["branches_affected"]) == 13
+    assert plan["breaking_contract_changes"] == []
     assert bundle["persona"] == {
         "id": "e7b7b2e8-859e-4185-b675-79bc0f3d846e",
         "slug": "utzig-garage",
@@ -129,7 +130,10 @@ def test_utzig_candidate_compiles_as_publishable_approved_plan() -> None:
         for edge in bundle["edges"]
         if edge["relation_type"] == "publishes_to" and edge["target"] == "gallery:utzig"
     }
-    assert len(public_grants) == 36
+    assert len(public_grants) == 41
+    assert {
+        node["id"] for node in bundle["nodes"] if node["node_type"] == "product"
+    } <= public_grants
     assert {
             edge["source"]
             for edge in bundle["edges"]
@@ -146,17 +150,15 @@ def test_public_product_descriptions_and_specialist_identity_are_approved() -> N
     nodes = _nodes(bundle)
     products = [node for node in bundle["nodes"] if node["node_type"] == "product"]
 
-    assert len(products) == 13
+    assert len(products) == 18
     for product in products:
         assert len(product["summary"]) >= 100
         assert not product["summary"].startswith("Serviço de ")
         provenance = product["data"]["public_site"]["description_source"]
-        assert provenance == {
-            "source": "operator_approved_aura_public_reference_2026_09_23",
-            "reference_url": "https://auradetail.com.br/",
-            "policy": "operator_approved_commercial_adaptation",
-            "validation_status": "approved",
-        }
+        assert provenance["source"] == "operator_approved_aura_adaptation_2026_09_24"
+        assert provenance["reference_url"] == "https://auradetail.com.br/"
+        assert provenance["policy"] == "operator_approved_commercial_adaptation"
+        assert provenance["validation_status"] == "approved"
         normalized = product["summary"].casefold()
         assert re.search(r"\baura\b", normalized) is None
         assert all(claim not in normalized for claim in FORBIDDEN_COMPETITOR_CLAIMS)
@@ -166,17 +168,17 @@ def test_public_product_descriptions_and_specialist_identity_are_approved() -> N
     assert entity["data"]["public_subtitle"] == "O Alemão da Utzig"
     page = nodes["campaign:automotive-detailing"]["data"]["page"]
     specialist = next(block for block in page["blocks"] if block["id"] == "lp-specialist")
-    assert specialist["title"] == "Wilian"
-    assert specialist["description"] == "O Alemão da Utzig"
-    expected_hero = {
-        "eyebrow": "Estética Automotiva Premium",
-        "title": "Mais de 20 serviços que valorizam e deixam o seu carro na melhor versão",
-        "description": "Tudo o que seu carro precisa, em um só lugar.",
-    }
+    assert specialist["title"] == "Wilian, o Alemão da Utzig"
+    assert "Olhar técnico" in specialist["description"]
     home = nodes["campaign:home"]["data"]["page"]
-    assert {key: home[key] for key in expected_hero} == expected_hero
+    assert home["title"] == "Encontre o cuidado certo para o seu carro."
     landing_hero = next(block for block in page["blocks"] if block["id"] == "lp-hero")
-    assert {key: landing_hero[key] for key in expected_hero} == expected_hero
+    assert landing_hero["eyebrow"] == "Estética Automotiva Premium"
+    assert landing_hero["title"] == "Mais de 20 serviços que valorizam e deixam o seu carro na melhor versão"
+    assert home["title"] != landing_hero["title"]
+    assert "martelinho" not in " ".join(product["title"].lower() for product in products)
+    assert "oxi-sanitização" not in " ".join(product["title"].lower() for product in products)
+    assert nodes["product:window-film"]["title"] == "Película de vidros / insulfilm"
 
 
 def test_operator_approved_starting_prices_are_graph_owned() -> None:
@@ -188,6 +190,7 @@ def test_operator_approved_starting_prices_are_graph_owned() -> None:
         "offer:technical-polish:starting-price": 700.00,
         "offer:ppf:starting-price": 499.90,
         "offer:vitrification:starting-price": 999.90,
+        "offer:window-film:starting-price": 999.90,
     }
 
     assert {
@@ -197,7 +200,7 @@ def test_operator_approved_starting_prices_are_graph_owned() -> None:
     for offer_id in expected:
         offer = nodes[offer_id]
         assert offer["status"] == "approved"
-        assert offer["data"]["source"] == "operator_approved_aura_public_reference_2026_09_23"
+        assert offer["data"]["source"] in {"operator_approved_aura_public_reference_2026_09_23", "operator_approved_aura_adaptation_2026_09_24"}
         assert offer["data"]["price_qualifier"] == "a_partir_de"
 
     relations = {
@@ -225,7 +228,7 @@ def test_appointment_fields_are_graph_owned_and_use_agentic_execution() -> None:
     assert policy["required_fields"] == ["nome_cliente", "servico"]
 
     products = [node for node in bundle["nodes"] if node["node_type"] == "product"]
-    assert len(products) == 13
+    assert len(products) == 18
     for product in products:
         required = product["data"]["booking"]["required_fields"]
         declared = {
@@ -240,6 +243,26 @@ def test_appointment_fields_are_graph_owned_and_use_agentic_execution() -> None:
             assert question_id == f"faq:qualification:{key}"
             assert nodes[question_id]["data"]["question"] == policy["field_questions"][key]
             assert nodes[question_id]["data"]["role"] == "qualification_question"
+
+
+def test_new_site_content_does_not_enter_agent_contract_or_rag() -> None:
+    bundle = _bundle()
+    compiled = compile_bundle(bundle)
+    new_products = {
+        "product:window-film", "product:vehicle-wrap", "product:chassis-wash",
+        "product:leather-conditioning", "product:seat-vitrification",
+    }
+    assert not new_products.intersection(compiled["branch_anchors"])
+    assert not any(
+        node_id.startswith("faq:site:") or node_id.rsplit(":", 1)[-1] in {
+            "window-film", "vehicle-wrap", "chassis-wash", "leather-conditioning", "seat-vitrification",
+        }
+        for node_id in compiled["eligible_faq_node_ids"]
+    )
+    assert all(
+        _nodes(bundle)[node_id]["data"]["public_site_only"] is True
+        for node_id in new_products
+    )
 
 
 def test_private_value_bands_do_not_reach_site_rag_or_runtime_contract_text() -> None:

@@ -5,7 +5,7 @@
     "slug": "utzig-garage"
   },
   "metadata": {
-    "purpose": "utzig_public_editorial_content_enrichment",
+    "purpose": "utzig_aura_inspired_complete_public_site_2026_09_24",
     "publication_allowed": true,
     "publication_blockers": [],
     "draft_persona_id": {
@@ -85,6 +85,16 @@
       "specialist_public_name": "Wilian",
       "specialist_public_subtitle": "O Alemão da Utzig",
       "hero_claim_source": "operator_approved_customer_feedback_2026_09_23"
+    },
+    "content_reference": {
+      "source": "operator_approved_aura_adaptation_2026_09_24",
+      "reference_url": "https://auradetail.com.br/",
+      "excluded_services": [
+        "martelinho de ouro",
+        "oxi-sanitização"
+      ],
+      "testimonial_policy": "verified_customer_source_required",
+      "site_only_new_content": true
     }
   },
   "nodes": [
@@ -351,14 +361,14 @@
           "route": "/",
           "kind": "linktree",
           "template_key": "automotive_detailing",
-          "title": "Mais de 20 serviços que valorizam e deixam o seu carro na melhor versão",
-          "description": "Tudo o que seu carro precisa, em um só lugar.",
+          "title": "Encontre o cuidado certo para o seu carro.",
+          "description": "Proteção, renovação e acabamento em um só lugar. Escolha por onde começar com a Utzig Garage.",
           "actions": [
             {
               "id": "services",
               "node_id": "campaign:automotive-detailing",
               "label": "Conheça nossos serviços",
-              "description": "Veja soluções de preservação, revitalização e aprimoramento",
+              "description": "Explore serviços, benefícios e valores iniciais",
               "kind": "internal",
               "href": "/estetica-automotiva",
               "position": 0
@@ -366,7 +376,7 @@
             {
               "id": "quick-booking",
               "label": "Agendamento rápido",
-              "description": "Um agente entende sua necessidade e encaminha para o Alemão",
+              "description": "Conte o que seu carro precisa e receba orientação",
               "kind": "whatsapp",
               "contact_key": "quick_booking",
               "message_template": "Olá, gostaria de pedir uma avaliação.",
@@ -403,9 +413,9 @@
             {
               "id": "home-hero",
               "kind": "hero",
-              "title": "Cuidado técnico, resultado que aparece.",
+              "title": "Encontre o cuidado certo para o seu carro.",
               "node_ids": [
-                "copy:hero"
+                "copy:home-hero"
               ],
               "asset_node_ids": [
                 "asset:hero"
@@ -489,14 +499,14 @@
           "kind": "landing_page",
           "template_key": "automotive_detailing",
           "title": "Mais de 20 serviços que valorizam e deixam o seu carro na melhor versão",
-          "description": "Tudo o que seu carro precisa, em um só lugar.",
+          "description": "Da limpeza à proteção da pintura, encontre o cuidado para cada momento do seu carro.",
           "actions": [],
           "blocks": [
             {
               "id": "lp-hero",
               "kind": "hero",
               "title": "Mais de 20 serviços que valorizam e deixam o seu carro na melhor versão",
-              "cta_label": "Pedir uma avaliação",
+              "cta_label": "Conversar sobre meu carro",
               "contact_key": "quick_booking",
               "message_template": "Olá, gostaria de pedir uma avaliação.",
               "node_ids": [
@@ -506,22 +516,24 @@
                 "asset:hero"
               ],
               "eyebrow": "Estética Automotiva Premium",
-              "description": "Tudo o que seu carro precisa, em um só lugar."
+              "description": "Lavagem, correção, proteção e acabamento com avaliação feita para o seu veículo."
             },
             {
               "id": "lp-audiences",
               "kind": "audience_links",
-              "title": "O que você busca?",
+              "title": "O que o seu carro precisa agora?",
               "node_ids": [
                 "audience:preservation",
                 "audience:revitalization",
                 "audience:enhancement"
-              ]
+              ],
+              "eyebrow": "Seu objetivo, nosso ponto de partida",
+              "description": "Preservar a pintura, recuperar o brilho ou transformar detalhes: comece pelo seu objetivo."
             },
             {
               "id": "lp-services",
               "kind": "service_catalog",
-              "title": "Serviços",
+              "title": "Do detalhe à transformação",
               "cta_label": "Descubra este serviço",
               "node_ids": [
                 "group:preservation",
@@ -541,25 +553,35 @@
                 "product:painting",
                 "product:ppf",
                 "product:vitrification",
-                "product:windshield-crystallization"
-              ]
+                "product:windshield-crystallization",
+                "product:window-film",
+                "product:vehicle-wrap",
+                "product:chassis-wash",
+                "product:leather-conditioning",
+                "product:seat-vitrification"
+              ],
+              "eyebrow": "Escolha o cuidado ideal",
+              "description": "Serviços para limpar, corrigir, proteger e renovar. Abra cada opção para entender o resultado e o investimento inicial disponível."
             },
             {
               "id": "lp-process",
               "kind": "process",
-              "title": "Avaliação e processo",
+              "title": "Seu carro em boas mãos, passo a passo",
               "node_ids": [
-                "copy:process",
-                "rule:photos-no-diagnosis"
+                "copy:process-step-contact",
+                "copy:process-step-diagnosis",
+                "copy:process-step-delivery"
               ],
               "asset_node_ids": [
                 "asset:process"
-              ]
+              ],
+              "eyebrow": "Simples desde o primeiro contato",
+              "description": "Uma conversa, uma avaliação cuidadosa e uma execução definida para o seu carro."
             },
             {
               "id": "lp-gallery",
               "kind": "gallery",
-              "title": "Trabalhos reais",
+              "title": "O cuidado visto de perto",
               "node_ids": [
                 "gallery:utzig"
               ],
@@ -570,54 +592,77 @@
                 "asset:engine-final",
                 "asset:interior",
                 "asset:glass-before-after"
-              ]
+              ],
+              "eyebrow": "Feito na Utzig",
+              "description": "Veja detalhes de trabalhos realizados na oficina."
             },
             {
               "id": "lp-specialist",
               "kind": "specialist",
-              "title": "Wilian",
+              "title": "Wilian, o Alemão da Utzig",
               "node_ids": [
-                "entity:alemao"
+                "entity:alemao",
+                "copy:benefit-care",
+                "copy:benefit-choice",
+                "copy:benefit-finish"
               ],
               "asset_node_ids": [
                 "asset:editorial"
               ],
               "eyebrow": "Quem está por trás",
-              "description": "O Alemão da Utzig"
+              "description": "Olhar técnico, cuidado em cada etapa e uma indicação pensada para o seu carro."
             },
             {
               "id": "lp-location",
               "kind": "location",
-              "title": "Onde estamos",
+              "title": "A Utzig fica em Santa Maria do Herval",
               "cta_label": "Como chegar",
               "node_ids": [
                 "campaign:physical-store"
-              ]
+              ],
+              "eyebrow": "Venha conhecer a oficina"
             },
             {
               "id": "lp-faq",
               "kind": "faq",
-              "title": "Perguntas frequentes",
+              "title": "Dúvidas frequentes",
               "node_ids": [
                 "faq:price-and-schedule",
                 "faq:photos",
                 "faq:assessment",
-                "faq:location"
-              ]
+                "faq:location",
+                "faq:site:ppf-benefit",
+                "faq:site:vitrification-vs-wax",
+                "faq:site:window-film-benefit",
+                "faq:site:service-duration",
+                "faq:site:aftercare",
+                "faq:site:warranty",
+                "faq:site:used-car-ppf",
+                "faq:site:budget"
+              ],
+              "eyebrow": "Antes de agendar",
+              "description": "Respostas diretas para escolher o próximo cuidado do seu carro."
             },
             {
               "id": "lp-final",
               "kind": "final_cta",
-              "title": "Pedir uma avaliação",
-              "cta_label": "Pedir uma avaliação",
+              "title": "Vamos descobrir o melhor para o seu carro?",
+              "cta_label": "Conversar com a Utzig",
               "contact_key": "quick_booking",
               "message_template": "Olá, gostaria de pedir uma avaliação.",
               "node_ids": [
                 "copy:final-cta"
-              ]
+              ],
+              "eyebrow": "O próximo passo é simples",
+              "description": "Conte o que você procura. A Utzig avalia o veículo e orienta a combinação certa de serviços."
             }
           ],
-          "eyebrow": "Estética Automotiva Premium"
+          "eyebrow": "Estética Automotiva Premium",
+          "ribbon_terms": [
+            "Proteção e conservação",
+            "Correção e brilho",
+            "Limpeza e conforto"
+          ]
         }
       }
     },
@@ -816,7 +861,7 @@
       "node_type": "product",
       "slug": "evaluation",
       "title": "Avaliação",
-      "summary": "O atendimento começa pelo WhatsApp e segue com uma avaliação do veículo para entender a necessidade, indicar o cuidado adequado e organizar a execução. Diagnóstico, valor e próximos passos são confirmados por Wilian, com orientações para conservar o resultado.",
+      "summary": "Cada carro tem uma história e uma necessidade. Na avaliação, Wilian observa o estado do veículo, entende seu objetivo e indica uma combinação de serviços, com orçamento e prazo definidos para o caso.",
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
@@ -827,10 +872,10 @@
             "message_template": "Olá! Quero pedir uma avaliação para o meu carro."
           },
           "description_source": {
-            "source": "operator_approved_aura_public_reference_2026_09_23",
+            "source": "operator_approved_aura_adaptation_2026_09_24",
+            "validation_status": "approved",
             "reference_url": "https://auradetail.com.br/",
-            "policy": "operator_approved_commercial_adaptation",
-            "validation_status": "approved"
+            "policy": "operator_approved_commercial_adaptation"
           }
         },
         "aliases": [
@@ -985,13 +1030,14 @@
       "node_type": "copy",
       "slug": "copy-evaluation",
       "title": "Apresentação — Avaliação",
-      "summary": "Conheça Avaliação e peça uma avaliação para entender o cuidado adequado ao seu veículo.",
+      "summary": "Cada carro tem uma história e uma necessidade. Na avaliação, Wilian observa o estado do veículo, entende seu objetivo e indica uma combinação de serviços, com orçamento e prazo definidos para o caso.",
       "status": "approved",
       "data": {
-        "source": "user_provided_utzig_plan_2026_09_22",
+        "source": "operator_approved_aura_adaptation_2026_09_24",
         "validation_status": "approved",
         "channel": "public_site",
-        "target_node_id": "product:evaluation"
+        "target_node_id": "product:evaluation",
+        "reference_url": "https://auradetail.com.br/"
       }
     },
     {
@@ -1024,7 +1070,7 @@
       "node_type": "product",
       "slug": "detailed-wash",
       "title": "Lavagem detalhada",
-      "summary": "Lavagem premium com técnica de dois baldes, produtos próprios para detalhamento, trabalho com pincel e atenção a pneus e rodas. O serviço leva em média de 1 a 2 horas e parte de R$ 259,90.",
+      "summary": "Mais que uma lavagem: limpeza cuidadosa de carroceria, rodas e detalhes, com técnica de dois baldes, pincéis e produtos adequados. Uma forma segura de recuperar a apresentação do carro e manter o acabamento em dia. A partir de R$ 259,90.",
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
@@ -1035,10 +1081,10 @@
             "message_template": "Olá! Quero pedir uma avaliação para lavagem detalhada."
           },
           "description_source": {
-            "source": "operator_approved_aura_public_reference_2026_09_23",
+            "source": "operator_approved_aura_adaptation_2026_09_24",
+            "validation_status": "approved",
             "reference_url": "https://auradetail.com.br/",
-            "policy": "operator_approved_commercial_adaptation",
-            "validation_status": "approved"
+            "policy": "operator_approved_commercial_adaptation"
           }
         },
         "aliases": [
@@ -1169,13 +1215,14 @@
       "node_type": "copy",
       "slug": "copy-detailed-wash",
       "title": "Apresentação — Lavagem detalhada",
-      "summary": "Conheça Lavagem detalhada e peça uma avaliação para entender o cuidado adequado ao seu veículo.",
+      "summary": "Mais que uma lavagem: limpeza cuidadosa de carroceria, rodas e detalhes, com técnica de dois baldes, pincéis e produtos adequados. Uma forma segura de recuperar a apresentação do carro e manter o acabamento em dia. A partir de R$ 259,90.",
       "status": "approved",
       "data": {
-        "source": "user_provided_utzig_plan_2026_09_22",
+        "source": "operator_approved_aura_adaptation_2026_09_24",
         "validation_status": "approved",
         "channel": "public_site",
-        "target_node_id": "product:detailed-wash"
+        "target_node_id": "product:detailed-wash",
+        "reference_url": "https://auradetail.com.br/"
       }
     },
     {
@@ -1208,7 +1255,7 @@
       "node_type": "product",
       "slug": "interior-cleaning",
       "title": "Higienização interna",
-      "summary": "Limpeza profunda e sanitização do interior com produtos e equipamentos específicos. Inclui tratamento compatível com couro ou tecido, cuidado com odores e proteção antimicrobiana; leva em média 6 horas e parte de R$ 600.",
+      "summary": "Cuidado profundo para bancos, carpetes, painéis e áreas de contato. A limpeza trata sujeira e odores com equipamentos e produtos compatíveis com cada revestimento, para um interior mais agradável. A partir de R$ 600.",
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
@@ -1219,10 +1266,10 @@
             "message_template": "Olá! Quero pedir uma avaliação para higienização interna."
           },
           "description_source": {
-            "source": "operator_approved_aura_public_reference_2026_09_23",
+            "source": "operator_approved_aura_adaptation_2026_09_24",
+            "validation_status": "approved",
             "reference_url": "https://auradetail.com.br/",
-            "policy": "operator_approved_commercial_adaptation",
-            "validation_status": "approved"
+            "policy": "operator_approved_commercial_adaptation"
           }
         },
         "aliases": [
@@ -1377,13 +1424,14 @@
       "node_type": "copy",
       "slug": "copy-interior-cleaning",
       "title": "Apresentação — Higienização interna",
-      "summary": "Conheça Higienização interna e peça uma avaliação para entender o cuidado adequado ao seu veículo.",
+      "summary": "Cuidado profundo para bancos, carpetes, painéis e áreas de contato. A limpeza trata sujeira e odores com equipamentos e produtos compatíveis com cada revestimento, para um interior mais agradável. A partir de R$ 600.",
       "status": "approved",
       "data": {
-        "source": "user_provided_utzig_plan_2026_09_22",
+        "source": "operator_approved_aura_adaptation_2026_09_24",
         "validation_status": "approved",
         "channel": "public_site",
-        "target_node_id": "product:interior-cleaning"
+        "target_node_id": "product:interior-cleaning",
+        "reference_url": "https://auradetail.com.br/"
       }
     },
     {
@@ -1416,7 +1464,7 @@
       "node_type": "product",
       "slug": "glass-polish",
       "title": "Polimento de vidros",
-      "summary": "Tratamento para melhorar o acabamento de vidros com marcas ou manchas compatíveis com polimento. O resultado possível e a combinação com cristalização dependem da avaliação da superfície.",
+      "summary": "Trata marcas e manchas compatíveis com polimento e melhora a leitura visual dos vidros. Wilian avalia o estado do vidro e indica o acabamento possível antes do serviço.",
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
@@ -1427,10 +1475,10 @@
             "message_template": "Olá! Quero pedir uma avaliação para polimento de vidros."
           },
           "description_source": {
-            "source": "operator_approved_aura_public_reference_2026_09_23",
+            "source": "operator_approved_aura_adaptation_2026_09_24",
+            "validation_status": "approved",
             "reference_url": "https://auradetail.com.br/",
-            "policy": "operator_approved_commercial_adaptation",
-            "validation_status": "approved"
+            "policy": "operator_approved_commercial_adaptation"
           }
         },
         "aliases": [
@@ -1561,13 +1609,14 @@
       "node_type": "copy",
       "slug": "copy-glass-polish",
       "title": "Apresentação — Polimento de vidros",
-      "summary": "Conheça Polimento de vidros e peça uma avaliação para entender o cuidado adequado ao seu veículo.",
+      "summary": "Trata marcas e manchas compatíveis com polimento e melhora a leitura visual dos vidros. Wilian avalia o estado do vidro e indica o acabamento possível antes do serviço.",
       "status": "approved",
       "data": {
-        "source": "user_provided_utzig_plan_2026_09_22",
+        "source": "operator_approved_aura_adaptation_2026_09_24",
         "validation_status": "approved",
         "channel": "public_site",
-        "target_node_id": "product:glass-polish"
+        "target_node_id": "product:glass-polish",
+        "reference_url": "https://auradetail.com.br/"
       }
     },
     {
@@ -1600,7 +1649,7 @@
       "node_type": "product",
       "slug": "engine-bay-wash",
       "title": "Lavagem de cofre",
-      "summary": "Limpeza profunda e segura do compartimento do motor, realizada conforme a condição observada e com atenção aos componentes. Possíveis sinais de vazamento precisam ser informados antes da avaliação.",
+      "summary": "Limpeza técnica do cofre do motor, com atenção aos componentes e ao estado do veículo. Remove a sujeira acumulada e devolve uma apresentação mais cuidada ao compartimento.",
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
@@ -1611,10 +1660,10 @@
             "message_template": "Olá! Quero pedir uma avaliação para lavagem de cofre."
           },
           "description_source": {
-            "source": "operator_approved_aura_public_reference_2026_09_23",
+            "source": "operator_approved_aura_adaptation_2026_09_24",
+            "validation_status": "approved",
             "reference_url": "https://auradetail.com.br/",
-            "policy": "operator_approved_commercial_adaptation",
-            "validation_status": "approved"
+            "policy": "operator_approved_commercial_adaptation"
           }
         },
         "aliases": [
@@ -1769,13 +1818,14 @@
       "node_type": "copy",
       "slug": "copy-engine-bay-wash",
       "title": "Apresentação — Lavagem de cofre",
-      "summary": "Conheça Lavagem de cofre e peça uma avaliação para entender o cuidado adequado ao seu veículo.",
+      "summary": "Limpeza técnica do cofre do motor, com atenção aos componentes e ao estado do veículo. Remove a sujeira acumulada e devolve uma apresentação mais cuidada ao compartimento.",
       "status": "approved",
       "data": {
-        "source": "user_provided_utzig_plan_2026_09_22",
+        "source": "operator_approved_aura_adaptation_2026_09_24",
         "validation_status": "approved",
         "channel": "public_site",
-        "target_node_id": "product:engine-bay-wash"
+        "target_node_id": "product:engine-bay-wash",
+        "reference_url": "https://auradetail.com.br/"
       }
     },
     {
@@ -1808,7 +1858,7 @@
       "node_type": "product",
       "slug": "technical-polish",
       "title": "Polimento técnico",
-      "summary": "Correção profissional da pintura para tratar microrriscos, hologramas e oxidação compatíveis com o processo, recuperar o brilho e preparar a superfície para proteção. Leva em média 1 dia e parte de R$ 700.",
+      "summary": "Correção de pintura para reduzir microrriscos, hologramas e sinais de oxidação compatíveis com o processo. Recupera profundidade de cor e brilho, além de preparar a superfície para proteção. A partir de R$ 700.",
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
@@ -1819,10 +1869,10 @@
             "message_template": "Olá! Quero pedir uma avaliação para polimento técnico."
           },
           "description_source": {
-            "source": "operator_approved_aura_public_reference_2026_09_23",
+            "source": "operator_approved_aura_adaptation_2026_09_24",
+            "validation_status": "approved",
             "reference_url": "https://auradetail.com.br/",
-            "policy": "operator_approved_commercial_adaptation",
-            "validation_status": "approved"
+            "policy": "operator_approved_commercial_adaptation"
           }
         },
         "aliases": [
@@ -1977,13 +2027,14 @@
       "node_type": "copy",
       "slug": "copy-technical-polish",
       "title": "Apresentação — Polimento técnico",
-      "summary": "Conheça Polimento técnico e peça uma avaliação para entender o cuidado adequado ao seu veículo.",
+      "summary": "Correção de pintura para reduzir microrriscos, hologramas e sinais de oxidação compatíveis com o processo. Recupera profundidade de cor e brilho, além de preparar a superfície para proteção. A partir de R$ 700.",
       "status": "approved",
       "data": {
-        "source": "user_provided_utzig_plan_2026_09_22",
+        "source": "operator_approved_aura_adaptation_2026_09_24",
         "validation_status": "approved",
         "channel": "public_site",
-        "target_node_id": "product:technical-polish"
+        "target_node_id": "product:technical-polish",
+        "reference_url": "https://auradetail.com.br/"
       }
     },
     {
@@ -2016,7 +2067,7 @@
       "node_type": "product",
       "slug": "commercial-polish",
       "title": "Polimento comercial",
-      "summary": "Polimento voltado à recuperação visual e ao ganho de brilho, indicado conforme o objetivo e a condição da pintura. A equipe orienta se o comercial ou o técnico é mais adequado.",
+      "summary": "Recupera o brilho e melhora a apresentação da pintura. É a escolha para quem quer um resultado visual perceptível, com a intensidade do trabalho definida depois da avaliação da superfície.",
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
@@ -2027,10 +2078,10 @@
             "message_template": "Olá! Quero pedir uma avaliação para polimento comercial."
           },
           "description_source": {
-            "source": "operator_approved_aura_public_reference_2026_09_23",
+            "source": "operator_approved_aura_adaptation_2026_09_24",
+            "validation_status": "approved",
             "reference_url": "https://auradetail.com.br/",
-            "policy": "operator_approved_commercial_adaptation",
-            "validation_status": "approved"
+            "policy": "operator_approved_commercial_adaptation"
           }
         },
         "aliases": [
@@ -2161,13 +2212,14 @@
       "node_type": "copy",
       "slug": "copy-commercial-polish",
       "title": "Apresentação — Polimento comercial",
-      "summary": "Conheça Polimento comercial e peça uma avaliação para entender o cuidado adequado ao seu veículo.",
+      "summary": "Recupera o brilho e melhora a apresentação da pintura. É a escolha para quem quer um resultado visual perceptível, com a intensidade do trabalho definida depois da avaliação da superfície.",
       "status": "approved",
       "data": {
-        "source": "user_provided_utzig_plan_2026_09_22",
+        "source": "operator_approved_aura_adaptation_2026_09_24",
         "validation_status": "approved",
         "channel": "public_site",
-        "target_node_id": "product:commercial-polish"
+        "target_node_id": "product:commercial-polish",
+        "reference_url": "https://auradetail.com.br/"
       }
     },
     {
@@ -2200,7 +2252,7 @@
       "node_type": "product",
       "slug": "headlight-restoration",
       "title": "Restauração de faróis",
-      "summary": "Restauração do acabamento dos faróis para recuperar transparência e apresentação visual dentro do que a peça permite. Resultado e proteção aplicável são confirmados após avaliação.",
+      "summary": "Faróis opacos fazem o carro parecer mais cansado. A restauração trabalha a transparência e o acabamento da lente, com proteção indicada conforme sua condição.",
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
@@ -2211,10 +2263,10 @@
             "message_template": "Olá! Quero pedir uma avaliação para restauração de faróis."
           },
           "description_source": {
-            "source": "operator_approved_aura_public_reference_2026_09_23",
+            "source": "operator_approved_aura_adaptation_2026_09_24",
+            "validation_status": "approved",
             "reference_url": "https://auradetail.com.br/",
-            "policy": "operator_approved_commercial_adaptation",
-            "validation_status": "approved"
+            "policy": "operator_approved_commercial_adaptation"
           }
         },
         "aliases": [
@@ -2345,13 +2397,14 @@
       "node_type": "copy",
       "slug": "copy-headlight-restoration",
       "title": "Apresentação — Restauração de faróis",
-      "summary": "Conheça Restauração de faróis e peça uma avaliação para entender o cuidado adequado ao seu veículo.",
+      "summary": "Faróis opacos fazem o carro parecer mais cansado. A restauração trabalha a transparência e o acabamento da lente, com proteção indicada conforme sua condição.",
       "status": "approved",
       "data": {
-        "source": "user_provided_utzig_plan_2026_09_22",
+        "source": "operator_approved_aura_adaptation_2026_09_24",
         "validation_status": "approved",
         "channel": "public_site",
-        "target_node_id": "product:headlight-restoration"
+        "target_node_id": "product:headlight-restoration",
+        "reference_url": "https://auradetail.com.br/"
       }
     },
     {
@@ -2384,7 +2437,7 @@
       "node_type": "product",
       "slug": "vitrification",
       "title": "Vitrificação",
-      "summary": "Revestimento cerâmico para brilho intenso, proteção química e limpeza mais fácil. A durabilidade informada é de até 3 anos, a execução leva de 1 a 3 dias e o serviço parte de R$ 999,90.",
+      "summary": "Proteção cerâmica que destaca o brilho, facilita a limpeza e ajuda a proteger a superfície contra contaminantes. O preparo e a aplicação são personalizados; durabilidade informada de até 3 anos. A partir de R$ 999,90.",
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
@@ -2395,10 +2448,10 @@
             "message_template": "Olá! Quero pedir uma avaliação para vitrificação."
           },
           "description_source": {
-            "source": "operator_approved_aura_public_reference_2026_09_23",
+            "source": "operator_approved_aura_adaptation_2026_09_24",
+            "validation_status": "approved",
             "reference_url": "https://auradetail.com.br/",
-            "policy": "operator_approved_commercial_adaptation",
-            "validation_status": "approved"
+            "policy": "operator_approved_commercial_adaptation"
           }
         },
         "aliases": [
@@ -2553,13 +2606,14 @@
       "node_type": "copy",
       "slug": "copy-vitrification",
       "title": "Apresentação — Vitrificação",
-      "summary": "Conheça Vitrificação e peça uma avaliação para entender o cuidado adequado ao seu veículo.",
+      "summary": "Proteção cerâmica que destaca o brilho, facilita a limpeza e ajuda a proteger a superfície contra contaminantes. O preparo e a aplicação são personalizados; durabilidade informada de até 3 anos. A partir de R$ 999,90.",
       "status": "approved",
       "data": {
-        "source": "user_provided_utzig_plan_2026_09_22",
+        "source": "operator_approved_aura_adaptation_2026_09_24",
         "validation_status": "approved",
         "channel": "public_site",
-        "target_node_id": "product:vitrification"
+        "target_node_id": "product:vitrification",
+        "reference_url": "https://auradetail.com.br/"
       }
     },
     {
@@ -2592,7 +2646,7 @@
       "node_type": "product",
       "slug": "ppf",
       "title": "PPF",
-      "summary": "Película transparente e autorreparável para proteger áreas selecionadas contra riscos, pedras, raios UV e intempéries, preservando a pintura original. A duração é personalizada, a garantia é de 10 anos e a aplicação parte de R$ 499,90.",
+      "summary": "Uma proteção transparente para áreas expostas a pedras, atrito e pequenos riscos. O PPF ajuda a preservar a pintura original, tem característica autorreparável e pode ser aplicado em partes selecionadas. A partir de R$ 499,90; garantia informada de 10 anos.",
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
@@ -2603,10 +2657,10 @@
             "message_template": "Olá! Quero pedir uma avaliação para PPF."
           },
           "description_source": {
-            "source": "operator_approved_aura_public_reference_2026_09_23",
+            "source": "operator_approved_aura_adaptation_2026_09_24",
+            "validation_status": "approved",
             "reference_url": "https://auradetail.com.br/",
-            "policy": "operator_approved_commercial_adaptation",
-            "validation_status": "approved"
+            "policy": "operator_approved_commercial_adaptation"
           }
         },
         "aliases": [
@@ -2761,13 +2815,14 @@
       "node_type": "copy",
       "slug": "copy-ppf",
       "title": "Apresentação — PPF",
-      "summary": "Conheça PPF e peça uma avaliação para entender o cuidado adequado ao seu veículo.",
+      "summary": "Uma proteção transparente para áreas expostas a pedras, atrito e pequenos riscos. O PPF ajuda a preservar a pintura original, tem característica autorreparável e pode ser aplicado em partes selecionadas. A partir de R$ 499,90; garantia informada de 10 anos.",
       "status": "approved",
       "data": {
-        "source": "user_provided_utzig_plan_2026_09_22",
+        "source": "operator_approved_aura_adaptation_2026_09_24",
         "validation_status": "approved",
         "channel": "public_site",
-        "target_node_id": "product:ppf"
+        "target_node_id": "product:ppf",
+        "reference_url": "https://auradetail.com.br/"
       }
     },
     {
@@ -2800,7 +2855,7 @@
       "node_type": "product",
       "slug": "bodywork",
       "title": "Funilaria",
-      "summary": "Correção de danos de carroceria e recuperação do alinhamento visual conforme a extensão e a localização do reparo. Quando indicado, pequenos amassados podem ser tratados sem danificar a pintura original; fotos iniciam a análise e a equipe confirma o diagnóstico.",
+      "summary": "Reparo de danos de carroceria para devolver alinhamento e apresentação ao veículo. A extensão do trabalho é definida depois de observar a peça e a condição do acabamento.",
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
@@ -2811,10 +2866,10 @@
             "message_template": "Olá! Quero pedir uma avaliação para funilaria."
           },
           "description_source": {
-            "source": "operator_approved_aura_public_reference_2026_09_23",
+            "source": "operator_approved_aura_adaptation_2026_09_24",
+            "validation_status": "approved",
             "reference_url": "https://auradetail.com.br/",
-            "policy": "operator_approved_commercial_adaptation",
-            "validation_status": "approved"
+            "policy": "operator_approved_commercial_adaptation"
           }
         },
         "aliases": [
@@ -2945,13 +3000,14 @@
       "node_type": "copy",
       "slug": "copy-bodywork",
       "title": "Apresentação — Funilaria",
-      "summary": "Conheça Funilaria e peça uma avaliação para entender o cuidado adequado ao seu veículo.",
+      "summary": "Reparo de danos de carroceria para devolver alinhamento e apresentação ao veículo. A extensão do trabalho é definida depois de observar a peça e a condição do acabamento.",
       "status": "approved",
       "data": {
-        "source": "user_provided_utzig_plan_2026_09_22",
+        "source": "operator_approved_aura_adaptation_2026_09_24",
         "validation_status": "approved",
         "channel": "public_site",
-        "target_node_id": "product:bodywork"
+        "target_node_id": "product:bodywork",
+        "reference_url": "https://auradetail.com.br/"
       }
     },
     {
@@ -2984,7 +3040,7 @@
       "node_type": "product",
       "slug": "painting",
       "title": "Pintura",
-      "summary": "Reparo, pintura e personalização para recuperar o acabamento ou adaptar a apresentação do veículo. Cor, modelo, ano e condição da área afetada orientam a avaliação de resultado, prazo e orçamento.",
+      "summary": "Reparo e pintura para recuperar áreas danificadas ou renovar a apresentação do carro. Cor, preparação e acabamento são definidos conforme a peça e o resultado desejado.",
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
@@ -2995,10 +3051,10 @@
             "message_template": "Olá! Quero pedir uma avaliação para pintura."
           },
           "description_source": {
-            "source": "operator_approved_aura_public_reference_2026_09_23",
+            "source": "operator_approved_aura_adaptation_2026_09_24",
+            "validation_status": "approved",
             "reference_url": "https://auradetail.com.br/",
-            "policy": "operator_approved_commercial_adaptation",
-            "validation_status": "approved"
+            "policy": "operator_approved_commercial_adaptation"
           }
         },
         "aliases": [
@@ -3153,13 +3209,14 @@
       "node_type": "copy",
       "slug": "copy-painting",
       "title": "Apresentação — Pintura",
-      "summary": "Conheça Pintura e peça uma avaliação para entender o cuidado adequado ao seu veículo.",
+      "summary": "Reparo e pintura para recuperar áreas danificadas ou renovar a apresentação do carro. Cor, preparação e acabamento são definidos conforme a peça e o resultado desejado.",
       "status": "approved",
       "data": {
-        "source": "user_provided_utzig_plan_2026_09_22",
+        "source": "operator_approved_aura_adaptation_2026_09_24",
         "validation_status": "approved",
         "channel": "public_site",
-        "target_node_id": "product:painting"
+        "target_node_id": "product:painting",
+        "reference_url": "https://auradetail.com.br/"
       }
     },
     {
@@ -3503,12 +3560,14 @@
       "node_type": "copy",
       "slug": "hero",
       "title": "Hero da estética automotiva",
-      "summary": "SEU CARRO, EM SUA MELHOR VERSÃO",
+      "summary": "Mais de 20 serviços que valorizam e deixam o seu carro na melhor versão",
       "status": "approved",
       "data": {
-        "source": "user_provided_utzig_plan_2026_09_22",
+        "source": "operator_approved_aura_adaptation_2026_09_24",
         "validation_status": "approved",
-        "channel": "public_site"
+        "channel": "public_site",
+        "reference_url": "https://auradetail.com.br/",
+        "page": "landing_page"
       }
     },
     {
@@ -3543,7 +3602,7 @@
       "node_type": "copy",
       "slug": "cta-avaliacao",
       "title": "Chamada para avaliação",
-      "summary": "Conte o que você busca para o veículo e peça uma avaliação.",
+      "summary": "Conte o que você procura. A Utzig avalia o veículo e orienta a combinação certa de serviços.",
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
@@ -4493,7 +4552,7 @@
       "node_type": "product",
       "slug": "windshield-crystallization",
       "title": "Cristalização de para-brisa",
-      "summary": "Tratamento do para-brisa voltado à proteção da superfície e à repelência de água para favorecer a visibilidade. A aplicação e o resultado esperado são confirmados conforme a condição do vidro.",
+      "summary": "Tratamento para o para-brisa com repelência à água e acabamento mais fácil de manter. Uma camada de cuidado que favorece a visibilidade em dias de chuva, conforme a condição do vidro.",
       "status": "approved",
       "data": {
         "source": "user_provided_utzig_plan_2026_09_22",
@@ -4504,10 +4563,10 @@
             "message_template": "Olá! Quero pedir uma avaliação para cristalização de para-brisa."
           },
           "description_source": {
-            "source": "operator_approved_aura_public_reference_2026_09_23",
+            "source": "operator_approved_aura_adaptation_2026_09_24",
+            "validation_status": "approved",
             "reference_url": "https://auradetail.com.br/",
-            "policy": "operator_approved_commercial_adaptation",
-            "validation_status": "approved"
+            "policy": "operator_approved_commercial_adaptation"
           }
         },
         "aliases": [
@@ -4638,13 +4697,14 @@
       "node_type": "copy",
       "slug": "windshield-crystallization",
       "title": "Cristalização de para-brisa",
-      "summary": "Conheça Polimento de vidros e peça uma avaliação para entender o cuidado adequado ao seu veículo.",
+      "summary": "Tratamento para o para-brisa com repelência à água e acabamento mais fácil de manter. Uma camada de cuidado que favorece a visibilidade em dias de chuva, conforme a condição do vidro.",
       "status": "approved",
       "data": {
-        "source": "user_provided_utzig_plan_2026_09_22",
+        "source": "operator_approved_aura_adaptation_2026_09_24",
         "validation_status": "approved",
         "channel": "public_site",
-        "target_node_id": "product:glass-polish"
+        "target_node_id": "product:windshield-crystallization",
+        "reference_url": "https://auradetail.com.br/"
       }
     },
     {
@@ -5887,7 +5947,7 @@
         "source": "operator_approved_aura_public_reference_2026_09_23",
         "validation_status": "approved",
         "offer": {
-          "amount": 600.0,
+          "amount": 600,
           "currency": "BRL"
         },
         "price_qualifier": "a_partir_de",
@@ -5907,7 +5967,7 @@
         "source": "operator_approved_aura_public_reference_2026_09_23",
         "validation_status": "approved",
         "offer": {
-          "amount": 700.0,
+          "amount": 700,
           "currency": "BRL"
         },
         "price_qualifier": "a_partir_de",
@@ -5954,6 +6014,1546 @@
         "duration": "1 a 3 dias",
         "reference_url": "https://auradetail.com.br/",
         "reference_scope": "operator_approved_commercial_catalog"
+      }
+    },
+    {
+      "id": "copy:home-hero",
+      "node_type": "copy",
+      "slug": "home-hero",
+      "title": "Hero do linktree",
+      "summary": "Encontre o cuidado certo para o seu carro.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "channel": "public_site",
+        "page": "linktree"
+      }
+    },
+    {
+      "id": "product:window-film",
+      "node_type": "product",
+      "slug": "window-film",
+      "title": "Película de vidros / insulfilm",
+      "summary": "Mais conforto e privacidade ao dirigir. A película de vidros ajuda a reduzir o calor interno e filtrar os raios UV, com tonalidade e aplicação escolhidas para o veículo. A partir de R$ 999,90.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "public_site": {
+          "cta": {
+            "label": "Pedir uma avaliação",
+            "message_template": "Olá! Quero pedir uma avaliação para Película de vidros / insulfilm."
+          },
+          "description_source": {
+            "source": "operator_approved_aura_adaptation_2026_09_24",
+            "validation_status": "approved",
+            "reference_url": "https://auradetail.com.br/",
+            "policy": "operator_approved_commercial_adaptation"
+          }
+        },
+        "aliases": [
+          "película de vidros",
+          "insulfilm",
+          "película automotiva"
+        ],
+        "capabilities": {
+          "branch_anchor": false
+        },
+        "booking": {
+          "required_fields": [
+            "nome_cliente",
+            "servico",
+            "modelo_veiculo",
+            "condicao"
+          ]
+        },
+        "qualification": {
+          "fields": [
+            {
+              "key": "nome_cliente",
+              "owner_node_id": "persona:utzig-garage",
+              "scope": "persona",
+              "question_node_id": "faq:qualification:nome_cliente",
+              "required": true,
+              "accepted_statuses": [
+                "known"
+              ],
+              "value_schema": {
+                "type": "string",
+                "minLength": 1
+              },
+              "validation": {
+                "mode": "schema"
+              },
+              "depends_on": [],
+              "priority": 1,
+              "overwrite_policy": "explicit_correction"
+            },
+            {
+              "key": "servico",
+              "owner_node_id": "product:window-film",
+              "scope": "branch",
+              "question_node_id": "faq:qualification:servico",
+              "required": true,
+              "accepted_statuses": [
+                "known"
+              ],
+              "value_schema": {
+                "type": "string",
+                "minLength": 1
+              },
+              "validation": {
+                "mode": "schema"
+              },
+              "depends_on": [
+                "nome_cliente"
+              ],
+              "priority": 0.8,
+              "overwrite_policy": "explicit_correction"
+            },
+            {
+              "key": "modelo_veiculo",
+              "owner_node_id": "persona:utzig-garage",
+              "scope": "persona",
+              "question_node_id": "faq:qualification:modelo_veiculo",
+              "required": true,
+              "accepted_statuses": [
+                "known"
+              ],
+              "value_schema": {
+                "type": "string",
+                "minLength": 1
+              },
+              "validation": {
+                "mode": "schema"
+              },
+              "depends_on": [
+                "servico"
+              ],
+              "priority": 0.8,
+              "overwrite_policy": "explicit_correction"
+            },
+            {
+              "key": "condicao",
+              "owner_node_id": "product:window-film",
+              "scope": "branch",
+              "question_node_id": "faq:qualification:condicao",
+              "required": true,
+              "accepted_statuses": [
+                "known"
+              ],
+              "value_schema": {
+                "type": "string",
+                "minLength": 1
+              },
+              "validation": {
+                "mode": "schema"
+              },
+              "depends_on": [
+                "servico"
+              ],
+              "priority": 0.8,
+              "overwrite_policy": "explicit_correction"
+            }
+          ]
+        },
+        "completion": {
+          "required_fields": [
+            "nome_cliente",
+            "servico",
+            "modelo_veiculo",
+            "condicao"
+          ]
+        },
+        "handoff": {
+          "on_complete_rule_node_id": "rule:human-handoff"
+        },
+        "metadata": {
+          "internal_commercial_value_band": {
+            "band": "faixa_3",
+            "source": "estimated_from_service_name"
+          }
+        },
+        "public_site_only": true
+      }
+    },
+    {
+      "id": "copy:window-film",
+      "node_type": "copy",
+      "slug": "copy-window-film",
+      "title": "Apresentação — Película de vidros / insulfilm",
+      "summary": "Mais conforto e privacidade ao dirigir. A película de vidros ajuda a reduzir o calor interno e filtrar os raios UV, com tonalidade e aplicação escolhidas para o veículo. A partir de R$ 999,90.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "channel": "public_site",
+        "target_node_id": "product:window-film"
+      }
+    },
+    {
+      "id": "faq:service:window-film",
+      "node_type": "faq",
+      "slug": "faq-window-film",
+      "title": "A Utzig oferece Película de vidros / insulfilm?",
+      "summary": "Mais conforto e privacidade ao dirigir. A película de vidros ajuda a reduzir o calor interno e filtrar os raios UV, com tonalidade e aplicação escolhidas para o veículo. A partir de R$ 999,90.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "question": "A Utzig oferece Película de vidros / insulfilm?",
+        "answer": "Sim. Mais conforto e privacidade ao dirigir. A película de vidros ajuda a reduzir o calor interno e filtrar os raios UV, com tonalidade e aplicação escolhidas para o veículo. A partir de R$ 999,90.",
+        "source_node_id": "product:window-film",
+        "source_node_type": "product",
+        "branch_path": [
+          "product:window-film",
+          "copy:window-film",
+          "faq:service:window-film"
+        ],
+        "question_aliases": [
+          "película de vidros",
+          "insulfilm",
+          "película automotiva"
+        ],
+        "claims": [
+          {
+            "claim_type": "service_availability",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "faq:service:window-film"
+            ]
+          }
+        ],
+        "public_site_only": true
+      }
+    },
+    {
+      "id": "offer:window-film:starting-price",
+      "node_type": "offer",
+      "slug": "window-film-starting-price",
+      "title": "Preço inicial — Película de vidros / insulfilm",
+      "summary": "Película de vidros / insulfilm a partir de R$ 999,90",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "offer": {
+          "amount": 999.9,
+          "currency": "BRL"
+        },
+        "price_qualifier": "a_partir_de",
+        "duration": "cerca de 6 horas",
+        "reference_scope": "operator_approved_commercial_catalog"
+      }
+    },
+    {
+      "id": "product:vehicle-wrap",
+      "node_type": "product",
+      "slug": "vehicle-wrap",
+      "title": "Envelopamento",
+      "summary": "Uma nova expressão para o carro com película de acabamento. O envelopamento permite mudar a aparência e acrescentar uma camada de proteção à superfície aplicada; cores e áreas são definidas na avaliação.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "public_site": {
+          "cta": {
+            "label": "Pedir uma avaliação",
+            "message_template": "Olá! Quero pedir uma avaliação para Envelopamento."
+          },
+          "description_source": {
+            "source": "operator_approved_aura_adaptation_2026_09_24",
+            "validation_status": "approved",
+            "reference_url": "https://auradetail.com.br/",
+            "policy": "operator_approved_commercial_adaptation"
+          }
+        },
+        "aliases": [
+          "envelopamento",
+          "mudança de cor"
+        ],
+        "capabilities": {
+          "branch_anchor": false
+        },
+        "booking": {
+          "required_fields": [
+            "nome_cliente",
+            "servico",
+            "modelo_veiculo",
+            "condicao"
+          ]
+        },
+        "qualification": {
+          "fields": [
+            {
+              "key": "nome_cliente",
+              "owner_node_id": "persona:utzig-garage",
+              "scope": "persona",
+              "question_node_id": "faq:qualification:nome_cliente",
+              "required": true,
+              "accepted_statuses": [
+                "known"
+              ],
+              "value_schema": {
+                "type": "string",
+                "minLength": 1
+              },
+              "validation": {
+                "mode": "schema"
+              },
+              "depends_on": [],
+              "priority": 1,
+              "overwrite_policy": "explicit_correction"
+            },
+            {
+              "key": "servico",
+              "owner_node_id": "product:vehicle-wrap",
+              "scope": "branch",
+              "question_node_id": "faq:qualification:servico",
+              "required": true,
+              "accepted_statuses": [
+                "known"
+              ],
+              "value_schema": {
+                "type": "string",
+                "minLength": 1
+              },
+              "validation": {
+                "mode": "schema"
+              },
+              "depends_on": [
+                "nome_cliente"
+              ],
+              "priority": 0.8,
+              "overwrite_policy": "explicit_correction"
+            },
+            {
+              "key": "modelo_veiculo",
+              "owner_node_id": "persona:utzig-garage",
+              "scope": "persona",
+              "question_node_id": "faq:qualification:modelo_veiculo",
+              "required": true,
+              "accepted_statuses": [
+                "known"
+              ],
+              "value_schema": {
+                "type": "string",
+                "minLength": 1
+              },
+              "validation": {
+                "mode": "schema"
+              },
+              "depends_on": [
+                "servico"
+              ],
+              "priority": 0.8,
+              "overwrite_policy": "explicit_correction"
+            },
+            {
+              "key": "condicao",
+              "owner_node_id": "product:vehicle-wrap",
+              "scope": "branch",
+              "question_node_id": "faq:qualification:condicao",
+              "required": true,
+              "accepted_statuses": [
+                "known"
+              ],
+              "value_schema": {
+                "type": "string",
+                "minLength": 1
+              },
+              "validation": {
+                "mode": "schema"
+              },
+              "depends_on": [
+                "servico"
+              ],
+              "priority": 0.8,
+              "overwrite_policy": "explicit_correction"
+            }
+          ]
+        },
+        "completion": {
+          "required_fields": [
+            "nome_cliente",
+            "servico",
+            "modelo_veiculo",
+            "condicao"
+          ]
+        },
+        "handoff": {
+          "on_complete_rule_node_id": "rule:human-handoff"
+        },
+        "metadata": {
+          "internal_commercial_value_band": {
+            "band": "faixa_3",
+            "source": "estimated_from_service_name"
+          }
+        },
+        "public_site_only": true
+      }
+    },
+    {
+      "id": "copy:vehicle-wrap",
+      "node_type": "copy",
+      "slug": "copy-vehicle-wrap",
+      "title": "Apresentação — Envelopamento",
+      "summary": "Uma nova expressão para o carro com película de acabamento. O envelopamento permite mudar a aparência e acrescentar uma camada de proteção à superfície aplicada; cores e áreas são definidas na avaliação.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "channel": "public_site",
+        "target_node_id": "product:vehicle-wrap"
+      }
+    },
+    {
+      "id": "faq:service:vehicle-wrap",
+      "node_type": "faq",
+      "slug": "faq-vehicle-wrap",
+      "title": "A Utzig oferece Envelopamento?",
+      "summary": "Uma nova expressão para o carro com película de acabamento. O envelopamento permite mudar a aparência e acrescentar uma camada de proteção à superfície aplicada; cores e áreas são definidas na avaliação.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "question": "A Utzig oferece Envelopamento?",
+        "answer": "Sim. Uma nova expressão para o carro com película de acabamento. O envelopamento permite mudar a aparência e acrescentar uma camada de proteção à superfície aplicada; cores e áreas são definidas na avaliação.",
+        "source_node_id": "product:vehicle-wrap",
+        "source_node_type": "product",
+        "branch_path": [
+          "product:vehicle-wrap",
+          "copy:vehicle-wrap",
+          "faq:service:vehicle-wrap"
+        ],
+        "question_aliases": [
+          "envelopamento",
+          "mudança de cor"
+        ],
+        "claims": [
+          {
+            "claim_type": "service_availability",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "faq:service:vehicle-wrap"
+            ]
+          }
+        ],
+        "public_site_only": true
+      }
+    },
+    {
+      "id": "product:chassis-wash",
+      "node_type": "product",
+      "slug": "chassis-wash",
+      "title": "Lavagem de chassis",
+      "summary": "Limpeza da parte inferior do veículo para remover sujeira acumulada em áreas de difícil acesso. O procedimento é escolhido de acordo com o uso e a condição do carro.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "public_site": {
+          "cta": {
+            "label": "Pedir uma avaliação",
+            "message_template": "Olá! Quero pedir uma avaliação para Lavagem de chassis."
+          },
+          "description_source": {
+            "source": "operator_approved_aura_adaptation_2026_09_24",
+            "validation_status": "approved",
+            "reference_url": "https://auradetail.com.br/",
+            "policy": "operator_approved_commercial_adaptation"
+          }
+        },
+        "aliases": [
+          "lavagem de chassis",
+          "lavação de chassis"
+        ],
+        "capabilities": {
+          "branch_anchor": false
+        },
+        "booking": {
+          "required_fields": [
+            "nome_cliente",
+            "servico",
+            "modelo_veiculo",
+            "condicao"
+          ]
+        },
+        "qualification": {
+          "fields": [
+            {
+              "key": "nome_cliente",
+              "owner_node_id": "persona:utzig-garage",
+              "scope": "persona",
+              "question_node_id": "faq:qualification:nome_cliente",
+              "required": true,
+              "accepted_statuses": [
+                "known"
+              ],
+              "value_schema": {
+                "type": "string",
+                "minLength": 1
+              },
+              "validation": {
+                "mode": "schema"
+              },
+              "depends_on": [],
+              "priority": 1,
+              "overwrite_policy": "explicit_correction"
+            },
+            {
+              "key": "servico",
+              "owner_node_id": "product:chassis-wash",
+              "scope": "branch",
+              "question_node_id": "faq:qualification:servico",
+              "required": true,
+              "accepted_statuses": [
+                "known"
+              ],
+              "value_schema": {
+                "type": "string",
+                "minLength": 1
+              },
+              "validation": {
+                "mode": "schema"
+              },
+              "depends_on": [
+                "nome_cliente"
+              ],
+              "priority": 0.8,
+              "overwrite_policy": "explicit_correction"
+            },
+            {
+              "key": "modelo_veiculo",
+              "owner_node_id": "persona:utzig-garage",
+              "scope": "persona",
+              "question_node_id": "faq:qualification:modelo_veiculo",
+              "required": true,
+              "accepted_statuses": [
+                "known"
+              ],
+              "value_schema": {
+                "type": "string",
+                "minLength": 1
+              },
+              "validation": {
+                "mode": "schema"
+              },
+              "depends_on": [
+                "servico"
+              ],
+              "priority": 0.8,
+              "overwrite_policy": "explicit_correction"
+            },
+            {
+              "key": "condicao",
+              "owner_node_id": "product:chassis-wash",
+              "scope": "branch",
+              "question_node_id": "faq:qualification:condicao",
+              "required": true,
+              "accepted_statuses": [
+                "known"
+              ],
+              "value_schema": {
+                "type": "string",
+                "minLength": 1
+              },
+              "validation": {
+                "mode": "schema"
+              },
+              "depends_on": [
+                "servico"
+              ],
+              "priority": 0.8,
+              "overwrite_policy": "explicit_correction"
+            }
+          ]
+        },
+        "completion": {
+          "required_fields": [
+            "nome_cliente",
+            "servico",
+            "modelo_veiculo",
+            "condicao"
+          ]
+        },
+        "handoff": {
+          "on_complete_rule_node_id": "rule:human-handoff"
+        },
+        "metadata": {
+          "internal_commercial_value_band": {
+            "band": "faixa_1",
+            "source": "estimated_from_service_name"
+          }
+        },
+        "public_site_only": true
+      }
+    },
+    {
+      "id": "copy:chassis-wash",
+      "node_type": "copy",
+      "slug": "copy-chassis-wash",
+      "title": "Apresentação — Lavagem de chassis",
+      "summary": "Limpeza da parte inferior do veículo para remover sujeira acumulada em áreas de difícil acesso. O procedimento é escolhido de acordo com o uso e a condição do carro.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "channel": "public_site",
+        "target_node_id": "product:chassis-wash"
+      }
+    },
+    {
+      "id": "faq:service:chassis-wash",
+      "node_type": "faq",
+      "slug": "faq-chassis-wash",
+      "title": "A Utzig oferece Lavagem de chassis?",
+      "summary": "Limpeza da parte inferior do veículo para remover sujeira acumulada em áreas de difícil acesso. O procedimento é escolhido de acordo com o uso e a condição do carro.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "question": "A Utzig oferece Lavagem de chassis?",
+        "answer": "Sim. Limpeza da parte inferior do veículo para remover sujeira acumulada em áreas de difícil acesso. O procedimento é escolhido de acordo com o uso e a condição do carro.",
+        "source_node_id": "product:chassis-wash",
+        "source_node_type": "product",
+        "branch_path": [
+          "product:chassis-wash",
+          "copy:chassis-wash",
+          "faq:service:chassis-wash"
+        ],
+        "question_aliases": [
+          "lavagem de chassis",
+          "lavação de chassis"
+        ],
+        "claims": [
+          {
+            "claim_type": "service_availability",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "faq:service:chassis-wash"
+            ]
+          }
+        ],
+        "public_site_only": true
+      }
+    },
+    {
+      "id": "product:leather-conditioning",
+      "node_type": "product",
+      "slug": "leather-conditioning",
+      "title": "Hidratação dos couros",
+      "summary": "Tratamento para bancos e revestimentos de couro que combina limpeza, hidratação e acabamento. Ajuda a manter o toque e a apresentação das superfícies no uso diário.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "public_site": {
+          "cta": {
+            "label": "Pedir uma avaliação",
+            "message_template": "Olá! Quero pedir uma avaliação para Hidratação dos couros."
+          },
+          "description_source": {
+            "source": "operator_approved_aura_adaptation_2026_09_24",
+            "validation_status": "approved",
+            "reference_url": "https://auradetail.com.br/",
+            "policy": "operator_approved_commercial_adaptation"
+          }
+        },
+        "aliases": [
+          "hidratação dos couros",
+          "tratamento de couro"
+        ],
+        "capabilities": {
+          "branch_anchor": false
+        },
+        "booking": {
+          "required_fields": [
+            "nome_cliente",
+            "servico",
+            "modelo_veiculo",
+            "condicao"
+          ]
+        },
+        "qualification": {
+          "fields": [
+            {
+              "key": "nome_cliente",
+              "owner_node_id": "persona:utzig-garage",
+              "scope": "persona",
+              "question_node_id": "faq:qualification:nome_cliente",
+              "required": true,
+              "accepted_statuses": [
+                "known"
+              ],
+              "value_schema": {
+                "type": "string",
+                "minLength": 1
+              },
+              "validation": {
+                "mode": "schema"
+              },
+              "depends_on": [],
+              "priority": 1,
+              "overwrite_policy": "explicit_correction"
+            },
+            {
+              "key": "servico",
+              "owner_node_id": "product:leather-conditioning",
+              "scope": "branch",
+              "question_node_id": "faq:qualification:servico",
+              "required": true,
+              "accepted_statuses": [
+                "known"
+              ],
+              "value_schema": {
+                "type": "string",
+                "minLength": 1
+              },
+              "validation": {
+                "mode": "schema"
+              },
+              "depends_on": [
+                "nome_cliente"
+              ],
+              "priority": 0.8,
+              "overwrite_policy": "explicit_correction"
+            },
+            {
+              "key": "modelo_veiculo",
+              "owner_node_id": "persona:utzig-garage",
+              "scope": "persona",
+              "question_node_id": "faq:qualification:modelo_veiculo",
+              "required": true,
+              "accepted_statuses": [
+                "known"
+              ],
+              "value_schema": {
+                "type": "string",
+                "minLength": 1
+              },
+              "validation": {
+                "mode": "schema"
+              },
+              "depends_on": [
+                "servico"
+              ],
+              "priority": 0.8,
+              "overwrite_policy": "explicit_correction"
+            },
+            {
+              "key": "condicao",
+              "owner_node_id": "product:leather-conditioning",
+              "scope": "branch",
+              "question_node_id": "faq:qualification:condicao",
+              "required": true,
+              "accepted_statuses": [
+                "known"
+              ],
+              "value_schema": {
+                "type": "string",
+                "minLength": 1
+              },
+              "validation": {
+                "mode": "schema"
+              },
+              "depends_on": [
+                "servico"
+              ],
+              "priority": 0.8,
+              "overwrite_policy": "explicit_correction"
+            }
+          ]
+        },
+        "completion": {
+          "required_fields": [
+            "nome_cliente",
+            "servico",
+            "modelo_veiculo",
+            "condicao"
+          ]
+        },
+        "handoff": {
+          "on_complete_rule_node_id": "rule:human-handoff"
+        },
+        "metadata": {
+          "internal_commercial_value_band": {
+            "band": "faixa_2",
+            "source": "estimated_from_service_name"
+          }
+        },
+        "public_site_only": true
+      }
+    },
+    {
+      "id": "copy:leather-conditioning",
+      "node_type": "copy",
+      "slug": "copy-leather-conditioning",
+      "title": "Apresentação — Hidratação dos couros",
+      "summary": "Tratamento para bancos e revestimentos de couro que combina limpeza, hidratação e acabamento. Ajuda a manter o toque e a apresentação das superfícies no uso diário.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "channel": "public_site",
+        "target_node_id": "product:leather-conditioning"
+      }
+    },
+    {
+      "id": "faq:service:leather-conditioning",
+      "node_type": "faq",
+      "slug": "faq-leather-conditioning",
+      "title": "A Utzig oferece Hidratação dos couros?",
+      "summary": "Tratamento para bancos e revestimentos de couro que combina limpeza, hidratação e acabamento. Ajuda a manter o toque e a apresentação das superfícies no uso diário.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "question": "A Utzig oferece Hidratação dos couros?",
+        "answer": "Sim. Tratamento para bancos e revestimentos de couro que combina limpeza, hidratação e acabamento. Ajuda a manter o toque e a apresentação das superfícies no uso diário.",
+        "source_node_id": "product:leather-conditioning",
+        "source_node_type": "product",
+        "branch_path": [
+          "product:leather-conditioning",
+          "copy:leather-conditioning",
+          "faq:service:leather-conditioning"
+        ],
+        "question_aliases": [
+          "hidratação dos couros",
+          "tratamento de couro"
+        ],
+        "claims": [
+          {
+            "claim_type": "service_availability",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "faq:service:leather-conditioning"
+            ]
+          }
+        ],
+        "public_site_only": true
+      }
+    },
+    {
+      "id": "product:seat-vitrification",
+      "node_type": "product",
+      "slug": "seat-vitrification",
+      "title": "Vitrificação dos bancos",
+      "summary": "Camada de proteção para bancos e estofados, indicada conforme o material. Ajuda a reduzir a absorção de sujeira e facilita a rotina de cuidado com o interior.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "public_site": {
+          "cta": {
+            "label": "Pedir uma avaliação",
+            "message_template": "Olá! Quero pedir uma avaliação para Vitrificação dos bancos."
+          },
+          "description_source": {
+            "source": "operator_approved_aura_adaptation_2026_09_24",
+            "validation_status": "approved",
+            "reference_url": "https://auradetail.com.br/",
+            "policy": "operator_approved_commercial_adaptation"
+          }
+        },
+        "aliases": [
+          "vitrificação dos bancos",
+          "proteção dos bancos"
+        ],
+        "capabilities": {
+          "branch_anchor": false
+        },
+        "booking": {
+          "required_fields": [
+            "nome_cliente",
+            "servico",
+            "modelo_veiculo",
+            "condicao"
+          ]
+        },
+        "qualification": {
+          "fields": [
+            {
+              "key": "nome_cliente",
+              "owner_node_id": "persona:utzig-garage",
+              "scope": "persona",
+              "question_node_id": "faq:qualification:nome_cliente",
+              "required": true,
+              "accepted_statuses": [
+                "known"
+              ],
+              "value_schema": {
+                "type": "string",
+                "minLength": 1
+              },
+              "validation": {
+                "mode": "schema"
+              },
+              "depends_on": [],
+              "priority": 1,
+              "overwrite_policy": "explicit_correction"
+            },
+            {
+              "key": "servico",
+              "owner_node_id": "product:seat-vitrification",
+              "scope": "branch",
+              "question_node_id": "faq:qualification:servico",
+              "required": true,
+              "accepted_statuses": [
+                "known"
+              ],
+              "value_schema": {
+                "type": "string",
+                "minLength": 1
+              },
+              "validation": {
+                "mode": "schema"
+              },
+              "depends_on": [
+                "nome_cliente"
+              ],
+              "priority": 0.8,
+              "overwrite_policy": "explicit_correction"
+            },
+            {
+              "key": "modelo_veiculo",
+              "owner_node_id": "persona:utzig-garage",
+              "scope": "persona",
+              "question_node_id": "faq:qualification:modelo_veiculo",
+              "required": true,
+              "accepted_statuses": [
+                "known"
+              ],
+              "value_schema": {
+                "type": "string",
+                "minLength": 1
+              },
+              "validation": {
+                "mode": "schema"
+              },
+              "depends_on": [
+                "servico"
+              ],
+              "priority": 0.8,
+              "overwrite_policy": "explicit_correction"
+            },
+            {
+              "key": "condicao",
+              "owner_node_id": "product:seat-vitrification",
+              "scope": "branch",
+              "question_node_id": "faq:qualification:condicao",
+              "required": true,
+              "accepted_statuses": [
+                "known"
+              ],
+              "value_schema": {
+                "type": "string",
+                "minLength": 1
+              },
+              "validation": {
+                "mode": "schema"
+              },
+              "depends_on": [
+                "servico"
+              ],
+              "priority": 0.8,
+              "overwrite_policy": "explicit_correction"
+            }
+          ]
+        },
+        "completion": {
+          "required_fields": [
+            "nome_cliente",
+            "servico",
+            "modelo_veiculo",
+            "condicao"
+          ]
+        },
+        "handoff": {
+          "on_complete_rule_node_id": "rule:human-handoff"
+        },
+        "metadata": {
+          "internal_commercial_value_band": {
+            "band": "faixa_2",
+            "source": "estimated_from_service_name"
+          }
+        },
+        "public_site_only": true
+      }
+    },
+    {
+      "id": "copy:seat-vitrification",
+      "node_type": "copy",
+      "slug": "copy-seat-vitrification",
+      "title": "Apresentação — Vitrificação dos bancos",
+      "summary": "Camada de proteção para bancos e estofados, indicada conforme o material. Ajuda a reduzir a absorção de sujeira e facilita a rotina de cuidado com o interior.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "channel": "public_site",
+        "target_node_id": "product:seat-vitrification"
+      }
+    },
+    {
+      "id": "faq:service:seat-vitrification",
+      "node_type": "faq",
+      "slug": "faq-seat-vitrification",
+      "title": "A Utzig oferece Vitrificação dos bancos?",
+      "summary": "Camada de proteção para bancos e estofados, indicada conforme o material. Ajuda a reduzir a absorção de sujeira e facilita a rotina de cuidado com o interior.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "question": "A Utzig oferece Vitrificação dos bancos?",
+        "answer": "Sim. Camada de proteção para bancos e estofados, indicada conforme o material. Ajuda a reduzir a absorção de sujeira e facilita a rotina de cuidado com o interior.",
+        "source_node_id": "product:seat-vitrification",
+        "source_node_type": "product",
+        "branch_path": [
+          "product:seat-vitrification",
+          "copy:seat-vitrification",
+          "faq:service:seat-vitrification"
+        ],
+        "question_aliases": [
+          "vitrificação dos bancos",
+          "proteção dos bancos"
+        ],
+        "claims": [
+          {
+            "claim_type": "service_availability",
+            "policy": {
+              "mode": "informational"
+            },
+            "evidence_node_ids": [
+              "faq:service:seat-vitrification"
+            ]
+          }
+        ],
+        "public_site_only": true
+      }
+    },
+    {
+      "id": "copy:process-step-contact",
+      "node_type": "copy",
+      "slug": "process-step-contact",
+      "title": "01 · Conte o que você busca",
+      "summary": "Envie uma mensagem e diga o que deseja melhorar, proteger ou renovar no veículo.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "channel": "public_site",
+        "target_node_id": "campaign:automotive-detailing"
+      }
+    },
+    {
+      "id": "copy:process-step-diagnosis",
+      "node_type": "copy",
+      "slug": "process-step-diagnosis",
+      "title": "02 · Avaliamos o veículo",
+      "summary": "Wilian observa o estado das superfícies e combina com você os serviços, o prazo e o orçamento.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "channel": "public_site",
+        "target_node_id": "campaign:automotive-detailing"
+      }
+    },
+    {
+      "id": "copy:process-step-delivery",
+      "node_type": "copy",
+      "slug": "process-step-delivery",
+      "title": "03 · Cuidamos de cada detalhe",
+      "summary": "A execução segue o plano definido, com orientações para conservar o resultado depois da entrega.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "channel": "public_site",
+        "target_node_id": "campaign:automotive-detailing"
+      }
+    },
+    {
+      "id": "copy:benefit-care",
+      "node_type": "copy",
+      "slug": "benefit-care",
+      "title": "Cuidado que aparece",
+      "summary": "Da lavagem ao acabamento, cada etapa recebe atenção aos materiais e aos detalhes do veículo.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "channel": "public_site",
+        "target_node_id": "campaign:automotive-detailing"
+      }
+    },
+    {
+      "id": "copy:benefit-choice",
+      "node_type": "copy",
+      "slug": "benefit-choice",
+      "title": "Solução para cada objetivo",
+      "summary": "Você pode combinar limpeza, correção e proteção em um plano definido após a avaliação.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "channel": "public_site",
+        "target_node_id": "campaign:automotive-detailing"
+      }
+    },
+    {
+      "id": "copy:benefit-finish",
+      "node_type": "copy",
+      "slug": "benefit-finish",
+      "title": "Resultado para durar",
+      "summary": "Ao entregar o carro, a Utzig orienta como manter a aparência e a proteção de cada serviço.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "channel": "public_site",
+        "target_node_id": "campaign:automotive-detailing"
+      }
+    },
+    {
+      "id": "copy:site-faq:ppf-benefit",
+      "node_type": "copy",
+      "slug": "site-faq-ppf-benefit",
+      "title": "Contexto — O que o PPF protege?",
+      "summary": "O PPF cria uma película transparente sobre áreas selecionadas da pintura. Ajuda a proteger contra marcas de uso, pequenas pedras e exposição ao tempo, preservando a aparência original.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "channel": "public_site",
+        "target_node_id": "product:ppf",
+        "public_site_only": true
+      }
+    },
+    {
+      "id": "faq:site:ppf-benefit",
+      "node_type": "faq",
+      "slug": "site-ppf-benefit",
+      "title": "O que o PPF protege?",
+      "summary": "O PPF cria uma película transparente sobre áreas selecionadas da pintura. Ajuda a proteger contra marcas de uso, pequenas pedras e exposição ao tempo, preservando a aparência original.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "question": "O que o PPF protege?",
+        "answer": "O PPF cria uma película transparente sobre áreas selecionadas da pintura. Ajuda a proteger contra marcas de uso, pequenas pedras e exposição ao tempo, preservando a aparência original.",
+        "source_node_id": "product:ppf",
+        "source_node_type": "product",
+        "branch_path": [
+          "campaign:automotive-detailing",
+          "copy:site-faq:ppf-benefit",
+          "faq:site:ppf-benefit"
+        ],
+        "question_aliases": [
+          "o que o ppf protege?"
+        ],
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "policy": "published_service_detail_with_source_provenance",
+            "evidence_node_ids": [
+              "faq:site:ppf-benefit"
+            ]
+          }
+        ],
+        "public_site_only": true
+      }
+    },
+    {
+      "id": "copy:site-faq:vitrification-vs-wax",
+      "node_type": "copy",
+      "slug": "site-faq-vitrification-vs-wax",
+      "title": "Contexto — Qual a diferença entre vitrificação e cera?",
+      "summary": "A vitrificação forma uma camada cerâmica de proteção e brilho com durabilidade maior que a de uma cera comum. O resultado depende do preparo e dos cuidados posteriores.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "channel": "public_site",
+        "target_node_id": "product:vitrification",
+        "public_site_only": true
+      }
+    },
+    {
+      "id": "faq:site:vitrification-vs-wax",
+      "node_type": "faq",
+      "slug": "site-vitrification-vs-wax",
+      "title": "Qual a diferença entre vitrificação e cera?",
+      "summary": "A vitrificação forma uma camada cerâmica de proteção e brilho com durabilidade maior que a de uma cera comum. O resultado depende do preparo e dos cuidados posteriores.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "question": "Qual a diferença entre vitrificação e cera?",
+        "answer": "A vitrificação forma uma camada cerâmica de proteção e brilho com durabilidade maior que a de uma cera comum. O resultado depende do preparo e dos cuidados posteriores.",
+        "source_node_id": "product:vitrification",
+        "source_node_type": "product",
+        "branch_path": [
+          "campaign:automotive-detailing",
+          "copy:site-faq:vitrification-vs-wax",
+          "faq:site:vitrification-vs-wax"
+        ],
+        "question_aliases": [
+          "qual a diferença entre vitrificação e cera?"
+        ],
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "policy": "published_service_detail_with_source_provenance",
+            "evidence_node_ids": [
+              "faq:site:vitrification-vs-wax"
+            ]
+          }
+        ],
+        "public_site_only": true
+      }
+    },
+    {
+      "id": "copy:site-faq:window-film-benefit",
+      "node_type": "copy",
+      "slug": "site-faq-window-film-benefit",
+      "title": "Contexto — Película de vidros ajuda no conforto?",
+      "summary": "Sim. A película automotiva ajuda a controlar o calor e filtrar raios UV, além de oferecer privacidade. A tonalidade e a aplicação são escolhidas conforme o veículo.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "channel": "public_site",
+        "target_node_id": "product:window-film",
+        "public_site_only": true
+      }
+    },
+    {
+      "id": "faq:site:window-film-benefit",
+      "node_type": "faq",
+      "slug": "site-window-film-benefit",
+      "title": "Película de vidros ajuda no conforto?",
+      "summary": "Sim. A película automotiva ajuda a controlar o calor e filtrar raios UV, além de oferecer privacidade. A tonalidade e a aplicação são escolhidas conforme o veículo.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "question": "Película de vidros ajuda no conforto?",
+        "answer": "Sim. A película automotiva ajuda a controlar o calor e filtrar raios UV, além de oferecer privacidade. A tonalidade e a aplicação são escolhidas conforme o veículo.",
+        "source_node_id": "product:window-film",
+        "source_node_type": "product",
+        "branch_path": [
+          "campaign:automotive-detailing",
+          "copy:site-faq:window-film-benefit",
+          "faq:site:window-film-benefit"
+        ],
+        "question_aliases": [
+          "película de vidros ajuda no conforto?"
+        ],
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "policy": "published_service_detail_with_source_provenance",
+            "evidence_node_ids": [
+              "faq:site:window-film-benefit"
+            ]
+          }
+        ],
+        "public_site_only": true
+      }
+    },
+    {
+      "id": "copy:site-faq:service-duration",
+      "node_type": "copy",
+      "slug": "site-faq-service-duration",
+      "title": "Contexto — Quanto tempo cada serviço leva?",
+      "summary": "Depende do serviço e do estado do carro. Lavagem detalhada costuma levar de 1 a 2 horas, higienização cerca de 6 horas, polimento técnico cerca de 1 dia e vitrificação de 1 a 3 dias. A Utzig confirma o prazo na avaliação.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "channel": "public_site",
+        "target_node_id": "campaign:automotive-detailing",
+        "public_site_only": true
+      }
+    },
+    {
+      "id": "faq:site:service-duration",
+      "node_type": "faq",
+      "slug": "site-service-duration",
+      "title": "Quanto tempo cada serviço leva?",
+      "summary": "Depende do serviço e do estado do carro. Lavagem detalhada costuma levar de 1 a 2 horas, higienização cerca de 6 horas, polimento técnico cerca de 1 dia e vitrificação de 1 a 3 dias. A Utzig confirma o prazo na avaliação.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "question": "Quanto tempo cada serviço leva?",
+        "answer": "Depende do serviço e do estado do carro. Lavagem detalhada costuma levar de 1 a 2 horas, higienização cerca de 6 horas, polimento técnico cerca de 1 dia e vitrificação de 1 a 3 dias. A Utzig confirma o prazo na avaliação.",
+        "source_node_id": "campaign:automotive-detailing",
+        "source_node_type": "campaign",
+        "branch_path": [
+          "campaign:automotive-detailing",
+          "copy:site-faq:service-duration",
+          "faq:site:service-duration"
+        ],
+        "question_aliases": [
+          "quanto tempo cada serviço leva?"
+        ],
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "policy": "published_service_detail_with_source_provenance",
+            "evidence_node_ids": [
+              "faq:site:service-duration"
+            ]
+          }
+        ],
+        "public_site_only": true
+      }
+    },
+    {
+      "id": "copy:site-faq:aftercare",
+      "node_type": "copy",
+      "slug": "site-faq-aftercare",
+      "title": "Contexto — Como cuidar do carro depois do serviço?",
+      "summary": "A Utzig orienta o intervalo e os produtos adequados a cada aplicação. Como regra geral, prefira lavagens sem escovas agressivas e produtos neutros para preservar o acabamento.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "channel": "public_site",
+        "target_node_id": "campaign:automotive-detailing",
+        "public_site_only": true
+      }
+    },
+    {
+      "id": "faq:site:aftercare",
+      "node_type": "faq",
+      "slug": "site-aftercare",
+      "title": "Como cuidar do carro depois do serviço?",
+      "summary": "A Utzig orienta o intervalo e os produtos adequados a cada aplicação. Como regra geral, prefira lavagens sem escovas agressivas e produtos neutros para preservar o acabamento.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "question": "Como cuidar do carro depois do serviço?",
+        "answer": "A Utzig orienta o intervalo e os produtos adequados a cada aplicação. Como regra geral, prefira lavagens sem escovas agressivas e produtos neutros para preservar o acabamento.",
+        "source_node_id": "campaign:automotive-detailing",
+        "source_node_type": "campaign",
+        "branch_path": [
+          "campaign:automotive-detailing",
+          "copy:site-faq:aftercare",
+          "faq:site:aftercare"
+        ],
+        "question_aliases": [
+          "como cuidar do carro depois do serviço?"
+        ],
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "policy": "published_service_detail_with_source_provenance",
+            "evidence_node_ids": [
+              "faq:site:aftercare"
+            ]
+          }
+        ],
+        "public_site_only": true
+      }
+    },
+    {
+      "id": "copy:site-faq:warranty",
+      "node_type": "copy",
+      "slug": "site-faq-warranty",
+      "title": "Contexto — Os serviços têm garantia?",
+      "summary": "A cobertura depende do serviço escolhido. No PPF, a garantia informada é de 10 anos; os demais detalhes são apresentados no orçamento antes da execução.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "channel": "public_site",
+        "target_node_id": "campaign:automotive-detailing",
+        "public_site_only": true
+      }
+    },
+    {
+      "id": "faq:site:warranty",
+      "node_type": "faq",
+      "slug": "site-warranty",
+      "title": "Os serviços têm garantia?",
+      "summary": "A cobertura depende do serviço escolhido. No PPF, a garantia informada é de 10 anos; os demais detalhes são apresentados no orçamento antes da execução.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "question": "Os serviços têm garantia?",
+        "answer": "A cobertura depende do serviço escolhido. No PPF, a garantia informada é de 10 anos; os demais detalhes são apresentados no orçamento antes da execução.",
+        "source_node_id": "campaign:automotive-detailing",
+        "source_node_type": "campaign",
+        "branch_path": [
+          "campaign:automotive-detailing",
+          "copy:site-faq:warranty",
+          "faq:site:warranty"
+        ],
+        "question_aliases": [
+          "os serviços têm garantia?"
+        ],
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "policy": "published_service_detail_with_source_provenance",
+            "evidence_node_ids": [
+              "faq:site:warranty"
+            ]
+          }
+        ],
+        "public_site_only": true
+      }
+    },
+    {
+      "id": "copy:site-faq:used-car-ppf",
+      "node_type": "copy",
+      "slug": "site-faq-used-car-ppf",
+      "title": "Contexto — Posso aplicar PPF em um carro usado?",
+      "summary": "Sim, depois de avaliar a condição da pintura. Se houver marcas ou correções necessárias, a Utzig indica a preparação adequada antes da aplicação.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "channel": "public_site",
+        "target_node_id": "product:ppf",
+        "public_site_only": true
+      }
+    },
+    {
+      "id": "faq:site:used-car-ppf",
+      "node_type": "faq",
+      "slug": "site-used-car-ppf",
+      "title": "Posso aplicar PPF em um carro usado?",
+      "summary": "Sim, depois de avaliar a condição da pintura. Se houver marcas ou correções necessárias, a Utzig indica a preparação adequada antes da aplicação.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "question": "Posso aplicar PPF em um carro usado?",
+        "answer": "Sim, depois de avaliar a condição da pintura. Se houver marcas ou correções necessárias, a Utzig indica a preparação adequada antes da aplicação.",
+        "source_node_id": "product:ppf",
+        "source_node_type": "product",
+        "branch_path": [
+          "campaign:automotive-detailing",
+          "copy:site-faq:used-car-ppf",
+          "faq:site:used-car-ppf"
+        ],
+        "question_aliases": [
+          "posso aplicar ppf em um carro usado?"
+        ],
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "policy": "published_service_detail_with_source_provenance",
+            "evidence_node_ids": [
+              "faq:site:used-car-ppf"
+            ]
+          }
+        ],
+        "public_site_only": true
+      }
+    },
+    {
+      "id": "copy:site-faq:budget",
+      "node_type": "copy",
+      "slug": "site-faq-budget",
+      "title": "Contexto — Como recebo um orçamento?",
+      "summary": "Conte qual é o veículo e o que você procura. Fotos ajudam a iniciar a conversa; Wilian confirma o serviço indicado, o valor final e a agenda depois da avaliação.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "channel": "public_site",
+        "target_node_id": "campaign:automotive-detailing",
+        "public_site_only": true
+      }
+    },
+    {
+      "id": "faq:site:budget",
+      "node_type": "faq",
+      "slug": "site-budget",
+      "title": "Como recebo um orçamento?",
+      "summary": "Conte qual é o veículo e o que você procura. Fotos ajudam a iniciar a conversa; Wilian confirma o serviço indicado, o valor final e a agenda depois da avaliação.",
+      "status": "approved",
+      "data": {
+        "source": "operator_approved_aura_adaptation_2026_09_24",
+        "validation_status": "approved",
+        "reference_url": "https://auradetail.com.br/",
+        "question": "Como recebo um orçamento?",
+        "answer": "Conte qual é o veículo e o que você procura. Fotos ajudam a iniciar a conversa; Wilian confirma o serviço indicado, o valor final e a agenda depois da avaliação.",
+        "source_node_id": "campaign:automotive-detailing",
+        "source_node_type": "campaign",
+        "branch_path": [
+          "campaign:automotive-detailing",
+          "copy:site-faq:budget",
+          "faq:site:budget"
+        ],
+        "question_aliases": [
+          "como recebo um orçamento?"
+        ],
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "policy": "published_service_detail_with_source_provenance",
+            "evidence_node_ids": [
+              "faq:site:budget"
+            ]
+          }
+        ],
+        "public_site_only": true
       }
     }
   ],
@@ -7539,7 +9139,7 @@
       "id": "edge:bodywork:chapeacao-preco-tempo",
       "source": "product:bodywork",
       "target": "faq:service:bodywork:chapeacao-preco-tempo",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -7551,7 +9151,7 @@
       "id": "edge:bodywork:chapeacao-preco-tempo:contains",
       "source": "product:bodywork",
       "target": "faq:service:bodywork:chapeacao-preco-tempo",
-      "weight": 1.0,
+      "weight": 1,
       "primary": true,
       "metadata": {
         "active": true,
@@ -7564,7 +9164,7 @@
       "id": "edge:bodywork:chapeacao-preco-tempo:embedded",
       "source": "faq:service:bodywork:chapeacao-preco-tempo",
       "target": "embedded:utzig",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -7576,7 +9176,7 @@
       "id": "edge:bodywork:chapeacao-remota",
       "source": "product:bodywork",
       "target": "faq:service:bodywork:chapeacao-remota",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -7588,7 +9188,7 @@
       "id": "edge:bodywork:chapeacao-remota:contains",
       "source": "product:bodywork",
       "target": "faq:service:bodywork:chapeacao-remota",
-      "weight": 1.0,
+      "weight": 1,
       "primary": true,
       "metadata": {
         "active": true,
@@ -7601,7 +9201,7 @@
       "id": "edge:bodywork:chapeacao-remota:embedded",
       "source": "faq:service:bodywork:chapeacao-remota",
       "target": "embedded:utzig",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -7613,7 +9213,7 @@
       "id": "edge:commercial-polish:polimento-comercial-diferenca",
       "source": "product:commercial-polish",
       "target": "faq:service:commercial-polish:polimento-comercial-diferenca",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -7625,7 +9225,7 @@
       "id": "edge:commercial-polish:polimento-comercial-diferenca:contains",
       "source": "product:commercial-polish",
       "target": "faq:service:commercial-polish:polimento-comercial-diferenca",
-      "weight": 1.0,
+      "weight": 1,
       "primary": true,
       "metadata": {
         "active": true,
@@ -7638,7 +9238,7 @@
       "id": "edge:commercial-polish:polimento-comercial-diferenca:embedded",
       "source": "faq:service:commercial-polish:polimento-comercial-diferenca",
       "target": "embedded:utzig",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -7650,7 +9250,7 @@
       "id": "edge:detailed-wash:lavagem-detalhada-objetivo",
       "source": "product:detailed-wash",
       "target": "faq:service:detailed-wash:lavagem-detalhada-objetivo",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -7662,7 +9262,7 @@
       "id": "edge:detailed-wash:lavagem-detalhada-objetivo:contains",
       "source": "product:detailed-wash",
       "target": "faq:service:detailed-wash:lavagem-detalhada-objetivo",
-      "weight": 1.0,
+      "weight": 1,
       "primary": true,
       "metadata": {
         "active": true,
@@ -7675,7 +9275,7 @@
       "id": "edge:detailed-wash:lavagem-detalhada-objetivo:embedded",
       "source": "faq:service:detailed-wash:lavagem-detalhada-objetivo",
       "target": "embedded:utzig",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -7687,7 +9287,7 @@
       "id": "edge:detailed-wash:lavagem-detalhada-preco",
       "source": "product:detailed-wash",
       "target": "faq:service:detailed-wash:lavagem-detalhada-preco",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -7699,7 +9299,7 @@
       "id": "edge:detailed-wash:lavagem-detalhada-preco:contains",
       "source": "product:detailed-wash",
       "target": "faq:service:detailed-wash:lavagem-detalhada-preco",
-      "weight": 1.0,
+      "weight": 1,
       "primary": true,
       "metadata": {
         "active": true,
@@ -7712,7 +9312,7 @@
       "id": "edge:detailed-wash:lavagem-detalhada-preco:embedded",
       "source": "faq:service:detailed-wash:lavagem-detalhada-preco",
       "target": "embedded:utzig",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -7724,7 +9324,7 @@
       "id": "edge:engine-bay-wash:motor-estrada",
       "source": "product:engine-bay-wash",
       "target": "faq:service:engine-bay-wash:motor-estrada",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -7736,7 +9336,7 @@
       "id": "edge:engine-bay-wash:motor-estrada:contains",
       "source": "product:engine-bay-wash",
       "target": "faq:service:engine-bay-wash:motor-estrada",
-      "weight": 1.0,
+      "weight": 1,
       "primary": true,
       "metadata": {
         "active": true,
@@ -7749,7 +9349,7 @@
       "id": "edge:engine-bay-wash:motor-estrada:embedded",
       "source": "faq:service:engine-bay-wash:motor-estrada",
       "target": "embedded:utzig",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -7761,7 +9361,7 @@
       "id": "edge:engine-bay-wash:motor-vazamento",
       "source": "product:engine-bay-wash",
       "target": "faq:service:engine-bay-wash:motor-vazamento",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -7773,7 +9373,7 @@
       "id": "edge:engine-bay-wash:motor-vazamento:contains",
       "source": "product:engine-bay-wash",
       "target": "faq:service:engine-bay-wash:motor-vazamento",
-      "weight": 1.0,
+      "weight": 1,
       "primary": true,
       "metadata": {
         "active": true,
@@ -7786,7 +9386,7 @@
       "id": "edge:engine-bay-wash:motor-vazamento:embedded",
       "source": "faq:service:engine-bay-wash:motor-vazamento",
       "target": "embedded:utzig",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -7798,7 +9398,7 @@
       "id": "edge:glass-polish:vidros-orcamento",
       "source": "product:glass-polish",
       "target": "faq:service:glass-polish:vidros-orcamento",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -7810,7 +9410,7 @@
       "id": "edge:glass-polish:vidros-orcamento:contains",
       "source": "product:glass-polish",
       "target": "faq:service:glass-polish:vidros-orcamento",
-      "weight": 1.0,
+      "weight": 1,
       "primary": true,
       "metadata": {
         "active": true,
@@ -7823,7 +9423,7 @@
       "id": "edge:glass-polish:vidros-orcamento:embedded",
       "source": "faq:service:glass-polish:vidros-orcamento",
       "target": "embedded:utzig",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -7835,7 +9435,7 @@
       "id": "edge:headlight-restoration:farois-resultado",
       "source": "product:headlight-restoration",
       "target": "faq:service:headlight-restoration:farois-resultado",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -7847,7 +9447,7 @@
       "id": "edge:headlight-restoration:farois-resultado:contains",
       "source": "product:headlight-restoration",
       "target": "faq:service:headlight-restoration:farois-resultado",
-      "weight": 1.0,
+      "weight": 1,
       "primary": true,
       "metadata": {
         "active": true,
@@ -7860,7 +9460,7 @@
       "id": "edge:headlight-restoration:farois-resultado:embedded",
       "source": "faq:service:headlight-restoration:farois-resultado",
       "target": "embedded:utzig",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -7872,7 +9472,7 @@
       "id": "edge:headlight-restoration:farois-uv",
       "source": "product:headlight-restoration",
       "target": "faq:service:headlight-restoration:farois-uv",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -7884,7 +9484,7 @@
       "id": "edge:headlight-restoration:farois-uv:contains",
       "source": "product:headlight-restoration",
       "target": "faq:service:headlight-restoration:farois-uv",
-      "weight": 1.0,
+      "weight": 1,
       "primary": true,
       "metadata": {
         "active": true,
@@ -7897,7 +9497,7 @@
       "id": "edge:headlight-restoration:farois-uv:embedded",
       "source": "faq:service:headlight-restoration:farois-uv",
       "target": "embedded:utzig",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -7909,7 +9509,7 @@
       "id": "edge:interior-cleaning:higienizacao-estrada",
       "source": "product:interior-cleaning",
       "target": "faq:service:interior-cleaning:higienizacao-estrada",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -7921,7 +9521,7 @@
       "id": "edge:interior-cleaning:higienizacao-estrada:contains",
       "source": "product:interior-cleaning",
       "target": "faq:service:interior-cleaning:higienizacao-estrada",
-      "weight": 1.0,
+      "weight": 1,
       "primary": true,
       "metadata": {
         "active": true,
@@ -7934,7 +9534,7 @@
       "id": "edge:interior-cleaning:higienizacao-estrada:embedded",
       "source": "faq:service:interior-cleaning:higienizacao-estrada",
       "target": "embedded:utzig",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -7946,7 +9546,7 @@
       "id": "edge:interior-cleaning:higienizacao-preco-tempo",
       "source": "product:interior-cleaning",
       "target": "faq:service:interior-cleaning:higienizacao-preco-tempo",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -7958,7 +9558,7 @@
       "id": "edge:interior-cleaning:higienizacao-preco-tempo:contains",
       "source": "product:interior-cleaning",
       "target": "faq:service:interior-cleaning:higienizacao-preco-tempo",
-      "weight": 1.0,
+      "weight": 1,
       "primary": true,
       "metadata": {
         "active": true,
@@ -7971,7 +9571,7 @@
       "id": "edge:interior-cleaning:higienizacao-preco-tempo:embedded",
       "source": "faq:service:interior-cleaning:higienizacao-preco-tempo",
       "target": "embedded:utzig",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -7983,7 +9583,7 @@
       "id": "edge:interior-cleaning:higienizacao-revestimento",
       "source": "product:interior-cleaning",
       "target": "faq:service:interior-cleaning:higienizacao-revestimento",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -7995,7 +9595,7 @@
       "id": "edge:interior-cleaning:higienizacao-revestimento:contains",
       "source": "product:interior-cleaning",
       "target": "faq:service:interior-cleaning:higienizacao-revestimento",
-      "weight": 1.0,
+      "weight": 1,
       "primary": true,
       "metadata": {
         "active": true,
@@ -8008,7 +9608,7 @@
       "id": "edge:interior-cleaning:higienizacao-revestimento:embedded",
       "source": "faq:service:interior-cleaning:higienizacao-revestimento",
       "target": "embedded:utzig",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -8020,7 +9620,7 @@
       "id": "edge:painting:pintura-preco-tempo",
       "source": "product:painting",
       "target": "faq:service:painting:pintura-preco-tempo",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -8032,7 +9632,7 @@
       "id": "edge:painting:pintura-preco-tempo:contains",
       "source": "product:painting",
       "target": "faq:service:painting:pintura-preco-tempo",
-      "weight": 1.0,
+      "weight": 1,
       "primary": true,
       "metadata": {
         "active": true,
@@ -8045,7 +9645,7 @@
       "id": "edge:painting:pintura-preco-tempo:embedded",
       "source": "faq:service:painting:pintura-preco-tempo",
       "target": "embedded:utzig",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -8057,7 +9657,7 @@
       "id": "edge:painting:pintura-remota",
       "source": "product:painting",
       "target": "faq:service:painting:pintura-remota",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -8069,7 +9669,7 @@
       "id": "edge:painting:pintura-remota:contains",
       "source": "product:painting",
       "target": "faq:service:painting:pintura-remota",
-      "weight": 1.0,
+      "weight": 1,
       "primary": true,
       "metadata": {
         "active": true,
@@ -8082,7 +9682,7 @@
       "id": "edge:painting:pintura-remota:embedded",
       "source": "faq:service:painting:pintura-remota",
       "target": "embedded:utzig",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -8094,7 +9694,7 @@
       "id": "edge:ppf:ppf-avaliacao",
       "source": "product:ppf",
       "target": "faq:service:ppf:ppf-avaliacao",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -8106,7 +9706,7 @@
       "id": "edge:ppf:ppf-avaliacao:contains",
       "source": "product:ppf",
       "target": "faq:service:ppf:ppf-avaliacao",
-      "weight": 1.0,
+      "weight": 1,
       "primary": true,
       "metadata": {
         "active": true,
@@ -8119,7 +9719,7 @@
       "id": "edge:ppf:ppf-avaliacao:embedded",
       "source": "faq:service:ppf:ppf-avaliacao",
       "target": "embedded:utzig",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -8131,7 +9731,7 @@
       "id": "edge:ppf:ppf-preco-tempo",
       "source": "product:ppf",
       "target": "faq:service:ppf:ppf-preco-tempo",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -8143,7 +9743,7 @@
       "id": "edge:ppf:ppf-preco-tempo:contains",
       "source": "product:ppf",
       "target": "faq:service:ppf:ppf-preco-tempo",
-      "weight": 1.0,
+      "weight": 1,
       "primary": true,
       "metadata": {
         "active": true,
@@ -8156,7 +9756,7 @@
       "id": "edge:ppf:ppf-preco-tempo:embedded",
       "source": "faq:service:ppf:ppf-preco-tempo",
       "target": "embedded:utzig",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -8168,7 +9768,7 @@
       "id": "edge:technical-polish:polimento-anterior",
       "source": "product:technical-polish",
       "target": "faq:service:technical-polish:polimento-anterior",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -8180,7 +9780,7 @@
       "id": "edge:technical-polish:polimento-anterior:contains",
       "source": "product:technical-polish",
       "target": "faq:service:technical-polish:polimento-anterior",
-      "weight": 1.0,
+      "weight": 1,
       "primary": true,
       "metadata": {
         "active": true,
@@ -8193,7 +9793,7 @@
       "id": "edge:technical-polish:polimento-anterior:embedded",
       "source": "faq:service:technical-polish:polimento-anterior",
       "target": "embedded:utzig",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -8205,7 +9805,7 @@
       "id": "edge:technical-polish:polimento-avaliacao",
       "source": "product:technical-polish",
       "target": "faq:service:technical-polish:polimento-avaliacao",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -8217,7 +9817,7 @@
       "id": "edge:technical-polish:polimento-avaliacao:contains",
       "source": "product:technical-polish",
       "target": "faq:service:technical-polish:polimento-avaliacao",
-      "weight": 1.0,
+      "weight": 1,
       "primary": true,
       "metadata": {
         "active": true,
@@ -8230,7 +9830,7 @@
       "id": "edge:technical-polish:polimento-avaliacao:embedded",
       "source": "faq:service:technical-polish:polimento-avaliacao",
       "target": "embedded:utzig",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -8242,7 +9842,7 @@
       "id": "edge:technical-polish:polimento-espelhamento",
       "source": "product:technical-polish",
       "target": "faq:service:technical-polish:polimento-espelhamento",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -8254,7 +9854,7 @@
       "id": "edge:technical-polish:polimento-espelhamento:contains",
       "source": "product:technical-polish",
       "target": "faq:service:technical-polish:polimento-espelhamento",
-      "weight": 1.0,
+      "weight": 1,
       "primary": true,
       "metadata": {
         "active": true,
@@ -8267,7 +9867,7 @@
       "id": "edge:technical-polish:polimento-espelhamento:embedded",
       "source": "faq:service:technical-polish:polimento-espelhamento",
       "target": "embedded:utzig",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -8279,7 +9879,7 @@
       "id": "edge:technical-polish:polimento-foco",
       "source": "product:technical-polish",
       "target": "faq:service:technical-polish:polimento-foco",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -8291,7 +9891,7 @@
       "id": "edge:technical-polish:polimento-foco:contains",
       "source": "product:technical-polish",
       "target": "faq:service:technical-polish:polimento-foco",
-      "weight": 1.0,
+      "weight": 1,
       "primary": true,
       "metadata": {
         "active": true,
@@ -8304,7 +9904,7 @@
       "id": "edge:technical-polish:polimento-foco:embedded",
       "source": "faq:service:technical-polish:polimento-foco",
       "target": "embedded:utzig",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -8316,7 +9916,7 @@
       "id": "edge:vitrification:vitrificacao-avaliacao",
       "source": "product:vitrification",
       "target": "faq:service:vitrification:vitrificacao-avaliacao",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -8328,7 +9928,7 @@
       "id": "edge:vitrification:vitrificacao-avaliacao:contains",
       "source": "product:vitrification",
       "target": "faq:service:vitrification:vitrificacao-avaliacao",
-      "weight": 1.0,
+      "weight": 1,
       "primary": true,
       "metadata": {
         "active": true,
@@ -8341,7 +9941,7 @@
       "id": "edge:vitrification:vitrificacao-avaliacao:embedded",
       "source": "faq:service:vitrification:vitrificacao-avaliacao",
       "target": "embedded:utzig",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -8353,7 +9953,7 @@
       "id": "edge:vitrification:vitrificacao-preco-tempo",
       "source": "product:vitrification",
       "target": "faq:service:vitrification:vitrificacao-preco-tempo",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -8365,7 +9965,7 @@
       "id": "edge:vitrification:vitrificacao-preco-tempo:contains",
       "source": "product:vitrification",
       "target": "faq:service:vitrification:vitrificacao-preco-tempo",
-      "weight": 1.0,
+      "weight": 1,
       "primary": true,
       "metadata": {
         "active": true,
@@ -8378,7 +9978,7 @@
       "id": "edge:vitrification:vitrificacao-preco-tempo:embedded",
       "source": "faq:service:vitrification:vitrificacao-preco-tempo",
       "target": "embedded:utzig",
-      "weight": 1.0,
+      "weight": 1,
       "primary": false,
       "metadata": {
         "active": true,
@@ -9070,6 +10670,601 @@
         "active": true,
         "primary_tree": false
       }
+    },
+    {
+      "id": "edge:home-hero-copy",
+      "source": "campaign:home",
+      "target": "copy:home-hero",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:landing-hero-copy",
+      "source": "campaign:automotive-detailing",
+      "target": "copy:hero",
+      "relation_type": "supports_copy",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:window-film:group",
+      "source": "group:enhancement",
+      "target": "product:window-film",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:window-film:copy",
+      "source": "product:window-film",
+      "target": "copy:window-film",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:window-film:supports-copy",
+      "source": "product:window-film",
+      "target": "copy:window-film",
+      "relation_type": "supports_copy",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:window-film:faq",
+      "source": "copy:window-film",
+      "target": "faq:service:window-film",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:window-film:answers",
+      "source": "copy:window-film",
+      "target": "faq:service:window-film",
+      "relation_type": "answers_question",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:window-film:offer",
+      "source": "product:window-film",
+      "target": "offer:window-film:starting-price",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:window-film:offer-product",
+      "source": "offer:window-film:starting-price",
+      "target": "product:window-film",
+      "relation_type": "about_product",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:vehicle-wrap:group",
+      "source": "group:repair-paint",
+      "target": "product:vehicle-wrap",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:vehicle-wrap:copy",
+      "source": "product:vehicle-wrap",
+      "target": "copy:vehicle-wrap",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:vehicle-wrap:supports-copy",
+      "source": "product:vehicle-wrap",
+      "target": "copy:vehicle-wrap",
+      "relation_type": "supports_copy",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:vehicle-wrap:faq",
+      "source": "copy:vehicle-wrap",
+      "target": "faq:service:vehicle-wrap",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:vehicle-wrap:answers",
+      "source": "copy:vehicle-wrap",
+      "target": "faq:service:vehicle-wrap",
+      "relation_type": "answers_question",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:chassis-wash:group",
+      "source": "group:cleaning",
+      "target": "product:chassis-wash",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:chassis-wash:copy",
+      "source": "product:chassis-wash",
+      "target": "copy:chassis-wash",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:chassis-wash:supports-copy",
+      "source": "product:chassis-wash",
+      "target": "copy:chassis-wash",
+      "relation_type": "supports_copy",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:chassis-wash:faq",
+      "source": "copy:chassis-wash",
+      "target": "faq:service:chassis-wash",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:chassis-wash:answers",
+      "source": "copy:chassis-wash",
+      "target": "faq:service:chassis-wash",
+      "relation_type": "answers_question",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:leather-conditioning:group",
+      "source": "group:cleaning",
+      "target": "product:leather-conditioning",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:leather-conditioning:copy",
+      "source": "product:leather-conditioning",
+      "target": "copy:leather-conditioning",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:leather-conditioning:supports-copy",
+      "source": "product:leather-conditioning",
+      "target": "copy:leather-conditioning",
+      "relation_type": "supports_copy",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:leather-conditioning:faq",
+      "source": "copy:leather-conditioning",
+      "target": "faq:service:leather-conditioning",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:leather-conditioning:answers",
+      "source": "copy:leather-conditioning",
+      "target": "faq:service:leather-conditioning",
+      "relation_type": "answers_question",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:seat-vitrification:group",
+      "source": "group:enhancement",
+      "target": "product:seat-vitrification",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:seat-vitrification:copy",
+      "source": "product:seat-vitrification",
+      "target": "copy:seat-vitrification",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:seat-vitrification:supports-copy",
+      "source": "product:seat-vitrification",
+      "target": "copy:seat-vitrification",
+      "relation_type": "supports_copy",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:seat-vitrification:faq",
+      "source": "copy:seat-vitrification",
+      "target": "faq:service:seat-vitrification",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:seat-vitrification:answers",
+      "source": "copy:seat-vitrification",
+      "target": "faq:service:seat-vitrification",
+      "relation_type": "answers_question",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:process-step-contact",
+      "source": "campaign:automotive-detailing",
+      "target": "copy:process-step-contact",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:process-step-diagnosis",
+      "source": "campaign:automotive-detailing",
+      "target": "copy:process-step-diagnosis",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:process-step-delivery",
+      "source": "campaign:automotive-detailing",
+      "target": "copy:process-step-delivery",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:benefit-care",
+      "source": "campaign:automotive-detailing",
+      "target": "copy:benefit-care",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:benefit-choice",
+      "source": "campaign:automotive-detailing",
+      "target": "copy:benefit-choice",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:benefit-finish",
+      "source": "campaign:automotive-detailing",
+      "target": "copy:benefit-finish",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:site-faq:ppf-benefit:parent",
+      "source": "campaign:automotive-detailing",
+      "target": "copy:site-faq:ppf-benefit",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:site-faq:ppf-benefit:copy",
+      "source": "copy:site-faq:ppf-benefit",
+      "target": "faq:site:ppf-benefit",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:site-faq:ppf-benefit:answers",
+      "source": "copy:site-faq:ppf-benefit",
+      "target": "faq:site:ppf-benefit",
+      "relation_type": "answers_question",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:site-faq:vitrification-vs-wax:parent",
+      "source": "campaign:automotive-detailing",
+      "target": "copy:site-faq:vitrification-vs-wax",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:site-faq:vitrification-vs-wax:copy",
+      "source": "copy:site-faq:vitrification-vs-wax",
+      "target": "faq:site:vitrification-vs-wax",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:site-faq:vitrification-vs-wax:answers",
+      "source": "copy:site-faq:vitrification-vs-wax",
+      "target": "faq:site:vitrification-vs-wax",
+      "relation_type": "answers_question",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:site-faq:window-film-benefit:parent",
+      "source": "campaign:automotive-detailing",
+      "target": "copy:site-faq:window-film-benefit",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:site-faq:window-film-benefit:copy",
+      "source": "copy:site-faq:window-film-benefit",
+      "target": "faq:site:window-film-benefit",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:site-faq:window-film-benefit:answers",
+      "source": "copy:site-faq:window-film-benefit",
+      "target": "faq:site:window-film-benefit",
+      "relation_type": "answers_question",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:site-faq:service-duration:parent",
+      "source": "campaign:automotive-detailing",
+      "target": "copy:site-faq:service-duration",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:site-faq:service-duration:copy",
+      "source": "copy:site-faq:service-duration",
+      "target": "faq:site:service-duration",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:site-faq:service-duration:answers",
+      "source": "copy:site-faq:service-duration",
+      "target": "faq:site:service-duration",
+      "relation_type": "answers_question",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:site-faq:aftercare:parent",
+      "source": "campaign:automotive-detailing",
+      "target": "copy:site-faq:aftercare",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:site-faq:aftercare:copy",
+      "source": "copy:site-faq:aftercare",
+      "target": "faq:site:aftercare",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:site-faq:aftercare:answers",
+      "source": "copy:site-faq:aftercare",
+      "target": "faq:site:aftercare",
+      "relation_type": "answers_question",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:site-faq:warranty:parent",
+      "source": "campaign:automotive-detailing",
+      "target": "copy:site-faq:warranty",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:site-faq:warranty:copy",
+      "source": "copy:site-faq:warranty",
+      "target": "faq:site:warranty",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:site-faq:warranty:answers",
+      "source": "copy:site-faq:warranty",
+      "target": "faq:site:warranty",
+      "relation_type": "answers_question",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:site-faq:used-car-ppf:parent",
+      "source": "campaign:automotive-detailing",
+      "target": "copy:site-faq:used-car-ppf",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:site-faq:used-car-ppf:copy",
+      "source": "copy:site-faq:used-car-ppf",
+      "target": "faq:site:used-car-ppf",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:site-faq:used-car-ppf:answers",
+      "source": "copy:site-faq:used-car-ppf",
+      "target": "faq:site:used-car-ppf",
+      "relation_type": "answers_question",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:site-faq:budget:parent",
+      "source": "campaign:automotive-detailing",
+      "target": "copy:site-faq:budget",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:site-faq:budget:copy",
+      "source": "copy:site-faq:budget",
+      "target": "faq:site:budget",
+      "relation_type": "contains",
+      "weight": 1,
+      "metadata": {
+        "primary_tree": true
+      }
+    },
+    {
+      "id": "edge:site-faq:budget:answers",
+      "source": "copy:site-faq:budget",
+      "target": "faq:site:budget",
+      "relation_type": "answers_question",
+      "weight": 1,
+      "metadata": {}
+    },
+    {
+      "id": "edge:public-product:window-film",
+      "source": "product:window-film",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {"active": true, "source": "operator_approved_aura_adaptation_2026_09_24", "primary_tree": false}
+    },
+    {
+      "id": "edge:public-product:vehicle-wrap",
+      "source": "product:vehicle-wrap",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {"active": true, "source": "operator_approved_aura_adaptation_2026_09_24", "primary_tree": false}
+    },
+    {
+      "id": "edge:public-product:chassis-wash",
+      "source": "product:chassis-wash",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {"active": true, "source": "operator_approved_aura_adaptation_2026_09_24", "primary_tree": false}
+    },
+    {
+      "id": "edge:public-product:leather-conditioning",
+      "source": "product:leather-conditioning",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {"active": true, "source": "operator_approved_aura_adaptation_2026_09_24", "primary_tree": false}
+    },
+    {
+      "id": "edge:public-product:seat-vitrification",
+      "source": "product:seat-vitrification",
+      "target": "gallery:utzig",
+      "relation_type": "publishes_to",
+      "confidence": 1,
+      "weight": 1,
+      "metadata": {"active": true, "source": "operator_approved_aura_adaptation_2026_09_24", "primary_tree": false}
     }
   ]
 }

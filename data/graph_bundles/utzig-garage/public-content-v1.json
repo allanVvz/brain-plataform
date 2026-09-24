@@ -3,10 +3,10 @@
   "reference_url": "https://auradetail.com.br/",
   "policy": "operator_approved_commercial_adaptation",
   "hero": {
-    "source": "operator_approved_customer_feedback_2026_09_23",
+    "source": "operator_approved_aura_adaptation_2026_09_24",
     "eyebrow": "Estética Automotiva Premium",
     "title": "Mais de 20 serviços que valorizam e deixam o seu carro na melhor versão",
-    "description": "Tudo o que seu carro precisa, em um só lugar."
+    "description": "Da limpeza à proteção da pintura, encontre o cuidado para cada momento do seu carro."
   },
   "specialist": {
     "name": "Wilian",
@@ -21,19 +21,24 @@
   },
   "process_summary": "Agende pelo WhatsApp, apresente o que deseja melhorar e passe pela avaliação do veículo. A execução é definida conforme a necessidade, e a entrega inclui orientações para conservar o resultado.",
   "product_descriptions": {
-    "product:evaluation": "O atendimento começa pelo WhatsApp e segue com uma avaliação do veículo para entender a necessidade, indicar o cuidado adequado e organizar a execução. Diagnóstico, valor e próximos passos são confirmados por Wilian, com orientações para conservar o resultado.",
-    "product:detailed-wash": "Lavagem premium com técnica de dois baldes, produtos próprios para detalhamento, trabalho com pincel e atenção a pneus e rodas. O serviço leva em média de 1 a 2 horas e parte de R$ 259,90.",
-    "product:engine-bay-wash": "Limpeza profunda e segura do compartimento do motor, realizada conforme a condição observada e com atenção aos componentes. Possíveis sinais de vazamento precisam ser informados antes da avaliação.",
-    "product:interior-cleaning": "Limpeza profunda e sanitização do interior com produtos e equipamentos específicos. Inclui tratamento compatível com couro ou tecido, cuidado com odores e proteção antimicrobiana; leva em média 6 horas e parte de R$ 600.",
-    "product:commercial-polish": "Polimento voltado à recuperação visual e ao ganho de brilho, indicado conforme o objetivo e a condição da pintura. A equipe orienta se o comercial ou o técnico é mais adequado.",
-    "product:glass-polish": "Tratamento para melhorar o acabamento de vidros com marcas ou manchas compatíveis com polimento. O resultado possível e a combinação com cristalização dependem da avaliação da superfície.",
-    "product:headlight-restoration": "Restauração do acabamento dos faróis para recuperar transparência e apresentação visual dentro do que a peça permite. Resultado e proteção aplicável são confirmados após avaliação.",
-    "product:technical-polish": "Correção profissional da pintura para tratar microrriscos, hologramas e oxidação compatíveis com o processo, recuperar o brilho e preparar a superfície para proteção. Leva em média 1 dia e parte de R$ 700.",
-    "product:bodywork": "Correção de danos de carroceria e recuperação do alinhamento visual conforme a extensão e a localização do reparo. Quando indicado, pequenos amassados podem ser tratados sem danificar a pintura original; fotos iniciam a análise e a equipe confirma o diagnóstico.",
-    "product:painting": "Reparo, pintura e personalização para recuperar o acabamento ou adaptar a apresentação do veículo. Cor, modelo, ano e condição da área afetada orientam a avaliação de resultado, prazo e orçamento.",
-    "product:ppf": "Película transparente e autorreparável para proteger áreas selecionadas contra riscos, pedras, raios UV e intempéries, preservando a pintura original. A duração é personalizada, a garantia é de 10 anos e a aplicação parte de R$ 499,90.",
-    "product:vitrification": "Revestimento cerâmico para brilho intenso, proteção química e limpeza mais fácil. A durabilidade informada é de até 3 anos, a execução leva de 1 a 3 dias e o serviço parte de R$ 999,90.",
-    "product:windshield-crystallization": "Tratamento do para-brisa voltado à proteção da superfície e à repelência de água para favorecer a visibilidade. A aplicação e o resultado esperado são confirmados conforme a condição do vidro."
+    "product:evaluation": "Cada carro tem uma história e uma necessidade. Na avaliação, Wilian observa o estado do veículo, entende seu objetivo e indica uma combinação de serviços, com orçamento e prazo definidos para o caso.",
+    "product:detailed-wash": "Mais que uma lavagem: limpeza cuidadosa de carroceria, rodas e detalhes, com técnica de dois baldes, pincéis e produtos adequados. Uma forma segura de recuperar a apresentação do carro e manter o acabamento em dia. A partir de R$ 259,90.",
+    "product:engine-bay-wash": "Limpeza técnica do cofre do motor, com atenção aos componentes e ao estado do veículo. Remove a sujeira acumulada e devolve uma apresentação mais cuidada ao compartimento.",
+    "product:interior-cleaning": "Cuidado profundo para bancos, carpetes, painéis e áreas de contato. A limpeza trata sujeira e odores com equipamentos e produtos compatíveis com cada revestimento, para um interior mais agradável. A partir de R$ 600.",
+    "product:commercial-polish": "Recupera o brilho e melhora a apresentação da pintura. É a escolha para quem quer um resultado visual perceptível, com a intensidade do trabalho definida depois da avaliação da superfície.",
+    "product:glass-polish": "Trata marcas e manchas compatíveis com polimento e melhora a leitura visual dos vidros. Wilian avalia o estado do vidro e indica o acabamento possível antes do serviço.",
+    "product:headlight-restoration": "Faróis opacos fazem o carro parecer mais cansado. A restauração trabalha a transparência e o acabamento da lente, com proteção indicada conforme sua condição.",
+    "product:technical-polish": "Correção de pintura para reduzir microrriscos, hologramas e sinais de oxidação compatíveis com o processo. Recupera profundidade de cor e brilho, além de preparar a superfície para proteção. A partir de R$ 700.",
+    "product:bodywork": "Reparo de danos de carroceria para devolver alinhamento e apresentação ao veículo. A extensão do trabalho é definida depois de observar a peça e a condição do acabamento.",
+    "product:painting": "Reparo e pintura para recuperar áreas danificadas ou renovar a apresentação do carro. Cor, preparação e acabamento são definidos conforme a peça e o resultado desejado.",
+    "product:ppf": "Uma proteção transparente para áreas expostas a pedras, atrito e pequenos riscos. O PPF ajuda a preservar a pintura original, tem característica autorreparável e pode ser aplicado em partes selecionadas. A partir de R$ 499,90; garantia informada de 10 anos.",
+    "product:vitrification": "Proteção cerâmica que destaca o brilho, facilita a limpeza e ajuda a proteger a superfície contra contaminantes. O preparo e a aplicação são personalizados; durabilidade informada de até 3 anos. A partir de R$ 999,90.",
+    "product:windshield-crystallization": "Tratamento para o para-brisa com repelência à água e acabamento mais fácil de manter. Uma camada de cuidado que favorece a visibilidade em dias de chuva, conforme a condição do vidro.",
+    "product:window-film": "Mais conforto e privacidade ao dirigir. A película de vidros ajuda a reduzir o calor interno e filtrar os raios UV, com tonalidade e aplicação escolhidas para o veículo. A partir de R$ 999,90.",
+    "product:vehicle-wrap": "Uma nova expressão para o carro com película de acabamento. O envelopamento permite mudar a aparência e acrescentar uma camada de proteção à superfície aplicada; cores e áreas são definidas na avaliação.",
+    "product:chassis-wash": "Limpeza da parte inferior do veículo para remover sujeira acumulada em áreas de difícil acesso. O procedimento é escolhido de acordo com o uso e a condição do carro.",
+    "product:leather-conditioning": "Tratamento para bancos e revestimentos de couro que combina limpeza, hidratação e acabamento. Ajuda a manter o toque e a apresentação das superfícies no uso diário.",
+    "product:seat-vitrification": "Camada de proteção para bancos e estofados, indicada conforme o material. Ajuda a reduzir a absorção de sujeira e facilita a rotina de cuidado com o interior."
   },
   "offers": {
     "product:detailed-wash": {
@@ -41,11 +46,11 @@
       "duration": "1 a 2 horas"
     },
     "product:interior-cleaning": {
-      "amount": 600.0,
+      "amount": 600,
       "duration": "6 horas"
     },
     "product:technical-polish": {
-      "amount": 700.0,
+      "amount": 700,
       "duration": "1 dia"
     },
     "product:ppf": {
@@ -55,6 +60,10 @@
     "product:vitrification": {
       "amount": 999.9,
       "duration": "1 a 3 dias"
+    },
+    "product:window-film": {
+      "amount": 999.9,
+      "duration": "cerca de 6 horas"
     }
   },
   "price_answers": {
@@ -62,5 +71,87 @@
     "faq:service:interior-cleaning:higienizacao-preco-tempo": "A higienização interna parte de R$ 600 e leva em média 6 horas. O valor final é confirmado conforme o veículo, os revestimentos e a condição do interior.",
     "faq:service:ppf:ppf-preco-tempo": "A aplicação de PPF parte de R$ 499,90 e tem duração personalizada conforme as áreas escolhidas. Cobertura, prazo e valor final são confirmados após a avaliação.",
     "faq:service:vitrification:vitrificacao-preco-tempo": "A vitrificação parte de R$ 999,90 e leva em média de 1 a 3 dias. O valor final depende da condição do veículo e do preparo indicado."
-  }
+  },
+  "linktree_hero": {
+    "source": "operator_approved_aura_adaptation_2026_09_24",
+    "eyebrow": "Estética Automotiva Premium",
+    "title": "Encontre o cuidado certo para o seu carro.",
+    "description": "Proteção, renovação e acabamento em um só lugar. Escolha por onde começar com a Utzig Garage."
+  },
+  "public_faqs": [
+    {
+      "id": "faq:site:ppf-benefit",
+      "question": "O que o PPF protege?",
+      "answer": "O PPF cria uma película transparente sobre áreas selecionadas da pintura. Ajuda a proteger contra marcas de uso, pequenas pedras e exposição ao tempo, preservando a aparência original."
+    },
+    {
+      "id": "faq:site:vitrification-vs-wax",
+      "question": "Qual a diferença entre vitrificação e cera?",
+      "answer": "A vitrificação forma uma camada cerâmica de proteção e brilho com durabilidade maior que a de uma cera comum. O resultado depende do preparo e dos cuidados posteriores."
+    },
+    {
+      "id": "faq:site:window-film-benefit",
+      "question": "Película de vidros ajuda no conforto?",
+      "answer": "Sim. A película automotiva ajuda a controlar o calor e filtrar raios UV, além de oferecer privacidade. A tonalidade e a aplicação são escolhidas conforme o veículo."
+    },
+    {
+      "id": "faq:site:service-duration",
+      "question": "Quanto tempo cada serviço leva?",
+      "answer": "Depende do serviço e do estado do carro. Lavagem detalhada costuma levar de 1 a 2 horas, higienização cerca de 6 horas, polimento técnico cerca de 1 dia e vitrificação de 1 a 3 dias. A Utzig confirma o prazo na avaliação."
+    },
+    {
+      "id": "faq:site:aftercare",
+      "question": "Como cuidar do carro depois do serviço?",
+      "answer": "A Utzig orienta o intervalo e os produtos adequados a cada aplicação. Como regra geral, prefira lavagens sem escovas agressivas e produtos neutros para preservar o acabamento."
+    },
+    {
+      "id": "faq:site:warranty",
+      "question": "Os serviços têm garantia?",
+      "answer": "A cobertura depende do serviço escolhido. No PPF, a garantia informada é de 10 anos; os demais detalhes são apresentados no orçamento antes da execução."
+    },
+    {
+      "id": "faq:site:used-car-ppf",
+      "question": "Posso aplicar PPF em um carro usado?",
+      "answer": "Sim, depois de avaliar a condição da pintura. Se houver marcas ou correções necessárias, a Utzig indica a preparação adequada antes da aplicação."
+    },
+    {
+      "id": "faq:site:budget",
+      "question": "Como recebo um orçamento?",
+      "answer": "Conte qual é o veículo e o que você procura. Fotos ajudam a iniciar a conversa; Wilian confirma o serviço indicado, o valor final e a agenda depois da avaliação."
+    }
+  ],
+  "benefits": [
+    {
+      "id": "copy:benefit-care",
+      "title": "Cuidado que aparece",
+      "summary": "Da lavagem ao acabamento, cada etapa recebe atenção aos materiais e aos detalhes do veículo."
+    },
+    {
+      "id": "copy:benefit-choice",
+      "title": "Solução para cada objetivo",
+      "summary": "Você pode combinar limpeza, correção e proteção em um plano definido após a avaliação."
+    },
+    {
+      "id": "copy:benefit-finish",
+      "title": "Resultado para durar",
+      "summary": "Ao entregar o carro, a Utzig orienta como manter a aparência e a proteção de cada serviço."
+    }
+  ],
+  "process_steps": [
+    {
+      "id": "copy:process-step-contact",
+      "title": "01 · Conte o que você busca",
+      "summary": "Envie uma mensagem e diga o que deseja melhorar, proteger ou renovar no veículo."
+    },
+    {
+      "id": "copy:process-step-diagnosis",
+      "title": "02 · Avaliamos o veículo",
+      "summary": "Wilian observa o estado das superfícies e combina com você os serviços, o prazo e o orçamento."
+    },
+    {
+      "id": "copy:process-step-delivery",
+      "title": "03 · Cuidamos de cada detalhe",
+      "summary": "A execução segue o plano definido, com orientações para conservar o resultado depois da entrega."
+    }
+  ]
 }
