@@ -4351,7 +4351,26 @@
     "internal_wa_validator_test_allowed": false,
     "publication_allowed": true,
     "purpose": "utzig_group_covers_and_linktree_evaluation_feature",
-    "source": "operator_request_2026_09_24"
+    "source": "operator_request_2026_09_24",
+    "visual_media_reconciliation": {
+      "soft_disabled_edge_count": 2,
+      "soft_disabled_edges": [
+        {
+          "id": "edge:group-cover:preservation",
+          "relation_type": "category_has_asset",
+          "removal_reason": "approved_group_cover_swap_2026_09_24",
+          "source": "group:preservation",
+          "target": "asset:process"
+        },
+        {
+          "id": "edge:group-cover:revitalization",
+          "relation_type": "category_has_asset",
+          "removal_reason": "approved_group_cover_swap_2026_09_24",
+          "source": "group:revitalization",
+          "target": "asset:headlight-before"
+        }
+      ]
+    }
   },
   "nodes": [
     {

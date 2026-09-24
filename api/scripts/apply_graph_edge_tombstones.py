@@ -120,7 +120,10 @@ def main() -> int:
     parser.add_argument("--approved-draft-checksum", required=True)
     parser.add_argument("--actor", required=True)
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--restore", action="store_true")
     args = parser.parse_args()
+    if args.apply and args.restore:
+        raise RuntimeError("apply_and_restore_are_mutually_exclusive")
 
     bundle = json.loads(Path(args.bundle).read_text(encoding="utf-8"))
     persona_scope = bundle.get("persona") or {}
@@ -134,6 +137,25 @@ def main() -> int:
     )
     planned = plan_tombstones(bundle, node_rows, edge_rows)
     changed = []
+    if args.restore:
+        for item in planned:
+            if item["status"] != "already_inactive":
+                continue
+            metadata = item["metadata"]
+            if (metadata.get("removed_by") != args.actor
+                    or metadata.get("graph_bundle_draft_checksum") != args.approved_draft_checksum):
+                continue
+            restored = {**metadata, "active": True}
+            restored.pop("removal_reason", None)
+            restored.pop("removed_by", None)
+            restored["primary_tree"] = restored.pop("previous_primary_tree", False)
+            previous_checksum = restored.pop("previous_graph_bundle_draft_checksum", None)
+            if previous_checksum is not None:
+                restored["graph_bundle_draft_checksum"] = previous_checksum
+            updated = supabase_client.update_knowledge_edge(item["row_id"], {"metadata": restored})
+            if not updated:
+                raise RuntimeError(f"tombstone_restore_failed:{item['edge_id']}")
+            changed.append(item["edge_id"])
     if args.apply:
         for item in planned:
             if item["status"] != "active":
@@ -145,6 +167,8 @@ def main() -> int:
                 "removal_reason": item["reason"],
                 "graph_bundle_draft_checksum": args.approved_draft_checksum,
                 "removed_by": args.actor,
+                "previous_primary_tree": item["metadata"].get("primary_tree", False),
+                "previous_graph_bundle_draft_checksum": item["metadata"].get("graph_bundle_draft_checksum"),
             }
             updated = supabase_client.update_knowledge_edge(
                 item["row_id"], {"metadata": metadata}
@@ -166,6 +190,7 @@ def main() -> int:
         }, source="scripts.apply_graph_edge_tombstones")
     print(json.dumps({
         "apply": args.apply,
+        "restore": args.restore,
         "persona_slug": persona_slug,
         "planned_count": len(planned),
         "active_count": sum(item["status"] == "active" for item in planned),

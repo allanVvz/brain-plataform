@@ -95,12 +95,16 @@ jobs:
             [[ "$(docker inspect -f '{{.State.Health.Status}}' "$control_container")" == healthy ]]
             compose=(docker compose --env-file .env.compose -f docker-compose.yml -f infra/microservices/docker-compose.blue-green.yml)
             previous_publication_id="$("${compose[@]}" exec -T "$control_service" python -c 'import sys; from services import supabase_client; persona=supabase_client.get_persona(sys.argv[1]); publication=supabase_client.get_active_graph_publication(str(persona["id"])); print((publication or {}).get("id") or "")' "$PERSONA_SLUG")"
+            tombstones_applied=false
             rollback_on_error() {
               exit_code=$?
               trap - ERR
               current_publication_id="$("${compose[@]}" exec -T "$control_service" python -c 'import sys; from services import supabase_client; persona=supabase_client.get_persona(sys.argv[1]); publication=supabase_client.get_active_graph_publication(str(persona["id"])); print((publication or {}).get("id") or "")' "$PERSONA_SLUG" || true)"
               if [[ -n "$previous_publication_id" && "$current_publication_id" != "$previous_publication_id" ]]; then
                 "${compose[@]}" exec -T "$control_service" python -c 'import json,sys; from services import supabase_client; result=supabase_client.get_client().rpc("activate_graph_publication_v3", {"p_publication_id":sys.argv[1]}).execute().data; print("GRAPH_PUBLICATION_ROLLBACK="+json.dumps(result,sort_keys=True,default=str))' "$previous_publication_id"
+              fi
+              if [[ "$tombstones_applied" == true ]]; then
+                "${compose[@]}" exec -T "$control_service" python /tmp/apply_graph_edge_tombstones.py /tmp/approved-graphbundle.json --approved-draft-checksum "$APPROVED_DRAFT_CHECKSUM" --actor "$PUBLISH_ACTOR" --restore
               fi
               exit "$exit_code"
             }
@@ -126,6 +130,7 @@ jobs:
             )
             "${compose[@]}" exec -T "$control_service" "${tombstone_args[@]}"
             "${compose[@]}" exec -T "$control_service" "${tombstone_args[@]}" --apply
+            tombstones_applied=true
             args=(
               python scripts/publish_graph_bundle.py /tmp/approved-graphbundle.json
               --approved-draft-checksum "$APPROVED_DRAFT_CHECKSUM"

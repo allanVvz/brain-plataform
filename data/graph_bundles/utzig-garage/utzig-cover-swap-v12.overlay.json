@@ -7,7 +7,26 @@
   },
   "metadata": {
     "purpose": "utzig_group_covers_and_linktree_evaluation_feature",
-    "source": "operator_request_2026_09_24"
+    "source": "operator_request_2026_09_24",
+    "visual_media_reconciliation": {
+      "soft_disabled_edge_count": 2,
+      "soft_disabled_edges": [
+        {
+          "id": "edge:group-cover:preservation",
+          "source": "group:preservation",
+          "target": "asset:process",
+          "relation_type": "category_has_asset",
+          "removal_reason": "approved_group_cover_swap_2026_09_24"
+        },
+        {
+          "id": "edge:group-cover:revitalization",
+          "source": "group:revitalization",
+          "target": "asset:headlight-before",
+          "relation_type": "category_has_asset",
+          "removal_reason": "approved_group_cover_swap_2026_09_24"
+        }
+      ]
+    }
   },
   "patch_nodes": [
     {
