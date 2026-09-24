@@ -283,7 +283,7 @@ def test_claim_evidence_disagreement_is_a_quality_warning(service):
     assert "cited_node_outside_package:faq:service" in proof["quality_warnings"]
 
 
-def test_publication_checksum_and_premature_confirmation_still_gate_delivery():
+def test_publication_checksum_gates_while_bare_confirmation_is_quality_warning():
     proof = graph_proof_checker_v3.check(
         publication={"status": "active", "checksum": "new", "document_json": {"branch_anchors": []}},
         contract={"closure_node_ids": [], "fields": [{"key": "profile", "owner_node_id": "persona"}]},
@@ -294,9 +294,21 @@ def test_publication_checksum_and_premature_confirmation_still_gate_delivery():
         branch_selection_allowed=False, branch_switch_allowed=False,
     )
     assert proof["valid"] is False
-    assert set(proof["gating_errors"]) == {
-        "publication_checksum_mismatch", "premature_final_confirmation",
-    }
+    assert proof["gating_errors"] == ["publication_checksum_mismatch"]
+    assert "premature_final_confirmation" in proof["quality_warnings"]
+
+    matching = graph_proof_checker_v3.check(
+        publication={"status": "active", "checksum": "old", "document_json": {"branch_anchors": []}},
+        contract={"closure_node_ids": [], "fields": [{"key": "profile", "owner_node_id": "persona"}]},
+        ledger={"graph_checksum": "old", "facts": {}},
+        proposal={"reply": "Está confirmado.", "branch_action": "none", "claims": []},
+        message="Olá", source_message_id="inbound:1", package_node_ids=set(),
+        package_chunk_ids=set(), active_branch_node_id=None,
+        branch_selection_allowed=False, branch_switch_allowed=False,
+    )
+    assert matching["valid"] is True
+    assert matching["delivery_authorized"] is True
+    assert "premature_final_confirmation" in matching["quality_warnings"]
 
 
 def test_price_comparison_is_derived_from_published_offer_and_faq():

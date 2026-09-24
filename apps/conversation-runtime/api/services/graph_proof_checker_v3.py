@@ -972,15 +972,15 @@ def check(
     discarded_metadata = [
         f"next_question_node_id:{error}" for error in metadata_errors
     ]
-    # Claim and citation discrepancies are editorial observations. The
-    # atomic commit still needs a valid technical proof, while the published
-    # graph identity and an explicit premature confirmation remain safety
-    # gates. Price disclosure and concrete price/date/time promises are also
-    # checked against the published policy at commit.
+    # Claim, citation and isolated closing words are editorial observations.
+    # A bare "confirmado" can acknowledge a received fact without promising
+    # a booking. The commit guard separately blocks concrete price/date/time
+    # confirmations and the graph's human-price policy before outbound.
+    # Publication identity remains a technical proof gate.
     hard_prefixes = ("publication_",)
     gating_errors = [
         error for error in errors
-        if error.startswith(hard_prefixes) or error == "premature_final_confirmation"
+        if error.startswith(hard_prefixes)
     ]
     repair_only = bool(gating_errors) and all(
         "outside_package" in error for error in gating_errors
