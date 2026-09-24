@@ -50,6 +50,11 @@ def plan_tombstones(
         for row in node_rows
         if (row.get("metadata") or {}).get("graph_json_node_id")
     }
+    desired_edges_by_id = {
+        str(edge.get("id") or ""): edge
+        for edge in bundle.get("edges") or []
+        if edge.get("id")
+    }
     planned: list[dict[str, Any]] = []
     seen: set[str] = set()
     for item in tombstones:
@@ -71,6 +76,26 @@ def plan_tombstones(
             and str(row.get("target_node_id") or "") == target_projection
             and str(row.get("relation_type") or "") == relation
         ]
+        if not matches:
+            desired = desired_edges_by_id.get(edge_id) or {}
+            desired_source = projection_by_stable.get(str(desired.get("source") or ""))
+            desired_target = projection_by_stable.get(str(desired.get("target") or ""))
+            replacements = [
+                row for row in edge_rows
+                if str((row.get("metadata") or {}).get("graph_json_edge_id") or "") == edge_id
+                and str(row.get("source_node_id") or "") == desired_source
+                and str(row.get("target_node_id") or "") == desired_target
+                and str(row.get("relation_type") or "") == str(desired.get("relation_type") or "")
+            ]
+            if len(replacements) == 1:
+                planned.append({
+                    "edge_id": edge_id,
+                    "row_id": str(replacements[0].get("id") or ""),
+                    "reason": reason,
+                    "status": "already_replaced",
+                    "metadata": dict(replacements[0].get("metadata") or {}),
+                })
+                continue
         if len(matches) != 1:
             raise RuntimeError(f"tombstone_edge_match_count:{edge_id}:{len(matches)}")
         row = matches[0]
@@ -109,7 +134,7 @@ def main() -> int:
     changed = []
     if args.apply:
         for item in planned:
-            if item["status"] == "already_inactive":
+            if item["status"] != "active":
                 continue
             metadata = {
                 **item["metadata"],
@@ -143,6 +168,7 @@ def main() -> int:
         "planned_count": len(planned),
         "active_count": sum(item["status"] == "active" for item in planned),
         "already_inactive_count": sum(item["status"] == "already_inactive" for item in planned),
+        "already_replaced_count": sum(item["status"] == "already_replaced" for item in planned),
         "changed_edge_ids": changed,
     }, ensure_ascii=False, sort_keys=True))
     return 0
