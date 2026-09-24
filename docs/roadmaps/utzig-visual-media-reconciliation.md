@@ -1,6 +1,6 @@
 # Reconciliação visual — Utzig Garage
 
-Status: reconciliação visual ativa na publicação v8. O incremento editorial seguinte parte exatamente dessa fonte comprovada e aguarda stage/CAS; não altera runtime, transport, binding, WhatsApp ou envio de mídia pelo agente.
+Status: reconciliação visual e enriquecimento editorial ativos na publicação v9 (`2f51e762-4d5d-452c-808d-1c9149fd466d`), checksum `sha256:5101c7565b789111e36fa5d80ad26b64d13efd57fe87536163041e378582c83b`. O frontend promovido em 2026-09-23 consome essa publicação sem alterar binding, WhatsApp ou envio de mídia pelo agente.
 
 ## Enriquecimento editorial aprovado
 
@@ -33,8 +33,16 @@ PPF, vitrificação, funilaria e pintura não recebem evidência direta. O retra
 
 A capa de Reparo e pintura foi gerada especificamente para preencher a lacuna visual do grupo. O asset declara `synthetic=true`, `representative=true` e `not_direct_evidence=true`; ele não é reutilizado como prova de funilaria ou pintura e permanece ligado canonicamente à Gallery.
 
-Materiais da pasta `EDIÇÃO`, se apresentados depois, entram como `pending_validation`; não são publicados nem entram no RAG antes de aprovação. Referências da Aura servem somente à estrutura: nenhum preço, garantia, promessa ou fato comercial dela é importado.
+Materiais da pasta `EDIÇÃO`, se apresentados depois, entram como `pending_validation`; não são publicados nem entram no RAG antes de aprovação. A referência pública da Aura foi autorizada pelo operador para adaptação comercial dos 13 serviços existentes, incluindo os cinco preços iniciais listados acima. Identidade, contatos, endereço, avaliações e depoimentos da Aura continuam excluídos.
 
-## Próximo gate
+## Evidências da ativação
 
-O incremento v7 foi compilado contra a v6: adiciona um asset, três edges, altera uma associação de capa, reutiliza todos os chunks e não cria embeddings. Após revisão do diff, executar stage e CAS. Não há cenário WA Validator nesta alteração: ela não muda pergunta, jornada ou resposta do agente.
+- GraphBundle compilado contra a publicação v8: cinco nodes `Offer`, dez edges e 25 nodes alterados; 145 chunks reutilizados, 27 embeddings e zero erro de validação.
+- Plan, stage e ativação CAS concluídos pelos runs `35945661475`, `35945736002` e `35945855899`.
+- O contrato público confirmou v9, 13 serviços, cinco grupos, cinco preços, seis imagens diretas, cinco capas de grupo e nenhuma chave pública de segredo.
+- O deployment Vercel `dpl_6hvPwMCDZKqxkHRc1mB3vwCN8nR3` está ativo em `https://utzig.vercel.app`. A home e a landing usam a mesma hero aprovada; cada resumo de produto contém apenas o chevron, sem ícone de fotografia.
+- O WA Validator interno confirmou `technical_pass=true`, Graph v9, proof válido, commit completo, uma decisão e um outbound interno por turno. O gate de qualidade reprovou porque a resposta “Onix” foi reconhecida na fala, mas não persistida como `modelo_veiculo`; sessão `635446f0-ee5c-435d-bb04-9e23b51b3e7e`. Não houve outbound ao WhatsApp real.
+
+## Gate bloqueado do backend
+
+O código do control plane e do `brain-contracts` já implementa `media.primary`, mas o control plane produtivo ainda usa o digest anterior e o payload público preserva somente `assets` e capas de grupo. A tentativa de renderizar uma release exclusiva do control plane foi bloqueada corretamente pelo validador: a alteração do checksum de `brain-contracts` também alcança runtime e transport, enquanto o escopo aprovado proíbe alterar esses serviços e o runtime possui um canário de qualidade pendente. Nenhum cutover de microsserviço foi executado. A interface pública já evita repetição visual pela estrutura grupo/produto; promover o contrato aditivo do backend exige uma release separada depois de corrigir e aprovar o canário do runtime.
