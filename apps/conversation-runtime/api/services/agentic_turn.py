@@ -17,6 +17,7 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from schemas.conversation import (
+    CommercialClaim,
     ConversationContext,
     ConversationReplyV1,
     ExtractedFact,
@@ -379,6 +380,48 @@ def _reply_claim_contract(resolved: Any) -> dict[str, Any]:
     }
 
 
+def _usable_reply_with_metadata(raw: dict[str, Any]) -> tuple[ConversationReplyV1, list[str]]:
+    """Keep a usable model sentence when only optional metadata is malformed."""
+    text = raw.get("reply")
+    if not isinstance(text, str) or not text.strip():
+        raise AgenticTurnError("reply_validation", "reply has no usable text")
+    allowed = {
+        "contract_version", "reply", "asked_field_key", "claims",
+        "cited_node_ids", "cited_chunk_ids", "handoff_requested", "knowledge_gap",
+    }
+    cleaned = {key: value for key, value in raw.items() if key in allowed}
+    warnings = [f"reply_metadata_discarded:extra:{key}" for key in raw if key not in allowed]
+    if cleaned.get("asked_field_key") is not None and not isinstance(cleaned["asked_field_key"], str):
+        cleaned["asked_field_key"] = None
+        warnings.append("reply_metadata_discarded:asked_field_key")
+    claims = cleaned.get("claims", [])
+    if not isinstance(claims, list):
+        cleaned["claims"] = []
+        warnings.append("reply_metadata_discarded:claims")
+    else:
+        accepted = []
+        for index, claim in enumerate(claims):
+            try:
+                accepted.append(CommercialClaim.model_validate(claim).model_dump(mode="json"))
+            except ValidationError:
+                warnings.append(f"reply_metadata_discarded:claims:{index}")
+        cleaned["claims"] = accepted
+    for key in ("cited_node_ids", "cited_chunk_ids"):
+        citations = cleaned.get(key, [])
+        if not isinstance(citations, list):
+            cleaned[key] = []
+            warnings.append(f"reply_metadata_discarded:{key}")
+            continue
+        cleaned[key] = [value for value in citations if isinstance(value, str)]
+        if len(cleaned[key]) != len(citations):
+            warnings.append(f"reply_metadata_discarded:{key}:items")
+    for key in ("handoff_requested", "knowledge_gap"):
+        if key in cleaned and not isinstance(cleaned[key], bool):
+            cleaned[key] = False
+            warnings.append(f"reply_metadata_discarded:{key}")
+    return ConversationReplyV1.model_validate(cleaned), warnings
+
+
 def _published_price_estimate(resolved: Any) -> dict[str, Any] | None:
     """Compute a retail-only estimate from selected, published products."""
     brief = resolved.conversation_brief
@@ -725,7 +768,7 @@ def execute(
         },
     )
     try:
-        reply = ConversationReplyV1.model_validate(reply_raw)
+        reply, reply_warnings = _usable_reply_with_metadata(reply_raw)
     except ValidationError as exc:
         validation_errors = [
             {
@@ -766,6 +809,17 @@ def execute(
                 "cited_chunk_ids": reply.cited_chunk_ids,
             },
         ) from exc
+    if reply_warnings:
+        quality_warnings = list(dict.fromkeys([
+            *(response.proof.get("quality_warnings") or []), *reply_warnings,
+        ]))
+        response = response.model_copy(update={
+            "proof": {
+                **response.proof,
+                "quality_warnings": quality_warnings,
+                "quality_pass": False,
+            },
+        })
     telemetry = dict(response.proof.get("telemetry") or {})
     if not telemetry:
         telemetry = conversation_runtime.build_turn_telemetry(

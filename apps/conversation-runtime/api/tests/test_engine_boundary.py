@@ -248,6 +248,57 @@ def test_agentic_proof_discards_invalid_question_metadata_without_blocking_reply
     ]
 
 
+@pytest.mark.parametrize("service", ["Vitrificação", "Higienização interna"])
+def test_claim_evidence_disagreement_is_a_quality_warning(service):
+    proof = graph_proof_checker_v3.check(
+        publication={
+            "status": "active", "checksum": "graph-checksum",
+            "document_json": {"branch_anchors": ["service:active"]},
+        },
+        contract={
+            "branch_path_checksum": "path-checksum",
+            "closure_node_ids": ["service:active", "faq:service"],
+            "fields": [], "questions": [],
+            "claims": [{"claim_type": "service_detail", "evidence_node_ids": ["faq:service"]}],
+        },
+        ledger={"graph_checksum": "graph-checksum", "facts": {}},
+        proposal={
+            "reply": f"Posso explicar {service}.",
+            "branch_action": "keep", "branch_anchor_node_id": "service:active",
+            "branch_path_checksum": "path-checksum",
+            "claims": [{"claim_type": "service_detail", "value": {"text": service},
+                        "evidence_node_ids": ["service:active"], "evidence_chunk_ids": []}],
+            "cited_node_ids": ["faq:service"],
+        },
+        message=f"Tenho interesse em {service}", source_message_id="inbound:1",
+        package_node_ids={"service:active"}, package_chunk_ids=set(),
+        active_branch_node_id="service:active", branch_selection_allowed=False,
+        branch_switch_allowed=False,
+    )
+    assert proof["valid"] is True
+    assert proof["delivery_authorized"] is True
+    assert proof["repair_required"] is False
+    assert proof["gating_errors"] == []
+    assert "claim_evidence_not_authorized:service_detail" in proof["quality_warnings"]
+    assert "cited_node_outside_package:faq:service" in proof["quality_warnings"]
+
+
+def test_publication_checksum_and_premature_confirmation_still_gate_delivery():
+    proof = graph_proof_checker_v3.check(
+        publication={"status": "active", "checksum": "new", "document_json": {"branch_anchors": []}},
+        contract={"closure_node_ids": [], "fields": [{"key": "profile", "owner_node_id": "persona"}]},
+        ledger={"graph_checksum": "old", "facts": {}},
+        proposal={"reply": "Está confirmado.", "branch_action": "none", "claims": []},
+        message="Olá", source_message_id="inbound:1", package_node_ids=set(),
+        package_chunk_ids=set(), active_branch_node_id=None,
+        branch_selection_allowed=False, branch_switch_allowed=False,
+    )
+    assert proof["valid"] is False
+    assert set(proof["gating_errors"]) == {
+        "publication_checksum_mismatch", "premature_final_confirmation",
+    }
+
+
 def test_price_comparison_is_derived_from_published_offer_and_faq():
     document = {
         "branch_anchors": ["audience:retail"],

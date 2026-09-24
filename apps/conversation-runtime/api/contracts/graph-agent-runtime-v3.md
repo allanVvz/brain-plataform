@@ -22,13 +22,20 @@ ainda perguntavel com dependencias satisfeitas. `missing_fields` mede apenas
 completude. Componentes estruturados invalidos sao descartados sem compor ou
 substituir a reply.
 
-Os hard gates agentic ficam restritos a checksum/publicacao, isolamento de
-persona/agente, evidencia de claims comerciais, confirmacao insegura de
-preco/data/horario e exactly-once. Em `interpret_then_respond`, JSON invalido,
-falha de qualquer modelo ou proof invalido gera handoff observavel e pausa da
-IA, sem chamada de reparo nem fallback publico fabricado. `single_pass` nao e
-uma estrategia produtiva. O canario exato e proporcional ao componente
-alterado; suites amplas permanecem nightly/advisory.
+Os hard gates agentic cobrem checksum/publicacao, isolamento de persona/agente,
+binding, texto vazio, confirmacao insegura de preco/data/horario, politica
+publicada de preco reservado a humano e exactly-once. Divergencias de claim,
+citacao e evidencia entram em `proof_result.quality_warnings`, com a resposta
+em `model_proposal.reply` e os IDs canonicos do turno; elas nao bloqueiam a
+resposta, nao geram repair nem contam como falha tecnica. `valid` no proof
+comprova a identidade da publicacao e a autorizacao do commit, nao a aprovacao
+editorial: `technical_pass=true` pode coexistir com `quality_pass=false`.
+Metadados opcionais invalidos da resposta sao descartados individualmente;
+o texto utilizavel e preservado. JSON irrecuperavel, resposta vazia, falha do
+modelo ou proof tecnico invalido terminalizam o turno, sem repair semantico.
+Duas falhas tecnicas consecutivas geram um unico handoff; a primeira e auditada
+sem pausa. `single_pass` nao e uma estrategia produtiva. O canario exato e
+proporcional ao componente alterado; suites amplas permanecem nightly/advisory.
 
 A integracao do modelo declara `structured_output_mode` como capacidade
 tecnica (`json_object` ou `json_schema`). O provisionamento nao infere

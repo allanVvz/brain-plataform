@@ -140,7 +140,8 @@ def test_understanding_instruction_extracts_a_direct_free_text_answer(monkeypatc
     assert "audience_signals are optional" in captured["system"]
 
 
-def test_two_model_calls_resolve_facts_before_reply_and_commit_once(monkeypatch):
+@pytest.mark.parametrize("invalid_metadata", [False, True])
+def test_two_model_calls_resolve_facts_before_reply_and_commit_once(monkeypatch, invalid_metadata):
     context = _context()
     calls: list[str] = []
     captured: dict = {}
@@ -186,8 +187,8 @@ def test_two_model_calls_resolve_facts_before_reply_and_commit_once(monkeypatch)
         return ({
             "contract_version": "conversation_reply_v1",
             "reply": "Entendi. O que voce procura?",
-            "asked_field_key": None,
-            "claims": [],
+            "asked_field_key": 17 if invalid_metadata else None,
+            "claims": [{"claim_type": "other", "value": "invalid"}] if invalid_metadata else [],
             "cited_node_ids": [],
             "cited_chunk_ids": [],
             "handoff_requested": False,
@@ -247,6 +248,13 @@ def test_two_model_calls_resolve_facts_before_reply_and_commit_once(monkeypatch)
     assert "rather than guessing" in captured["reply_system"]
     assert "claim_contract exactly" in captured["reply_system"]
     assert result["model_calls"] == 2
+    assert captured["commit"]["response"].reply_text == "Entendi. O que voce procura?"
+    if invalid_metadata:
+        assert captured["commit"]["response"].proof["quality_pass"] is False
+        assert set(captured["commit"]["response"].proof["quality_warnings"]) == {
+            "reply_metadata_discarded:asked_field_key",
+            "reply_metadata_discarded:claims:0",
+        }
 
 
 def test_reply_claim_contract_exposes_only_graph_authorized_price_evidence():
@@ -334,6 +342,45 @@ def test_public_information_claim_is_valid_in_reply_and_model_schema():
 
     assert reply.claims[0].claim_type == "public_information"
     assert "public_information" in agentic_turn._reply_schema()["properties"]["claims"]["items"]["properties"]["claim_type"]["enum"]
+
+
+def test_usable_reply_discards_only_invalid_optional_metadata():
+    reply, warnings = agentic_turn._usable_reply_with_metadata({
+        "contract_version": "conversation_reply_v1",
+        "reply": "Posso explicar como funciona a vitrificação.",
+        "asked_field_key": 17,
+        "claims": [
+            {"claim_type": "service_detail", "value": {"text": "Explicação"},
+             "evidence_node_ids": ["faq:service"], "evidence_chunk_ids": []},
+            {"claim_type": "service_detail", "value": "invalid"},
+        ],
+        "cited_node_ids": ["faq:service", 5],
+        "cited_chunk_ids": "invalid",
+        "handoff_requested": "false",
+        "knowledge_gap": False,
+        "extra": "ignored",
+    })
+
+    assert reply.reply == "Posso explicar como funciona a vitrificação."
+    assert len(reply.claims) == 1
+    assert reply.cited_node_ids == ["faq:service"]
+    assert reply.cited_chunk_ids == []
+    assert reply.handoff_requested is False
+    assert set(warnings) == {
+        "reply_metadata_discarded:extra:extra",
+        "reply_metadata_discarded:asked_field_key",
+        "reply_metadata_discarded:claims:1",
+        "reply_metadata_discarded:cited_node_ids:items",
+        "reply_metadata_discarded:cited_chunk_ids",
+        "reply_metadata_discarded:handoff_requested",
+    }
+
+
+@pytest.mark.parametrize("reply", ["", "  \n  ", None])
+def test_empty_reply_remains_a_technical_failure(reply):
+    with pytest.raises(agentic_turn.AgenticTurnError) as raised:
+        agentic_turn._usable_reply_with_metadata({"reply": reply})
+    assert raised.value.stage == "reply_validation"
 
 
 def test_non_literal_fact_evidence_fails_without_reply_call(monkeypatch):

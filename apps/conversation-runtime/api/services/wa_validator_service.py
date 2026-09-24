@@ -2725,12 +2725,25 @@ def _semantic_turn_audit(
     # as observations; objective proof, persistence and exactly-once failures
     # remain release gates.
     observations = [name for name, passed in criteria.items() if not passed]
+    observations.extend(
+        f"proof_quality_warning:{warning}"
+        for warning in proof.get("quality_warnings") or []
+    )
     non_blocking_observations = [
         name for name in observations
-        if name in {
+        if name.startswith("proof_quality_warning:") or name in {
             "question_semantically_askable",
             "required_reply_content",
             "forbidden_reply_content_absent",
+            "doubt_answered_first",
+            "unsupported_claim_not_invented",
+            "sales_internal_language_absent",
+            "received_content_acknowledged",
+            "known_fact_not_reasked",
+            "reply_not_repeated",
+            "question_repetition_budget",
+            "contextual_retry_valid",
+            "terminal_not_repeated",
         }
     ]
     failures = [
@@ -3178,6 +3191,7 @@ async def run_session_direct(
             }
             expected_active_branches: list[str] = []
             semantic_complete = False
+            quality_observations: list[str] = []
             i = 0
             while step_queue and i < max_turns:
                 step = step_queue.pop(0)
@@ -3465,6 +3479,7 @@ async def run_session_direct(
                             conversation_mode=conversation_mode,
                         )
                     turn["semantic_audit"] = audit
+                    quality_observations.extend(audit.get("observations") or [])
                     # Persist every semantic observation, including advisory
                     # ones. Sessions retain the full transcript as well, but
                     # this event makes longitudinal audit/querying possible
@@ -3612,7 +3627,8 @@ async def run_session_direct(
                 "conversation": conversation,
                 "status": "done",
                 "technical_pass": True,
-                "quality_pass": True if semantic_mode else None,
+                "quality_pass": not quality_observations if semantic_mode else None,
+                "quality_observations": list(dict.fromkeys(quality_observations)),
                 "quality_scope": "semantic_graph_v1" if semantic_mode else "technical_only",
             }
             _session_update(session_id, status="done", output=final_output)
@@ -3627,7 +3643,7 @@ async def run_session_direct(
                     "graph_checksum": script.get("meta", {}).get("graph_checksum"),
                     "conversation_mode": conversation_mode,
                     "classifier": "semantic_graph_v1" if semantic_mode else "deterministic_v1",
-                    "quality_pass": True if semantic_mode else None,
+                    "quality_pass": not quality_observations if semantic_mode else None,
                     "pipeline_contract": pipeline_contract,
                 },
             })

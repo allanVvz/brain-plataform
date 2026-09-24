@@ -712,6 +712,13 @@ Se nao aparece no grafo, esta incompleto.
   semantico nao sao caminhos produtivos. A primeira falha JSON/modelo/proof e
   terminalizada e auditada sem pausa; duas falhas consecutivas geram um unico
   handoff. Um turno bem-sucedido zera a sequencia.
+- Divergencias de claim, citacao e evidencia da resposta sao registradas em
+  `proof_result.quality_warnings` e avaliadas depois do envio; elas nao geram
+  repair, falha tecnica ou veto de outbound. `technical_pass=true` pode
+  coexistir com `quality_pass=false`. O proof valido comprova identidade da
+  publicacao e commit exactly-once, nao aprovacao editorial. Continuam gates
+  publicacao/checksum, persona/binding, duplicidade, texto vazio, confirmacao
+  indevida de preco/data/horario e politica publicada de preco humano.
 - Control plane, conversation runtime e transport usam imagens, health,
   rollback e roles de banco independentes; nenhum importa codigo de outro.
 - Contratos entre servicos vem somente de `brain-contracts` em versao exata.

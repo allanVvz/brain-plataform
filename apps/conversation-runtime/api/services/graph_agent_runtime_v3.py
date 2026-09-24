@@ -4440,8 +4440,8 @@ def _discard_invalid_structured_components(
     """Drop malformed ancillary components without touching ``reply``.
 
     A malformed fact/claim/service observation is not permission to replace a
-    valid public answer. Each component is independently parsed; proof later
-    decides which surviving commercial claims are safe to publish.
+    valid public answer. Each component is independently parsed; proof records
+    evidence discrepancies for the later quality review.
     """
     if not isinstance(raw, dict):
         return raw, []
@@ -4963,10 +4963,7 @@ def _decide(
         proof["errors"] = [*proof.get("errors", []), *service_proof["errors"]]
         proof["repair_required"] = False
     safe_service_operations = service_operations if service_proof["valid"] else []
-    delivery_gates = [
-        str(error) for error in proof.get("errors") or []
-        if str(error).startswith(("publication_", "claim_"))
-    ]
+    delivery_gates = list(proof.get("gating_errors") or [])
     proof["gating_errors"] = list(dict.fromkeys(delivery_gates))
     proof["valid"] = not delivery_gates
     proof["delivery_authorized"] = not delivery_gates
@@ -5145,9 +5142,9 @@ def _decide(
     # A fact error belonging to a currently active branch OTHER than the one
     # the model focused on this turn must not, by itself, discard the whole
     # turn's natural/accepted-proposal path -- only the focused branch's own
-    # errors (and any non-fact error: branch-action authorization, citation,
-    # claims) still gate it exactly as before. proof["valid"]/proof["errors"]
-    # stay the true, complete validation result for anyone else consuming
+    # errors still matter to the state transition. Claim/citation differences
+    # remain in the proof as quality warnings. proof["valid"]/proof["errors"]
+    # keep the complete validation result for anyone else consuming
     # them (logging, audits); this is a local view used only for this one
     # routing decision. field_validation already carries each fact's
     # owner_node_id, so this reuses data check() already computed.
@@ -5609,7 +5606,7 @@ def _decide(
             "delivery_authorized": True,
             "model_reply_preserved": reply == proposal.reply,
             "technical_pass": True,
-            "quality_pass": repetition["passed"],
+            "quality_pass": repetition["passed"] and not proof.get("quality_warnings"),
         }
         proof["catalog_images"] = selected_images
         evidence_node_ids = list(dict.fromkeys([

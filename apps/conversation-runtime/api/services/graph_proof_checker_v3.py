@@ -972,15 +972,15 @@ def check(
     discarded_metadata = [
         f"next_question_node_id:{error}" for error in metadata_errors
     ]
-    # The proof checker is an evidence/safety boundary, not a copy editor or
-    # journey controller.  A grounded natural reply must remain deliverable
-    # when the model's optional branch, citation, question or handoff
-    # metadata is imperfect.  Only publication integrity and commercial
-    # claims can revoke delivery authorization here.
-    hard_prefixes = ("publication_", "claim_")
+    # Claim and citation discrepancies are editorial observations. The
+    # atomic commit still needs a valid technical proof, while the published
+    # graph identity and an explicit premature confirmation remain safety
+    # gates. Price disclosure and concrete price/date/time promises are also
+    # checked against the published policy at commit.
+    hard_prefixes = ("publication_",)
     gating_errors = [
         error for error in errors
-        if error.startswith(hard_prefixes)
+        if error.startswith(hard_prefixes) or error == "premature_final_confirmation"
     ]
     repair_only = bool(gating_errors) and all(
         "outside_package" in error for error in gating_errors
