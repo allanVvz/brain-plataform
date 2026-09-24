@@ -64,8 +64,16 @@
         "product:evaluation"
       ],
       "preserved_active_faq_count": 0,
-      "soft_disabled_edges": [],
-      "soft_disabled_edge_count": 0
+      "soft_disabled_edges": [
+        {
+          "id": "edge:group-cover:repair-paint",
+          "source": "group:repair-paint",
+          "target": "asset:process",
+          "relation_type": "category_has_asset",
+          "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
+        }
+      ],
+      "soft_disabled_edge_count": 1
     }
   },
   "nodes": [

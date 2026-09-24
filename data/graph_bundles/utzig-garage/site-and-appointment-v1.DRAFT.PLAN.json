@@ -20,7 +20,7 @@
   "chunks_to_embed": 0,
   "compiler_version": "graph-compiler-v3.6.5",
   "disposition": "awaiting_approval",
-  "draft_checksum": "sha256:8641beb6c34fee1c9d1cffe39416b29cb8449755557e7fb748509d844149e9d9",
+  "draft_checksum": "sha256:819b9781395790995f12d45d871000e15a457dcafcebcbe34cb206524812afaf",
   "edge_changes": {
     "added": [
       "edge:primary:repair-paint-representative-v1",

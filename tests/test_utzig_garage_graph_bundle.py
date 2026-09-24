@@ -111,6 +111,14 @@ def test_utzig_candidate_compiles_as_publishable_approved_plan() -> None:
         "slug": "utzig-garage",
     }
     assert bundle["metadata"]["publication_blockers"] == []
+    tombstones = bundle["metadata"]["visual_media_reconciliation"]["soft_disabled_edges"]
+    assert tombstones == [{
+        "id": "edge:group-cover:repair-paint",
+        "source": "group:repair-paint",
+        "target": "asset:process",
+        "relation_type": "category_has_asset",
+        "removal_reason": "utzig_visual_media_reconciliation_2026_09_23",
+    }]
     public_grants = {
         edge["source"]
         for edge in bundle["edges"]

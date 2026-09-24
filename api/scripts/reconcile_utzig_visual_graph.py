@@ -279,7 +279,6 @@ def main(active_export: Path | None = None) -> None:
                 logical_edge in desired_logical_edges
                 or item.get("source") not in known
                 or item.get("target") not in known
-                or str(item.get("id")) in existing_edge_ids
             ):
                 continue
             soft_disabled_edges.append({
