@@ -191,15 +191,15 @@ def main(active_export: Path | None = None) -> None:
                     bundle["edges"].append(copy.deepcopy(item))
                     existing_edge_ids.add(str(item.get("id")))
         # GraphBundle replacement is append-safe in the authoring tables. Keep
-        # every obsolete logical relation as an explicit inactive tombstone so
-        # preflight can prove that the removal was reviewed, then soft-disable
-        # it during stage. The compiler excludes inactive edges from runtime.
+        # every obsolete logical relation in the approved metadata so the
+        # publication workflow can soft-disable it before staging. Tombstones
+        # stay outside `edges`: older active publishers can compile the same
+        # candidate while the workflow still has an exact reviewed removal set.
         desired_logical_edges = {
             (str(item.get("source")), str(item.get("target")), str(item.get("relation_type")))
             for item in bundle["edges"]
-            if (item.get("metadata") or {}).get("active", True) is not False
         }
-        tombstone_count = 0
+        soft_disabled_edges = []
         for item in active.get("edges") or []:
             logical_edge = (
                 str(item.get("source")),
@@ -213,18 +213,16 @@ def main(active_export: Path | None = None) -> None:
                 or str(item.get("id")) in existing_edge_ids
             ):
                 continue
-            tombstone = copy.deepcopy(item)
-            tombstone["metadata"] = {
-                **(tombstone.get("metadata") or {}),
-                "active": False,
-                "primary_tree": False,
+            soft_disabled_edges.append({
+                "id": str(item.get("id")),
+                "source": str(item.get("source")),
+                "target": str(item.get("target")),
+                "relation_type": str(item.get("relation_type")),
                 "removal_reason": "utzig_visual_media_reconciliation_2026_09_23",
-            }
-            bundle["edges"].append(tombstone)
-            existing_edge_ids.add(str(tombstone.get("id")))
-            tombstone_count += 1
+            })
         bundle["metadata"]["visual_media_reconciliation"]["preserved_active_faq_count"] = len(missing_faq_ids)
-        bundle["metadata"]["visual_media_reconciliation"]["soft_disabled_edge_count"] = tombstone_count
+        bundle["metadata"]["visual_media_reconciliation"]["soft_disabled_edges"] = soft_disabled_edges
+        bundle["metadata"]["visual_media_reconciliation"]["soft_disabled_edge_count"] = len(soft_disabled_edges)
     bundle["nodes"] = list(nodes.values())
     PATH.write_text(json.dumps(bundle, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 

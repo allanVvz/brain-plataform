@@ -64,6 +64,99 @@
         "product:evaluation"
       ],
       "preserved_active_faq_count": 0,
+      "soft_disabled_edges": [
+        {
+          "id": "edge:enhancement-bodywork",
+          "source": "group:enhancement",
+          "target": "product:bodywork",
+          "relation_type": "contains",
+          "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
+        },
+        {
+          "id": "edge:enhancement-painting",
+          "source": "group:enhancement",
+          "target": "product:painting",
+          "relation_type": "contains",
+          "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
+        },
+        {
+          "id": "edge:preservation-detailed-wash",
+          "source": "group:preservation",
+          "target": "product:detailed-wash",
+          "relation_type": "contains",
+          "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
+        },
+        {
+          "id": "edge:preservation-engine-bay-wash",
+          "source": "group:preservation",
+          "target": "product:engine-bay-wash",
+          "relation_type": "contains",
+          "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
+        },
+        {
+          "id": "edge:preservation-glass-polish",
+          "source": "group:preservation",
+          "target": "product:glass-polish",
+          "relation_type": "contains",
+          "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
+        },
+        {
+          "id": "edge:preservation-interior-cleaning",
+          "source": "group:preservation",
+          "target": "product:interior-cleaning",
+          "relation_type": "contains",
+          "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
+        },
+        {
+          "id": "edge:service-image:3d982199e860180c1a63",
+          "source": "product:evaluation",
+          "target": "asset:process",
+          "relation_type": "uses_asset",
+          "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
+        },
+        {
+          "id": "edge:service-image:853fac9ecb4c6ee59497",
+          "source": "product:bodywork",
+          "target": "asset:process",
+          "relation_type": "uses_asset",
+          "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
+        },
+        {
+          "id": "edge:service-image:b17cec5c8c7e3e272417",
+          "source": "product:detailed-wash",
+          "target": "asset:engine-detail",
+          "relation_type": "uses_asset",
+          "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
+        },
+        {
+          "id": "edge:service-image:c1542270886c69e4a836",
+          "source": "product:ppf",
+          "target": "asset:hero",
+          "relation_type": "uses_asset",
+          "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
+        },
+        {
+          "id": "edge:service-image:da279ea5eefcfc011bb7",
+          "source": "product:commercial-polish",
+          "target": "asset:process",
+          "relation_type": "uses_asset",
+          "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
+        },
+        {
+          "id": "edge:service-image:db58742048a00443220a",
+          "source": "product:vitrification",
+          "target": "asset:work-polish",
+          "relation_type": "uses_asset",
+          "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
+        },
+        {
+          "id": "edge:service-image:f824190e46bd78fea83e",
+          "source": "product:painting",
+          "target": "asset:engine-final",
+          "relation_type": "uses_asset",
+          "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
+        }
+      ],
       "soft_disabled_edge_count": 13
     }
   },
@@ -8661,230 +8754,6 @@
         "primary_tree": false,
         "source": "utzig_visual_reconciliation_2026_09_23"
       }
-    },
-    {
-      "id": "edge:enhancement-bodywork",
-      "source": "group:enhancement",
-      "target": "product:bodywork",
-      "weight": 1.0,
-      "primary": true,
-      "metadata": {
-        "active": false,
-        "graph_json_edge_id": "edge:enhancement-bodywork",
-        "primary_tree": false,
-        "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
-      },
-      "relation_type": "contains"
-    },
-    {
-      "id": "edge:enhancement-painting",
-      "source": "group:enhancement",
-      "target": "product:painting",
-      "weight": 1.0,
-      "primary": true,
-      "metadata": {
-        "active": false,
-        "graph_json_edge_id": "edge:enhancement-painting",
-        "primary_tree": false,
-        "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
-      },
-      "relation_type": "contains"
-    },
-    {
-      "id": "edge:preservation-detailed-wash",
-      "source": "group:preservation",
-      "target": "product:detailed-wash",
-      "weight": 1.0,
-      "primary": true,
-      "metadata": {
-        "active": false,
-        "graph_json_edge_id": "edge:preservation-detailed-wash",
-        "primary_tree": false,
-        "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
-      },
-      "relation_type": "contains"
-    },
-    {
-      "id": "edge:preservation-engine-bay-wash",
-      "source": "group:preservation",
-      "target": "product:engine-bay-wash",
-      "weight": 1.0,
-      "primary": true,
-      "metadata": {
-        "active": false,
-        "graph_json_edge_id": "edge:preservation-engine-bay-wash",
-        "primary_tree": false,
-        "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
-      },
-      "relation_type": "contains"
-    },
-    {
-      "id": "edge:preservation-glass-polish",
-      "source": "group:preservation",
-      "target": "product:glass-polish",
-      "weight": 1.0,
-      "primary": true,
-      "metadata": {
-        "active": false,
-        "graph_json_edge_id": "edge:preservation-glass-polish",
-        "primary_tree": false,
-        "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
-      },
-      "relation_type": "contains"
-    },
-    {
-      "id": "edge:preservation-interior-cleaning",
-      "source": "group:preservation",
-      "target": "product:interior-cleaning",
-      "weight": 1.0,
-      "primary": true,
-      "metadata": {
-        "active": false,
-        "graph_json_edge_id": "edge:preservation-interior-cleaning",
-        "primary_tree": false,
-        "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
-      },
-      "relation_type": "contains"
-    },
-    {
-      "id": "edge:service-image:3d982199e860180c1a63",
-      "source": "product:evaluation",
-      "target": "asset:process",
-      "weight": 1.0,
-      "primary": false,
-      "metadata": {
-        "role": "product_image",
-        "active": false,
-        "source": "utzig_public_site_approval_2026_09_23",
-        "page_binding": {
-          "position": 0,
-          "slot_key": "product_image:evaluation"
-        },
-        "graph_json_edge_id": "edge:service-image:3d982199e860180c1a63",
-        "primary_tree": false,
-        "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
-      },
-      "relation_type": "uses_asset"
-    },
-    {
-      "id": "edge:service-image:853fac9ecb4c6ee59497",
-      "source": "product:bodywork",
-      "target": "asset:process",
-      "weight": 1.0,
-      "primary": false,
-      "metadata": {
-        "role": "product_image",
-        "active": false,
-        "source": "utzig_public_site_approval_2026_09_23",
-        "page_binding": {
-          "position": 0,
-          "slot_key": "product_image:bodywork"
-        },
-        "graph_json_edge_id": "edge:service-image:853fac9ecb4c6ee59497",
-        "primary_tree": false,
-        "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
-      },
-      "relation_type": "uses_asset"
-    },
-    {
-      "id": "edge:service-image:b17cec5c8c7e3e272417",
-      "source": "product:detailed-wash",
-      "target": "asset:engine-detail",
-      "weight": 1.0,
-      "primary": false,
-      "metadata": {
-        "role": "product_image",
-        "active": false,
-        "source": "utzig_public_site_approval_2026_09_23",
-        "page_binding": {
-          "position": 0,
-          "slot_key": "product_image:detailed-wash"
-        },
-        "graph_json_edge_id": "edge:service-image:b17cec5c8c7e3e272417",
-        "primary_tree": false,
-        "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
-      },
-      "relation_type": "uses_asset"
-    },
-    {
-      "id": "edge:service-image:c1542270886c69e4a836",
-      "source": "product:ppf",
-      "target": "asset:hero",
-      "weight": 1.0,
-      "primary": false,
-      "metadata": {
-        "role": "product_image",
-        "active": false,
-        "source": "utzig_public_site_approval_2026_09_23",
-        "page_binding": {
-          "position": 0,
-          "slot_key": "product_image:ppf"
-        },
-        "graph_json_edge_id": "edge:service-image:c1542270886c69e4a836",
-        "primary_tree": false,
-        "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
-      },
-      "relation_type": "uses_asset"
-    },
-    {
-      "id": "edge:service-image:da279ea5eefcfc011bb7",
-      "source": "product:commercial-polish",
-      "target": "asset:process",
-      "weight": 1.0,
-      "primary": false,
-      "metadata": {
-        "role": "product_image",
-        "active": false,
-        "source": "utzig_public_site_approval_2026_09_23",
-        "page_binding": {
-          "position": 0,
-          "slot_key": "product_image:commercial-polish"
-        },
-        "graph_json_edge_id": "edge:service-image:da279ea5eefcfc011bb7",
-        "primary_tree": false,
-        "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
-      },
-      "relation_type": "uses_asset"
-    },
-    {
-      "id": "edge:service-image:db58742048a00443220a",
-      "source": "product:vitrification",
-      "target": "asset:work-polish",
-      "weight": 1.0,
-      "primary": false,
-      "metadata": {
-        "role": "product_image",
-        "active": false,
-        "source": "utzig_public_site_approval_2026_09_23",
-        "page_binding": {
-          "position": 0,
-          "slot_key": "product_image:vitrification"
-        },
-        "graph_json_edge_id": "edge:service-image:db58742048a00443220a",
-        "primary_tree": false,
-        "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
-      },
-      "relation_type": "uses_asset"
-    },
-    {
-      "id": "edge:service-image:f824190e46bd78fea83e",
-      "source": "product:painting",
-      "target": "asset:engine-final",
-      "weight": 1.0,
-      "primary": false,
-      "metadata": {
-        "role": "product_image",
-        "active": false,
-        "source": "utzig_public_site_approval_2026_09_23",
-        "page_binding": {
-          "position": 0,
-          "slot_key": "product_image:painting"
-        },
-        "graph_json_edge_id": "edge:service-image:f824190e46bd78fea83e",
-        "primary_tree": false,
-        "removal_reason": "utzig_visual_media_reconciliation_2026_09_23"
-      },
-      "relation_type": "uses_asset"
     }
   ]
 }

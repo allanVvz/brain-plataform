@@ -187,10 +187,7 @@ def normalize_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
         root_id = persona_nodes[0]
         parents: dict[str, str] = {}
         for edge in edges:
-            if (
-                edge["relation_type"] != "contains"
-                or edge["metadata"].get("active", True) is False
-            ):
+            if edge["relation_type"] != "contains":
                 continue
             target = edge["target"]
             prior = parents.get(target)

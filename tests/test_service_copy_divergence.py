@@ -290,10 +290,6 @@ DIVERGENT_BASELINE: tuple[tuple[str, str], ...] = (
     ("conversation-runtime", "conversation_runtime.py"),
     ("conversation-runtime", "deepseek_n8n_service.py"),
     ("conversation-runtime", "graph_agent_runtime_v3.py"),
-    # Inactive-edge tombstones belong to GraphBundle authoring/publication in
-    # control-plane. The conversation runtime only consumes compiled graphs;
-    # keeping its frozen copy unchanged avoids an unrelated runtime release.
-    ("conversation-runtime", "graph_bundle.py"),
     ("conversation-runtime", "graph_compiler_v3.py"),
     ("conversation-runtime", "graph_json_v2_store.py"),
     ("conversation-runtime", "graph_json_v2_validator.py"),

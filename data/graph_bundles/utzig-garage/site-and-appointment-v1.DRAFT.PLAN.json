@@ -66,7 +66,7 @@
   "chunks_to_embed": 65,
   "compiler_version": "graph-compiler-v3.6.5",
   "disposition": "awaiting_approval",
-  "draft_checksum": "sha256:ebedfe8494bcfd99e36d2eac1e7adf8f2b157b666abf53ee333de45925a8ee9e",
+  "draft_checksum": "sha256:5ee0e556edfea7c945303213e5055e9206d764f2de57874687090dbdc85b90f0",
   "edge_changes": {
     "added": [
       "edge:brand-cleaning",
