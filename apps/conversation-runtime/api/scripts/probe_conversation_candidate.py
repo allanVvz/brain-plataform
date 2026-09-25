@@ -64,6 +64,12 @@ def run(case: dict) -> dict:
         )
     response = result["response"]
     proof = response.proof
+    print("CANDIDATE_CONVERSATION_OBSERVATION=" + json.dumps({
+        "case": case["name"], "reply": response.reply_text,
+        "question_kind": proof.get("question_kind"),
+        "asked_field_key": proof.get("asked_field_key"),
+        "quality_warnings": proof.get("quality_warnings") or [],
+    }, ensure_ascii=True), flush=True)
     validate_case(case, result)
     return {"case": case["name"], "lead_ref": lead_ref, "publication_id": context.publication_id,
             "graph_checksum": context.graph_checksum, "commit": False, "model_calls": 2,

@@ -1,3 +1,15 @@
+# Checkpoint 2026-09-25 - candidate barrado
+
+O dry-run `36185642472` passou para o runtime `9f21691`, digest
+`sha256:02fe8052888301031edae5485b5742ec2132373a6ae7cdcf11d336418bb545ad`.
+O candidate da release `36185750075` falhou antes do cutover: o modelo repetiu
+`nome_cliente` no turno da dúvida da Utzig. Slot azul e transport anterior
+permaneceram ativos; claims não pausados, candidate verde parado. Não repetir
+o deploy nesta operação. Ajuste posterior em código explicita o campo adiado
+no brief e retira sua guia elegível naquele turno; ainda sem candidate real.
+Jornadas Utzig/Tock e terminalização nova do transport continuam pendentes.
+Evidência: `docs/research/conversation-candidate-gate-2026-09-25.md`.
+
 # Checkpoint 2026-09-25 - conversa humana
 
 Implementacao: duas chamadas, prompts em portugues, ultima mensagem real nas duas

@@ -18,6 +18,7 @@ from schemas.conversation import (
     TurnUnderstandingV1,
 )
 from services import (
+    conversation_prompts,
     conversation_runtime,
     graph_agent_runtime_v3,
     graph_bundle,
@@ -48,6 +49,24 @@ def test_recent_messages_read_latest_question_metadata(monkeypatch):
     assert calls == [("7", 8)]
     assert graph_agent_runtime_v3._recent_messages_with_question_metadata(7, canonical) == canonical
     assert calls == [("7", 8)]
+
+
+def test_doubt_defers_only_the_latest_qualification_field():
+    messages = [
+        {"role": "assistant", "content": "Como prefere que eu te chame?",
+         "metadata": {"question_kind": "qualification", "asked_field_key": "nome_cliente"}},
+        {"role": "user", "content": "Como funciona a avaliação?"},
+    ]
+    assert conversation_prompts.deferred_qualification_field(
+        messages, ["nome_cliente", "vehicle_color"], True,
+    ) == "nome_cliente"
+    assert conversation_prompts.deferred_qualification_field(
+        messages, ["nome_cliente"], False,
+    ) is None
+    messages[0]["metadata"]["question_kind"] = "consultative"
+    assert conversation_prompts.deferred_qualification_field(
+        messages, ["nome_cliente"], True,
+    ) is None
 
 
 def _context(*, strategy: str = "interpret_then_respond") -> ConversationContext:

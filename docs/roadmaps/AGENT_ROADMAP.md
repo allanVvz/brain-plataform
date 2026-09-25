@@ -1,5 +1,14 @@
 # Roadmap de agentes - atualizacao 2026-09-25
 
+Checkpoint posterior: o candidate de `9f21691` foi barrado antes do cutover
+porque repetiu `nome_cliente` logo após a dúvida da Utzig. O gate novo funcionou;
+o comportamento do modelo ainda não passou. O runtime azul e o transport
+anterior seguem ativos. A próxima versão de código informa explicitamente o
+campo adiado no brief e retira sua guia deste turno; precisa passar no mesmo
+probe com modelo real antes de nova promoção. Depois, executar as jornadas
+internas completas de Utzig e Tock e validar o buffer com o novo transport.
+Detalhes: `docs/research/conversation-candidate-gate-2026-09-25.md`.
+
 As instrucoes do usuario e AGENTS.md regem a operacao. Publicacao de conteudo
 usa candidate e ativacao CAS sem pausa de persona ou binding.
 

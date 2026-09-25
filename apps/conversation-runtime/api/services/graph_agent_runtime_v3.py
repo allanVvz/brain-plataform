@@ -1,7 +1,7 @@
 """Two-phase, branch-scoped GraphRAG context and proposal reconciliation."""
 from __future__ import annotations
 
-from services.conversation_prompts import last_assistant_message
+from services.conversation_prompts import deferred_qualification_field, last_assistant_message
 
 from services import catalog_images
 
@@ -4376,6 +4376,13 @@ def resolve_understanding(
                     "reason": "reply_context_budget",
                 })
     recent_messages = list(resolved_context.messages[-10:])
+    deferred_field_key = deferred_qualification_field(
+        recent_messages, list(missing), bool(understanding.customer_questions),
+    )
+    if deferred_field_key:
+        eligible_guides = [
+            guide for guide in eligible_guides if guide.get("key") != deferred_field_key
+        ]
     identity_and_tone = [
         {
             "node_id": card.id,
@@ -4423,6 +4430,7 @@ def resolve_understanding(
                 ((policy.get("opening") or {}).get("first_turn") or "")
             ),
             "handoff_now": bool(response.handoff_required),
+            "defer_field_until_later": deferred_field_key,
             "answer_before_qualification": bool(
                 ((policy.get("response_ownership") or {}).get(
                     "answer_and_explain_before_qualification"
