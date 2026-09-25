@@ -333,9 +333,11 @@ if [[ "$ACTION" == "--apply" && "$SERVICE" == "conversation-runtime" ]]; then
   "${COMPOSE[@]}" exec -T "$target_service" python -c \
     'import sys; from services.wa_validator_service import supports_semantic_validator_flow; assert supports_semantic_validator_flow(sys.argv[1]), "unsupported semantic validator flow: " + sys.argv[1]' \
     "$CANARY_FLOW_ID"
-  if [[ -n "${RUNTIME_PROBE_FIXTURE:-}" ]]; then
-    "${COMPOSE[@]}" exec -T "$target_service" python -m scripts.probe_conversation_candidate "$RUNTIME_PROBE_FIXTURE"
-  fi
+  [[ -n "${RUNTIME_PROBE_FIXTURE:-}" ]] || {
+    echo "runtime candidate requires a no-commit conversation probe fixture" >&2
+    exit 1
+  }
+  "${COMPOSE[@]}" exec -T "$target_service" python -m scripts.probe_conversation_candidate "$RUNTIME_PROBE_FIXTURE"
 fi
 
 # Move only this service's consumers. The old consumers receive at most the

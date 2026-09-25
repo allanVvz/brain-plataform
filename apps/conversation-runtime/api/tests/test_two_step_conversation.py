@@ -29,6 +29,27 @@ ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE = ROOT / "n8n" / "persona-conversation-template.json"
 
 
+def test_recent_messages_read_latest_question_metadata(monkeypatch):
+    batch = [
+        {"id": "in-1", "direction": "inbound", "content": "Tenho uma dúvida"},
+        {"id": "out-1", "direction": "outbound", "content": "Como prefere que eu te chame?"},
+    ]
+    canonical = [
+        batch[0],
+        {**batch[1], "metadata": {"question_kind": "qualification", "asked_field_key": "nome_cliente"}},
+    ]
+    calls = []
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client, "get_messages",
+        lambda lead_ref, limit: calls.append((lead_ref, limit)) or canonical,
+    )
+
+    assert graph_agent_runtime_v3._recent_messages_with_question_metadata(7, batch) == canonical
+    assert calls == [("7", 8)]
+    assert graph_agent_runtime_v3._recent_messages_with_question_metadata(7, canonical) == canonical
+    assert calls == [("7", 8)]
+
+
 def _context(*, strategy: str = "interpret_then_respond") -> ConversationContext:
     return ConversationContext(
         persona_slug="generic",

@@ -4,6 +4,9 @@
     "session_id": "d59a2c87-bfb4-4ee5-94f1-6a62123facf7",
     "pending_fields": ["nome_cliente"],
     "forbidden_extracted_fields": ["nome_cliente"],
+    "forbidden_asked_fields": ["nome_cliente"],
+    "allowed_question_kinds": ["consultative", "none"],
+    "forbid_reply_repetition": true,
     "history": [
       {"role": "user", "content": "Há marcas de uso e sujeira acumulada no veículo"},
       {"role": "assistant", "content": "Entendi. Como você prefere que eu te chame?", "metadata": {"question_kind": "qualification", "asked_field_key": "nome_cliente"}}

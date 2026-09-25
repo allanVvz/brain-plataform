@@ -2108,6 +2108,20 @@ def _project_recent_messages(messages: list[dict[str, Any]], limit: int = 6) -> 
     return projected
 
 
+def _recent_messages_with_question_metadata(lead_ref: int, batch_messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    latest_outbound = next((
+        row for row in reversed(batch_messages)
+        if row.get("direction") == "outbound" or row.get("role") == "assistant"
+    ), None)
+    if batch_messages and latest_outbound and (latest_outbound.get("metadata") or {}).get("question_kind"):
+        return batch_messages
+    try:
+        return supabase_client.get_messages(str(lead_ref), limit=8) or batch_messages
+    except Exception:
+        # The batch still has the latest wording if metadata is unavailable.
+        return batch_messages
+
+
 
 
 def _question_repetition_max_attempts(contract: dict[str, Any]) -> int:
@@ -3007,7 +3021,10 @@ def build_context(
     if not publication:
         raise RuntimeError("active GraphRAG v3 publication not found")
     document = publication.get("document_json") or {}
-    messages = batch.get("messages") or supabase_client.get_messages(str(lead_ref), limit=8) or []
+    # The batch RPC projects message text but currently omits outbound
+    # metadata. Read the canonical message projection so the actual latest
+    # question kind and field reach both model stages on the next turn.
+    messages = _recent_messages_with_question_metadata(lead_ref, batch.get("messages") or [])
     # The buffer can canonically coalesce several physical messages. Use that
     # ordered text for this decision/proof without rewriting persisted history
     # or changing the canonical inbound identity.

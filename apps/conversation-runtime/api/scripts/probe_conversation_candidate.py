@@ -10,6 +10,26 @@ from uuid import uuid4
 from services import agentic_turn, conversation_runtime, supabase_client, wa_validator_service
 
 
+def validate_case(case: dict, result: dict) -> None:
+    response = result["response"]
+    proof = response.proof
+    assert result["model_calls"] == 2 and proof["valid"] is True
+    assert response.reply_text and proof.get("delivery_authorized") is not False
+    assert not any(f.get("field_key") in case.get("forbidden_extracted_fields", [])
+                   for f in proof.get("accepted_facts") or []), "contextual answer misclassified"
+    assert proof.get("asked_field_key") not in case.get("forbidden_asked_fields", []), (
+        "candidate repeated the interrupted qualification field"
+    )
+    if case.get("allowed_question_kinds"):
+        assert proof.get("question_kind") in case["allowed_question_kinds"], (
+            "candidate chose an unexpected question kind"
+        )
+    if case.get("forbid_reply_repetition"):
+        assert (proof.get("repetition_audit") or {}).get("passed") is True, (
+            "candidate repeated a recent assistant reply"
+        )
+
+
 def run(case: dict) -> dict:
     session = wa_validator_service._session_get(case["session_id"])
     lead_ref = int(session["lead_ref"])
@@ -44,10 +64,7 @@ def run(case: dict) -> dict:
         )
     response = result["response"]
     proof = response.proof
-    assert result["model_calls"] == 2 and proof["valid"] is True
-    assert response.reply_text and proof.get("delivery_authorized") is not False
-    assert not any(f.get("field_key") in case.get("forbidden_extracted_fields", [])
-                   for f in proof.get("accepted_facts") or []), "contextual answer misclassified"
+    validate_case(case, result)
     return {"case": case["name"], "lead_ref": lead_ref, "publication_id": context.publication_id,
             "graph_checksum": context.graph_checksum, "commit": False, "model_calls": 2,
             "reply": response.reply_text, "question_kind": proof.get("question_kind"),
