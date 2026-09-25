@@ -502,6 +502,10 @@ auditorias oficiais e pelos handoffs indicados no roadmap.
 
 ## Runtime e proof publicados em 2026-09-24
 
+### Ajuste de condução preparado após o E2E
+
+Repetir o nome ainda pendente em um turno posterior é aceitável dentro do limite do grafo; a repetição imediatamente após uma dúvida torna o diálogo circular. A apresentação como agente de IA deve ocorrer no primeiro reply de cada jornada para todas as personas, usando nome e marca publicados. O código local passa `first_reply_in_journey` ao modelo, registra ausência de apresentação como aviso de qualidade e faz o Validator distinguir retomada tardia de repetição consecutiva. Essa mudança ainda não está no digest ativo.
+
 - O usuário confirmou a fronteira: prompt e condução pertencem ao modelo; a chamada ao modelo continua no `conversation-runtime`. O n8n fica em automações auxiliares e transporte, sem modelo, proof, repair ou commit no caminho síncrono. `n8n_agents` é apenas um valor legado de binding; o template em `apps/conversation-runtime/n8n/` é fixture de auditoria, não é provisionável.
 - Release compatível do runtime: fonte `5d4af4d51e3eeaf6d73f4fd743b12617e4269f2a`, digest `sha256:d0a8ea096cfc65b25f5dc86883e8e9b6d9d91ea5e690df6ef9172b73452adad5`, workflow `36070246557`, slot green. Dry-run `36070094854`, candidate, cutover e canário WA interno passaram. Sem migration, pausa de claims, WhatsApp real ou deploy de outro serviço.
 - O prompt agora aponta explicitamente para fatos conhecidos, pergunta anterior, mensagens recentes, interrupção por dúvida e confirmação final. O checker removeu acúmulo de repair inalcançável; publicação errada continua bloqueante e divergências editoriais seguem em `quality_warnings`.

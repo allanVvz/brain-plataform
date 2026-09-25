@@ -184,6 +184,7 @@ def test_two_model_calls_resolve_facts_before_reply_and_commit_once(monkeypatch,
                 "interaction_observation": {"kind": "continue_current"},
             }, {"prompt_tokens": 10, "completion_tokens": 5})
         captured["reply_system"] = kwargs["system"]
+        captured["first_reply_in_journey"] = kwargs["payload"]["first_reply_in_journey"]
         return ({
             "contract_version": "conversation_reply_v1",
             "reply": "Entendi. O que voce procura?",
@@ -247,14 +248,40 @@ def test_two_model_calls_resolve_facts_before_reply_and_commit_once(monkeypatch,
     assert "warm, concise reply" in captured["reply_system"]
     assert "rather than guessing" in captured["reply_system"]
     assert "claim_contract exactly" in captured["reply_system"]
+    assert "introduce yourself truthfully as an AI assistant" in captured["reply_system"]
+    assert "never ask it in consecutive" in captured["reply_system"]
+    assert captured["first_reply_in_journey"] is True
     assert result["model_calls"] == 2
     assert captured["commit"]["response"].reply_text == "Entendi. O que voce procura?"
-    if invalid_metadata:
-        assert captured["commit"]["response"].proof["quality_pass"] is False
-        assert set(captured["commit"]["response"].proof["quality_warnings"]) == {
+    assert captured["commit"]["response"].proof["quality_pass"] is False
+    assert set(captured["commit"]["response"].proof["quality_warnings"]) == (
+        {"first_reply_missing_ai_introduction"} | ({
             "reply_metadata_discarded:asked_field_key",
             "reply_metadata_discarded:claims:0",
-        }
+        } if invalid_metadata else set())
+    )
+
+
+def test_ai_introduction_is_scoped_to_each_journey():
+    first = _context().model_copy(update={
+        "journey_id": "journey-1", "cart": {"_ledger_revision": 0},
+    })
+    continued = first.model_copy(update={"cart": {"_ledger_revision": 3}})
+    next_journey = continued.model_copy(update={"journey_id": None})
+
+    assert agentic_turn._first_reply_in_journey(first) is True
+    assert agentic_turn._first_reply_in_journey(continued) is False
+    assert agentic_turn._first_reply_in_journey(next_journey) is True
+    candidate_continued = next_journey.model_copy(update={
+        "messages": [{"role": "assistant", "content": "Sou uma assistente virtual."}],
+    })
+    assert agentic_turn._first_reply_in_journey(candidate_continued) is False
+    newer_journey = candidate_continued.model_copy(update={"journey_sequence": 2})
+    assert agentic_turn._first_reply_in_journey(newer_journey) is True
+    assert agentic_turn._ai_agent_disclosed(
+        "Oi, sou a Vitória, assistente virtual da Tock Fatal."
+    ) is True
+    assert agentic_turn._ai_agent_disclosed("Oi, sou a Vitória da Tock Fatal.") is False
 
 
 def test_reply_claim_contract_exposes_only_graph_authorized_price_evidence():

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import unicodedata
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
@@ -477,6 +478,27 @@ def _expected_answer_field(context: Any) -> str | None:
     return str(unresolved[-1]) if unresolved else None
 
 
+def _first_reply_in_journey(context: ConversationContext) -> bool:
+    """A new journey, or a ledger with no committed turn, needs disclosure."""
+    if context.journey_id is None:
+        if context.journey_sequence > 1 or context.post_completion_state.get("has_terminal_journey"):
+            return True
+        return not any(str(row.get("role") or "") == "assistant" for row in context.messages)
+    return int(context.cart.get("_ledger_revision") or 0) == 0
+
+
+def _ai_agent_disclosed(reply: str) -> bool:
+    folded = "".join(
+        char for char in unicodedata.normalize("NFKD", reply.casefold())
+        if not unicodedata.combining(char)
+    )
+    return any(phrase in folded for phrase in (
+        "assistente virtual", "assistente de ia", "agente de ia",
+        "inteligencia artificial", "sou uma ia", "ai assistant",
+        "virtual assistant", "asistente virtual",
+    ))
+
+
 def _read_understanding(
     raw: dict[str, Any], *, context: Any, message: str, message_id: str | None
 ) -> TurnUnderstandingV1:
@@ -715,6 +737,7 @@ def execute(
     )
     if context.execution_strategy != "interpret_then_respond":
         raise AgenticTurnError("context", "published graph does not authorize two-stage execution")
+    first_reply_in_journey = _first_reply_in_journey(context)
     lead = supabase_client.get_lead_by_ref(lead_ref) or {}
     validation_publication_id = _validated_candidate_publication_id(
         provider=provider, publication_id=publication_id, context=context,
@@ -808,9 +831,13 @@ def execute(
         system=(
             "Write one warm, concise reply using the resolved brief and authorized evidence. Answer the "
             "customer's question before qualification. You may ask one eligible field or none; guides are "
-            "not a script. Use known_facts, previously_asked_field_key and recent_messages to avoid "
-            "reintroductions and repeated questions. When the customer interrupts with a question, answer it "
-            "without repeating the unanswered qualification question in the same reply. When the brief is in "
+            "not a script. When first_reply_in_journey is true, introduce yourself truthfully as an AI assistant "
+            "for the brand using the approved identity_and_tone; later replies do not repeat that introduction. "
+            "Use known_facts, previously_asked_field_key and recent_messages to avoid asking a known fact. "
+            "When the customer interrupts with a question, answer it without repeating the unanswered "
+            "qualification question in the same reply. On a later turn you may resume an unanswered field "
+            "once if it is still eligible and the published retry limit permits it; never ask it in consecutive "
+            "assistant replies. When the brief is in "
             "confirmation mode, summarize the known request and ask for one clear final confirmation; do not "
             "ask an unrelated follow-up. After an explicit confirmation, follow the resolved handoff policy "
             "without asking for another confirmation. Use citations only "
@@ -829,6 +856,7 @@ def execute(
             "customer_message": customer_message,
             "understanding": understanding.model_dump(mode="json"),
             "conversation_brief": resolved.conversation_brief,
+            "first_reply_in_journey": first_reply_in_journey,
             "context_manifest": resolved.context_manifest,
             "claim_contract": _reply_claim_contract(resolved),
         },
@@ -875,6 +903,8 @@ def execute(
                 "cited_chunk_ids": reply.cited_chunk_ids,
             },
         ) from exc
+    if first_reply_in_journey and not _ai_agent_disclosed(response.reply_text or ""):
+        reply_warnings.append("first_reply_missing_ai_introduction")
     if reply_warnings:
         quality_warnings = list(dict.fromkeys([
             *(response.proof.get("quality_warnings") or []), *reply_warnings,

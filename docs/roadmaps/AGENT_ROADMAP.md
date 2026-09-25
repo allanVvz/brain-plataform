@@ -1478,6 +1478,8 @@ deve preservar estas decisões:
 
 ## Próxima correção conversacional após release 5d4af4d
 
+Decisão posterior do produto: a pergunta de nome pode ser retomada em um turno posterior se continuar pendente e o limite publicado permitir; evitar apenas a repetição na resposta imediatamente seguinte à interrupção. A apresentação como agente de IA é padrão em todas as personas no primeiro reply de cada jornada, com identidade e marca vindas do grafo. Prompt, aviso de qualidade e Validator foram preparados localmente; incluir na próxima release única junto com a correção de confirmação/handoff e validar por WA interno antes do cutover.
+
 Evidência: WA Validator interno Utzig `b1ee258b-2659-4955-b257-513bde54c698` e Tock `81b5cdd6-cf49-43ac-8793-ac25897ff581`, ambos com integridade técnica aprovada e qualidade reprovada. A publicação ativa continua segura; a falha é de condução e transição de jornada.
 
 1. **P0 — confirmação para handoff:** quando a publicação exige confirmação final e o cliente afirma a pergunta pendente, persistir a confirmação, concluir a jornada e mudar a rota para humano no mesmo commit. A Utzig respondeu “vou encaminhar” após “Sim”, mas permaneceu em `awaiting_confirmation`/SDR. O caminho agentic de `graph_agent_runtime_v3._decide` calcula `terminal_intent` apenas para qualificação incompleta e grava `explicit_confirmation=False` na resposta; comparar a interpretação do modelo, o target da confirmação e a regra publicada antes de alterar a transição. Testar também recusa e correção, sem handoff precoce.

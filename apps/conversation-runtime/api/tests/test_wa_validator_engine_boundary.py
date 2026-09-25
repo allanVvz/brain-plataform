@@ -304,19 +304,28 @@ def test_sales_driver_answers_optional_name_before_final_confirmation():
     assert state.get("confirmation_sent") is None
 
 
-def test_semantic_turn_audit_counts_name_question_ids_not_only_similar_wording():
+def test_semantic_turn_audit_flags_immediate_name_retry_but_allows_later_resume():
     inputs = _audit_inputs(conversation_mode="n8n_agents")
     inputs["contract"]["fields"][0]["key"] = "nome_cliente"
     inputs["contract"]["questions"]["q:name"]["field_key"] = "nome_cliente"
     inputs["proof_record"]["proof_result"]["missing_fields"] = [
         "nome_cliente", "objective",
     ]
+    inputs["proof_record"]["proof_result"]["next_question_node_id"] = "q:name"
+    inputs["ledger_before"]["asked_question_node_ids"] = ["q:name"]
     inputs["ledger_after"]["asked_question_node_ids"] = ["q:name", "q:name"]
-    inputs["turn"]["text"] = "Como posso te chamar para continuarmos?"
+    inputs["turn"]["text"] = "Entendi sua preferência. Para continuar, qual é o seu nome?"
+    inputs["recent_replies"] = ["Qual é o seu nome?"]
 
-    audit = wa_validator_service._semantic_turn_audit(**inputs)
+    immediate = wa_validator_service._semantic_turn_audit(**inputs)
 
-    assert audit["criteria"]["customer_name_question_once"] is False
-    assert "customer_name_question_once" in audit["non_blocking_observations"]
-    assert "customer_name_question_once" not in audit["failures"]
-    assert audit["passed"] is True
+    assert immediate["criteria"]["customer_name_question_timing"] is False
+    assert "customer_name_question_timing" in immediate["non_blocking_observations"]
+    assert immediate["criteria"]["question_repetition_budget"] is True
+
+    inputs["recent_replies"].append("Sua dúvida foi respondida. Podemos seguir quando quiser.")
+    later = wa_validator_service._semantic_turn_audit(**inputs)
+
+    assert later["criteria"]["customer_name_question_timing"] is True
+    assert later["criteria"]["question_repetition_budget"] is True
+    assert later["passed"] is True

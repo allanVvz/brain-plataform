@@ -2521,7 +2521,9 @@ def _semantic_turn_audit(
         question_node_id=question_id,
         question_text=question_text,
         asked_question_node_ids=ledger_before.get("asked_question_node_ids") or [],
-        max_attempts=repetition_policy.get("max_attempts", 0),
+        # Match the runtime's default: a pending question can be resumed once
+        # on a later turn unless the published graph sets a stricter limit.
+        max_attempts=repetition_policy.get("max_attempts", 1),
         field_pending=(
             bool(question_id and question_id in askable_question_ids)
             if conversation_mode == "n8n_agents"
@@ -2553,24 +2555,16 @@ def _semantic_turn_audit(
         )
         if value
     ]
-    name_question_text_count = sum(
-        1
-        for candidate_reply in [*recent_replies, reply]
-        if any(
-            _question_already_asked(variant, candidate_reply)
+    current_asks_name = bool(
+        (name_question_id and question_id == name_question_id)
+        or any(_question_already_asked(variant, reply) for variant in name_variants)
+    )
+    previous_asks_name = bool(
+        recent_replies and any(
+            _question_already_asked(variant, recent_replies[-1])
             for variant in name_variants
         )
     )
-    name_question_id_count = (
-        sum(
-            1
-            for question_id in ledger_after.get("asked_question_node_ids") or []
-            if str(question_id or "") == name_question_id
-        )
-        if name_question_id
-        else 0
-    )
-    name_question_count = max(name_question_text_count, name_question_id_count)
     criteria = {
         "intent_identified": bool(decision.get("intent")),
         "doubt_answered_first": (
@@ -2584,7 +2578,7 @@ def _semantic_turn_audit(
         "unsupported_claim_not_invented": unsupported_claim_not_invented,
         **reply_requirements,
         "sales_internal_language_absent": _sales_internal_language_absent(reply, contract),
-        "customer_name_question_once": name_question_count <= 1,
+        "customer_name_question_timing": not (current_asks_name and previous_asks_name),
         "pre_handoff_notice_observed": (
             not handoff_observed
             or not pre_handoff_required
@@ -2748,7 +2742,7 @@ def _semantic_turn_audit(
             "unsupported_claim_not_invented",
             "sales_internal_language_absent",
             "received_content_acknowledged",
-            "customer_name_question_once",
+            "customer_name_question_timing",
             "known_fact_not_reasked",
             "reply_not_repeated",
             "question_repetition_budget",
