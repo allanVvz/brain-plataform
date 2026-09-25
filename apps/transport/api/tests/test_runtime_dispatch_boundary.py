@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import pytest
+
 from workers.whatsapp_dispatch_worker import WhatsAppDispatchWorker
 
 
-def test_deterministic_inbound_delegates_without_burning_attempt(monkeypatch):
+@pytest.mark.parametrize("handoff", [False, True])
+def test_deterministic_inbound_delegates_without_burning_attempt(monkeypatch, handoff):
     row = {
         "id": "buffer-1",
         "persona_id": "persona-1",
@@ -16,6 +19,7 @@ def test_deterministic_inbound_delegates_without_burning_attempt(monkeypatch):
     }
     worker = WhatsAppDispatchWorker()
     calls: list[dict] = []
+    completions: list[tuple] = []
 
     monkeypatch.setattr(
         "workers.whatsapp_dispatch_worker.supabase_client.get_persona_by_id",
@@ -46,11 +50,11 @@ def test_deterministic_inbound_delegates_without_burning_attempt(monkeypatch):
     )
     monkeypatch.setattr(
         "workers.whatsapp_dispatch_worker.runtime_client.execute_inbound",
-        lambda payload: calls.append(payload) or {"ok": True, "handoff": False},
+        lambda payload: calls.append(payload) or {"ok": True, "handoff": handoff},
     )
     monkeypatch.setattr(
         "workers.whatsapp_dispatch_worker.supabase_client.complete_whatsapp_buffer",
-        lambda *_args, **_kwargs: None,
+        lambda *args, **kwargs: completions.append((args, kwargs)),
     )
     monkeypatch.setattr(
         "workers.whatsapp_dispatch_worker.event_emitter.emit",
@@ -69,6 +73,7 @@ def test_deterministic_inbound_delegates_without_burning_attempt(monkeypatch):
         "channel_binding_id": "binding-1",
         "inbound_buffer_id": "buffer-1",
     }]
+    assert completions == [(("buffer-1", "sent"), {})]
 
 
 def test_unavailable_runtime_releases_deterministic_inbound_for_retry(monkeypatch):
@@ -91,7 +96,8 @@ def test_unavailable_runtime_releases_deterministic_inbound_for_retry(monkeypatc
     assert releases[0][0][1] == "retry"
 
 
-def test_agentic_inbound_uses_runtime_and_never_n8n(monkeypatch):
+@pytest.mark.parametrize("handoff", [False, True])
+def test_agentic_inbound_uses_runtime_and_never_n8n(monkeypatch, handoff):
     row = {
         "id": "buffer-agentic",
         "persona_id": "persona-1",
@@ -104,6 +110,7 @@ def test_agentic_inbound_uses_runtime_and_never_n8n(monkeypatch):
     }
     worker = WhatsAppDispatchWorker()
     calls: list[dict] = []
+    completions: list[tuple] = []
     monkeypatch.setattr(
         "workers.whatsapp_dispatch_worker.supabase_client.get_persona_by_id",
         lambda _persona_id: {"id": "persona-1", "slug": "persona"},
@@ -126,7 +133,7 @@ def test_agentic_inbound_uses_runtime_and_never_n8n(monkeypatch):
     )
     monkeypatch.setattr(
         "workers.whatsapp_dispatch_worker.runtime_client.execute_agentic_inbound",
-        lambda payload: calls.append(payload) or {"ok": True, "handoff": False},
+        lambda payload: calls.append(payload) or {"ok": True, "handoff": handoff},
     )
     monkeypatch.setattr(
         "workers.whatsapp_dispatch_worker.n8n_client.send_to_webhook",
@@ -136,7 +143,7 @@ def test_agentic_inbound_uses_runtime_and_never_n8n(monkeypatch):
     )
     monkeypatch.setattr(
         "workers.whatsapp_dispatch_worker.supabase_client.complete_whatsapp_buffer",
-        lambda *_args, **_kwargs: None,
+        lambda *args, **kwargs: completions.append((args, kwargs)),
     )
     monkeypatch.setattr(
         "workers.whatsapp_dispatch_worker.event_emitter.emit",
@@ -149,9 +156,11 @@ def test_agentic_inbound_uses_runtime_and_never_n8n(monkeypatch):
     assert calls[0]["inbound_buffer_id"] == "buffer-agentic"
     assert calls[0]["provider"] == "meta_cloud"
     assert calls[0]["publication_id"] is None
+    assert completions == [(("buffer-agentic", "sent"), {})]
 
 
-def test_internal_validator_uses_real_worker_while_binding_is_paused(monkeypatch):
+@pytest.mark.parametrize("handoff", [False, True])
+def test_internal_validator_uses_real_worker_while_binding_is_paused(monkeypatch, handoff):
     row = {
         "id": "buffer-validator",
         "persona_id": "persona-1",
@@ -168,6 +177,7 @@ def test_internal_validator_uses_real_worker_while_binding_is_paused(monkeypatch
     }
     worker = WhatsAppDispatchWorker()
     calls: list[dict] = []
+    completions: list[tuple] = []
     monkeypatch.setattr(
         "workers.whatsapp_dispatch_worker.supabase_client.get_persona_by_id",
         lambda _persona_id: {"id": "persona-1", "slug": "persona"},
@@ -193,11 +203,11 @@ def test_internal_validator_uses_real_worker_while_binding_is_paused(monkeypatch
     )
     monkeypatch.setattr(
         "workers.whatsapp_dispatch_worker.runtime_client.execute_agentic_inbound",
-        lambda payload: calls.append(payload) or {"ok": True, "handoff": False},
+        lambda payload: calls.append(payload) or {"ok": True, "handoff": handoff},
     )
     monkeypatch.setattr(
         "workers.whatsapp_dispatch_worker.supabase_client.complete_whatsapp_buffer",
-        lambda *_args, **_kwargs: None,
+        lambda *args, **kwargs: completions.append((args, kwargs)),
     )
     monkeypatch.setattr(
         "workers.whatsapp_dispatch_worker.event_emitter.emit",
@@ -209,6 +219,7 @@ def test_internal_validator_uses_real_worker_while_binding_is_paused(monkeypatch
     assert len(calls) == 1
     assert calls[0]["provider"] == "internal_validator"
     assert calls[0]["publication_id"] == "publication-1"
+    assert completions == [(("buffer-validator", "sent"), {})]
 
 
 def test_agentic_runtime_transport_failure_terminalizes_once_without_retry(monkeypatch):

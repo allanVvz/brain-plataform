@@ -228,8 +228,10 @@ class WhatsAppDispatchWorker(BaseWorker):
                     source="workers.whatsapp",
                 )
                 return
-            if not result.get("handoff"):
-                supabase_client.complete_whatsapp_buffer(row["id"], "sent")
+            # The inbound decision is complete even when its outcome is handoff.
+            # Leaving the claimed row processing relies on a lead pause to
+            # terminalize it, which internal Validator leads do not perform.
+            supabase_client.complete_whatsapp_buffer(row["id"], "sent")
             event_emitter.emit(
                 "whatsapp.inbound_dispatched",
                 entity_type="lead",
@@ -321,8 +323,7 @@ class WhatsAppDispatchWorker(BaseWorker):
                     source="workers.whatsapp",
                 )
                 return
-            if not runtime_result.get("handoff"):
-                supabase_client.complete_whatsapp_buffer(row["id"], "sent")
+            supabase_client.complete_whatsapp_buffer(row["id"], "sent")
             event_emitter.emit(
                 "whatsapp.inbound_dispatched",
                 entity_type="lead",
