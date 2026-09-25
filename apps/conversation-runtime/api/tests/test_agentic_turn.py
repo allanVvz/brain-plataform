@@ -249,7 +249,10 @@ def test_two_model_calls_resolve_facts_before_reply_and_commit_once(monkeypatch,
     assert "rather than guessing" in captured["reply_system"]
     assert "claim_contract exactly" in captured["reply_system"]
     assert "introduce yourself truthfully as an AI assistant" in captured["reply_system"]
-    assert "never ask it in consecutive" in captured["reply_system"]
+    assert "reply_guidance.first_reply_identity" in captured["reply_system"]
+    assert "reply_guidance.handoff_now" in captured["reply_system"]
+    assert "do not collect an optional name" in captured["reply_system"]
+    assert "without asking the same field again" in captured["reply_system"]
     assert captured["first_reply_in_journey"] is True
     assert result["model_calls"] == 2
     assert captured["commit"]["response"].reply_text == "Entendi. O que voce procura?"

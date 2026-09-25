@@ -821,6 +821,28 @@ def _semantic_appointment_script(
     }
 
 
+def _sales_opening_identity_patterns(document: dict, contract: dict) -> list[str]:
+    """Read the approved agent name from this publication, not a QA fixture."""
+    persona = next(
+        (node for node in document.get("nodes") or []
+         if node.get("node_type") == "persona"),
+        {},
+    )
+    opening = (
+        (contract.get("conversation_policy") or {}).get("opening")
+        or (((persona.get("data") or {}).get("conversation_policy") or {}).get("opening"))
+        or {}
+    )
+    identity = str(
+        opening.get("self_introduction_identity") or ""
+    ).strip()
+    name = identity.split(",", 1)[0].strip() if "," in identity else ""
+    return [
+        *([rf"\b{re.escape(name)}\b"] if name else []),
+        r"\b(?:assistente\s+(?:virtual|de\s+ia)|intelig[eê]ncia\s+artificial|ia)\b",
+    ]
+
+
 def _semantic_sales_script(
     *, publication: dict, flow_id: str, initial_state: str = "cold",
 ) -> dict:
@@ -883,10 +905,9 @@ def _semantic_sales_script(
         "text": opening_text,
         "intended_facts": {identity_key: identity_value},
         "expected_branch_node_id": anchor,
-        "required_reply_patterns": [
-            r"\bvit[oó]ria\b",
-            r"\b(?:assistente\s+virtual|intelig[eê]ncia\s+artificial|ia)\b",
-        ],
+        "required_reply_patterns": _sales_opening_identity_patterns(
+            document, contract,
+        ),
     }
 
     nodes_by_id = {
@@ -2579,6 +2600,9 @@ def _semantic_turn_audit(
         **reply_requirements,
         "sales_internal_language_absent": _sales_internal_language_absent(reply, contract),
         "customer_name_question_timing": not (current_asks_name and previous_asks_name),
+        "handoff_without_new_question": (
+            not handoff_observed or (question_id is None and "?" not in reply)
+        ),
         "pre_handoff_notice_observed": (
             not handoff_observed
             or not pre_handoff_required
@@ -2743,6 +2767,7 @@ def _semantic_turn_audit(
             "sales_internal_language_absent",
             "received_content_acknowledged",
             "customer_name_question_timing",
+            "handoff_without_new_question",
             "known_fact_not_reasked",
             "reply_not_repeated",
             "question_repetition_budget",

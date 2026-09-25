@@ -52,6 +52,41 @@ def test_validator_request_rejects_retired_n8n_candidate_webhook():
         })
 
 
+def test_sales_opening_checks_published_agent_identity():
+    document = {"nodes": [{"node_type": "persona", "data": {}}]}
+    contract = {"conversation_policy": {"opening": {
+        "self_introduction_identity": "Lia, assistente virtual de Marca Exemplo",
+    }}}
+    patterns = wa_validator_service._sales_opening_identity_patterns(
+        document, contract,
+    )
+
+    assert wa_validator_service._reply_content_requirements(
+        {"required_reply_patterns": patterns},
+        "Oi, eu sou a Lia, assistente de IA da Marca Exemplo.",
+    )["required_reply_content"] is True
+    assert wa_validator_service._reply_content_requirements(
+        {"required_reply_patterns": patterns},
+        "Oi, eu sou a assistente de IA da Marca Exemplo.",
+    )["required_reply_content"] is False
+    assert wa_validator_service._sales_opening_identity_patterns(document, {}) == [
+        patterns[-1]
+    ]
+
+
+def test_handoff_question_is_quality_observation_only():
+    inputs = _audit_inputs(conversation_mode="n8n_agents")
+    inputs["turn"].update({
+        "text": "Vou encaminhar para a equipe. Como posso te chamar?",
+        "route": "HUMAN", "handoff": True,
+    })
+
+    audit = wa_validator_service._semantic_turn_audit(**inputs)
+
+    assert audit["criteria"]["handoff_without_new_question"] is False
+    assert "handoff_without_new_question" in audit["non_blocking_observations"]
+
+
 def _audit_inputs(*, conversation_mode: str) -> dict:
     fields = [
         {

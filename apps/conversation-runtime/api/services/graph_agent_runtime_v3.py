@@ -4282,6 +4282,9 @@ def resolve_understanding(
         )
         missing = proof.get("missing_fields") or []
     questions = resolved_context.graph_contract.get("questions") or {}
+    # A completed handoff has no next qualification question, even when the
+    # published graph leaves an optional field askable for a future journey.
+    reply_eligible = [] if response.handoff_required else eligible
     eligible_guides = [
         {
             "key": field.get("key"),
@@ -4293,7 +4296,7 @@ def resolve_understanding(
             ),
             "depends_on": field.get("depends_on") or [],
         }
-        for field in eligible
+        for field in reply_eligible
     ]
     candidate_nodes = [
         {
@@ -4373,9 +4376,6 @@ def resolve_understanding(
         "operational_mode": str(resolved_context.operational_mode),
         "missing_fields": list(missing),
         "eligible_question_guides": eligible_guides,
-        "do_not_ask_question_node_ids": (
-            prospective_state.get("asked_question_node_ids") or []
-        ),
         "recent_messages": recent_messages,
         "commercial_interests": commercial_interests,
         "historical_commercial_interests": (
@@ -4395,6 +4395,13 @@ def resolve_understanding(
         # only its already-resolved operating mode and this small behavioural
         # guide, not a second copy of the graph's technical contract.
         "reply_guidance": {
+            "first_reply_identity": str(
+                ((policy.get("opening") or {}).get("self_introduction_identity") or "")
+            ),
+            "first_reply_instruction": str(
+                ((policy.get("opening") or {}).get("first_turn") or "")
+            ),
+            "handoff_now": bool(response.handoff_required),
             "answer_before_qualification": bool(
                 ((policy.get("response_ownership") or {}).get(
                     "answer_and_explain_before_qualification"
@@ -4426,7 +4433,7 @@ def resolve_understanding(
         understanding=understanding,
         context=resolved_context,
         prospective_state=prospective_state,
-        eligible_fields=eligible,
+        eligible_fields=reply_eligible,
         missing_fields=list(missing),
         operational_mode=resolved_context.operational_mode,
         conversation_brief=conversation_brief,
