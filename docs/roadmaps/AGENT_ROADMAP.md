@@ -1488,6 +1488,15 @@ Pendências de qualidade para a próxima mudança, sem redeploy corretivo nesta 
 
 O gate técnico da release passou nas duas personas (`technical_pass=true`), mas o gate de qualidade completo segue pendente (`quality_pass=false`). Testar nome espontâneo, nova jornada e replay de inbound em cenários dedicados na próxima rodada; esta release testou as jornadas completas dos fluxos publicados.
 
+## Resultado da simplificação do prompt 1557622 (2026-09-25)
+
+Release runtime-only ativa no slot green, digest `sha256:261e0f6bbebe3f300e59c9846343a857bd11f1266a825ac753290b4578a60781`. Dry-run `36109142196`, candidate, cutover e canário interno `36109227854` passaram; auditoria final teve zero CAS conflict, buffer crítico, outbound sem proof e checksum divergente. O prompt e brief agora destacam a identidade publicada e o fechamento sem pergunta; o Validator usa o nome da agente publicado em vez de uma string fixa.
+
+- Utzig `b9673984-89b7-47ce-b8ec-bb38f8c6bb7b`: 6/6 decisões, proofs e outbounds internos, handoff correto, mas `quality_pass=false` por repetir a pergunta do nome imediatamente após responder uma dúvida. O ajuste apenas textual não resolveu o caso.
+- Tock `7de841e7-bdfd-4ed6-9e58-25ff18df53f5`: a apresentação como Vitória passou; 3/3 decisões, proofs e outbounds internos. `quality_pass=false` porque o modelo perguntou sobre categorias sem `asked_field_key` enquanto a qualificação seguia incompleta. O driver parou antes de testar o handoff final.
+
+Próxima mudança: investigar a seleção conversacional do modelo usando o brief real desses turnos. Preferir uma indicação curta da ação esperada do turno, derivada do estado existente, a mais regras de proof ou novos estados. Verificar em candidate isolado antes de outra release; não empilhar redeploy corretivo nesta operação.
+
 ## Próxima correção conversacional após release 5d4af4d
 
 Decisão posterior do produto: a pergunta de nome pode ser retomada em um turno posterior se continuar pendente e o limite publicado permitir; evitar apenas a repetição na resposta imediatamente seguinte à interrupção. A apresentação como agente de IA é padrão em todas as personas no primeiro reply de cada jornada, com identidade e marca vindas do grafo. Prompt, aviso de qualidade e Validator foram preparados localmente; incluir na próxima release única junto com a correção de confirmação/handoff e validar por WA interno antes do cutover.

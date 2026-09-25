@@ -507,6 +507,13 @@ auditorias oficiais e pelos handoffs indicados no roadmap.
 - WA Validator interno Tock `390d46b9-ee4a-4957-a41d-3ae973ae0eda`: 6 inbounds, 6 decisões/proofs/commits/outbounds internos, apresentação como IA e handoff final, `technical_pass=true`, `quality_pass=false`. O critério `required_reply_content` falhou na primeira resposta; no handoff o modelo ainda perguntou como chamar a cliente.
 - Auditoria final: zero outbound sem proof e zero divergência de checksum; claims ativos. As falhas de qualidade são pendências de condução para uma próxima mudança, sem segundo redeploy corretivo nesta operação.
 
+## Ajuste do prompt de 2026-09-25
+
+- Release `15576229784d8dd65ffec5ff98f3a1afa238e3aa`, digest `sha256:261e0f6bbebe3f300e59c9846343a857bd11f1266a825ac753290b4578a60781`, slot green; dry-run `36109142196` e deploy blue/green `36109227854` passaram. O prompt passou a receber a identidade de abertura publicada, a instrução de não repetir a pergunta interrompida e a conclusão de handoff sem nova pergunta. O brief não oferece campo opcional depois do handoff. O Validator deixou de fixar `Vitória` no código e lê a identidade da publicação.
+- WA Validator interno Utzig `b9673984-89b7-47ce-b8ec-bb38f8c6bb7b`: 6 inbounds, 6 decisões/proofs/commits/outbounds, handoff final, `technical_pass=true`, `quality_pass=false`. A pergunta do nome ainda reapareceu imediatamente depois da dúvida sobre avaliação; o prompt mais claro não bastou.
+- WA Validator interno Tock `7de841e7-bdfd-4ed6-9e58-25ff18df53f5`: apresentação correta como Vitória; 3 inbounds, 3 decisões/proofs/commits/outbounds, `technical_pass=true`, `quality_pass=false`. A terceira resposta perguntou sobre categorias sem `asked_field_key` enquanto havia campo de qualificação pendente; o fluxo parou antes do handoff.
+- Auditoria final: zero conflito CAS, buffer crítico, outbound sem proof e divergência de checksum. Não houve segundo redeploy corretivo. Próxima hipótese: simplificar o brief para declarar a ação esperada do turno ao modelo a partir do estado já calculado, sem adicionar estado persistido ou bloqueio editorial ao proof.
+
 ## Runtime e proof publicados em 2026-09-24
 
 ### Ajuste de condução preparado após o E2E
