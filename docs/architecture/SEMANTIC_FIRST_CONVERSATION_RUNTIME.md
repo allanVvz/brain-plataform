@@ -1,3 +1,31 @@
+# Contrato produtivo de conversa - 2026-09-25
+
+A fonte produtiva e apps/conversation-runtime. O transport chama
+/internal/v1/conversations/execute-agentic; n8n_agents e somente metadata legado.
+Duas chamadas: interpretacao -> resolucao unica de fatos, ramo e jornada ->
+redacao -> proof -> commit atomico. Prompts produtivos em services/conversation_prompts.py.
+
+Ambas as etapas recebem a conversa recente e a ultima mensagem realmente enviada.
+Nao se deduz resposta esperada de um campo antigo pendente. question_kind registra
+qualification, consultative, confirmation ou none. asked_field_key identifica
+somente qualificacao. Metadata ausente/invalida fica desconhecida e gera aviso;
+a resposta valida permanece. Perguntas consultivas nao criam campos ou nodes.
+Proof e metadata do outbound registram a pergunta no mesmo commit.
+
+Confirmacao exige interpretacao afirmativa, evidencia literal e referencia
+pendente correspondente. Limites de preco/data/horario permanecem no commit.
+O brief fornece uma situacao operacional unica, identidade, fatos, conversa,
+pendencias e evidencias; nao envia estado completo ou manifesto de auditoria.
+O Validator registra sample_status=incomplete quando nao sabe continuar,
+sem declarar a jornada aprovada ou uma falha do agente.
+
+O template apps/conversation-runtime/n8n/persona-conversation-template.json
+permanece intacto: e artefato historico usado nos checksums das publicacoes.
+As secoes abaixo e WHATSAPP_N8N_RUNTIME.md descrevem arquitetura historica,
+nao a operacao atual; inclusive reparacao semantica e despacho n8n foram retirados.
+
+## Arquitetura historica (nao operacional)
+
 # Runtime de conversa semantic-first
 
 Substitui a camada de interpretação literal do runtime de conversa por uma

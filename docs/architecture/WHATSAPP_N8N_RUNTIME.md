@@ -1,3 +1,7 @@
+> Documento historico. A operacao atual usa exclusivamente o conversation-runtime,
+> sem execucao de modelo, proof ou commit pelo n8n. Veja
+> [contrato atual](SEMANTIC_FIRST_CONVERSATION_RUNTIME.md).
+
 # WhatsApp / n8n runtime
 
 Referência única e atual do pipeline de mensagens WhatsApp. Substitui a

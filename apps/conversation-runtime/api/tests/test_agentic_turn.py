@@ -109,15 +109,20 @@ def test_model_http_failure_keeps_only_sanitized_provider_diagnostic(monkeypatch
     assert "must-not-be-persisted" not in repr(exc.diagnostic)
 
 
-def test_understanding_instruction_extracts_a_direct_free_text_answer(monkeypatch):
+def test_understanding_receives_actual_last_reply_not_stale_pending_field(monkeypatch):
     captured: dict = {}
 
     def fake_call(_binding, *, system, **_kwargs):
-        captured["system"] = system
+        captured["payload"] = _kwargs["payload"]
         return ({"facts": [{"key": "unknown", "evidence_span": "para o dia a dia"}]}, {})
 
     monkeypatch.setattr(
-        agentic_turn.conversation_runtime, "build_context", lambda **_kwargs: _context(),
+        agentic_turn.conversation_runtime, "build_context", lambda **_kwargs: _context().model_copy(update={"messages": [
+            {"role": "assistant", "content": "Como prefere que eu te chame?"},
+            {"role": "user", "content": "Qual combina comigo?"},
+            {"role": "assistant", "content": "Prefere algo discreto?", "metadata": {"question_kind": "consultative"}},
+            {"role": "user", "content": "para o dia a dia"},
+        ]}),
     )
     monkeypatch.setattr(
         agentic_turn.supabase_client, "get_lead_by_ref", lambda _lead_ref: {"persona_id": "persona-1"},
@@ -134,10 +139,10 @@ def test_understanding_instruction_extracts_a_direct_free_text_answer(monkeypatc
             phone_number_id=None, channel_binding_id="binding-1",
             inbound_buffer_id="inbound-1",
         )
-    assert "Capture every stated fact" in captured["system"]
-    assert "expected_answer_field_key is set" in captured["system"]
-    assert "free-text field preserve" in captured["system"]
-    assert "audience_signals are optional" in captured["system"]
+    assert "expected_answer_field_key" not in captured["payload"]
+    assert captured["payload"]["last_assistant_message"]["content"] == "Prefere algo discreto?"
+    assert len(captured["payload"]["recent_messages"]) == 4
+
 
 
 @pytest.mark.parametrize("invalid_metadata", [False, True])
@@ -188,6 +193,7 @@ def test_two_model_calls_resolve_facts_before_reply_and_commit_once(monkeypatch,
         return ({
             "contract_version": "conversation_reply_v1",
             "reply": "Entendi. O que voce procura?",
+            "question_kind": "consultative",
             "asked_field_key": 17 if invalid_metadata else None,
             "claims": [{"claim_type": "other", "value": "invalid"}] if invalid_metadata else [],
             "cited_node_ids": [],
@@ -245,14 +251,6 @@ def test_two_model_calls_resolve_facts_before_reply_and_commit_once(monkeypatch,
     assert captured["commit"]["inbound_buffer_id"] == "buffer-1"
     assert captured["commit"]["site_origin"]["event_id"] == "site-event-1"
     assert captured["commit"]["expected_decision_owner"] == "n8n_agents"
-    assert "warm, concise reply" in captured["reply_system"]
-    assert "rather than guessing" in captured["reply_system"]
-    assert "claim_contract exactly" in captured["reply_system"]
-    assert "introduce yourself truthfully as an AI assistant" in captured["reply_system"]
-    assert "reply_guidance.first_reply_identity" in captured["reply_system"]
-    assert "reply_guidance.handoff_now" in captured["reply_system"]
-    assert "do not collect an optional name" in captured["reply_system"]
-    assert "without asking the same field again" in captured["reply_system"]
     assert captured["first_reply_in_journey"] is True
     assert result["model_calls"] == 2
     assert captured["commit"]["response"].reply_text == "Entendi. O que voce procura?"
@@ -398,6 +396,7 @@ def test_usable_reply_discards_only_invalid_optional_metadata():
     assert reply.handoff_requested is False
     assert set(warnings) == {
         "reply_metadata_discarded:extra:extra",
+        "reply_metadata_discarded:question_kind",
         "reply_metadata_discarded:asked_field_key",
         "reply_metadata_discarded:claims:1",
         "reply_metadata_discarded:cited_node_ids:items",
@@ -602,3 +601,24 @@ def test_agentic_failure_returns_truthful_canonical_handoff(monkeypatch):
         "message": "model request failed: HTTP 402",
         "http_code": 402,
     }
+
+
+@pytest.mark.parametrize("kind", [None, "invalid", 3, [], {}])
+def test_unknown_question_metadata_preserves_reply(kind):
+    reply, warnings = agentic_turn._usable_reply_with_metadata({
+        "reply": "Prefere algo discreto?", "question_kind": kind,
+    })
+    assert reply.reply == "Prefere algo discreto?"
+    assert reply.question_kind is None
+    assert reply.asked_field_key is None
+    assert "reply_metadata_discarded:question_kind" in warnings
+
+
+@pytest.mark.parametrize("kind", ["consultative", "confirmation", "none"])
+def test_nonqualification_question_never_spends_a_field(kind):
+    reply, warnings = agentic_turn._usable_reply_with_metadata({
+        "reply": "Prefere algo discreto?", "question_kind": kind, "asked_field_key": "name",
+    })
+    assert reply.question_kind == kind
+    assert reply.asked_field_key is None
+    assert "reply_metadata_discarded:asked_field_key" in warnings

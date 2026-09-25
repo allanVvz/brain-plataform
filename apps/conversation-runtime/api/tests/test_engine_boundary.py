@@ -498,7 +498,7 @@ def test_final_confirmation_requires_pending_same_branch_and_explicit_yes():
     })
     accepted = graph_agent_runtime_v3._qualification_confirmation_accepted
     args = {
-        "confirmation": {"state": "affirm", "target_ref": ref},
+        "confirmation": {"state": "affirm", "target_ref": ref, "evidence_span": "Sim"},
         "confirmation_ref": ref,
         "qualification_complete": True,
         "active_branch_node_ids": ["service:assessment"],
@@ -510,7 +510,7 @@ def test_final_confirmation_requires_pending_same_branch_and_explicit_yes():
     assert accepted(context, **{**args, "customer_questions": [{"kind": "price"}]}) is False
     assert accepted(context.model_copy(update={
         "messages": [{"role": "user", "content": "Sim, mas quero mudar", "message_id": "in-2"}],
-    }), **args) is False
+    }), **{**args, "confirmation": {"state": "partial", "target_ref": ref, "evidence_span": "Sim, mas quero mudar"}}) is False
     assert accepted(context.model_copy(update={"cart": {}}), **args) is False
 
 
@@ -797,3 +797,20 @@ def test_decide_binds_every_name_it_reads():
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
     }
     assert read <= bound, f"unbound names read in _decide: {sorted(read - bound)}"
+
+
+@pytest.mark.parametrize("text,span,accepted", [
+    ("Isso mesmo, pode encaminhar para a equipe", "pode encaminhar para a equipe", True),
+    ("Isso mesmo, pode encaminhar para a equipe", "Sim", False),
+    ("Isso mesmo, pode encaminhar para a equipe", "", False),
+])
+def test_natural_confirmation_requires_literal_evidence(text, span, accepted):
+    context = _context().model_copy(update={
+        "messages": [{"role": "user", "content": text}],
+        "cart": {"sdr_state": "awaiting_confirmation", "pending_confirmation_ref": "ref"},
+    })
+    assert graph_agent_runtime_v3._qualification_confirmation_accepted(
+        context, confirmation={"state": "affirm", "target_ref": "ref", "evidence_span": span},
+        confirmation_ref="ref", qualification_complete=True,
+        active_branch_node_ids=["service:assessment"], customer_questions=[],
+    ) is accepted

@@ -8,6 +8,7 @@ on:
       services: {description: Comma-separated affected services without spaces, required: true, default: conversation-runtime}
       canary_persona_slug: {description: Persona for the internal direct runtime canary, required: false}
       canary_flow_id: {description: WA Validator flow for the runtime canary, required: false}
+      runtime_probe_fixture: {description: Optional baked no-commit real-model candidate fixture, required: false, default: ""}
 permissions:
   contents: read
 jobs:
@@ -40,6 +41,7 @@ jobs:
       action: "${{ inputs.action }}"
       canary_persona_slug: "${{ inputs.canary_persona_slug }}"
       canary_flow_id: "${{ inputs.canary_flow_id }}"
+      runtime_probe_fixture: "${{ inputs.runtime_probe_fixture }}"
     secrets: inherit
   transport:
     needs: validate

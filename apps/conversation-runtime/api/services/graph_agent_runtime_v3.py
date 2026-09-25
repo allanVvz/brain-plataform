@@ -1,6 +1,8 @@
 """Two-phase, branch-scoped GraphRAG context and proposal reconciliation."""
 from __future__ import annotations
 
+from services.conversation_prompts import last_assistant_message
+
 from services import catalog_images
 
 import json
@@ -2101,6 +2103,7 @@ def _project_recent_messages(messages: list[dict[str, Any]], limit: int = 6) -> 
             "role": row.get("role") or ("user" if row.get("direction") == "inbound" else "assistant"),
             "content": row.get("content") or row.get("texto") or row.get("text") or "",
             "created_at": row.get("created_at"),
+            "metadata": {key: (row.get("metadata") or {}).get(key) for key in ("question_kind", "asked_field_key")},
         })
     return projected
 
@@ -3829,6 +3832,8 @@ def decide(
 ) -> tuple[ConversationDecision, AgentResponse]:
     if not isinstance(model_observation, dict):
         raise ValueError("model_observation is required for graph_agent_runtime_v3")
+    if context.retrieval_trace.get("resolved_response"):
+        return _finalize_resolved_reply(context, model_observation)
     decision, response = _decide(
         context, model_observation=model_observation,
     )
@@ -4203,6 +4208,13 @@ def resolve_understanding(
         errors = proof.get("errors") or ["understanding_proof_invalid"]
         raise RuntimeError("understanding proof failed: " + "; ".join(map(str, errors)))
 
+    # Understanding deliberately has no reply, so decide's no-outbound return
+    # has not applied journey policy yet. Resolve it here once, before writing.
+    decision, response = _apply_journey_policy(
+        focused_context, decision, response, model_observation=observation,
+    )
+    proof = response.proof
+
     commercial_interests = _resolved_commercial_interests(
         context=focused_context, understanding=understanding,
     )
@@ -4235,7 +4247,8 @@ def resolve_understanding(
     active_branches = list(prospective_state.get("active_branch_node_ids") or [])
     confirmation_state = str(proof.get("confirmation_state") or "")
     resolved_mode = (
-        "confirmation" if confirmation_state == "awaiting_confirmation"
+        "handoff" if response.handoff_required
+        else "confirmation" if confirmation_state == "awaiting_confirmation"
         else "post_qualification_support"
         if confirmation_state in {"post_qualification_support", "consultative_support"}
         else "collection"
@@ -4250,6 +4263,8 @@ def resolve_understanding(
         "retrieval_trace": {
             **focused_context.retrieval_trace,
             "understanding_resolution_proof": proof,
+            "resolved_decision": decision.model_dump(mode="json"),
+            "resolved_response": response.model_dump(mode="json"),
             # The final reply proof starts from the already-resolved state. It
             # must not replay branch operations a second time.
             "service_resolution": {
@@ -4358,21 +4373,10 @@ def resolve_understanding(
         "known_facts": _known_facts_payload(
             grouped, _source_message_id(resolved_context.messages),
         ),
-        "previously_asked_field_key": next(
-            (
-                str(field.get("key"))
-                for field in resolved_context.graph_contract.get("fields") or []
-                if field.get("question_node_id")
-                and str(field["question_node_id"]) == str(
-                    (context.cart.get("asked_question_node_ids") or [None])[-1]
-                )
-            ),
-            None,
-        ),
+        "last_assistant_message": last_assistant_message(recent_messages),
         "customer_questions": [
             item.model_dump(mode="json") for item in understanding.customer_questions
         ],
-        "prospective_state": prospective_state,
         "operational_mode": str(resolved_context.operational_mode),
         "missing_fields": list(missing),
         "eligible_question_guides": eligible_guides,
@@ -4785,7 +4789,9 @@ def _qualification_confirmation_accepted(
         and pending_ref == confirmation_ref
         and str(confirmation.get("state") or "") == "affirm"
         and str(confirmation.get("target_ref") or "") == pending_ref
-        and _is_explicit_confirmation(_latest_user_message(context))
+        and graph_proof_checker_v3._literal_span(
+            _latest_user_message(context), str(confirmation.get("evidence_span") or "")
+        )
         and (
             str(context.cart.get("sdr_state") or "") == "awaiting_confirmation"
             or str(context.journey_state) == "awaiting_confirmation"
@@ -4794,6 +4800,107 @@ def _qualification_confirmation_accepted(
             ))
         )
     )
+
+
+def _finalize_resolved_reply(
+    context: ConversationContext, observation: dict[str, Any],
+) -> tuple[ConversationDecision, AgentResponse]:
+    """Validate wording and record the ask without replaying state resolution."""
+    decision = ConversationDecision.model_validate(context.retrieval_trace["resolved_decision"])
+    resolved = AgentResponse.model_validate(context.retrieval_trace["resolved_response"])
+    proposal = ConversationProposal.model_validate(observation["proposal"])
+    publication = _turn_publication(context)
+    if str(publication.get("id")) != str(context.publication_id) or publication.get("checksum") != context.graph_checksum:
+        raise RuntimeError("GraphRAG publication changed during turn")
+    document = publication.get("document_json") or {}
+    contract = context.graph_contract
+    active = context.active_branch_node_ids or ([context.active_branch_node_id] if context.active_branch_node_id else [])
+    grouped = context.cart.get("facts_by_key") or {}
+    proof = graph_proof_checker_v3.check(
+        publication=publication, contract=contract,
+        ledger={"publication_id": context.publication_id, "graph_checksum": context.graph_checksum,
+                "facts": _facts_for_contract(contract, grouped),
+                "asked_question_node_ids": context.cart.get("asked_question_node_ids") or [],
+                "active_branch_node_id": context.active_branch_node_id,
+                "revision": context.retrieval_trace.get("ledger_revision", 0)},
+        proposal=proposal.model_dump(mode="json"), message=_latest_user_message(context),
+        source_message_id=_source_message_id(context.messages),
+        package_node_ids={card.id for card in context.context_cards}
+        | {str((_persona_node(document) or {}).get("id") or "")}
+        | {str(item.get("evidence_node_id")) for item in observation.get("authorized_price_catalog") or []},
+        package_chunk_ids={str(row.get("chunk_id") or row.get("id")) for row in context.rag_chunks},
+        package_chunk_sources={str(row.get("chunk_id") or row.get("id")):
+                               str(row.get("source_node_id") or row.get("source_graph_node_id") or "")
+                               for row in context.rag_chunks},
+        active_branch_node_id=context.active_branch_node_id, active_branch_node_ids=active,
+        branch_selection_allowed=False, branch_switch_allowed=False,
+        additional_fields=_active_contract_fields(document, active, contract),
+        validation_publication_id=observation.get("validation_publication_id"),
+    )
+    eligible = (graph_proof_checker_v3.aggregate_askable_fields(
+        document.get("branch_contracts") or {}, active, grouped,
+        asked_question_node_ids=context.cart.get("asked_question_node_ids") or [],
+    ) if active else graph_proof_checker_v3.askable_pending_fields(
+        contract, _facts_for_contract(contract, grouped),
+        asked_question_node_ids=context.cart.get("asked_question_node_ids") or [],
+    ))
+    metadata = observation.get("interpretation") or {}
+    kind = metadata.get("question_kind")
+    warnings = list(proof.get("quality_warnings") or [])
+    if kind not in {"qualification", "consultative", "confirmation", "none"}:
+        kind = None
+        warnings.append("reply_metadata_discarded:question_kind")
+    field = next((field for field in eligible
+                  if field.get("key") == metadata.get("asked_field_key")), None)
+    question_id = None
+    asked_field = None
+    if kind in {None, "qualification"} and field and not resolved.handoff_required:
+        asked_field = field["key"]
+        question_id = field.get("question_node_id")
+    elif metadata.get("asked_field_key") or kind == "qualification":
+        warnings.append("reply_metadata_discarded:asked_field_key")
+        kind = None
+    repetition = conversation_repetition.assess_repetition(
+        current_reply=proposal.reply, recent_replies=_assistant_replies(context.messages),
+        question_node_id=question_id,
+        question_text=str(((contract.get("questions") or {}).get(question_id) or {}).get("text") or ""),
+        asked_question_node_ids=context.cart.get("asked_question_node_ids") or [],
+        max_attempts=_question_repetition_max_attempts(contract), field_pending=bool(field),
+        terminal_intent=decision.intent if resolved.handoff_required else None,
+        previous_terminal_intent=None,
+    )
+    if not repetition["passed"]:
+        warnings.append("reply_repetition_observed")
+    gates = list(proof.get("gating_errors") or [])
+    if not proposal.reply.strip():
+        gates.append("empty_reply")
+    warnings = list(dict.fromkeys([*(resolved.proof.get("quality_warnings") or []), *warnings]))
+    state = {**context.cart, "asked_question_node_ids": [
+        *(context.cart.get("asked_question_node_ids") or []), *([question_id] if question_id else []),
+    ]}
+    final_proof = {
+        **resolved.proof,
+        # Resolution owns facts, branch changes and completion. Only the reply
+        # validation diagnostics come from the second proof check.
+        **{key: proof[key] for key in (
+            "errors", "metadata_errors", "blocking_metadata_errors",
+            "discarded_structured_components",
+        ) if key in proof},
+        "question_kind": kind, "asked_field_key": asked_field, "next_question_node_id": question_id,
+        "quality_warnings": warnings, "quality_pass": not warnings,
+        "gating_errors": gates, "valid": not gates, "technical_pass": not gates,
+        "delivery_authorized": not gates, "repair_required": False,
+        "model_reply_preserved": True, "repetition_audit": repetition,
+        "repetition_action": "allowed" if repetition["passed"] else "quality_failure_recorded",
+        "semantic_repairs": 0,
+    }
+    evidence = list(dict.fromkeys(proposal.cited_node_ids))
+    return decision.model_copy(update={"evidence_node_ids": evidence}), resolved.model_copy(update={
+        "reply_text": proposal.reply if not gates else None, "proposal": proposal,
+        "evidence_node_ids": evidence,
+        "cart_state": state, "proof": final_proof,
+        "token_usage": observation.get("token_usage") or {},
+    })
 
 
 def _decide(

@@ -1,3 +1,11 @@
+# Checkpoint 2026-09-25 - conversa humana
+
+Implementacao: duas chamadas, prompts em portugues, ultima mensagem real nas duas
+etapas, question_kind e resolucao unica. Perguntas consultivas sao permitidas.
+Confirmacao usa interpretacao, evidencia e referencia pendente. Validator distingue
+amostra incompleta de falha. Sem migration ou republicacao de grafo.
+Evidencias: docs/research/conversation-human-contract-2026-09-25.md.
+
 # Brain Platform Memory
 
 Updated: 2026-09-14

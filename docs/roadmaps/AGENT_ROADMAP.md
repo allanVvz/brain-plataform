@@ -1,26 +1,15 @@
-# Roadmap de Agentes de IA — Brain AI
+# Roadmap de agentes - atualizacao 2026-09-25
 
-Publicações de conteúdo isoladas pausam somente a persona alvo. Personas não
-envolvidas continuam operando.
+As instrucoes do usuario e AGENTS.md regem a operacao. Publicacao de conteudo
+usa candidate e ativacao CAS sem pausa de persona ou binding.
 
-> **Este documento é a autoridade máxima do projeto.**
-> Quando qualquer outro arquivo contradiz este, este vence. Um agente que
-> encontrar contradição deve **reportar o conflito**, nunca escolher em silêncio.
->
-> Criado em 2026-08-19. Ordem de precedência declarada em `CLAUDE.md`.
+Implementado: contrato minimo de pergunta, continuidade pela conversa real,
+confirmacao sem frase fixa, estado resolvido uma vez, prompts em portugues
+e amostra incompleta no Validator. Release restrita ao runtime.
+Verificacao pendente: candidate real sem commit e jornadas internas Utzig/Tock.
+Evidencias: docs/research/conversation-human-contract-2026-09-25.md.
 
-## Ordem de precedência
-
-```
-1. docs/roadmaps/AGENT_ROADMAP.md   <- este arquivo (autoridade máxima)
-2. AGENTS.md                        <- regras operacionais de produção
-3. PROJECT_REQUIREMENTS.md          <- contrato de produto
-4. memory.md                        <- estado corrente (não é contrato)
-5. docs/**                          <- referência
-   docs/archive/**                  <- NUNCA ler; histórico morto
-```
-
----
+## Historico do roadmap (regras antigas nao se sobrepoem ao AGENTS.md)
 
 ## Princípio arquitetural
 

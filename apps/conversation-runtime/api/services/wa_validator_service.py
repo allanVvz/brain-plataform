@@ -2623,7 +2623,8 @@ def _semantic_turn_audit(
         ),
         "received_content_acknowledged": not intended or bool(declarative_parts),
         "question_semantically_askable": (
-            (not missing and question_id is None)
+            (proof.get("question_kind") in {"consultative", "none"} and question_id is None)
+            or (not missing and question_id is None)
             or (
                 proof.get("confirmation_state") == "consultative_support"
                 and question_id is None
@@ -2786,6 +2787,7 @@ def _semantic_turn_audit(
         "observations": observations,
         "non_blocking_observations": non_blocking_observations,
         "asked_field": asked_field,
+        "question_kind": proof.get("question_kind"),
         "next_question_node_id": question_id,
         "first_missing_field": first_missing,
         "missing_fields": missing,
@@ -2923,6 +2925,7 @@ def _next_semantic_driver_step(
     active_anchor: str,
     expected_active_branches: list[str],
     qualification_complete: bool = False,
+    question_kind: str | None = None,
 ) -> dict | None:
     """Select the next synthetic customer turn for a semantic validation.
 
@@ -2933,6 +2936,13 @@ def _next_semantic_driver_step(
     # Required fields may already be complete while the agent has just asked
     # an optional field (notably the customer's name). Answer that question
     # before sending a generic confirmation such as "Sim".
+    if question_kind == "consultative":
+        answers = driver.get("consultative_answers") or []
+        index = int(state.get("consultative_answer_index") or 0)
+        if index >= len(answers):
+            return None
+        state["consultative_answer_index"] = index + 1
+        return dict(answers[index])
     pending_answer = (driver.get("answers") or {}).get(asked_field)
     if (
         qualification_complete
@@ -3239,6 +3249,7 @@ async def run_session_direct(
             }
             expected_active_branches: list[str] = []
             semantic_complete = False
+            sample_incomplete = False
             quality_observations: list[str] = []
             i = 0
             while step_queue and i < max_turns:
@@ -3628,6 +3639,7 @@ async def run_session_direct(
                         active_anchor=active_anchor,
                         expected_active_branches=expected_active_branches,
                         qualification_complete=bool(audit.get("qualification_complete")),
+                        question_kind=audit.get("question_kind"),
                     )
                     if not next_step:
                         # The synthetic driver cannot dictate the next move in
@@ -3653,22 +3665,24 @@ async def run_session_direct(
                                 "correlation_id": correlation_id,
                             },
                         })
-                        semantic_complete = True
+                        sample_incomplete = True
                         break
                     step_queue.append(next_step)
 
                 i += 1
 
             if semantic_mode and not semantic_complete:
-                failure = "semantic_driver_exhausted_before_terminal_handoff"
                 final_output = {
                     "conversation": conversation,
-                    "status": "error",
+                    "status": "done",
+                    "sample_status": "incomplete",
+                    "sample_label": "amostra incompleta",
+                    "incomplete_reason": "driver_cannot_continue" if sample_incomplete else "turn_budget_exhausted",
                     "technical_pass": True,
-                    "quality_pass": False,
-                    "failure": failure,
+                    "quality_pass": None,
+                    "quality_observations": list(dict.fromkeys(quality_observations)),
                 }
-                _session_update(session_id, status="error", output=final_output, error=failure)
+                _session_update(session_id, status="done", output=final_output)
                 return
 
             final_output = {

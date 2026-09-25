@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -30,6 +30,7 @@ class ConversationOperationalMode(StrEnum):
     COLLECTION = "collection"
     CONFIRMATION = "confirmation"
     POST_QUALIFICATION_SUPPORT = "post_qualification_support"
+    HANDOFF = "handoff"
 
 
 class CartAction(StrEnum):
@@ -265,6 +266,7 @@ class ConversationReplyV1(StrictModel):
     contract_version: str = Field(default="conversation_reply_v1", pattern="^conversation_reply_v1$")
     reply: str = Field(min_length=1)
     asked_field_key: str | None = None
+    question_kind: Literal["qualification", "consultative", "confirmation", "none"] | None = None
     claims: list[CommercialClaim] = Field(default_factory=list)
     cited_node_ids: list[str] = Field(default_factory=list)
     cited_chunk_ids: list[str] = Field(default_factory=list)

@@ -1,0 +1,25 @@
+[
+  {
+    "name": "utzig-doubt-interrupting-name",
+    "session_id": "d59a2c87-bfb4-4ee5-94f1-6a62123facf7",
+    "pending_fields": ["nome_cliente"],
+    "forbidden_extracted_fields": ["nome_cliente"],
+    "history": [
+      {"role": "user", "content": "Há marcas de uso e sujeira acumulada no veículo"},
+      {"role": "assistant", "content": "Entendi. Como você prefere que eu te chame?", "metadata": {"question_kind": "qualification", "asked_field_key": "nome_cliente"}}
+    ],
+    "message": "Como pedir uma avaliação?"
+  },
+  {
+    "name": "tock-consultative-answer-with-name-pending",
+    "session_id": "c14e81de-f316-4d34-b604-497c4529b211",
+    "pending_fields": ["nome_cliente"],
+    "forbidden_extracted_fields": ["nome_cliente"],
+    "history": [
+      {"role": "assistant", "content": "Como você prefere que eu te chame?", "metadata": {"question_kind": "qualification", "asked_field_key": "nome_cliente"}},
+      {"role": "user", "content": "Ainda estou comparando peças para o dia a dia."},
+      {"role": "assistant", "content": "Você prefere algo mais discreto ou mais marcante?", "metadata": {"question_kind": "consultative", "asked_field_key": null}}
+    ],
+    "message": "Prefiro algo mais discreto"
+  }
+]

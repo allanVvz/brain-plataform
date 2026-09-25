@@ -203,6 +203,7 @@ def test_final_proof_keeps_understanding_facts_branch_change_and_reply_question(
     understanding = TurnUnderstandingV1(
         validation_observations=["understanding_metadata_discarded:customer_question"],
     )
+
     fact = {
         "field_key": "vehicle", "owner_node_id": "branch:new", "status": "known",
         "value": "Ford Ka", "source_message_id": "m1", "evidence_span": "Ford Ka",
@@ -556,3 +557,49 @@ def test_tock_understanding_persists_retail_need_before_reply_and_refocuses_rag(
         for guide in resolved.conversation_brief["eligible_question_guides"]
     )
     assert resolved.context_manifest["strategy"] == "graph_scoped_relevance"
+    assert "prospective_state" not in resolved.conversation_brief
+    # The final stage must neither re-extract facts nor replay branch/journey resolution.
+    monkeypatch.setattr(graph_agent_runtime_v3, "_decide", lambda *_a, **_k: pytest.fail("state resolved twice"))
+    monkeypatch.setattr(graph_agent_runtime_v3, "_apply_journey_policy", lambda *_a, **_k: pytest.fail("journey resolved twice"))
+    reply = ConversationReplyV1(reply="Prefere um visual mais discreto?", question_kind="consultative")
+    decision, response = conversation_runtime.decide_agentic(
+        context, resolved_understanding=resolved, conversation_reply=reply,
+    )
+    assert response.reply_text == reply.reply
+    assert response.proof["question_kind"] == "consultative"
+    assert response.proof["asked_field_key"] is None
+    assert response.proof["next_question_node_id"] is None
+    assert response.cart_state["asked_question_node_ids"] == resolved.prospective_state["asked_question_node_ids"]
+    assert response.cart_state["facts_by_key"]["retail_need"][0]["value"] == "dia a dia"
+    assert response.proof["accepted_facts"] == resolved.resolution_proof["accepted_facts"]
+    assert decision.intent == resolved.context.retrieval_trace["resolved_decision"]["intent"]
+
+
+def test_final_reply_preserves_confirmed_handoff_and_checks_publication(monkeypatch):
+    context = _context()
+    decision = ConversationDecision(intent="qualified_confirmed", route="HUMAN", confidence=1, lead_stage="qualificado")
+    response = AgentResponse(reply_text=None, role="HUMAN", handoff_required=True, cart_state={
+        "sdr_state": "handed_off", "pending_confirmation_ref": None,
+    }, proof={"valid": True, "journey_action": "continue", "explicit_confirmation": True,
+              "confirmed_qualification_ref": "ref", "qualification_complete": True})
+    context = context.model_copy(update={"cart": response.cart_state, "retrieval_trace": {
+        "resolved_decision": decision.model_dump(mode="json"),
+        "resolved_response": response.model_dump(mode="json"),
+    }})
+    publication = {"id": context.publication_id, "checksum": context.graph_checksum,
+                   "status": "active", "document_json": {}}
+    monkeypatch.setattr(graph_agent_runtime_v3, "_turn_publication", lambda _context: publication)
+    monkeypatch.setattr(graph_agent_runtime_v3, "_decide", lambda *_a, **_k: pytest.fail("second resolution"))
+    observation = {"proposal": {"reply": "Vou encaminhar seu pedido para a equipe."},
+                   "interpretation": {"question_kind": "none", "asked_field_key": None}}
+    final_decision, final_response = graph_agent_runtime_v3.decide(context, model_observation=observation)
+    assert final_decision.route == decision.route
+    assert final_response.handoff_required is True
+    assert final_response.proof["explicit_confirmation"] is True
+    assert final_response.proof["confirmed_qualification_ref"] == "ref"
+    assert final_response.proof["journey_action"] == "continue"
+    assert final_response.cart_state["pending_confirmation_ref"] is None
+    assert final_response.proof["question_kind"] == "none"
+    publication["checksum"] = "changed"
+    with pytest.raises(RuntimeError, match="publication changed"):
+        graph_agent_runtime_v3.decide(context, model_observation=observation)

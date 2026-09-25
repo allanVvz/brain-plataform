@@ -1665,6 +1665,7 @@ def decide_agentic(
             "proposal": proposal.model_dump(mode="json"),
             "interpretation": {
                 "asked_field_key": conversation_reply.asked_field_key,
+                "question_kind": conversation_reply.question_kind,
                 "customer_questions": [
                     item.model_dump(mode="json")
                     for item in resolved_understanding.understanding.customer_questions
@@ -3354,6 +3355,8 @@ def commit(
                     "text": response.reply_text,
                     "sender_type": "agent",
                     "validation": True,
+                    "question_kind": response.proof.get("question_kind"),
+                    "asked_field_key": response.proof.get("asked_field_key"),
                 },
             },
             "message": {
@@ -3378,6 +3381,8 @@ def commit(
                     "trace_id": inbound_buffer_id,
                     "n8n_execution_id": n8n_execution_id,
                     "validation": True,
+                    "question_kind": response.proof.get("question_kind"),
+                    "asked_field_key": response.proof.get("asked_field_key"),
                 },
             },
         }
@@ -3397,6 +3402,8 @@ def commit(
         # tried to force the same external_message_id onto both, tripping
         # idx_messages_channel_external_unique. Confirmed live 2026-08-01.
         outbound_metadata = {
+                "question_kind": response.proof.get("question_kind"),
+                "asked_field_key": response.proof.get("asked_field_key"),
                 "agent_slug": context.agent_slug,
                 "role": response.role.value,
                 "intent": decision.intent,

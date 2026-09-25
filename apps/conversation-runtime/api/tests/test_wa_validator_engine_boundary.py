@@ -364,3 +364,14 @@ def test_semantic_turn_audit_flags_immediate_name_retry_but_allows_later_resume(
     assert later["criteria"]["customer_name_question_timing"] is True
     assert later["criteria"]["question_repetition_budget"] is True
     assert later["passed"] is True
+
+
+def test_consultative_driver_does_not_send_confirmation_or_invent_field():
+    args = dict(driver={"confirmation": {"text": "Sim"}}, state={}, asked_field="",
+                answered_fields=set(), active_anchor="branch", expected_active_branches=["branch"],
+                qualification_complete=True, question_kind="consultative")
+    assert wa_validator_service._next_semantic_driver_step(**args) is None
+    assert "confirmation_sent" not in args["state"]
+    args["driver"]["consultative_answers"] = [{"text": "Prefiro algo discreto", "kind": "consultative_answer"}]
+    assert wa_validator_service._next_semantic_driver_step(**args)["text"] == "Prefiro algo discreto"
+    assert wa_validator_service._next_semantic_driver_step(**args) is None
