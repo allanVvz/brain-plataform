@@ -1,0 +1,655 @@
+[
+  {
+    "session_id": "1bdcfad0-cb83-48cb-b6c9-0c644529318b",
+    "persona_slug": "utzig-garage",
+    "lead_ref": 377,
+    "publication_id": "46925297-f966-42cc-a33a-bd031fa1ded5",
+    "graph_checksum": "sha256:a5bfac4a813f9c7c357910371d70a8e8a2df14e86d93c4374aa4e2f322b1c553",
+    "quality_pass": false,
+    "sample_status": "incomplete",
+    "quality_stop": "pending_name_repeated_after_doubt",
+    "ai_enabled": true,
+    "ai_paused": false,
+    "all_outbounds_internal": true,
+    "message_ids": [
+      3388,
+      3389,
+      3390,
+      3391,
+      3392,
+      3393,
+      3395,
+      3397
+    ],
+    "turns": [
+      {
+        "role": "validator",
+        "text": "Ol\u00e1! Tenho interesse em Pintura.",
+        "ts": "2026-09-25T09:23:33.127373+00:00",
+        "message_id": "validator:1bdcfad0-cb83-48cb-b6c9-0c644529318b:0"
+      },
+      {
+        "role": "bot",
+        "text": "Oi! \ud83d\ude0a Eu sou a assistente virtual da Utzig Garage. A pintura faz parte dos nossos servi\u00e7os, e o Alem\u00e3o confirma avalia\u00e7\u00e3o, valor e pr\u00f3ximos passos.\n\nPra eu j\u00e1 organizar seu pedido: qual \u00e9 o modelo do ve\u00edculo?",
+        "ts": "2026-09-25T09:23:48.487584+00:00",
+        "message_id": "ai:validator:1bdcfad0-cb83-48cb-b6c9-0c644529318b:0",
+        "route": "SDR",
+        "handoff": false,
+        "turn_audit": {
+          "inbound_id": "17251a87-583d-4624-8123-5cb07fb0f9c6",
+          "model_calls": 2,
+          "proof_count": 1,
+          "commit_state": "completed",
+          "repair_calls": 0,
+          "inbound_count": 1,
+          "prompt_tokens": null,
+          "decision_count": 1,
+          "outbound_count": 1,
+          "ledger_revision": 1,
+          "outbound_status": "sent",
+          "valid_proof_count": 1,
+          "current_fact_count": 2,
+          "active_branch_node_id": "product:painting",
+          "prompt_estimated_tokens": null,
+          "deterministic_branch_match": true,
+          "outbound_released_after_proof": true
+        }
+      },
+      {
+        "role": "validator",
+        "text": "Onix 2020",
+        "ts": "2026-09-25T18:11:30.997669+00:00",
+        "message_id": "validator:1bdcfad0-cb83-48cb-b6c9-0c644529318b:guided-afcb4910-c7d4-4dc7-8be4-ee6b04b6bf47"
+      },
+      {
+        "role": "bot",
+        "text": "Onix 2020, anotado! \ud83d\ude97\n\nPra pintura, o Alem\u00e3o confirma avalia\u00e7\u00e3o, valor e pr\u00f3ximos passos. E d\u00e1 pra adiantar bastante coisa por fotos e v\u00eddeos \u2014 cor, condi\u00e7\u00e3o, modelo e ano ajudam no diagn\u00f3stico inicial.\n\nS\u00f3 me falta saber: qual \u00e9 a cor do Onix?",
+        "ts": "2026-09-25T18:11:47.454903+00:00",
+        "message_id": "ai:validator:1bdcfad0-cb83-48cb-b6c9-0c644529318b:guided-afcb4910-c7d4-4dc7-8be4-ee6b04b6bf47",
+        "buffer_id": "976c3c8c-f909-4cdd-9ad2-7a09fa88039c",
+        "route": "SDR",
+        "handoff": false,
+        "question_kind": "qualification",
+        "asked_field_key": "vehicle_color",
+        "latency_seconds": 16.457,
+        "journey_state": "collecting",
+        "quality_warnings": [],
+        "missing_fields": [
+          "nome_cliente",
+          "vehicle_color",
+          "condicao"
+        ],
+        "explicit_confirmation": false,
+        "turn_audit": {
+          "inbound_id": "976c3c8c-f909-4cdd-9ad2-7a09fa88039c",
+          "model_calls": 2,
+          "proof_count": 1,
+          "commit_state": "completed",
+          "repair_calls": 0,
+          "inbound_count": 1,
+          "prompt_tokens": null,
+          "decision_count": 1,
+          "outbound_count": 1,
+          "ledger_revision": 2,
+          "outbound_status": "sent",
+          "valid_proof_count": 1,
+          "current_fact_count": 3,
+          "active_branch_node_id": "product:painting",
+          "prompt_estimated_tokens": null,
+          "deterministic_branch_match": false,
+          "outbound_released_after_proof": true
+        },
+        "facts": {
+          "servico": {
+            "value": "painting",
+            "status": "known"
+          },
+          "modelo_veiculo": {
+            "value": "Onix 2020",
+            "status": "known"
+          },
+          "commercial_interests": {
+            "value": {
+              "products": [
+                {
+                  "title": "Pintura",
+                  "intent": "select",
+                  "quantity": null,
+                  "evidence_span": "Tenho interesse em Pintura.",
+                  "product_node_id": "product:painting"
+                }
+              ]
+            },
+            "status": "known"
+          }
+        }
+      },
+      {
+        "role": "validator",
+        "text": "Prata. A pintura est\u00e1 com riscos e sem brilho.",
+        "ts": "2026-09-25T18:12:13.244954+00:00",
+        "message_id": "validator:1bdcfad0-cb83-48cb-b6c9-0c644529318b:guided-0507940a-4a35-44cc-bc43-1a4613a38a99"
+      },
+      {
+        "role": "bot",
+        "text": "Prata, anotado! \ud83d\udc4d\n\nRiscos e falta de brilho s\u00e3o bem comuns nesse caso \u2014 d\u00e1 pra recuperar com o servi\u00e7o de pintura. E o bom \u00e9 que d\u00e1 pra come\u00e7ar por fotos e v\u00eddeos: cor, condi\u00e7\u00e3o, modelo e ano j\u00e1 est\u00e3o registrados, e o Alem\u00e3o confirma o diagn\u00f3stico.\n\nComo voc\u00ea prefere que eu te chame? O sobrenome \u00e9 opcional.",
+        "ts": "2026-09-25T18:12:27.591427+00:00",
+        "message_id": "ai:validator:1bdcfad0-cb83-48cb-b6c9-0c644529318b:guided-0507940a-4a35-44cc-bc43-1a4613a38a99",
+        "buffer_id": "5514c4cf-d2da-4c9e-a7bb-d5644e13e45a",
+        "route": "SDR",
+        "handoff": false,
+        "question_kind": "qualification",
+        "asked_field_key": "nome_cliente",
+        "latency_seconds": 14.346,
+        "journey_state": "collecting",
+        "quality_warnings": [],
+        "missing_fields": [
+          "nome_cliente"
+        ],
+        "explicit_confirmation": false,
+        "turn_audit": {
+          "inbound_id": "5514c4cf-d2da-4c9e-a7bb-d5644e13e45a",
+          "model_calls": 2,
+          "proof_count": 1,
+          "commit_state": "completed",
+          "repair_calls": 0,
+          "inbound_count": 1,
+          "prompt_tokens": null,
+          "decision_count": 1,
+          "outbound_count": 1,
+          "ledger_revision": 3,
+          "outbound_status": "sent",
+          "valid_proof_count": 1,
+          "current_fact_count": 5,
+          "active_branch_node_id": "product:painting",
+          "prompt_estimated_tokens": null,
+          "deterministic_branch_match": false,
+          "outbound_released_after_proof": true
+        },
+        "facts": {
+          "servico": {
+            "value": "painting",
+            "status": "known"
+          },
+          "condicao": {
+            "value": "A pintura est\u00e1 com riscos e sem brilho.",
+            "status": "known"
+          },
+          "vehicle_color": {
+            "value": "Prata",
+            "status": "known"
+          },
+          "modelo_veiculo": {
+            "value": "Onix 2020",
+            "status": "known"
+          },
+          "commercial_interests": {
+            "value": {
+              "products": [
+                {
+                  "title": "Pintura",
+                  "intent": "select",
+                  "quantity": null,
+                  "evidence_span": "A pintura est\u00e1 com riscos e sem brilho.",
+                  "product_node_id": "product:painting"
+                }
+              ]
+            },
+            "status": "known"
+          }
+        }
+      },
+      {
+        "role": "validator",
+        "text": "Antes disso, como funciona a avalia\u00e7\u00e3o por fotos?",
+        "ts": "2026-09-25T18:12:47.206209+00:00",
+        "message_id": "validator:1bdcfad0-cb83-48cb-b6c9-0c644529318b:guided-6baa8369-dc0c-4710-b10b-95b22bba27bc"
+      },
+      {
+        "role": "bot",
+        "text": "Claro! Funciona assim: voc\u00ea manda fotos e v\u00eddeos do Onix \u2014 d\u00e1 pra mostrar bem os riscos e a falta de brilho na pintura. Cor, condi\u00e7\u00e3o, modelo e ano j\u00e1 est\u00e3o anotados aqui, ent\u00e3o o Alem\u00e3o usa esse material pra confirmar o diagn\u00f3stico. As fotos ajudam como contexto inicial, mas n\u00e3o substituem a avalia\u00e7\u00e3o presencial nem geram diagn\u00f3stico autom\u00e1tico. \ud83d\ude0a\n\nDepois disso, como voc\u00ea prefere que eu te chame? O sobrenome \u00e9 opcional.",
+        "ts": "2026-09-25T18:13:02.848136+00:00",
+        "message_id": "ai:validator:1bdcfad0-cb83-48cb-b6c9-0c644529318b:guided-6baa8369-dc0c-4710-b10b-95b22bba27bc",
+        "buffer_id": "a444e4b4-d5a8-499b-8a22-cfd06c33c819",
+        "route": "SDR",
+        "handoff": false,
+        "question_kind": "qualification",
+        "asked_field_key": "nome_cliente",
+        "latency_seconds": 15.642,
+        "journey_state": "collecting",
+        "quality_warnings": [],
+        "missing_fields": [
+          "nome_cliente"
+        ],
+        "explicit_confirmation": false,
+        "turn_audit": {
+          "inbound_id": "a444e4b4-d5a8-499b-8a22-cfd06c33c819",
+          "model_calls": 2,
+          "proof_count": 1,
+          "commit_state": "completed",
+          "repair_calls": 0,
+          "inbound_count": 1,
+          "prompt_tokens": null,
+          "decision_count": 1,
+          "outbound_count": 1,
+          "ledger_revision": 4,
+          "outbound_status": "sent",
+          "valid_proof_count": 1,
+          "current_fact_count": 5,
+          "active_branch_node_id": "product:painting",
+          "prompt_estimated_tokens": null,
+          "deterministic_branch_match": true,
+          "outbound_released_after_proof": true
+        },
+        "facts": {
+          "servico": {
+            "value": "painting",
+            "status": "known"
+          },
+          "condicao": {
+            "value": "A pintura est\u00e1 com riscos e sem brilho.",
+            "status": "known"
+          },
+          "vehicle_color": {
+            "value": "Prata",
+            "status": "known"
+          },
+          "modelo_veiculo": {
+            "value": "Onix 2020",
+            "status": "known"
+          },
+          "commercial_interests": {
+            "value": {
+              "products": [
+                {
+                  "title": "Pintura",
+                  "intent": "select",
+                  "quantity": null,
+                  "evidence_span": "A pintura est\u00e1 com riscos e sem brilho.",
+                  "product_node_id": "product:painting"
+                }
+              ]
+            },
+            "status": "known"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "session_id": "0efe66d3-240d-4267-8230-8fd8b60d9197",
+    "persona_slug": "tock-fatal",
+    "lead_ref": 378,
+    "publication_id": "2b46d7a2-fba9-4b92-aa2a-27fb53f55af4",
+    "graph_checksum": "sha256:3aa4cd2d4a7c50389534ab9cb7c372474030b3852eaaa4c851fc8b7f14d6a28a",
+    "quality_pass": false,
+    "sample_status": "complete",
+    "quality_stop": null,
+    "ai_enabled": true,
+    "ai_paused": false,
+    "all_outbounds_internal": true,
+    "message_ids": [
+      3394,
+      3396,
+      3398,
+      3399,
+      3400,
+      3401,
+      3402,
+      3403,
+      3404,
+      3405,
+      3406,
+      3407
+    ],
+    "turns": [
+      {
+        "role": "validator",
+        "text": "Oi! Quero algumas pe\u00e7as para uso pr\u00f3prio.",
+        "ts": "2026-09-25T18:12:30.744805+00:00",
+        "message_id": "validator:0efe66d3-240d-4267-8230-8fd8b60d9197:0"
+      },
+      {
+        "role": "bot",
+        "text": "Oi! Eu sou a Vit\u00f3ria, assistente virtual com intelig\u00eancia artificial da Tock Fatal \ud83d\ude0a Que bom que voc\u00ea quer pe\u00e7as pra voc\u00ea mesma!\n\nO cat\u00e1logo \u00e9 organizado por grupos: vestidos, conjuntos, blusas e partes de cima, cal\u00e7as e partes de baixo, casacos, cal\u00e7ados, infantil, masculino e acess\u00f3rios.\n\nO que voc\u00ea est\u00e1 procurando para uso pr\u00f3prio?",
+        "ts": "2026-09-25T18:12:50.464103+00:00",
+        "message_id": "ai:validator:0efe66d3-240d-4267-8230-8fd8b60d9197:0",
+        "route": "SDR",
+        "handoff": false,
+        "turn_audit": {
+          "inbound_id": "4bfb6aeb-4ee1-48a5-9327-7ced4266b9a7",
+          "model_calls": 2,
+          "proof_count": 1,
+          "commit_state": "completed",
+          "repair_calls": 0,
+          "inbound_count": 1,
+          "prompt_tokens": null,
+          "decision_count": 1,
+          "outbound_count": 1,
+          "ledger_revision": 1,
+          "outbound_status": "sent",
+          "valid_proof_count": 1,
+          "current_fact_count": 1,
+          "active_branch_node_id": "audience:tock-retail",
+          "prompt_estimated_tokens": null,
+          "deterministic_branch_match": true,
+          "outbound_released_after_proof": true
+        }
+      },
+      {
+        "role": "validator",
+        "text": "Quero algo confort\u00e1vel para o dia a dia, mas estou em d\u00favida entre vestido e conjunto. O que voc\u00ea sugere?",
+        "ts": "2026-09-25T18:13:42.930719+00:00",
+        "message_id": "validator:0efe66d3-240d-4267-8230-8fd8b60d9197:guided-3171496a-186e-40de-ad92-e30efe099eec"
+      },
+      {
+        "role": "bot",
+        "text": "Boa pergunta! Os dois funcionam bem pro dia a dia, ent\u00e3o vai muito do seu estilo \ud83d\ude0a\n\nO vestido \u00e9 uma pe\u00e7a \u00fanica: voc\u00ea veste e o look j\u00e1 est\u00e1 pronto, bem pr\u00e1tico. J\u00e1 o conjunto te d\u00e1 mais versatilidade, porque voc\u00ea pode usar as pe\u00e7as juntas ou separadas, combinando com outras coisas do guarda-roupa.\n\nSe o que voc\u00ea mais quer \u00e9 praticidade pra montar o look r\u00e1pido, o vestido leva vantagem. Se prefere variar mais combina\u00e7\u00f5es, o conjunto rende mais.\n\nVoc\u00ea est\u00e1 conhecendo as op\u00e7\u00f5es, comparando ou j\u00e1 quer avan\u00e7ar com a compra?",
+        "ts": "2026-09-25T18:14:06.485172+00:00",
+        "message_id": "ai:validator:0efe66d3-240d-4267-8230-8fd8b60d9197:guided-3171496a-186e-40de-ad92-e30efe099eec",
+        "buffer_id": "d5379d67-aff4-46e5-9dd8-7e705fd6f331",
+        "route": "SDR",
+        "handoff": false,
+        "question_kind": "qualification",
+        "asked_field_key": "grau_qualificacao",
+        "latency_seconds": 23.554,
+        "journey_state": "collecting",
+        "quality_warnings": [],
+        "missing_fields": [
+          "grau_qualificacao",
+          "forma_recebimento"
+        ],
+        "explicit_confirmation": false,
+        "turn_audit": {
+          "inbound_id": "d5379d67-aff4-46e5-9dd8-7e705fd6f331",
+          "model_calls": 2,
+          "proof_count": 1,
+          "commit_state": "completed",
+          "repair_calls": 0,
+          "inbound_count": 1,
+          "prompt_tokens": null,
+          "decision_count": 1,
+          "outbound_count": 1,
+          "ledger_revision": 2,
+          "outbound_status": "sent",
+          "valid_proof_count": 1,
+          "current_fact_count": 3,
+          "active_branch_node_id": "audience:tock-retail",
+          "prompt_estimated_tokens": null,
+          "deterministic_branch_match": false,
+          "outbound_released_after_proof": true
+        },
+        "facts": {
+          "retail_need": {
+            "value": "algo confort\u00e1vel para o dia a dia",
+            "status": "known"
+          },
+          "retail_style": {
+            "value": "em d\u00favida entre vestido e conjunto",
+            "status": "known"
+          },
+          "purchase_profile": {
+            "value": "uso-proprio-varejo",
+            "status": "known"
+          }
+        }
+      },
+      {
+        "role": "validator",
+        "text": "Estou comparando. Gostei da praticidade do vestido. Qual voc\u00ea indicaria para um visual discreto?",
+        "ts": "2026-09-25T18:14:28.058741+00:00",
+        "message_id": "validator:0efe66d3-240d-4267-8230-8fd8b60d9197:guided-2409262f-a581-4753-9996-62fecf6b20cf"
+      },
+      {
+        "role": "bot",
+        "text": "Boa! Ent\u00e3o j\u00e1 temos um norte: vestido, uso pr\u00f3prio, conforto pro dia a dia \ud83d\ude0a\n\nPra um visual discreto, o Vestido drapeado \u00e9 uma op\u00e7\u00e3o do grupo Vestidos: vestido feminino curto com efeito drapeado e gola alta. O drapeado valoriza a silhueta e deixa o vestido marcante na medida certa \u2014 ou seja, discreto, mas sem ficar sem gra\u00e7a. A escolha ideal depende do estilo e da ocasi\u00e3o que voc\u00ea tem em mente.\n\nE a\u00ed, esse visual mais arrumadinho e discreto \u00e9 pra algum momento espec\u00edfico?",
+        "ts": "2026-09-25T18:14:52.716613+00:00",
+        "message_id": "ai:validator:0efe66d3-240d-4267-8230-8fd8b60d9197:guided-2409262f-a581-4753-9996-62fecf6b20cf",
+        "buffer_id": "d3f64e54-1a3a-4a2e-b94f-7cc2ff27b5ca",
+        "route": "SDR",
+        "handoff": false,
+        "question_kind": "consultative",
+        "asked_field_key": null,
+        "latency_seconds": 24.658,
+        "journey_state": "collecting",
+        "quality_warnings": [
+          "fact_correction_not_explicit:retail_style"
+        ],
+        "missing_fields": [
+          "forma_recebimento"
+        ],
+        "explicit_confirmation": false,
+        "turn_audit": {
+          "inbound_id": "d3f64e54-1a3a-4a2e-b94f-7cc2ff27b5ca",
+          "model_calls": 2,
+          "proof_count": 1,
+          "commit_state": "completed",
+          "repair_calls": 0,
+          "inbound_count": 1,
+          "prompt_tokens": null,
+          "decision_count": 1,
+          "outbound_count": 1,
+          "ledger_revision": 3,
+          "outbound_status": "sent",
+          "valid_proof_count": 1,
+          "current_fact_count": 4,
+          "active_branch_node_id": "audience:tock-retail",
+          "prompt_estimated_tokens": null,
+          "deterministic_branch_match": false,
+          "outbound_released_after_proof": true
+        },
+        "facts": {
+          "retail_need": {
+            "value": "algo confort\u00e1vel para o dia a dia",
+            "status": "known"
+          },
+          "retail_style": {
+            "value": "em d\u00favida entre vestido e conjunto",
+            "status": "known"
+          },
+          "purchase_profile": {
+            "value": "uso-proprio-varejo",
+            "status": "known"
+          },
+          "grau_qualificacao": {
+            "value": "comparando",
+            "status": "known"
+          }
+        }
+      },
+      {
+        "role": "validator",
+        "text": "\u00c9 para trabalhar no escrit\u00f3rio e sair depois, sem parecer roupa de festa.",
+        "ts": "2026-09-25T18:15:36.869238+00:00",
+        "message_id": "validator:0efe66d3-240d-4267-8230-8fd8b60d9197:guided-0a6e7a7a-156c-4e71-a9f4-fb6e968533d1"
+      },
+      {
+        "role": "bot",
+        "text": "Ah, entendi! Escrit\u00f3rio e depois um happy hour, sem cara de roupa de festa \ud83d\ude0a\n\nPra esse tipo de dia, o Vestido em mousse faz bastante sentido: \u00e9 vestido feminino em mousse, manga longa e modelagem confort\u00e1vel. Macio, feminino e \u00f3timo pros dias mais frescos \u2014 f\u00e1cil de usar e cheio de charme. Ele funciona bem nesse tr\u00e2nsito entre trabalho e depois, sem exagerar no arrumado.\n\nSe quiser algo um pouco mais elegante pro escrit\u00f3rio, o Vestido canelado gola alta \u2014 azul tamb\u00e9m \u00e9 uma op\u00e7\u00e3o: canelado ajustado, gola alta e manga longa. O canelado valoriza a silhueta e a gola alta deixa o look elegante \u2014 pe\u00e7a \u00fanica pra produzir sem esfor\u00e7o.\n\nVoc\u00ea prefere receber por envio ou visitar a loja f\u00edsica?",
+        "ts": "2026-09-25T18:15:58.388866+00:00",
+        "message_id": "ai:validator:0efe66d3-240d-4267-8230-8fd8b60d9197:guided-0a6e7a7a-156c-4e71-a9f4-fb6e968533d1",
+        "buffer_id": "fd63a289-4998-4fe1-8e1c-4d041c39aba3",
+        "route": "SDR",
+        "handoff": false,
+        "question_kind": "qualification",
+        "asked_field_key": "forma_recebimento",
+        "latency_seconds": 21.52,
+        "journey_state": "collecting",
+        "quality_warnings": [
+          "fact_correction_not_explicit:retail_need"
+        ],
+        "missing_fields": [
+          "forma_recebimento"
+        ],
+        "explicit_confirmation": false,
+        "turn_audit": {
+          "inbound_id": "fd63a289-4998-4fe1-8e1c-4d041c39aba3",
+          "model_calls": 2,
+          "proof_count": 1,
+          "commit_state": "completed",
+          "repair_calls": 0,
+          "inbound_count": 1,
+          "prompt_tokens": null,
+          "decision_count": 1,
+          "outbound_count": 1,
+          "ledger_revision": 4,
+          "outbound_status": "sent",
+          "valid_proof_count": 1,
+          "current_fact_count": 4,
+          "active_branch_node_id": "audience:tock-retail",
+          "prompt_estimated_tokens": null,
+          "deterministic_branch_match": false,
+          "outbound_released_after_proof": true
+        },
+        "facts": {
+          "retail_need": {
+            "value": "algo confort\u00e1vel para o dia a dia",
+            "status": "known"
+          },
+          "retail_style": {
+            "value": "em d\u00favida entre vestido e conjunto",
+            "status": "known"
+          },
+          "purchase_profile": {
+            "value": "uso-proprio-varejo",
+            "status": "known"
+          },
+          "grau_qualificacao": {
+            "value": "comparando",
+            "status": "known"
+          }
+        }
+      },
+      {
+        "role": "validator",
+        "text": "Prefiro visitar a loja f\u00edsica. Agora quero avan\u00e7ar com o Vestido em mousse.",
+        "ts": "2026-09-25T18:16:22.126885+00:00",
+        "message_id": "validator:0efe66d3-240d-4267-8230-8fd8b60d9197:guided-e821c531-8e8f-4d93-b2c2-72cedb3d3815"
+      },
+      {
+        "role": "bot",
+        "text": "Boa! Ent\u00e3o vamos com o Vestido em mousse \ud83d\ude0a\n\nS\u00f3 pra deixar tudo certinho: ele \u00e9 um vestido feminino em mousse, manga longa e modelagem confort\u00e1vel \u2014 macio e \u00f3timo pros dias mais frescos. No varejo, o pre\u00e7o \u00e9 R$ 129,90 e a compra \u00e9 unit\u00e1ria.\n\nResumo do seu pedido:\n\u2022 Pe\u00e7a: Vestido em mousse\n\u2022 Perfil: uso pr\u00f3prio (varejo)\n\u2022 Recebimento: visita \u00e0 loja f\u00edsica\n\nVou encaminhar essas informa\u00e7\u00f5es pra equipe, que segue com voc\u00ea pro pr\u00f3ximo passo. Qualquer d\u00favida, \u00e9 s\u00f3 chamar!",
+        "ts": "2026-09-25T18:16:42.632903+00:00",
+        "message_id": "ai:validator:0efe66d3-240d-4267-8230-8fd8b60d9197:guided-e821c531-8e8f-4d93-b2c2-72cedb3d3815",
+        "buffer_id": "d7500f3e-4318-44c3-b858-40fc3f22f5ee",
+        "route": "SDR",
+        "handoff": false,
+        "question_kind": "none",
+        "asked_field_key": null,
+        "latency_seconds": 20.506,
+        "journey_state": "awaiting_confirmation",
+        "quality_warnings": [
+          "fact_correction_not_explicit:grau_qualificacao"
+        ],
+        "missing_fields": [],
+        "explicit_confirmation": false,
+        "turn_audit": {
+          "inbound_id": "d7500f3e-4318-44c3-b858-40fc3f22f5ee",
+          "model_calls": 2,
+          "proof_count": 1,
+          "commit_state": "completed",
+          "repair_calls": 0,
+          "inbound_count": 1,
+          "prompt_tokens": null,
+          "decision_count": 1,
+          "outbound_count": 1,
+          "ledger_revision": 5,
+          "outbound_status": "sent",
+          "valid_proof_count": 1,
+          "current_fact_count": 5,
+          "active_branch_node_id": "audience:tock-retail",
+          "prompt_estimated_tokens": null,
+          "deterministic_branch_match": false,
+          "outbound_released_after_proof": true
+        },
+        "facts": {
+          "retail_need": {
+            "value": "algo confort\u00e1vel para o dia a dia",
+            "status": "known"
+          },
+          "retail_style": {
+            "value": "em d\u00favida entre vestido e conjunto",
+            "status": "known"
+          },
+          "purchase_profile": {
+            "value": "uso-proprio-varejo",
+            "status": "known"
+          },
+          "forma_recebimento": {
+            "value": "visita_loja",
+            "status": "known"
+          },
+          "grau_qualificacao": {
+            "value": "comparando",
+            "status": "known"
+          }
+        }
+      },
+      {
+        "role": "validator",
+        "text": "Isso mesmo, pode encaminhar para a equipe.",
+        "ts": "2026-09-25T18:17:37.545713+00:00",
+        "message_id": "validator:0efe66d3-240d-4267-8230-8fd8b60d9197:guided-b6439388-a097-4fed-86f6-0b130c7632af"
+      },
+      {
+        "role": "bot",
+        "text": "Fechado! \u2705 J\u00e1 registrei tudo e encaminhei pro time da Tock Fatal.\n\nResumo final:\n\u2022 Pe\u00e7a: Vestido em mousse\n\u2022 Perfil: uso pr\u00f3prio (varejo)\n\u2022 Recebimento: visita \u00e0 loja f\u00edsica\n\nA equipe segue com voc\u00ea pro pr\u00f3ximo passo. Se surgir qualquer d\u00favida, \u00e9 s\u00f3 chamar \ud83d\ude0a",
+        "ts": "2026-09-25T18:17:58.149268+00:00",
+        "message_id": "ai:validator:0efe66d3-240d-4267-8230-8fd8b60d9197:guided-b6439388-a097-4fed-86f6-0b130c7632af",
+        "buffer_id": "5e11a86a-4a8b-4388-a8ac-242cd8bc384d",
+        "route": "HUMAN",
+        "handoff": true,
+        "question_kind": null,
+        "asked_field_key": null,
+        "latency_seconds": 20.604,
+        "journey_state": "handed_off",
+        "quality_warnings": [
+          "reply_metadata_discarded:question_kind"
+        ],
+        "missing_fields": [],
+        "explicit_confirmation": true,
+        "turn_audit": {
+          "inbound_id": "5e11a86a-4a8b-4388-a8ac-242cd8bc384d",
+          "model_calls": 2,
+          "proof_count": 1,
+          "commit_state": "completed",
+          "repair_calls": 0,
+          "inbound_count": 1,
+          "prompt_tokens": null,
+          "decision_count": 1,
+          "outbound_count": 1,
+          "ledger_revision": 6,
+          "outbound_status": "sent",
+          "valid_proof_count": 1,
+          "current_fact_count": 5,
+          "active_branch_node_id": "audience:tock-retail",
+          "prompt_estimated_tokens": null,
+          "deterministic_branch_match": false,
+          "outbound_released_after_proof": true
+        },
+        "facts": {
+          "retail_need": {
+            "value": "algo confort\u00e1vel para o dia a dia",
+            "status": "known"
+          },
+          "retail_style": {
+            "value": "em d\u00favida entre vestido e conjunto",
+            "status": "known"
+          },
+          "purchase_profile": {
+            "value": "uso-proprio-varejo",
+            "status": "known"
+          },
+          "forma_recebimento": {
+            "value": "visita_loja",
+            "status": "known"
+          },
+          "grau_qualificacao": {
+            "value": "comparando",
+            "status": "known"
+          }
+        }
+      }
+    ]
+  }
+]

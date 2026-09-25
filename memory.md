@@ -4,7 +4,14 @@ Implementacao: duas chamadas, prompts em portugues, ultima mensagem real nas dua
 etapas, question_kind e resolucao unica. Perguntas consultivas sao permitidas.
 Confirmacao usa interpretacao, evidencia e referencia pendente. Validator distingue
 amostra incompleta de falha. Sem migration ou republicacao de grafo.
-Evidencias: docs/research/conversation-human-contract-2026-09-25.md.
+Release publicada: runtime 2834149, digest sha256:392e138720deeda5db5159e3ca35ad01eb7505023eb700fbcb6608b774a23523,
+slot blue. 84 testes e build do dashboard passaram. Dez turnos internos sem
+duplicidade ou outbound real. Tock confirmou handoff; Utzig parou por repetir nome.
+Qualidade pendente: anuncio prematuro de handoff, correcao natural de fatos e
+metadata ausente no RPC de contexto. Buffer sintetico final da Tock ficou processing
+apos commit; transport nao terminaliza inbound com handoff no sink interno.
+Nao houve segundo deploy ou correcao manual. Evidencias e proximo trabalho:
+docs/research/conversation-human-contract-2026-09-25.md.
 
 # Brain Platform Memory
 

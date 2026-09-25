@@ -6,7 +6,11 @@ usa candidate e ativacao CAS sem pausa de persona ou binding.
 Implementado: contrato minimo de pergunta, continuidade pela conversa real,
 confirmacao sem frase fixa, estado resolvido uma vez, prompts em portugues
 e amostra incompleta no Validator. Release restrita ao runtime.
-Verificacao pendente: candidate real sem commit e jornadas internas Utzig/Tock.
+Release 2834149 publicada: candidate real sem commit e canario passaram.
+Utzig/Tock somaram 10 turnos internos exactly-once. Tock confirmou handoff;
+Utzig parou por repetir nome. Qualidade ainda pendente e buffer sintetico de
+handoff sem terminalizacao no transport. Nao executar redeploy corretivo nesta
+operacao; corrigir contrato/canario de encerramento e retestar na proxima release.
 Evidencias: docs/research/conversation-human-contract-2026-09-25.md.
 
 ## Historico do roadmap (regras antigas nao se sobrepoem ao AGENTS.md)
