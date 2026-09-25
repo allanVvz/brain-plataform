@@ -1,3 +1,72 @@
+# Checkpoint 2026-09-25 - branch switch corrigido, candidate barrado por nome
+
+O usuario confirmou que o agente pode mudar de branch quando o cliente pede
+outro servico. O runtime agora interpreta `SELECT` sobre branch ativo como
+`SWITCH` para um branch diferente ou `KEEP` para o mesmo branch; a prova do
+grafo continua exigindo evidencia literal, branch publicado e checksum.
+Codigo `57f9b5493f2bbd1a17f6b91e832099da00c8fe26`: 81 testes focados,
+compilacao da API, build do dashboard, CI e build da imagem passaram. O teste
+integrado com o grafo Tock provou `drop`+`add` na troca e `keep` na reescolha.
+Manifesto `ops/microservices/release-manifest.runtime-57f9b54.json`, commit
+`f0ba06e5462211eced04c685851d38c458f1da61`, digest candidato
+`sha256:07094ec06439817bb2ebbea56e2f434a51eedfce02ae91925a3644088f12b9b2`.
+O dry-run `36197982020` passou. O deploy `36198105704` iniciou o candidate
+isolado: a excecao anterior de branch nao ocorreu, mas a fixture
+`utzig-doubt-interrupting-name` foi barrada porque a resposta perguntou
+`nome_cliente` imediatamente apos responder a duvida da Utzig. O erro do gate
+foi `candidate repeated the interrupted qualification field`. O candidate
+verde foi parado antes do cutover. Nao empilhar outro deploy corretivo nesta
+operacao. Auditado depois: runtime azul anterior e transport anterior ativos,
+claims nao pausados, zero buffer critico, zero outbound sem proof e zero
+divergencia de checksum. A correcao de branch ainda nao esta em producao.
+
+# Checkpoint 2026-09-25 - runtime candidate de84bfa barrado
+
+O usuario retomou o deploy e os testes dos agentes. A mudanca foi classificada
+como `service` compativel, limitada ao `conversation-runtime`. O manifesto
+incremental `ops/microservices/release-manifest.runtime-de84bfa.json` foi
+publicado no commit `14429752f4604983ab091a26a99429719b23461f`;
+somente a entrada do runtime mudou para a fonte
+`de84bfafb8aed6a37d68b411b3917d24b08cebbc` e o digest
+`sha256:e2540322979f4e67e6248ce042575efde59f3e95e93d1e4a2c21b7ca097c49f7`.
+O dry-run `36194896547` passou. O release `36195273718` iniciou o candidate
+verde isolado, mas a fixture `human-conversation-2026-09-25` falhou na etapa
+real do modelo com `RuntimeError: understanding cannot select over an active
+branch` em `graph_agent_runtime_v3.resolve_understanding`. Nao houve cutover;
+o workflow parou o candidate. Nao fazer segundo deploy corretivo nesta
+operacao. Investigar por que o modelo emite `SELECT` para um branch ja ativo e
+adicionar cobertura do candidate para esse estado antes de novo release.
+
+Auditoria posterior: runtime azul antigo ainda ativo, digest
+`sha256:392e138720deeda5db5159e3ca35ad01eb7505023eb700fbcb6608b774a23523`;
+claims nao pausados, zero buffers criticos, zero outbound sem proof e zero
+divergencia de checksum. Dry-runs do WA Validator interno passaram para Utzig e
+Tock. Na sessao Utzig `1272f869-a65e-4616-88c7-c138026fe652`, houve um
+inbound, uma decisao, proof valido, commit e outbound interno, mas
+`quality_pass=false` por `service_value_not_reused_as_field`. Na sessao Tock
+`54dbdd24-0d20-425e-94bd-2b2b500aa731`, os mesmos invariantes tecnicos
+passaram e o primeiro turno semantico passou, mas a sessao marcou `done` com
+`quality_scope=null` apos um turno; o runner retornou erro. As jornadas
+completas e a terminalizacao do transport continuam pendentes. Nenhum teste
+usou WhatsApp real.
+
+# Prioridade da LP Utzig (2026-09-25)
+
+A correção do runtime conversacional ficou adiada durante o trabalho da LP.
+O checkpoint anterior, as jornadas Utzig/Tock e a terminalização do transport
+foram preservados como pendências. A tentativa posterior consta acima.
+O trabalho corrente é de frontend público: destacar a Avaliação já publicada
+no primeiro cartão do catálogo, mantendo seu item na linktree. O grafo ativo
+permanece v12 (`46925297-f966-42cc-a33a-bd031fa1ded5`,
+`sha256:a5bfac4a813f9c7c357910371d70a8e8a2df14e86d93c4374aa4e2f322b1c553`).
+O frontend `Card-pio` foi publicado no commit `3c7a989`, promovendo o
+Preview `dpl_93jnXz7G7nn28MWvBNieXuPwQ2bk` para Production
+`dpl_FK4GdxXWmVU4gbKQM9prS9gQJPuU`. A descrição e o CTA de
+`product:evaluation` ficam sempre visíveis no primeiro cartão do catálogo;
+os outros 17 serviços seguem expansíveis. Linktree e catálogo passaram em
+produção a 1440 e 390 px, sem overflow horizontal ou erro de página.
+Screenshots: `.codex-run/utzig-review/production/`. O grafo não foi republicado.
+
 # Checkpoint 2026-09-25 - candidate barrado
 
 O dry-run `36185642472` passou para o runtime `9f21691`, digest
