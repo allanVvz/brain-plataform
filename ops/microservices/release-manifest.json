@@ -1,7 +1,7 @@
 {
-  "source_sha": "6092457774fcd1520a7551c4f102458a6e02b8cc",
+  "source_sha": "9f18cb94d896bdabb88294d6888229e096067509",
   "contracts_version": "3.2.0",
-  "contracts_checksum": "sha256:4fef73451747a4b482067a0a50b9c239f0a50d778ff0d5d82ea99fdf211270e4",
+  "contracts_checksum": "sha256:b905cfb87111ac50197a495ad487694eb379e192e3e92c07179bbb45ad2fda2a",
   "schema_version": 160,
   "route_map_checksum": "sha256:0146765a3fed6f690566d212fee29d1a324183ce2106429bf52f891403fd5c64",
   "services": {
@@ -23,11 +23,11 @@
     },
     "conversation-runtime": {
       "repository": "allanVvz/brain-plataform",
-      "sha": "6092457774fcd1520a7551c4f102458a6e02b8cc",
-      "digest": "sha256:fa37f5da81723d7c28026ab134bb6b62c5a8d4b0e93a3a0c362c8979a59fb0d1",
+      "sha": "9f18cb94d896bdabb88294d6888229e096067509",
+      "digest": "sha256:295a5d2f46a48588ecac0259c2e55fb7256365068bc4733c632da702cd7f4ae7",
       "required_schema_version": 160,
       "contracts_version": "3.2.0",
-      "contracts_checksum": "sha256:4fef73451747a4b482067a0a50b9c239f0a50d778ff0d5d82ea99fdf211270e4",
+      "contracts_checksum": "sha256:b905cfb87111ac50197a495ad487694eb379e192e3e92c07179bbb45ad2fda2a",
       "build_context": "apps/conversation-runtime"
     },
     "transport": {
