@@ -48,6 +48,23 @@ CONVERSATION_FAILURE_EVENT = "conversation.failure_observed"
 CONVERSATION_SUCCESS_EVENT = "conversation.decision_committed"
 
 
+def graph_handoff_minimum_fields(
+    document: dict[str, Any], branch_id: str | None, selection_key: str,
+) -> set[str]:
+    """Return graph-declared identity requirements plus the selected offering."""
+    required = {str(selection_key)} if selection_key else set()
+    persona = graph_agent_runtime_v3._persona_node(document)
+    policy = (persona.get("data") or {}).get("appointment_policy") or {}
+    identity_key = str(policy.get("identity_field") or "").strip()
+    branch_contract = (document.get("branch_contracts") or {}).get(str(branch_id or "")) or {}
+    branch_required = {
+        str(value) for value in branch_contract.get("required_fields") or [] if value
+    }
+    if identity_key and identity_key in branch_required:
+        required.add(identity_key)
+    return required
+
+
 def consecutive_conversation_failures(lead_ref: int) -> int:
     """Count the leading failure events since the latest committed success."""
     rows = supabase_client.list_system_events(
@@ -3254,17 +3271,12 @@ def commit(
                 and fact.get("value") not in (None, "")
             )
 
-        # A handoff-authorizing turn only silences the AI outright (level=
-        # "full") once the lead's minimum registration -- name + service --
-        # is known, this turn or from an earlier session (facts persist for
-        # the lead's whole lifetime, see conversation_ledgers). Otherwise
-        # it's "partial": the lead is flagged for eventual human attention,
-        # but lead_buffer keeps flowing so the SDR can keep collecting what's
-        # missing instead of going silent on a customer who, say, wants to
-        # complain but hasn't given their name yet.
+        handoff_minimum_fields = graph_handoff_minimum_fields(
+            v3_document, active_branch, selection_key,
+        )
         handoff_level = (
             "full"
-            if (_is_known(facts.get("nome_cliente")) and _is_known(facts.get(selection_key)))
+            if all(_is_known(facts.get(key)) for key in handoff_minimum_fields)
             else "partial"
         )
     else:

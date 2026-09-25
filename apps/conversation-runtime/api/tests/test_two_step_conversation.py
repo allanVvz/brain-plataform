@@ -60,6 +60,12 @@ def test_doubt_defers_only_the_latest_qualification_field():
     assert conversation_prompts.deferred_qualification_field(
         messages, ["nome_cliente", "vehicle_color"], True,
     ) == "nome_cliente"
+    # A literal client question must defer the interrupted field even if the
+    # understanding model omitted customer_questions from its structured output.
+    assert conversation_prompts.deferred_qualification_field(
+        messages, ["nome_cliente"],
+        graph_agent_runtime_v3._looks_like_customer_question("Como pedir uma avaliação?"),
+    ) == "nome_cliente"
     assert conversation_prompts.deferred_qualification_field(
         messages, ["nome_cliente"], False,
     ) is None
@@ -67,6 +73,23 @@ def test_doubt_defers_only_the_latest_qualification_field():
     assert conversation_prompts.deferred_qualification_field(
         messages, ["nome_cliente"], True,
     ) is None
+
+
+def test_graph_handoff_minimum_fields_follow_published_policy():
+    document = {
+        "nodes": [{"node_type": "persona", "data": {
+            "appointment_policy": {"identity_field": "nome_cliente"},
+        }}],
+        "branch_contracts": {"service:evaluation": {"required_fields": ["servico"]}},
+    }
+    assert conversation_runtime.graph_handoff_minimum_fields(
+        document, "service:evaluation", "servico",
+    ) == {"servico"}
+
+    document["branch_contracts"]["service:evaluation"]["required_fields"].append("nome_cliente")
+    assert conversation_runtime.graph_handoff_minimum_fields(
+        document, "service:evaluation", "servico",
+    ) == {"servico", "nome_cliente"}
 
 
 def _context(*, strategy: str = "interpret_then_respond") -> ConversationContext:

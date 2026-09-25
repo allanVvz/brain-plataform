@@ -1,0 +1,70 @@
+{
+  "approval_scope": "dry_run_only",
+  "branches_affected": [
+    "product:bodywork",
+    "product:commercial-polish",
+    "product:detailed-wash",
+    "product:engine-bay-wash",
+    "product:evaluation",
+    "product:glass-polish",
+    "product:headlight-restoration",
+    "product:interior-cleaning",
+    "product:painting",
+    "product:ppf",
+    "product:technical-polish",
+    "product:vitrification",
+    "product:windshield-crystallization"
+  ],
+  "breaking_contract_changes": [],
+  "chunks_reused": 171,
+  "chunks_to_embed": 0,
+  "compiler_version": "graph-compiler-v3.6.5",
+  "disposition": "dry_run_complete",
+  "draft_checksum": "sha256:50fb752c9e3d8d5fe4ed78b9bc21ae5ac700764e2f20d7b7f1bef0fd17e83c5a",
+  "edge_changes": {
+    "added": [],
+    "changed": [],
+    "removed": []
+  },
+  "edges_added": 0,
+  "edges_changed": 0,
+  "edges_removed": 0,
+  "estimated_embedding_cost": {
+    "amount": null,
+    "currency": "USD",
+    "reason": "provider_pricing_not_configured"
+  },
+  "next_version": 13,
+  "node_changes": {
+    "added": [],
+    "changed": [
+      "persona:utzig-garage",
+      "product:bodywork",
+      "product:chassis-wash",
+      "product:commercial-polish",
+      "product:detailed-wash",
+      "product:engine-bay-wash",
+      "product:evaluation",
+      "product:glass-polish",
+      "product:headlight-restoration",
+      "product:interior-cleaning",
+      "product:leather-conditioning",
+      "product:painting",
+      "product:ppf",
+      "product:seat-vitrification",
+      "product:technical-polish",
+      "product:vehicle-wrap",
+      "product:vitrification",
+      "product:window-film",
+      "product:windshield-crystallization"
+    ],
+    "removed": []
+  },
+  "nodes_added": 0,
+  "nodes_changed": 19,
+  "nodes_removed": 0,
+  "plan_version": "1.0",
+  "publication_allowed": false,
+  "runtime_checksum": "sha256:3b74427e12ed77ce063acec242a2a1c03b56ca469dc0b5ddf9bef3da5e26e11b",
+  "validation_errors": []
+}

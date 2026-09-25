@@ -4384,7 +4384,10 @@ def resolve_understanding(
                 })
     recent_messages = list(resolved_context.messages[-10:])
     deferred_field_key = deferred_qualification_field(
-        recent_messages, list(missing), bool(understanding.customer_questions),
+        recent_messages,
+        list(missing),
+        bool(understanding.customer_questions)
+        or _looks_like_customer_question(_latest_user_message(resolved_context)),
     )
     if deferred_field_key:
         eligible_guides = [

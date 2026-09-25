@@ -1,0 +1,286 @@
+{
+  "overlay_version": "1.0",
+  "base_publication": {
+    "publication_id": "46925297-f966-42cc-a33a-bd031fa1ded5",
+    "version": 12,
+    "checksum": "sha256:a5bfac4a813f9c7c357910371d70a8e8a2df14e86d93c4374aa4e2f322b1c553"
+  },
+  "metadata": {
+    "purpose": "make customer identity optional for natural appointment qualification",
+    "source": "operator_request_2026_09_25"
+  },
+  "patch_nodes": [
+    {
+      "id": "persona:utzig-garage",
+      "patch": {
+        "data": {
+          "appointment_policy": {
+            "required_fields": [
+              "servico"
+            ],
+            "identity_field": null
+          }
+        }
+      }
+    },
+    {
+      "id": "product:bodywork",
+      "patch": {
+        "data": {
+          "booking": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "condicao"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "product:chassis-wash",
+      "patch": {
+        "data": {
+          "booking": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "condicao"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "product:commercial-polish",
+      "patch": {
+        "data": {
+          "booking": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "foco_brilho_riscos"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "product:detailed-wash",
+      "patch": {
+        "data": {
+          "booking": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "condicao"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "product:engine-bay-wash",
+      "patch": {
+        "data": {
+          "booking": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "vazamento_oleo",
+              "estrada_de_chao"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "product:evaluation",
+      "patch": {
+        "data": {
+          "booking": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "objective",
+              "evaluation_route"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "product:glass-polish",
+      "patch": {
+        "data": {
+          "booking": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "condicao"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "product:headlight-restoration",
+      "patch": {
+        "data": {
+          "booking": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "condicao"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "product:interior-cleaning",
+      "patch": {
+        "data": {
+          "booking": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "revestimento_bancos",
+              "condicao"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "product:leather-conditioning",
+      "patch": {
+        "data": {
+          "booking": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "condicao"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "product:painting",
+      "patch": {
+        "data": {
+          "booking": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "vehicle_color",
+              "condicao"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "product:ppf",
+      "patch": {
+        "data": {
+          "booking": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "condicao",
+              "objective"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "product:seat-vitrification",
+      "patch": {
+        "data": {
+          "booking": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "condicao"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "product:technical-polish",
+      "patch": {
+        "data": {
+          "booking": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "procedimento_anterior",
+              "foco_brilho_riscos"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "product:vehicle-wrap",
+      "patch": {
+        "data": {
+          "booking": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "condicao"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "product:vitrification",
+      "patch": {
+        "data": {
+          "booking": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "condicao",
+              "objective"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "product:window-film",
+      "patch": {
+        "data": {
+          "booking": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "condicao"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "product:windshield-crystallization",
+      "patch": {
+        "data": {
+          "booking": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "condicao"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}
