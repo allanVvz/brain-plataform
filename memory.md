@@ -500,6 +500,13 @@ A seção antiga sobre o WA Validator de 2026-08-12 foi removida porque descrevi
 um estado operacional que já não vale. O estado corrente deve ser obtido pelas
 auditorias oficiais e pelos handoffs indicados no roadmap.
 
+## Release conversacional de 2026-09-25
+
+- Runtime publicado: fonte `557188fe7aab6664329ced9df33717dda052cbe5`, digest `sha256:25aca0b8495a31b03e64320e845d71eb21076d356f93505ebd3bffd949e05705`, slot blue. Dry-run `36085744592` e deploy blue/green `36085848962` passaram. A apresentação como IA no primeiro reply é padrão para todas as personas; o nome pode ser retomado mais tarde conforme o limite do grafo. A confirmação final agora usa a referência pendente da jornada e conclui o handoff no mesmo commit.
+- WA Validator interno Utzig `dde43e69-2cc5-43b1-a536-4e3aae9fcd48`: 7 inbounds, 7 decisões/proofs/commits/outbounds internos, handoff final para humano, `technical_pass=true`, `quality_pass=false`. O modelo ainda repetiu a pergunta do nome imediatamente após responder uma dúvida, apesar da instrução no prompt.
+- WA Validator interno Tock `390d46b9-ee4a-4957-a41d-3ae973ae0eda`: 6 inbounds, 6 decisões/proofs/commits/outbounds internos, apresentação como IA e handoff final, `technical_pass=true`, `quality_pass=false`. O critério `required_reply_content` falhou na primeira resposta; no handoff o modelo ainda perguntou como chamar a cliente.
+- Auditoria final: zero outbound sem proof e zero divergência de checksum; claims ativos. As falhas de qualidade são pendências de condução para uma próxima mudança, sem segundo redeploy corretivo nesta operação.
+
 ## Runtime e proof publicados em 2026-09-24
 
 ### Ajuste de condução preparado após o E2E

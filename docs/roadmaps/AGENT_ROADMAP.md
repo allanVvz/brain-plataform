@@ -1476,6 +1476,18 @@ deve preservar estas decisões:
 - Depoimentos, certificações e um design system no Figma permanecem roadmap;
   nenhum deles pode ser inventado a partir do material atual.
 
+## Resultado da release 557188f (2026-09-25)
+
+O runtime novo está ativo no slot blue, digest `sha256:25aca0b8495a31b03e64320e845d71eb21076d356f93505ebd3bffd949e05705`. O dry-run `36085744592`, candidate, cutover, canário interno e auditoria final passaram. As sessões completas Utzig `dde43e69-2cc5-43b1-a536-4e3aae9fcd48` e Tock `390d46b9-ee4a-4957-a41d-3ae973ae0eda` provaram um inbound, decisão, proof, commit e outbound interno por turno. O handoff após confirmação final funcionou em ambas. Nenhum outbound real foi enviado.
+
+Pendências de qualidade para a próxima mudança, sem redeploy corretivo nesta release:
+
+1. Utzig: o modelo respondeu à dúvida sobre avaliação e repetiu imediatamente a pergunta do nome, gerando `customer_name_question_timing=false`. Investigar como apresentar ao modelo a última pergunta de modo inequívoco e medir uma retomada posterior; preservar a autoria do texto pelo modelo.
+2. Tock: `required_reply_content=false` na primeira resposta do fluxo de varejo. Comparar o critério do Validator com a copy publicada e avaliar a resposta sem confundir falta editorial com falha técnica.
+3. Tock: a resposta de handoff ainda perguntou o nome depois de encaminhar ao humano. Ajustar a orientação de conclusão no prompt/brief e verificar que o campo opcional não reabre qualificação.
+
+O gate técnico da release passou nas duas personas (`technical_pass=true`), mas o gate de qualidade completo segue pendente (`quality_pass=false`). Testar nome espontâneo, nova jornada e replay de inbound em cenários dedicados na próxima rodada; esta release testou as jornadas completas dos fluxos publicados.
+
 ## Próxima correção conversacional após release 5d4af4d
 
 Decisão posterior do produto: a pergunta de nome pode ser retomada em um turno posterior se continuar pendente e o limite publicado permitir; evitar apenas a repetição na resposta imediatamente seguinte à interrupção. A apresentação como agente de IA é padrão em todas as personas no primeiro reply de cada jornada, com identidade e marca vindas do grafo. Prompt, aviso de qualidade e Validator foram preparados localmente; incluir na próxima release única junto com a correção de confirmação/handoff e validar por WA interno antes do cutover.
