@@ -615,6 +615,82 @@ def test_tock_understanding_persists_retail_need_before_reply_and_refocuses_rag(
     assert decision.intent == resolved.context.retrieval_trace["resolved_decision"]["intent"]
 
 
+@pytest.mark.parametrize(
+    ("message", "target", "expected_action"),
+    [
+        ("Agora quero revender", "audience:tock-reseller", "switch"),
+        ("Quero comprar para uso próprio", "audience:tock-retail", "keep"),
+    ],
+)
+def test_select_with_active_branch_resolves_customer_intent(
+    monkeypatch, message, target, expected_action,
+):
+    bundle_path = (
+        ROOT.parent.parent / "data" / "graph_bundles" / "tock-fatal"
+        / "graph-first-consultative-handoff-v36.json"
+    )
+    document = graph_bundle.compile_bundle(
+        graph_bundle.normalize_bundle(json.loads(bundle_path.read_text(encoding="utf-8")))
+    )
+    publication = {
+        "id": "publication-v36", "version": 36,
+        "checksum": document["checksum"], "status": "active",
+        "document_json": document,
+    }
+    active = "audience:tock-retail"
+    context = ConversationContext(
+        persona_slug="tock-fatal", agent_slug="vitoria", agent_role="sdr",
+        execution_strategy="interpret_then_respond", graph_version=36,
+        graph_checksum=document["checksum"],
+        messages=[{"role": "user", "content": message, "message_id": "message-1"}],
+        cart={"facts": {}, "facts_by_key": {}, "asked_question_node_ids": []},
+        rag_nodes=[], rag_paths=[], graph_contract=document["branch_contracts"][active],
+        active_branch_node_id=active, active_branch_node_ids=[active],
+        publication_id=publication["id"],
+        runtime_version=graph_agent_runtime_v3.RUNTIME_VERSION,
+        retrieval_trace={"branch_candidates": [], "possible_switches": []},
+        available_services=[{
+            "branch_anchor_node_id": anchor,
+            "slug": document["node_by_id"][anchor]["slug"],
+            "label": document["node_by_id"][anchor]["title"],
+        } for anchor in document["branch_anchors"]],
+    )
+    understanding = TurnUnderstandingV1(
+        facts=[],
+        branch_selections=[{
+            "action": "select", "branch_anchor_node_id": target,
+            "evidence_span": "revender" if target != active else "uso próprio",
+        }],
+        confirmation={"state": "none"}, customer_questions=[],
+    )
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client,
+        "get_graph_publication_by_id", lambda _publication_id: publication,
+    )
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.graph_compiler_v3,
+        "query_embeddings", lambda _texts: [[0.0] * 1536],
+    )
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client,
+        "search_graph_rag_v3", lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        graph_agent_runtime_v3.supabase_client,
+        "get_graph_branch_package_v3", lambda **_kwargs: {"chunks": []},
+    )
+
+    resolved = graph_agent_runtime_v3.resolve_understanding(context, understanding)
+
+    assert resolved.context.active_branch_node_id == target
+    assert resolved.resolution_proof["valid"] is True
+    assert resolved.prospective_state["active_branch_node_ids"] == [target]
+    operations = resolved.resolution_proof["service_operations"]
+    assert [item["action"] for item in operations] == (
+        ["drop", "add"] if expected_action == "switch" else ["keep"]
+    )
+
+
 def test_final_reply_preserves_confirmed_handoff_and_checks_publication(monkeypatch):
     context = _context()
     decision = ConversationDecision(intent="qualified_confirmed", route="HUMAN", confidence=1, lead_stage="qualificado")

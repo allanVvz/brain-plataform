@@ -4120,21 +4120,28 @@ def resolve_understanding(
         active_set = set(context.active_branch_node_ids)
         if active:
             active_set.add(active)
-        if selection.action is BranchAction.SELECT and active_set:
-            raise RuntimeError("understanding cannot select over an active branch")
-        if selection.action is BranchAction.SWITCH and (
+        action = selection.action
+        if action is BranchAction.SELECT and active_set:
+            # A selected service can replace the current focus. The graph
+            # proof still checks the literal customer evidence and published
+            # branch before any state is committed.
+            action = (
+                BranchAction.KEEP if focused_branch in active_set
+                else BranchAction.SWITCH
+            )
+        if action is BranchAction.SWITCH and (
             not active or focused_branch == active
         ):
             raise RuntimeError("understanding switch is not applicable")
-        if selection.action is BranchAction.ADD and (
+        if action is BranchAction.ADD and (
             not active_set or focused_branch in active_set
         ):
             raise RuntimeError("understanding add is not applicable")
-        if selection.action is BranchAction.KEEP and focused_branch not in active_set:
+        if action is BranchAction.KEEP and focused_branch not in active_set:
             raise RuntimeError("understanding cannot keep an inactive branch")
         operations: list[dict[str, Any]] = []
         consumed: list[dict[str, Any]] = []
-        if selection.action is BranchAction.SWITCH and active:
+        if action is BranchAction.SWITCH and active:
             old_checksum = str(
                 (((_turn_publication(context).get("document_json") or {})
                   .get("coordinates") or {}).get(active) or {}).get("path_checksum")
@@ -4156,7 +4163,7 @@ def resolve_understanding(
                 "evidence_type": "explicit_change",
             })
         operation_action = (
-            "keep" if selection.action is BranchAction.KEEP else "add"
+            "keep" if action is BranchAction.KEEP else "add"
         )
         operations.append({
             "action": operation_action,
@@ -4187,7 +4194,7 @@ def resolve_understanding(
         })
     proposal = ConversationProposal(
         interaction_observation=understanding.interaction_observation,
-        branch_action=selection.action if selection else (
+        branch_action=action if selection else (
             BranchAction.KEEP if context.active_branch_node_id else BranchAction.NONE
         ),
         branch_anchor_node_id=focused_branch,
