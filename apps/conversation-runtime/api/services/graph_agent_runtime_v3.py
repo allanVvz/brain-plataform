@@ -4759,6 +4759,36 @@ def _consultative_support_active(
     return bool(collection_complete and customer_questions and not post_support)
 
 
+def _qualification_confirmation_accepted(
+    context: ConversationContext, *, confirmation: dict[str, Any],
+    confirmation_ref: str, qualification_complete: bool,
+    active_branch_node_ids: list[str], customer_questions: list[Any],
+) -> bool:
+    pending_ref = str(
+        context.cart.get("pending_confirmation_ref")
+        or (context.retrieval_trace.get("understanding_resolution_proof") or {}).get(
+            "confirmed_qualification_ref"
+        )
+        or ""
+    )
+    return bool(
+        qualification_complete
+        and active_branch_node_ids
+        and not customer_questions
+        and pending_ref == confirmation_ref
+        and str(confirmation.get("state") or "") == "affirm"
+        and str(confirmation.get("target_ref") or "") == pending_ref
+        and _is_explicit_confirmation(_latest_user_message(context))
+        and (
+            str(context.cart.get("sdr_state") or "") == "awaiting_confirmation"
+            or str(context.journey_state) == "awaiting_confirmation"
+            or bool((context.retrieval_trace.get("understanding_resolution_proof") or {}).get(
+                "confirmed_qualification_ref"
+            ))
+        )
+    )
+
+
 def _decide(
     context: ConversationContext, *, model_observation: dict[str, Any]
 ) -> tuple[ConversationDecision, AgentResponse]:
@@ -5473,6 +5503,17 @@ def _decide(
             else {}
         )
         customer_questions = list(interpretation.get("customer_questions") or [])
+        confirmation = interpretation.get("confirmation") or {}
+        confirmation_ref = "qualification:" + ",".join(sorted(active_branch_ids))
+        confirmation_accepted = _qualification_confirmation_accepted(
+            context, confirmation=confirmation,
+            confirmation_ref=confirmation_ref,
+            qualification_complete=qualification_complete,
+            active_branch_node_ids=active_branch_ids,
+            customer_questions=customer_questions,
+        )
+        if confirmation_accepted:
+            terminal_intent = "qualification_confirmed"
         consultative_support = _consultative_support_active(
             collection_complete=collection_complete,
             customer_questions=customer_questions,
@@ -5480,6 +5521,7 @@ def _decide(
         )
         confirmation_pending = bool(
             qualification_complete and not post_support and not consultative_support
+            and not confirmation_accepted
         )
         if consultative_support:
             terminal_intent = None
@@ -5571,6 +5613,10 @@ def _decide(
                 else "handed_off" if post_support
                 else "collecting"
             ),
+            "pending_confirmation_ref": (
+                None if confirmation_accepted
+                else confirmation_ref if confirmation_pending else context.cart.get("pending_confirmation_ref")
+            ),
             **({
                 "terminal_handoff": {
                     "intent": terminal_intent,
@@ -5601,11 +5647,14 @@ def _decide(
             "qualification_incomplete": qualification_incomplete,
             "collection_complete": collection_complete,
             "consultative_support": consultative_support,
-            "explicit_confirmation": False,
+            "explicit_confirmation": confirmation_accepted,
+            "confirmed_qualification_ref": confirmation_ref if confirmation_accepted else None,
+            "confirmed_branch_node_ids": active_branch_ids if confirmation_accepted else [],
             "confirmation_state": (
                 "field_confirmation" if pending_confirmation_fact
                 else "consultative_support" if consultative_support
                 else "awaiting_confirmation" if confirmation_pending
+                else "qualified_confirmed" if confirmation_accepted
                 else "handed_off" if terminal_intent
                 else "post_qualification_support" if post_support
                 else "collecting"
@@ -5637,7 +5686,10 @@ def _decide(
             ConversationDecision(classifier="graph_proof_checker_v3",
                                  intent=resolved_intent,
                                  route=route, confidence=1, lead_stage="qualificado" if qualification_complete else "engajado",
-                                 handoff_reason="graph_terminal_qualification" if terminal_intent else None,
+                                 handoff_reason=(
+                                     "graph_qualification_confirmed" if confirmation_accepted
+                                     else "graph_terminal_qualification" if terminal_intent else None
+                                 ),
                                  evidence_node_ids=evidence_node_ids),
             AgentResponse(reply_text=reply or None, role=route, evidence_node_ids=evidence_node_ids,
                           cart_state=state,

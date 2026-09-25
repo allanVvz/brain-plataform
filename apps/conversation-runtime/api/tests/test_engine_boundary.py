@@ -490,6 +490,30 @@ def test_sdr_enters_temporary_consultative_support_before_handoff():
     ) is False
 
 
+def test_final_confirmation_requires_pending_same_branch_and_explicit_yes():
+    ref = "qualification:service:assessment"
+    context = _context().model_copy(update={
+        "messages": [{"role": "user", "content": "Sim", "message_id": "in-2"}],
+        "cart": {"sdr_state": "awaiting_confirmation", "pending_confirmation_ref": ref},
+    })
+    accepted = graph_agent_runtime_v3._qualification_confirmation_accepted
+    args = {
+        "confirmation": {"state": "affirm", "target_ref": ref},
+        "confirmation_ref": ref,
+        "qualification_complete": True,
+        "active_branch_node_ids": ["service:assessment"],
+        "customer_questions": [],
+    }
+    assert accepted(context, **args) is True
+    assert accepted(context, **{**args, "confirmation_ref": "qualification:service:other"}) is False
+    assert accepted(context, **{**args, "qualification_complete": False}) is False
+    assert accepted(context, **{**args, "customer_questions": [{"kind": "price"}]}) is False
+    assert accepted(context.model_copy(update={
+        "messages": [{"role": "user", "content": "Sim, mas quero mudar", "message_id": "in-2"}],
+    }), **args) is False
+    assert accepted(context.model_copy(update={"cart": {}}), **args) is False
+
+
 def test_optional_collect_once_field_is_askable_then_stops_without_blocking_completion():
     contract = {
         "branch_path_checksum": "checksum:retail",
