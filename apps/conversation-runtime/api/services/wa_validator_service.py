@@ -2803,6 +2803,11 @@ def _semantic_turn_audit(
             }
             for fact in proof.get("accepted_facts") or []
         ],
+        "consumed_service_spans": [
+            str(span.get("text") or "")
+            for span in proof.get("consumed_service_spans") or []
+        ],
+        "branch_selection_field_keys": sorted(branch_selection_keys),
         "intended_fact_keys": sorted(str(key) for key in intended),
         "previous_ledger_revision": ledger_before.get("revision"),
         "ledger_revision": ledger_after.get("revision"),
