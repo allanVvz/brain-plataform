@@ -30,6 +30,10 @@
         "text": "Não há vazamento de óleo no veículo",
         "value": "sem vazamento de óleo"
       },
+      "evaluation_route": {
+        "text": "Prefiro uma avalia\u00e7\u00e3o presencial",
+        "value": "presencial"
+      },
       "revestimento_bancos": {
         "text": "Os bancos têm revestimento de tecido",
         "value": "tecido"

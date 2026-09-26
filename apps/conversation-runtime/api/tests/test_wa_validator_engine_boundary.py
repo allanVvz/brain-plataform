@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -13,6 +14,36 @@ if str(API_ROOT) not in sys.path:
 
 from services import wa_validator_service
 from routes.wa_validator import GenerateScriptRequest
+
+
+def test_appointment_canary_profile_covers_published_candidate_fields():
+    repo = API_ROOT.parents[2]
+    bundle = json.loads((
+        repo / "data/graph_bundles/utzig-garage/utzig-optional-identity-v13.json"
+    ).read_text(encoding="utf-8"))
+    profiles = json.loads((
+        API_ROOT / "evaluation/wa_validator_customer_profiles.json"
+    ).read_text(encoding="utf-8"))
+    answers = profiles["appointment"]["answers"]
+    persona_node = next(node for node in bundle["nodes"] if node.get("node_type") == "persona")
+    policy = (persona_node.get("data") or {}).get("appointment_policy") or {}
+    assert "nome_cliente" not in policy.get("required_fields", [])
+    assert policy.get("identity_field") is None
+
+    missing = set()
+    for node in bundle["nodes"]:
+        if node.get("node_type") != "product":
+            continue
+        data = node.get("data") or {}
+        assert "nome_cliente" not in (data.get("booking") or {}).get("required_fields", [])
+        assert "nome_cliente" not in (data.get("completion") or {}).get("required_fields", [])
+        for field in (data.get("qualification") or {}).get("fields") or []:
+            key = str(field.get("key") or "")
+            if key == "nome_cliente":
+                assert field.get("required") is False
+            elif key and field.get("required", True) and key != "servico" and key not in answers:
+                missing.add(key)
+    assert not missing, f"WA Validator appointment profile misses: {sorted(missing)}"
 
 
 def test_release_canary_keeps_one_graph_opening_and_internal_transport(monkeypatch):

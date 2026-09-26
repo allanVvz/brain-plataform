@@ -6,7 +6,7 @@
     "checksum": "sha256:a5bfac4a813f9c7c357910371d70a8e8a2df14e86d93c4374aa4e2f322b1c553"
   },
   "metadata": {
-    "purpose": "make customer identity optional for natural appointment qualification",
+    "purpose": "make customer identity optional across booking and completion contracts",
     "source": "operator_request_2026_09_25"
   },
   "patch_nodes": [
@@ -15,10 +15,62 @@
       "patch": {
         "data": {
           "appointment_policy": {
+            "provider": "manual",
+            "field_labels": {
+              "servico": "serviço",
+              "condicao": "condição atual",
+              "objective": "objetivo",
+              "nome_cliente": "nome",
+              "vehicle_color": "cor do veículo",
+              "modelo_veiculo": "modelo do veículo",
+              "vazamento_oleo": "sinal de vazamento",
+              "estrada_de_chao": "uso em estrada de chão",
+              "evaluation_route": "rota de avaliação",
+              "foco_brilho_riscos": "foco em brilho ou riscos",
+              "revestimento_bancos": "revestimento dos bancos",
+              "procedimento_anterior": "procedimento anterior"
+            },
+            "photo_policy": "Receber fotos como contexto, sem diagnóstico automático.",
+            "identity_field": null,
+            "field_questions": {
+              "servico": "Qual serviço você procura para o veículo?",
+              "condicao": "Como está a condição atual do veículo nessa área?",
+              "objective": "O que você espera melhorar ou preservar no veículo?",
+              "nome_cliente": "Como você prefere que eu te chame? O sobrenome é opcional.",
+              "vehicle_color": "Qual é a cor do veículo?",
+              "modelo_veiculo": "Qual é o modelo do veículo?",
+              "vazamento_oleo": "Há sinal de vazamento de óleo no motor ou no cofre?",
+              "estrada_de_chao": "O veículo circula com frequência em estrada de chão?",
+              "evaluation_route": "Você prefere uma avaliação presencial ou uma avaliação inicial por fotos?",
+              "foco_brilho_riscos": "Seu foco principal é recuperar o brilho, reduzir riscos ou os dois?",
+              "revestimento_bancos": "Os bancos são de couro ou tecido?",
+              "procedimento_anterior": "Já foi feito algum procedimento nessa pintura antes?"
+            },
             "required_fields": [
               "servico"
             ],
-            "identity_field": null
+            "price_disclosure": "human_only",
+            "confirmation_required": true,
+            "confirmation_templates": {
+              "fact": [
+                "Entendi {candidate}. Está correto?"
+              ],
+              "name": [
+                "Posso te chamar de {candidate}?"
+              ],
+              "service_switch": "Você quer trocar o serviço atual por {candidate}?",
+              "service_removal": "Você quer remover {candidate} do pedido?",
+              "service_addition": "Você quer adicionar {candidate} ao pedido?",
+              "service_selection": "Você quer seguir com {candidate}?",
+              "service_disambiguation": "Encontrei estas opções: {options}. Qual delas você quer?"
+            },
+            "availability_disclosure": "human_only",
+            "human_confirmation_topics": [
+              "preço",
+              "agenda",
+              "disponibilidade",
+              "resultado"
+            ]
           }
         }
       }
@@ -32,6 +84,103 @@
               "servico",
               "modelo_veiculo",
               "condicao"
+            ]
+          },
+          "completion": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "condicao"
+            ]
+          },
+          "qualification": {
+            "fields": [
+              {
+                "key": "nome_cliente",
+                "scope": "persona",
+                "priority": 1,
+                "required": false,
+                "depends_on": [],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:nome_cliente",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "servico",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "nome_cliente"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:bodywork",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:servico",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "modelo_veiculo",
+                "scope": "persona",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:modelo_veiculo",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "condicao",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:bodywork",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:condicao",
+                "accepted_statuses": [
+                  "known"
+                ]
+              }
             ]
           }
         }
@@ -47,6 +196,103 @@
               "modelo_veiculo",
               "condicao"
             ]
+          },
+          "completion": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "condicao"
+            ]
+          },
+          "qualification": {
+            "fields": [
+              {
+                "key": "nome_cliente",
+                "scope": "persona",
+                "priority": 1,
+                "required": false,
+                "depends_on": [],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:nome_cliente",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "servico",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "nome_cliente"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:chassis-wash",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:servico",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "modelo_veiculo",
+                "scope": "persona",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:modelo_veiculo",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "condicao",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:chassis-wash",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:condicao",
+                "accepted_statuses": [
+                  "known"
+                ]
+              }
+            ]
           }
         }
       }
@@ -61,6 +307,103 @@
               "modelo_veiculo",
               "foco_brilho_riscos"
             ]
+          },
+          "completion": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "foco_brilho_riscos"
+            ]
+          },
+          "qualification": {
+            "fields": [
+              {
+                "key": "nome_cliente",
+                "scope": "persona",
+                "priority": 1,
+                "required": false,
+                "depends_on": [],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:nome_cliente",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "servico",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "nome_cliente"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:commercial-polish",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:servico",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "modelo_veiculo",
+                "scope": "persona",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:modelo_veiculo",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "foco_brilho_riscos",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:commercial-polish",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:foco_brilho_riscos",
+                "accepted_statuses": [
+                  "known"
+                ]
+              }
+            ]
           }
         }
       }
@@ -74,6 +417,103 @@
               "servico",
               "modelo_veiculo",
               "condicao"
+            ]
+          },
+          "completion": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "condicao"
+            ]
+          },
+          "qualification": {
+            "fields": [
+              {
+                "key": "nome_cliente",
+                "scope": "persona",
+                "priority": 1,
+                "required": false,
+                "depends_on": [],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:nome_cliente",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "servico",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "nome_cliente"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:detailed-wash",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:servico",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "modelo_veiculo",
+                "scope": "persona",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:modelo_veiculo",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "condicao",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:detailed-wash",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:condicao",
+                "accepted_statuses": [
+                  "known"
+                ]
+              }
             ]
           }
         }
@@ -90,6 +530,126 @@
               "vazamento_oleo",
               "estrada_de_chao"
             ]
+          },
+          "completion": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "vazamento_oleo",
+              "estrada_de_chao"
+            ]
+          },
+          "qualification": {
+            "fields": [
+              {
+                "key": "nome_cliente",
+                "scope": "persona",
+                "priority": 1,
+                "required": false,
+                "depends_on": [],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:nome_cliente",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "servico",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "nome_cliente"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:engine-bay-wash",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:servico",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "modelo_veiculo",
+                "scope": "persona",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:modelo_veiculo",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "vazamento_oleo",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:engine-bay-wash",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:vazamento_oleo",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "estrada_de_chao",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:engine-bay-wash",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:estrada_de_chao",
+                "accepted_statuses": [
+                  "known"
+                ]
+              }
+            ]
           }
         }
       }
@@ -105,6 +665,126 @@
               "objective",
               "evaluation_route"
             ]
+          },
+          "completion": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "objective",
+              "evaluation_route"
+            ]
+          },
+          "qualification": {
+            "fields": [
+              {
+                "key": "nome_cliente",
+                "scope": "persona",
+                "priority": 1,
+                "required": false,
+                "depends_on": [],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:nome_cliente",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "servico",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "nome_cliente"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:evaluation",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:servico",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "modelo_veiculo",
+                "scope": "persona",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:modelo_veiculo",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "objective",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:evaluation",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:objective",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "evaluation_route",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:evaluation",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:evaluation_route",
+                "accepted_statuses": [
+                  "known"
+                ]
+              }
+            ]
           }
         }
       }
@@ -119,6 +799,103 @@
               "modelo_veiculo",
               "condicao"
             ]
+          },
+          "completion": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "condicao"
+            ]
+          },
+          "qualification": {
+            "fields": [
+              {
+                "key": "nome_cliente",
+                "scope": "persona",
+                "priority": 1,
+                "required": false,
+                "depends_on": [],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:nome_cliente",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "servico",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "nome_cliente"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:glass-polish",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:servico",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "modelo_veiculo",
+                "scope": "persona",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:modelo_veiculo",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "condicao",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:glass-polish",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:condicao",
+                "accepted_statuses": [
+                  "known"
+                ]
+              }
+            ]
           }
         }
       }
@@ -132,6 +909,103 @@
               "servico",
               "modelo_veiculo",
               "condicao"
+            ]
+          },
+          "completion": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "condicao"
+            ]
+          },
+          "qualification": {
+            "fields": [
+              {
+                "key": "nome_cliente",
+                "scope": "persona",
+                "priority": 1,
+                "required": false,
+                "depends_on": [],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:nome_cliente",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "servico",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "nome_cliente"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:headlight-restoration",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:servico",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "modelo_veiculo",
+                "scope": "persona",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:modelo_veiculo",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "condicao",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:headlight-restoration",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:condicao",
+                "accepted_statuses": [
+                  "known"
+                ]
+              }
             ]
           }
         }
@@ -148,6 +1022,126 @@
               "revestimento_bancos",
               "condicao"
             ]
+          },
+          "completion": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "revestimento_bancos",
+              "condicao"
+            ]
+          },
+          "qualification": {
+            "fields": [
+              {
+                "key": "nome_cliente",
+                "scope": "persona",
+                "priority": 1,
+                "required": false,
+                "depends_on": [],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:nome_cliente",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "servico",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "nome_cliente"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:interior-cleaning",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:servico",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "modelo_veiculo",
+                "scope": "persona",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:modelo_veiculo",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "revestimento_bancos",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:interior-cleaning",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:revestimento_bancos",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "condicao",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:interior-cleaning",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:condicao",
+                "accepted_statuses": [
+                  "known"
+                ]
+              }
+            ]
           }
         }
       }
@@ -161,6 +1155,103 @@
               "servico",
               "modelo_veiculo",
               "condicao"
+            ]
+          },
+          "completion": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "condicao"
+            ]
+          },
+          "qualification": {
+            "fields": [
+              {
+                "key": "nome_cliente",
+                "scope": "persona",
+                "priority": 1,
+                "required": false,
+                "depends_on": [],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:nome_cliente",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "servico",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "nome_cliente"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:leather-conditioning",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:servico",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "modelo_veiculo",
+                "scope": "persona",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:modelo_veiculo",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "condicao",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:leather-conditioning",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:condicao",
+                "accepted_statuses": [
+                  "known"
+                ]
+              }
             ]
           }
         }
@@ -177,6 +1268,126 @@
               "vehicle_color",
               "condicao"
             ]
+          },
+          "completion": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "vehicle_color",
+              "condicao"
+            ]
+          },
+          "qualification": {
+            "fields": [
+              {
+                "key": "nome_cliente",
+                "scope": "persona",
+                "priority": 1,
+                "required": false,
+                "depends_on": [],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:nome_cliente",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "servico",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "nome_cliente"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:painting",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:servico",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "modelo_veiculo",
+                "scope": "persona",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:modelo_veiculo",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "vehicle_color",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:painting",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:vehicle_color",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "condicao",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:painting",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:condicao",
+                "accepted_statuses": [
+                  "known"
+                ]
+              }
+            ]
           }
         }
       }
@@ -192,6 +1403,126 @@
               "condicao",
               "objective"
             ]
+          },
+          "completion": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "condicao",
+              "objective"
+            ]
+          },
+          "qualification": {
+            "fields": [
+              {
+                "key": "nome_cliente",
+                "scope": "persona",
+                "priority": 1,
+                "required": false,
+                "depends_on": [],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:nome_cliente",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "servico",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "nome_cliente"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:ppf",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:servico",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "modelo_veiculo",
+                "scope": "persona",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:modelo_veiculo",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "condicao",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:ppf",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:condicao",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "objective",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:ppf",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:objective",
+                "accepted_statuses": [
+                  "known"
+                ]
+              }
+            ]
           }
         }
       }
@@ -205,6 +1536,103 @@
               "servico",
               "modelo_veiculo",
               "condicao"
+            ]
+          },
+          "completion": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "condicao"
+            ]
+          },
+          "qualification": {
+            "fields": [
+              {
+                "key": "nome_cliente",
+                "scope": "persona",
+                "priority": 1,
+                "required": false,
+                "depends_on": [],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:nome_cliente",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "servico",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "nome_cliente"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:seat-vitrification",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:servico",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "modelo_veiculo",
+                "scope": "persona",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:modelo_veiculo",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "condicao",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:seat-vitrification",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:condicao",
+                "accepted_statuses": [
+                  "known"
+                ]
+              }
             ]
           }
         }
@@ -221,6 +1649,126 @@
               "procedimento_anterior",
               "foco_brilho_riscos"
             ]
+          },
+          "completion": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "procedimento_anterior",
+              "foco_brilho_riscos"
+            ]
+          },
+          "qualification": {
+            "fields": [
+              {
+                "key": "nome_cliente",
+                "scope": "persona",
+                "priority": 1,
+                "required": false,
+                "depends_on": [],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:nome_cliente",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "servico",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "nome_cliente"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:technical-polish",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:servico",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "modelo_veiculo",
+                "scope": "persona",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:modelo_veiculo",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "procedimento_anterior",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:technical-polish",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:procedimento_anterior",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "foco_brilho_riscos",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:technical-polish",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:foco_brilho_riscos",
+                "accepted_statuses": [
+                  "known"
+                ]
+              }
+            ]
           }
         }
       }
@@ -234,6 +1782,103 @@
               "servico",
               "modelo_veiculo",
               "condicao"
+            ]
+          },
+          "completion": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "condicao"
+            ]
+          },
+          "qualification": {
+            "fields": [
+              {
+                "key": "nome_cliente",
+                "scope": "persona",
+                "priority": 1,
+                "required": false,
+                "depends_on": [],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:nome_cliente",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "servico",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "nome_cliente"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:vehicle-wrap",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:servico",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "modelo_veiculo",
+                "scope": "persona",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:modelo_veiculo",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "condicao",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:vehicle-wrap",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:condicao",
+                "accepted_statuses": [
+                  "known"
+                ]
+              }
             ]
           }
         }
@@ -250,6 +1895,126 @@
               "condicao",
               "objective"
             ]
+          },
+          "completion": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "condicao",
+              "objective"
+            ]
+          },
+          "qualification": {
+            "fields": [
+              {
+                "key": "nome_cliente",
+                "scope": "persona",
+                "priority": 1,
+                "required": false,
+                "depends_on": [],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:nome_cliente",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "servico",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "nome_cliente"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:vitrification",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:servico",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "modelo_veiculo",
+                "scope": "persona",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:modelo_veiculo",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "condicao",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:vitrification",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:condicao",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "objective",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:vitrification",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:objective",
+                "accepted_statuses": [
+                  "known"
+                ]
+              }
+            ]
           }
         }
       }
@@ -264,6 +2029,103 @@
               "modelo_veiculo",
               "condicao"
             ]
+          },
+          "completion": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "condicao"
+            ]
+          },
+          "qualification": {
+            "fields": [
+              {
+                "key": "nome_cliente",
+                "scope": "persona",
+                "priority": 1,
+                "required": false,
+                "depends_on": [],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:nome_cliente",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "servico",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "nome_cliente"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:window-film",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:servico",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "modelo_veiculo",
+                "scope": "persona",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:modelo_veiculo",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "condicao",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:window-film",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:condicao",
+                "accepted_statuses": [
+                  "known"
+                ]
+              }
+            ]
           }
         }
       }
@@ -277,6 +2139,103 @@
               "servico",
               "modelo_veiculo",
               "condicao"
+            ]
+          },
+          "completion": {
+            "required_fields": [
+              "servico",
+              "modelo_veiculo",
+              "condicao"
+            ]
+          },
+          "qualification": {
+            "fields": [
+              {
+                "key": "nome_cliente",
+                "scope": "persona",
+                "priority": 1,
+                "required": false,
+                "depends_on": [],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:nome_cliente",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "servico",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "nome_cliente"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:windshield-crystallization",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:servico",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "modelo_veiculo",
+                "scope": "persona",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "persona:utzig-garage",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:modelo_veiculo",
+                "accepted_statuses": [
+                  "known"
+                ]
+              },
+              {
+                "key": "condicao",
+                "scope": "branch",
+                "priority": 0.8,
+                "required": true,
+                "depends_on": [
+                  "servico"
+                ],
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "owner_node_id": "product:windshield-crystallization",
+                "overwrite_policy": "explicit_correction",
+                "question_node_id": "faq:qualification:condicao",
+                "accepted_statuses": [
+                  "known"
+                ]
+              }
             ]
           }
         }

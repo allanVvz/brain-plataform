@@ -4349,8 +4349,8 @@
       "embedding_provider": "local"
     },
     "internal_wa_validator_test_allowed": false,
-    "publication_allowed": false,
-    "purpose": "make customer identity optional for natural appointment qualification",
+    "publication_allowed": true,
+    "purpose": "Utzig appointment identity is optional; services remain graph-qualified",
     "source": "operator_request_2026_09_25"
   },
   "nodes": [
@@ -9466,7 +9466,6 @@
         },
         "completion": {
           "required_fields": [
-            "nome_cliente",
             "servico",
             "modelo_veiculo",
             "condicao"
@@ -9506,7 +9505,7 @@
               "owner_node_id": "persona:utzig-garage",
               "priority": 1,
               "question_node_id": "faq:qualification:nome_cliente",
-              "required": true,
+              "required": false,
               "scope": "persona",
               "validation": {
                 "mode": "schema"
@@ -9614,7 +9613,6 @@
         },
         "completion": {
           "required_fields": [
-            "nome_cliente",
             "servico",
             "modelo_veiculo",
             "condicao"
@@ -9655,7 +9653,7 @@
               "owner_node_id": "persona:utzig-garage",
               "priority": 1,
               "question_node_id": "faq:qualification:nome_cliente",
-              "required": true,
+              "required": false,
               "scope": "persona",
               "validation": {
                 "mode": "schema"
@@ -9763,7 +9761,6 @@
         },
         "completion": {
           "required_fields": [
-            "nome_cliente",
             "servico",
             "modelo_veiculo",
             "foco_brilho_riscos"
@@ -9803,7 +9800,7 @@
               "owner_node_id": "persona:utzig-garage",
               "priority": 1,
               "question_node_id": "faq:qualification:nome_cliente",
-              "required": true,
+              "required": false,
               "scope": "persona",
               "validation": {
                 "mode": "schema"
@@ -9910,7 +9907,6 @@
         },
         "completion": {
           "required_fields": [
-            "nome_cliente",
             "servico",
             "modelo_veiculo",
             "condicao"
@@ -9950,7 +9946,7 @@
               "owner_node_id": "persona:utzig-garage",
               "priority": 1,
               "question_node_id": "faq:qualification:nome_cliente",
-              "required": true,
+              "required": false,
               "scope": "persona",
               "validation": {
                 "mode": "schema"
@@ -10058,7 +10054,6 @@
         },
         "completion": {
           "required_fields": [
-            "nome_cliente",
             "servico",
             "modelo_veiculo",
             "vazamento_oleo",
@@ -10099,7 +10094,7 @@
               "owner_node_id": "persona:utzig-garage",
               "priority": 1,
               "question_node_id": "faq:qualification:nome_cliente",
-              "required": true,
+              "required": false,
               "scope": "persona",
               "validation": {
                 "mode": "schema"
@@ -10229,7 +10224,6 @@
         },
         "completion": {
           "required_fields": [
-            "nome_cliente",
             "servico",
             "modelo_veiculo",
             "objective",
@@ -10270,7 +10264,7 @@
               "owner_node_id": "persona:utzig-garage",
               "priority": 1,
               "question_node_id": "faq:qualification:nome_cliente",
-              "required": true,
+              "required": false,
               "scope": "persona",
               "validation": {
                 "mode": "schema"
@@ -10399,7 +10393,6 @@
         },
         "completion": {
           "required_fields": [
-            "nome_cliente",
             "servico",
             "modelo_veiculo",
             "condicao"
@@ -10439,7 +10432,7 @@
               "owner_node_id": "persona:utzig-garage",
               "priority": 1,
               "question_node_id": "faq:qualification:nome_cliente",
-              "required": true,
+              "required": false,
               "scope": "persona",
               "validation": {
                 "mode": "schema"
@@ -10546,7 +10539,6 @@
         },
         "completion": {
           "required_fields": [
-            "nome_cliente",
             "servico",
             "modelo_veiculo",
             "condicao"
@@ -10586,7 +10578,7 @@
               "owner_node_id": "persona:utzig-garage",
               "priority": 1,
               "question_node_id": "faq:qualification:nome_cliente",
-              "required": true,
+              "required": false,
               "scope": "persona",
               "validation": {
                 "mode": "schema"
@@ -10694,7 +10686,6 @@
         },
         "completion": {
           "required_fields": [
-            "nome_cliente",
             "servico",
             "modelo_veiculo",
             "revestimento_bancos",
@@ -10735,7 +10726,7 @@
               "owner_node_id": "persona:utzig-garage",
               "priority": 1,
               "question_node_id": "faq:qualification:nome_cliente",
-              "required": true,
+              "required": false,
               "scope": "persona",
               "validation": {
                 "mode": "schema"
@@ -10865,7 +10856,6 @@
         },
         "completion": {
           "required_fields": [
-            "nome_cliente",
             "servico",
             "modelo_veiculo",
             "condicao"
@@ -10906,7 +10896,7 @@
               "owner_node_id": "persona:utzig-garage",
               "priority": 1,
               "question_node_id": "faq:qualification:nome_cliente",
-              "required": true,
+              "required": false,
               "scope": "persona",
               "validation": {
                 "mode": "schema"
@@ -11015,7 +11005,6 @@
         },
         "completion": {
           "required_fields": [
-            "nome_cliente",
             "servico",
             "modelo_veiculo",
             "vehicle_color",
@@ -11056,7 +11045,7 @@
               "owner_node_id": "persona:utzig-garage",
               "priority": 1,
               "question_node_id": "faq:qualification:nome_cliente",
-              "required": true,
+              "required": false,
               "scope": "persona",
               "validation": {
                 "mode": "schema"
@@ -11186,7 +11175,6 @@
         },
         "completion": {
           "required_fields": [
-            "nome_cliente",
             "servico",
             "modelo_veiculo",
             "condicao",
@@ -11227,7 +11215,7 @@
               "owner_node_id": "persona:utzig-garage",
               "priority": 1,
               "question_node_id": "faq:qualification:nome_cliente",
-              "required": true,
+              "required": false,
               "scope": "persona",
               "validation": {
                 "mode": "schema"
@@ -11357,7 +11345,6 @@
         },
         "completion": {
           "required_fields": [
-            "nome_cliente",
             "servico",
             "modelo_veiculo",
             "condicao"
@@ -11398,7 +11385,7 @@
               "owner_node_id": "persona:utzig-garage",
               "priority": 1,
               "question_node_id": "faq:qualification:nome_cliente",
-              "required": true,
+              "required": false,
               "scope": "persona",
               "validation": {
                 "mode": "schema"
@@ -11507,7 +11494,6 @@
         },
         "completion": {
           "required_fields": [
-            "nome_cliente",
             "servico",
             "modelo_veiculo",
             "procedimento_anterior",
@@ -11548,7 +11534,7 @@
               "owner_node_id": "persona:utzig-garage",
               "priority": 1,
               "question_node_id": "faq:qualification:nome_cliente",
-              "required": true,
+              "required": false,
               "scope": "persona",
               "validation": {
                 "mode": "schema"
@@ -11678,7 +11664,6 @@
         },
         "completion": {
           "required_fields": [
-            "nome_cliente",
             "servico",
             "modelo_veiculo",
             "condicao"
@@ -11719,7 +11704,7 @@
               "owner_node_id": "persona:utzig-garage",
               "priority": 1,
               "question_node_id": "faq:qualification:nome_cliente",
-              "required": true,
+              "required": false,
               "scope": "persona",
               "validation": {
                 "mode": "schema"
@@ -11828,7 +11813,6 @@
         },
         "completion": {
           "required_fields": [
-            "nome_cliente",
             "servico",
             "modelo_veiculo",
             "condicao",
@@ -11869,7 +11853,7 @@
               "owner_node_id": "persona:utzig-garage",
               "priority": 1,
               "question_node_id": "faq:qualification:nome_cliente",
-              "required": true,
+              "required": false,
               "scope": "persona",
               "validation": {
                 "mode": "schema"
@@ -12000,7 +11984,6 @@
         },
         "completion": {
           "required_fields": [
-            "nome_cliente",
             "servico",
             "modelo_veiculo",
             "condicao"
@@ -12041,7 +12024,7 @@
               "owner_node_id": "persona:utzig-garage",
               "priority": 1,
               "question_node_id": "faq:qualification:nome_cliente",
-              "required": true,
+              "required": false,
               "scope": "persona",
               "validation": {
                 "mode": "schema"
@@ -12149,7 +12132,6 @@
         },
         "completion": {
           "required_fields": [
-            "nome_cliente",
             "servico",
             "modelo_veiculo",
             "condicao"
@@ -12189,7 +12171,7 @@
               "owner_node_id": "persona:utzig-garage",
               "priority": 1,
               "question_node_id": "faq:qualification:nome_cliente",
-              "required": true,
+              "required": false,
               "scope": "persona",
               "validation": {
                 "mode": "schema"

@@ -1,5 +1,5 @@
 {
-  "approval_scope": "dry_run_only",
+  "approval_scope": "publication_plan",
   "branches_affected": [
     "product:bodywork",
     "product:commercial-polish",
@@ -15,12 +15,26 @@
     "product:vitrification",
     "product:windshield-crystallization"
   ],
-  "breaking_contract_changes": [],
+  "breaking_contract_changes": [
+    "branch_contract_changed:product:bodywork",
+    "branch_contract_changed:product:commercial-polish",
+    "branch_contract_changed:product:detailed-wash",
+    "branch_contract_changed:product:engine-bay-wash",
+    "branch_contract_changed:product:evaluation",
+    "branch_contract_changed:product:glass-polish",
+    "branch_contract_changed:product:headlight-restoration",
+    "branch_contract_changed:product:interior-cleaning",
+    "branch_contract_changed:product:painting",
+    "branch_contract_changed:product:ppf",
+    "branch_contract_changed:product:technical-polish",
+    "branch_contract_changed:product:vitrification",
+    "branch_contract_changed:product:windshield-crystallization"
+  ],
   "chunks_reused": 171,
   "chunks_to_embed": 0,
   "compiler_version": "graph-compiler-v3.6.5",
-  "disposition": "dry_run_complete",
-  "draft_checksum": "sha256:50fb752c9e3d8d5fe4ed78b9bc21ae5ac700764e2f20d7b7f1bef0fd17e83c5a",
+  "disposition": "awaiting_approval",
+  "draft_checksum": "sha256:245e543569596a274fd7fde38780388512219f2a988f1d58f2ae64e987e9db7e",
   "edge_changes": {
     "added": [],
     "changed": [],
@@ -64,7 +78,7 @@
   "nodes_changed": 19,
   "nodes_removed": 0,
   "plan_version": "1.0",
-  "publication_allowed": false,
-  "runtime_checksum": "sha256:3b74427e12ed77ce063acec242a2a1c03b56ca469dc0b5ddf9bef3da5e26e11b",
+  "publication_allowed": true,
+  "runtime_checksum": "sha256:ecb110523fab8fda6260cb9961b991c9be37f1eb11b15972e3970dbff269d7fc",
   "validation_errors": []
 }
