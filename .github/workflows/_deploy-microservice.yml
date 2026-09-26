@@ -83,7 +83,7 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
           timeout: 120s
-          source: ops/microservices/route-map.json,ops/microservices/render-active-routes.py,ops/microservices/validate-release-manifest.py,ops/vps/deploy-microservice-blue-green.sh,ops/vps/run-microservice-wa-validator.sh,${{ inputs.manifest_path }}
+          source: ops/microservices/route-map.json,ops/microservices/render-active-routes.py,ops/microservices/validate-release-manifest.py,ops/microservices/verify-selective-rollout-status.py,ops/vps/deploy-microservice-blue-green.sh,ops/vps/run-microservice-wa-validator.sh,${{ inputs.manifest_path }}
           target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           overwrite: true
       - name: Wait before retrying service-control sync
@@ -98,7 +98,7 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
           timeout: 120s
-          source: ops/microservices/route-map.json,ops/microservices/render-active-routes.py,ops/microservices/validate-release-manifest.py,ops/vps/deploy-microservice-blue-green.sh,ops/vps/run-microservice-wa-validator.sh,${{ inputs.manifest_path }}
+          source: ops/microservices/route-map.json,ops/microservices/render-active-routes.py,ops/microservices/validate-release-manifest.py,ops/microservices/verify-selective-rollout-status.py,ops/vps/deploy-microservice-blue-green.sh,ops/vps/run-microservice-wa-validator.sh,${{ inputs.manifest_path }}
           target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           overwrite: true
       - name: Deploy or rollback one service by immutable digest
@@ -153,10 +153,18 @@ jobs:
               cp "$canonical" "$previous_manifest"
               cp "${{ inputs.manifest_path }}" "$next_manifest"
               mv "$next_manifest" "$canonical"
-              if ! status_output="$(bash ops/vps/rollout-microservices.sh status)" \
-                || [[ "$status_output" == *BEHIND* ]]; then
+              if ! status_output="$(bash ops/vps/rollout-microservices.sh status)"; then
                 cp "$previous_manifest" "$canonical"
                 echo "manifest promotion verification failed; rolling back service" >&2
+                bash ops/vps/deploy-microservice-blue-green.sh \
+                  "${{ inputs.manifest_path }}" "${{ inputs.service }}" --rollback
+                exit 1
+              fi
+              if ! printf '%s\n' "$status_output" | \
+                python3 ops/microservices/verify-selective-rollout-status.py "${{ inputs.service }}"; then
+                cp "$previous_manifest" "$canonical"
+                printf '%s\n' "$status_output"
+                echo "affected service or its workers are not current; rolling back service" >&2
                 bash ops/vps/deploy-microservice-blue-green.sh \
                   "${{ inputs.manifest_path }}" "${{ inputs.service }}" --rollback
                 exit 1

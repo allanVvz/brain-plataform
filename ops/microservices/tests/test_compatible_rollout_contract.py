@@ -47,6 +47,9 @@ def test_rollout_has_service_sha_digest_deduplication_and_automatic_rollback():
     assert "cannot establish immutable provenance" in script
     assert "interrupted historical rollback" in script
     assert "rollout-microservices.sh status" in workflow
+    assert "verify-selective-rollout-status.py" in workflow
+    assert workflow.count("ops/microservices/verify-selective-rollout-status.py") >= 3
+    assert "[[ \"$status_output\" == *BEHIND* ]]" not in workflow
     assert "continue-on-error: true" in workflow
     assert "Wait before retrying service-control sync" in workflow
     assert "Synchronize service release controls (retry)" in workflow
