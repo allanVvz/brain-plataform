@@ -2353,10 +2353,14 @@ def _semantic_turn_audit(
     qualification_complete = bool(proof.get("qualification_complete"))
     confirmation_pending = proof.get("confirmation_state") == "awaiting_confirmation"
     collection_complete = bool(proof.get("collection_complete"))
-    consumed_service_values = {
-        _semantic_fold(str(span.get("text") or ""))
-        for span in proof.get("consumed_service_spans") or []
-        if str(span.get("text") or "").strip()
+    service_resolution = (
+        proof.get("understanding_service_resolution")
+        or proof.get("service_resolution") or {}
+    )
+    resolved_service_values = {
+        _semantic_fold(str(operation.get("evidence_span") or ""))
+        for operation in service_resolution.get("operations") or []
+        if str(operation.get("evidence_span") or "").strip()
     }
     branch_selection_keys = {
         str(field.get("key") or "")
@@ -2429,8 +2433,8 @@ def _semantic_turn_audit(
             branch_selection_keys | {"servico", "commercial_interests"}
         )
         and (
-            _semantic_fold(str(fact.get("value") or "")) in consumed_service_values
-            or _semantic_fold(str(fact.get("evidence_span") or "")) in consumed_service_values
+            _semantic_fold(str(fact.get("value") or "")) in resolved_service_values
+            or _semantic_fold(str(fact.get("evidence_span") or "")) in resolved_service_values
         )
         for fact in proof.get("accepted_facts") or []
     )
@@ -2807,6 +2811,7 @@ def _semantic_turn_audit(
             str(span.get("text") or "")
             for span in proof.get("consumed_service_spans") or []
         ],
+        "resolved_service_operation_spans": sorted(resolved_service_values),
         "branch_selection_field_keys": sorted(branch_selection_keys),
         "intended_fact_keys": sorted(str(key) for key in intended),
         "previous_ledger_revision": ledger_before.get("revision"),
