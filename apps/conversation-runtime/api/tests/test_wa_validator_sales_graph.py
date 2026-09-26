@@ -423,4 +423,7 @@ def test_sales_quality_audit_rejects_internal_terms_and_silent_handoff():
     assert wa_validator_service._pre_handoff_notice_observed(
         "Vou avisar uma pessoa da equipe para continuar o atendimento com você."
     )
+    assert wa_validator_service._pre_handoff_notice_observed(
+        "Ja deixei tudo registrado pra equipe. Ela vai te orientar sobre a visita."
+    )
     assert not wa_validator_service._pre_handoff_notice_observed("")

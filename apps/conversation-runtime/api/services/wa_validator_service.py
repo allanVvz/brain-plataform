@@ -2222,7 +2222,7 @@ def _pre_handoff_notice_observed(reply: str) -> bool:
         r"\b(?:atendente|especialista|pessoa da equipe|equipe)\b", folded,
     ))
     announces_transition = bool(re.search(
-        r"\b(?:avis|encaminh|continu|assum|atend|solicit|envi|confirm)", folded,
+        r"\b(?:avis|encaminh|continu|assum|atend|solicit|envi|confirm|registr|pass)", folded,
     ))
     return bool(reply.strip() and mentions_human and announces_transition)
 
