@@ -195,15 +195,21 @@ cleanup() {
     # source-injected container, even when the source run failed.
     if "${COMPOSE[@]}" up -d --no-deps "$validator_service" >/dev/null; then
       restore_deadline=$((SECONDS + 120))
-      until [[ "$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$validator_name" 2>/dev/null || true)" == "healthy" ]]; do
+      restored_state=""
+      while true; do
+        restored_state="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$validator_name" 2>/dev/null || true)"
+        [[ "$restored_state" == "healthy" || "$restored_state" == "running" ]] && break
         if (( SECONDS >= restore_deadline )); then
-          echo "configured WA Validator worker failed to restore: $validator_name" >&2
+          echo "configured WA Validator worker failed to restore: $validator_name state=${restored_state:-missing}" >&2
           status=1
           break
         fi
         sleep 3
       done
-      [[ "$(docker inspect -f '{{.State.Health.Status}}' "$validator_name" 2>/dev/null || true)" == "healthy" ]] || status=1
+      [[ "$restored_state" == "healthy" || "$restored_state" == "running" ]] || {
+        echo "configured WA Validator worker is not ready: $validator_name state=${restored_state:-missing}" >&2
+        status=1
+      }
     else
       echo "configured WA Validator worker failed to recreate: $validator_name" >&2
       status=1
