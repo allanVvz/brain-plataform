@@ -165,23 +165,17 @@ fi
 
 validator_cid="$(docker ps -aq --filter "name=^/${validator_name}$" | head -n 1)"
 validator_was_running=false
-validator_existed_before_run=false
 source_validator_created=false
 if [[ -n "$validator_cid" ]]; then
-  validator_existed_before_run=true
   validator_was_running="$(docker inspect -f '{{.State.Running}}' "$validator_cid")"
 fi
 cleanup() {
   local status="$?"
   if [[ "$MODE" == "--run-source" && "$source_validator_created" == "true" ]]; then
     docker rm -f "$validator_name" >/dev/null 2>&1 || true
-    if [[ "$validator_existed_before_run" == "true" ]]; then
-      if [[ "$validator_was_running" == "true" ]]; then
-        "${COMPOSE[@]}" up -d --no-deps "$validator_service" >/dev/null || true
-      else
-        "${COMPOSE[@]}" create --no-build "$validator_service" >/dev/null || true
-      fi
-    fi
+    # Restore the configured immutable QA worker after removing the
+    # source-injected container, even when the source run failed.
+    "${COMPOSE[@]}" up -d --no-deps "$validator_service" >/dev/null || true
   elif [[ "$validator_was_running" != "true" ]]; then
     docker stop -t 120 "$validator_name" >/dev/null || true
   fi
