@@ -166,6 +166,7 @@ fi
 validator_cid="$(docker ps -aq --filter "name=^/${validator_name}$" | head -n 1)"
 validator_was_running=false
 source_validator_created=false
+source_validator_stopped_for_run=false
 if [[ -n "$validator_cid" ]]; then
   validator_was_running="$(docker inspect -f '{{.State.Running}}' "$validator_cid")"
 fi
@@ -175,6 +176,9 @@ cleanup() {
     docker rm -f "$validator_name" >/dev/null 2>&1 || true
   elif [[ "$validator_was_running" != "true" ]]; then
     docker stop -t 120 "$validator_name" >/dev/null || true
+  fi
+  if [[ "$source_validator_stopped_for_run" == "true" ]]; then
+    docker start "$validator_name" >/dev/null || true
   fi
   if [[ "$runner_was_running" != "true" ]]; then
     docker stop -t 120 "$runner_cid" >/dev/null || true
@@ -193,7 +197,25 @@ until [[ "$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{els
 done
 
 if [[ "$MODE" == "--run-source" ]]; then
-  [[ "$validator_was_running" != "true" ]] || { echo "source validator requires an idle validator worker" >&2; exit 1; }
+  active_sessions="$(docker exec -i "$runtime_name" python - <<'PY'
+import json
+from services import wa_validator_service as validator
+active = [
+    {"id": str(session.get("id") or ""), "status": str(session.get("status") or "")}
+    for session in validator._session_list(since_hours=1, limit=100)
+    if str(session.get("status") or "").lower() in {"ready", "queued", "starting", "running"}
+]
+print(json.dumps(active, sort_keys=True))
+PY
+  )"
+  [[ "$active_sessions" == "[]" ]] || {
+    echo "source validator has active sessions: $active_sessions" >&2
+    exit 1
+  }
+  if [[ "$validator_was_running" == "true" ]]; then
+    docker stop -t 120 "$validator_name" >/dev/null
+    source_validator_stopped_for_run=true
+  fi
   source_service="$ROOT_DIR/apps/conversation-runtime/api/services/wa_validator_service.py"
   source_profile="$ROOT_DIR/apps/conversation-runtime/api/evaluation/wa_validator_customer_profiles.json"
   [[ -s "$source_service" && -s "$source_profile" ]] || { echo "source validator files missing" >&2; exit 1; }
