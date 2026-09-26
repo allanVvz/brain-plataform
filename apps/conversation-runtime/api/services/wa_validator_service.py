@@ -2360,7 +2360,8 @@ def _semantic_turn_audit(
     resolved_service_values = {
         _semantic_fold(str(operation.get("evidence_span") or ""))
         for operation in service_resolution.get("operations") or []
-        if str(operation.get("evidence_span") or "").strip()
+        if str(operation.get("action") or "").lower() == "add"
+        and str(operation.get("evidence_span") or "").strip()
     }
     branch_selection_keys = {
         str(field.get("key") or "")

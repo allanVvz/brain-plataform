@@ -320,6 +320,24 @@ def test_validator_ignores_unresolved_service_span_when_customer_answers_field()
     assert audit["criteria"]["service_value_not_reused_as_field"] is True
 
 
+def test_validator_ignores_keep_operation_evidence_when_customer_answers_field():
+    inputs = _audit_inputs(conversation_mode="n8n_agents")
+    inputs["proof_record"]["proof_result"].update({
+        "accepted_facts": [{
+            "field_key": "modelo_veiculo",
+            "value": "Onix",
+            "evidence_span": "Onix",
+        }],
+        "understanding_service_resolution": {
+            "operations": [{"action": "keep", "evidence_span": "Onix"}],
+        },
+    })
+
+    audit = wa_validator_service._semantic_turn_audit(**inputs)
+
+    assert audit["criteria"]["service_value_not_reused_as_field"] is True
+
+
 def test_agentic_validator_accepts_consultative_turn_when_no_field_is_askable():
     inputs = _audit_inputs(conversation_mode="n8n_agents")
     inputs["contract"]["fields"] = []
