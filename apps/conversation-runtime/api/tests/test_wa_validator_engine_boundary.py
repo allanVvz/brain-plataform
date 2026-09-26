@@ -39,6 +39,7 @@ def test_appointment_canary_profile_covers_published_candidate_fields():
         assert "nome_cliente" not in (data.get("completion") or {}).get("required_fields", [])
         for field in (data.get("qualification") or {}).get("fields") or []:
             key = str(field.get("key") or "")
+            assert "nome_cliente" not in field.get("depends_on", [])
             if key == "nome_cliente":
                 assert field.get("required") is False
             elif key and field.get("required", True) and key != "servico" and key not in answers:

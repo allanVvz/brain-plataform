@@ -5,7 +5,7 @@
     "pending_fields": ["nome_cliente"],
     "forbidden_extracted_fields": ["nome_cliente"],
     "forbidden_asked_fields": ["nome_cliente"],
-    "allowed_question_kinds": ["consultative", "none"],
+    "allowed_question_kinds": ["qualification", "consultative", "none"],
     "forbid_reply_repetition": true,
     "history": [
       {"role": "user", "content": "Há marcas de uso e sujeira acumulada no veículo"},

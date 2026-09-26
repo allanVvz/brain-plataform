@@ -4350,7 +4350,7 @@
     },
     "internal_wa_validator_test_allowed": false,
     "publication_allowed": true,
-    "purpose": "Utzig appointment identity is optional; services remain graph-qualified",
+    "purpose": "Utzig appointment identity is optional and does not gate service selection",
     "source": "operator_request_2026_09_25"
   },
   "nodes": [
@@ -9519,9 +9519,7 @@
               "accepted_statuses": [
                 "known"
               ],
-              "depends_on": [
-                "nome_cliente"
-              ],
+              "depends_on": [],
               "key": "servico",
               "overwrite_policy": "explicit_correction",
               "owner_node_id": "product:bodywork",
@@ -9667,9 +9665,7 @@
               "accepted_statuses": [
                 "known"
               ],
-              "depends_on": [
-                "nome_cliente"
-              ],
+              "depends_on": [],
               "key": "servico",
               "overwrite_policy": "explicit_correction",
               "owner_node_id": "product:chassis-wash",
@@ -9814,9 +9810,7 @@
               "accepted_statuses": [
                 "known"
               ],
-              "depends_on": [
-                "nome_cliente"
-              ],
+              "depends_on": [],
               "key": "servico",
               "overwrite_policy": "explicit_correction",
               "owner_node_id": "product:commercial-polish",
@@ -9960,9 +9954,7 @@
               "accepted_statuses": [
                 "known"
               ],
-              "depends_on": [
-                "nome_cliente"
-              ],
+              "depends_on": [],
               "key": "servico",
               "overwrite_policy": "explicit_correction",
               "owner_node_id": "product:detailed-wash",
@@ -10108,9 +10100,7 @@
               "accepted_statuses": [
                 "known"
               ],
-              "depends_on": [
-                "nome_cliente"
-              ],
+              "depends_on": [],
               "key": "servico",
               "overwrite_policy": "explicit_correction",
               "owner_node_id": "product:engine-bay-wash",
@@ -10278,9 +10268,7 @@
               "accepted_statuses": [
                 "known"
               ],
-              "depends_on": [
-                "nome_cliente"
-              ],
+              "depends_on": [],
               "key": "servico",
               "overwrite_policy": "explicit_correction",
               "owner_node_id": "product:evaluation",
@@ -10446,9 +10434,7 @@
               "accepted_statuses": [
                 "known"
               ],
-              "depends_on": [
-                "nome_cliente"
-              ],
+              "depends_on": [],
               "key": "servico",
               "overwrite_policy": "explicit_correction",
               "owner_node_id": "product:glass-polish",
@@ -10592,9 +10578,7 @@
               "accepted_statuses": [
                 "known"
               ],
-              "depends_on": [
-                "nome_cliente"
-              ],
+              "depends_on": [],
               "key": "servico",
               "overwrite_policy": "explicit_correction",
               "owner_node_id": "product:headlight-restoration",
@@ -10740,9 +10724,7 @@
               "accepted_statuses": [
                 "known"
               ],
-              "depends_on": [
-                "nome_cliente"
-              ],
+              "depends_on": [],
               "key": "servico",
               "overwrite_policy": "explicit_correction",
               "owner_node_id": "product:interior-cleaning",
@@ -10910,9 +10892,7 @@
               "accepted_statuses": [
                 "known"
               ],
-              "depends_on": [
-                "nome_cliente"
-              ],
+              "depends_on": [],
               "key": "servico",
               "overwrite_policy": "explicit_correction",
               "owner_node_id": "product:leather-conditioning",
@@ -11059,9 +11039,7 @@
               "accepted_statuses": [
                 "known"
               ],
-              "depends_on": [
-                "nome_cliente"
-              ],
+              "depends_on": [],
               "key": "servico",
               "overwrite_policy": "explicit_correction",
               "owner_node_id": "product:painting",
@@ -11229,9 +11207,7 @@
               "accepted_statuses": [
                 "known"
               ],
-              "depends_on": [
-                "nome_cliente"
-              ],
+              "depends_on": [],
               "key": "servico",
               "overwrite_policy": "explicit_correction",
               "owner_node_id": "product:ppf",
@@ -11399,9 +11375,7 @@
               "accepted_statuses": [
                 "known"
               ],
-              "depends_on": [
-                "nome_cliente"
-              ],
+              "depends_on": [],
               "key": "servico",
               "overwrite_policy": "explicit_correction",
               "owner_node_id": "product:seat-vitrification",
@@ -11548,9 +11522,7 @@
               "accepted_statuses": [
                 "known"
               ],
-              "depends_on": [
-                "nome_cliente"
-              ],
+              "depends_on": [],
               "key": "servico",
               "overwrite_policy": "explicit_correction",
               "owner_node_id": "product:technical-polish",
@@ -11718,9 +11690,7 @@
               "accepted_statuses": [
                 "known"
               ],
-              "depends_on": [
-                "nome_cliente"
-              ],
+              "depends_on": [],
               "key": "servico",
               "overwrite_policy": "explicit_correction",
               "owner_node_id": "product:vehicle-wrap",
@@ -11867,9 +11837,7 @@
               "accepted_statuses": [
                 "known"
               ],
-              "depends_on": [
-                "nome_cliente"
-              ],
+              "depends_on": [],
               "key": "servico",
               "overwrite_policy": "explicit_correction",
               "owner_node_id": "product:vitrification",
@@ -12038,9 +12006,7 @@
               "accepted_statuses": [
                 "known"
               ],
-              "depends_on": [
-                "nome_cliente"
-              ],
+              "depends_on": [],
               "key": "servico",
               "overwrite_policy": "explicit_correction",
               "owner_node_id": "product:window-film",
@@ -12185,9 +12151,7 @@
               "accepted_statuses": [
                 "known"
               ],
-              "depends_on": [
-                "nome_cliente"
-              ],
+              "depends_on": [],
               "key": "servico",
               "overwrite_policy": "explicit_correction",
               "owner_node_id": "product:windshield-crystallization",

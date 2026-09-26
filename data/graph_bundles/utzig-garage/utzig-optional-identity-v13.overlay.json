@@ -6,7 +6,7 @@
     "checksum": "sha256:a5bfac4a813f9c7c357910371d70a8e8a2df14e86d93c4374aa4e2f322b1c553"
   },
   "metadata": {
-    "purpose": "make customer identity optional across booking and completion contracts",
+    "purpose": "make customer identity optional without qualifying or selecting services by identity",
     "source": "operator_request_2026_09_25"
   },
   "patch_nodes": [
@@ -120,9 +120,7 @@
                 "scope": "branch",
                 "priority": 0.8,
                 "required": true,
-                "depends_on": [
-                  "nome_cliente"
-                ],
+                "depends_on": [],
                 "validation": {
                   "mode": "schema"
                 },
@@ -231,9 +229,7 @@
                 "scope": "branch",
                 "priority": 0.8,
                 "required": true,
-                "depends_on": [
-                  "nome_cliente"
-                ],
+                "depends_on": [],
                 "validation": {
                   "mode": "schema"
                 },
@@ -342,9 +338,7 @@
                 "scope": "branch",
                 "priority": 0.8,
                 "required": true,
-                "depends_on": [
-                  "nome_cliente"
-                ],
+                "depends_on": [],
                 "validation": {
                   "mode": "schema"
                 },
@@ -453,9 +447,7 @@
                 "scope": "branch",
                 "priority": 0.8,
                 "required": true,
-                "depends_on": [
-                  "nome_cliente"
-                ],
+                "depends_on": [],
                 "validation": {
                   "mode": "schema"
                 },
@@ -566,9 +558,7 @@
                 "scope": "branch",
                 "priority": 0.8,
                 "required": true,
-                "depends_on": [
-                  "nome_cliente"
-                ],
+                "depends_on": [],
                 "validation": {
                   "mode": "schema"
                 },
@@ -701,9 +691,7 @@
                 "scope": "branch",
                 "priority": 0.8,
                 "required": true,
-                "depends_on": [
-                  "nome_cliente"
-                ],
+                "depends_on": [],
                 "validation": {
                   "mode": "schema"
                 },
@@ -834,9 +822,7 @@
                 "scope": "branch",
                 "priority": 0.8,
                 "required": true,
-                "depends_on": [
-                  "nome_cliente"
-                ],
+                "depends_on": [],
                 "validation": {
                   "mode": "schema"
                 },
@@ -945,9 +931,7 @@
                 "scope": "branch",
                 "priority": 0.8,
                 "required": true,
-                "depends_on": [
-                  "nome_cliente"
-                ],
+                "depends_on": [],
                 "validation": {
                   "mode": "schema"
                 },
@@ -1058,9 +1042,7 @@
                 "scope": "branch",
                 "priority": 0.8,
                 "required": true,
-                "depends_on": [
-                  "nome_cliente"
-                ],
+                "depends_on": [],
                 "validation": {
                   "mode": "schema"
                 },
@@ -1191,9 +1173,7 @@
                 "scope": "branch",
                 "priority": 0.8,
                 "required": true,
-                "depends_on": [
-                  "nome_cliente"
-                ],
+                "depends_on": [],
                 "validation": {
                   "mode": "schema"
                 },
@@ -1304,9 +1284,7 @@
                 "scope": "branch",
                 "priority": 0.8,
                 "required": true,
-                "depends_on": [
-                  "nome_cliente"
-                ],
+                "depends_on": [],
                 "validation": {
                   "mode": "schema"
                 },
@@ -1439,9 +1417,7 @@
                 "scope": "branch",
                 "priority": 0.8,
                 "required": true,
-                "depends_on": [
-                  "nome_cliente"
-                ],
+                "depends_on": [],
                 "validation": {
                   "mode": "schema"
                 },
@@ -1572,9 +1548,7 @@
                 "scope": "branch",
                 "priority": 0.8,
                 "required": true,
-                "depends_on": [
-                  "nome_cliente"
-                ],
+                "depends_on": [],
                 "validation": {
                   "mode": "schema"
                 },
@@ -1685,9 +1659,7 @@
                 "scope": "branch",
                 "priority": 0.8,
                 "required": true,
-                "depends_on": [
-                  "nome_cliente"
-                ],
+                "depends_on": [],
                 "validation": {
                   "mode": "schema"
                 },
@@ -1818,9 +1790,7 @@
                 "scope": "branch",
                 "priority": 0.8,
                 "required": true,
-                "depends_on": [
-                  "nome_cliente"
-                ],
+                "depends_on": [],
                 "validation": {
                   "mode": "schema"
                 },
@@ -1931,9 +1901,7 @@
                 "scope": "branch",
                 "priority": 0.8,
                 "required": true,
-                "depends_on": [
-                  "nome_cliente"
-                ],
+                "depends_on": [],
                 "validation": {
                   "mode": "schema"
                 },
@@ -2064,9 +2032,7 @@
                 "scope": "branch",
                 "priority": 0.8,
                 "required": true,
-                "depends_on": [
-                  "nome_cliente"
-                ],
+                "depends_on": [],
                 "validation": {
                   "mode": "schema"
                 },
@@ -2175,9 +2141,7 @@
                 "scope": "branch",
                 "priority": 0.8,
                 "required": true,
-                "depends_on": [
-                  "nome_cliente"
-                ],
+                "depends_on": [],
                 "validation": {
                   "mode": "schema"
                 },
