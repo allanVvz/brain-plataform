@@ -284,6 +284,22 @@ def test_validator_uses_understanding_resolution_for_committed_branch_operation(
     assert audit["passed"] is True
 
 
+def test_validator_does_not_treat_canonical_service_selector_as_reused_field():
+    inputs = _audit_inputs(conversation_mode="n8n_agents")
+    inputs["proof_record"]["proof_result"].update({
+        "accepted_facts": [{
+            "field_key": "servico",
+            "value": "vitrificacao",
+            "evidence_span": "Vitrificação",
+        }],
+        "consumed_service_spans": [{"text": "Vitrificação"}],
+    })
+
+    audit = wa_validator_service._semantic_turn_audit(**inputs)
+
+    assert audit["criteria"]["service_value_not_reused_as_field"] is True
+
+
 def test_agentic_validator_accepts_consultative_turn_when_no_field_is_askable():
     inputs = _audit_inputs(conversation_mode="n8n_agents")
     inputs["contract"]["fields"] = []

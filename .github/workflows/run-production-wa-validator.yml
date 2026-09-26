@@ -71,6 +71,7 @@ jobs:
             cd "$VPS_APP_DIR"
             mode=--dry-run
             [[ "$VALIDATOR_ACTION" == "run" ]] && mode=--run
+            [[ "$VALIDATOR_ACTION" == "run-source" ]] && mode=--run-source
             [[ "$VALIDATOR_ACTION" == "inspect" ]] && mode=--inspect
             bash ops/vps/run-microservice-wa-validator.sh \
               "$mode" "$PERSONA_SLUG" "$FLOW_ID" "$INITIAL_STATE" \

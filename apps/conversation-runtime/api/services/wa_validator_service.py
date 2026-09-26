@@ -2425,7 +2425,7 @@ def _semantic_turn_audit(
         for key, value in intended.items()
     )
     service_value_not_reused_as_field = not any(
-        str(fact.get("field_key") or "") not in branch_selection_keys
+        str(fact.get("field_key") or "") not in (branch_selection_keys | {"servico"})
         and (
             _semantic_fold(str(fact.get("value") or "")) in consumed_service_values
             or _semantic_fold(str(fact.get("evidence_span") or "")) in consumed_service_values
