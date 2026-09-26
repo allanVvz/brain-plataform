@@ -145,7 +145,25 @@ result = {
     "quality_scope": output.get("quality_scope", session.get("quality_scope")),
     "turns": turns,
 }
+semantic_turns = [
+    {
+        "message_id": turn.get("message_id"),
+        "active_branch_node_id": (turn.get("turn_audit") or {}).get("active_branch_node_id"),
+        "intent": turn.get("intent"),
+        "route": turn.get("route"),
+        "handoff": turn.get("handoff"),
+        "asked_field": (turn.get("semantic_audit") or {}).get("asked_field"),
+        "failures": (turn.get("semantic_audit") or {}).get("failures") or [],
+        "observations": (turn.get("semantic_audit") or {}).get("observations") or [],
+        "false_criteria": sorted(
+            key for key, value in ((turn.get("semantic_audit") or {}).get("criteria") or {}).items()
+            if value is False
+        ),
+    }
+    for turn in conversation if turn.get("role") == "bot"
+]
 print("WA_VALIDATOR_AUDIT=" + json.dumps(summary, ensure_ascii=True, sort_keys=True))
+print("WA_VALIDATOR_SEMANTIC_TURNS=" + json.dumps(semantic_turns, ensure_ascii=True, sort_keys=True))
 print("WA_VALIDATOR_INSPECTION=" + json.dumps(result, ensure_ascii=True, sort_keys=True))
 PY
   echo "WA_VALIDATOR_INSPECT_RESULT=passed"
