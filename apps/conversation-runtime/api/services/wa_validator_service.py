@@ -1075,6 +1075,18 @@ def _semantic_sales_script(
         "mode": "semantic_graph_v1",
         "opening": opening,
         "answers": answers,
+        "consultative_answers": [
+            {
+                **item,
+                "kind": "consultative_answer",
+                "expected_branch_node_id": anchor,
+                "expected_active_branch_node_ids": [anchor],
+            }
+            for item in (
+                (profile.get("consultative_answers_by_flow") or {}).get(flow_id) or []
+            )
+            if isinstance(item, dict) and str(item.get("text") or "").strip()
+        ],
         "required_fields": required_fields,
         "questions": driver_questions,
         "branch_anchor_node_id": anchor,

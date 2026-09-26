@@ -153,6 +153,14 @@
         }
       }
     },
+    "consultative_answers_by_flow": {
+      "sdr_sales_retail": [
+        {
+          "text": "Conforto e praticidade contam mais pra mim. Prefiro visitar a loja física para comparar as peças de perto.",
+          "intended_facts": {"forma_recebimento": "visita_loja"}
+        }
+      ]
+    },
     "unsupported_commercial_question": "Vocês conseguem garantir estoque para a próxima semana?",
     "post_qualification_question": "Ainda estou comparando. Quais tipos de peça casual vocês têm para o dia a dia?",
     "branch_switch_text": "Na verdade, é para uso próprio.",

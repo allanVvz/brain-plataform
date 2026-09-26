@@ -139,6 +139,9 @@ def test_sales_semantic_scripts_select_distinct_graph_branches():
     )
 
     assert retail["driver"]["mode"] == "semantic_graph_v1"
+    assert retail["driver"]["consultative_answers"][0]["intended_facts"] == {
+        "forma_recebimento": "visita_loja"
+    }
     assert retail["driver"]["branch_anchor_node_id"] == "audience:tock-retail"
     assert reseller["driver"]["branch_anchor_node_id"] == "audience:tock-reseller"
     assert retail["driver"]["branch_anchor_node_id"] != reseller["driver"]["branch_anchor_node_id"]
