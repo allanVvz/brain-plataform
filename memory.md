@@ -1,3 +1,32 @@
+# Checkpoint 2026-09-26 - Tock e Utzig ativos, auditoria e WA Validator
+
+O usuario pediu para garantir Tock e Utzig funcionando. Auditoria produtiva
+read-only `36216395221` confirmou ambas as personas `active=true`, bindings
+comerciais `active=true`, `connected`, sem `safety_paused`, claims globais nao
+pausados, zero orfaos e zero outbound recente sem proof. O unico backlog real
+na auditoria sao 12 `dead_letter` historicos de 14 a 25/09; nenhum foi
+reprocessado. O status da Tock inclui `waiting_human` historico, que nao foi
+retomado em lote. Nao houve comando de reativacao: os dois agentes ja estavam
+ligados. Auditoria de estado adicionada ao workflow no commit `79df0c5`.
+
+WA Validator direto/interno, sem WhatsApp real: Utzig `36209970058`, sessao
+`d01aacba-2510-4fe1-b151-143139ee98f6`, Graph v13, cinco turnos de bot,
+cinco decisoes/proofs validos/commits/outbounds internos, cinco auditorias
+semanticas aprovadas e um handoff; `technical_pass=true`. Tock `36216043754`,
+sessao `2a5606de-67bb-461d-9701-0cea74fd66c6`, Graph v38, seis turnos de
+bot, seis decisoes/proofs validos/commits/outbounds internos, seis auditorias
+semanticas aprovadas e um handoff; `technical_pass=true`, `quality_pass=true`.
+As inspecoes foram `36215669745` e `36216381036`.
+
+Dois ensaios previos da Tock ficaram registrados: `36209985187` teve
+`technical_pass=true` mas o validador nao reconheceu a frase natural de
+passagem a equipe no handoff final; `36215648356` teve quatro turnos tecnicos
+e semanticos validos, mas o motorista sintetico nao sabia responder a uma
+pergunta consultiva e encerrou a amostra como incompleta. Foram corrigidos
+somente o validador e o perfil de cliente sintetico, nos commits `10367f2` e
+`bbed44c`; 33 testes focados passaram. Nao houve deploy de runtime, graph ou
+transport nesta retomada.
+
 # Checkpoint 2026-09-26 - agente Utzig atualizado e validado em producao
 
 O usuario pediu que o trabalho continuasse ate a ultima versao do agente estar
