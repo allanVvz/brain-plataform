@@ -103,7 +103,7 @@ conversation = output.get("conversation") or []
 keep = (
     "role", "text", "intent", "route", "handoff", "message_id",
     "pipeline_contract", "graph_version", "graph_checksum", "journey_state",
-    "turn_audit", "semantic_audit", "failure_diagnostic",
+  "turn_audit", "semantic_audit", "failure_diagnostic",
 )
 turns = [{key: turn.get(key) for key in keep if key in turn} for turn in conversation]
 bot_turns = [turn for turn in conversation if turn.get("role") == "bot" and turn.get("turn_audit")]
@@ -165,20 +165,25 @@ fi
 
 validator_cid="$(docker ps -aq --filter "name=^/${validator_name}$" | head -n 1)"
 validator_was_running=false
+validator_existed_before_run=false
 source_validator_created=false
-source_validator_stopped_for_run=false
 if [[ -n "$validator_cid" ]]; then
+  validator_existed_before_run=true
   validator_was_running="$(docker inspect -f '{{.State.Running}}' "$validator_cid")"
 fi
 cleanup() {
   local status="$?"
   if [[ "$MODE" == "--run-source" && "$source_validator_created" == "true" ]]; then
     docker rm -f "$validator_name" >/dev/null 2>&1 || true
+    if [[ "$validator_existed_before_run" == "true" ]]; then
+      if [[ "$validator_was_running" == "true" ]]; then
+        "${COMPOSE[@]}" up -d --no-deps "$validator_service" >/dev/null || true
+      else
+        "${COMPOSE[@]}" create --no-build "$validator_service" >/dev/null || true
+      fi
+    fi
   elif [[ "$validator_was_running" != "true" ]]; then
     docker stop -t 120 "$validator_name" >/dev/null || true
-  fi
-  if [[ "$source_validator_stopped_for_run" == "true" ]]; then
-    docker start "$validator_name" >/dev/null || true
   fi
   if [[ "$runner_was_running" != "true" ]]; then
     docker stop -t 120 "$runner_cid" >/dev/null || true
@@ -214,7 +219,7 @@ PY
   }
   if [[ "$validator_was_running" == "true" ]]; then
     docker stop -t 120 "$validator_name" >/dev/null
-    source_validator_stopped_for_run=true
+    docker rm -f "$validator_name" >/dev/null
   fi
   source_service="$ROOT_DIR/apps/conversation-runtime/api/services/wa_validator_service.py"
   source_profile="$ROOT_DIR/apps/conversation-runtime/api/evaluation/wa_validator_customer_profiles.json"

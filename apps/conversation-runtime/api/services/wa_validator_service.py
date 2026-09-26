@@ -2425,7 +2425,9 @@ def _semantic_turn_audit(
         for key, value in intended.items()
     )
     service_value_not_reused_as_field = not any(
-        str(fact.get("field_key") or "") not in (branch_selection_keys | {"servico"})
+        str(fact.get("field_key") or "") not in (
+            branch_selection_keys | {"servico", "commercial_interests"}
+        )
         and (
             _semantic_fold(str(fact.get("value") or "")) in consumed_service_values
             or _semantic_fold(str(fact.get("evidence_span") or "")) in consumed_service_values
@@ -2792,6 +2794,15 @@ def _semantic_turn_audit(
         "first_missing_field": first_missing,
         "missing_fields": missing,
         "accepted_fact_keys": sorted(accepted),
+        "accepted_fact_evidence": [
+            {
+                "field_key": str(fact.get("field_key") or ""),
+                "owner_node_id": str(fact.get("owner_node_id") or ""),
+                "value": str(fact.get("value") or ""),
+                "evidence_span": str(fact.get("evidence_span") or ""),
+            }
+            for fact in proof.get("accepted_facts") or []
+        ],
         "intended_fact_keys": sorted(str(key) for key in intended),
         "previous_ledger_revision": ledger_before.get("revision"),
         "ledger_revision": ledger_after.get("revision"),

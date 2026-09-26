@@ -291,6 +291,10 @@ def test_validator_does_not_treat_canonical_service_selector_as_reused_field():
             "field_key": "servico",
             "value": "vitrificacao",
             "evidence_span": "Vitrificação",
+        }, {
+            "field_key": "commercial_interests",
+            "value": "vitrificacao",
+            "evidence_span": "Vitrificação",
         }],
         "consumed_service_spans": [{"text": "Vitrificação"}],
     })
