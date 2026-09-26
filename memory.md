@@ -1,3 +1,50 @@
+# Checkpoint 2026-09-26 - agente Utzig atualizado e validado em producao
+
+O usuario pediu que o trabalho continuasse ate a ultima versao do agente estar
+funcionando. Release compatível `conversation-runtime` publicada no workflow
+`36205661785`, a partir do commit de codigo `b38730a83982e489507ecdb2fec5b5e0f30748b7`,
+digest `sha256:2962ebb924dbf646b08c617965d6767b509a2b0e4a8c98ed59b78a015f343165`;
+manifesto incremental `875d0496caecec45224ce0ddd0c920ae9f170db5`. O pipeline foi
+corrigido antes do deploy para verificar somente o servico afetado; runtime
+ficou em slot verde e os outros microsservicos nao foram promovidos.
+
+GraphBundle Utzig v13 staged no workflow `36205951486` e ativado no workflow
+`36206063495`: publicacao `6b85bf7a-ab87-4f3b-a1d1-4a6b4ae4c05f`, checksum
+`sha256:961c06d8fe7e707b3e71c74c2aa1b8c50d6b828436b0b15f2005381dc00a5f32`.
+Versao 13 e checksum foram verificados pela API publica. `nome_cliente` nao e
+mais obrigatorio na persona/produtos; continua opcional e nao bloqueia a coleta.
+
+E2E pelo WA Validator interno, sem WhatsApp real. A sessao completa
+`f1e84f8f-ae9b-45f3-8e40-912b27c3eb91` foi inspecionada: 5 turnos de bot,
+5 decisoes, 5 proofs validos, 5 commits completos e 5 outbounds internos;
+modelo executou 2 chamadas por turno, zero repairs; todas as cinco auditorias
+semanticas passaram, branch mudou de `product:vitrification` para
+`product:windshield-crystallization` no pedido explicito e terminou em handoff
+humano. Uma segunda sessao completa, workflow `36209057241`, tambem concluiu
+`technical_pass=true` / `WA_VALIDATOR_RESULT=passed` com 12 mensagens totais.
+O resumo do Validator marcou `quality_pass=false` apesar dos criterios
+semanticos individuais passarem; os warnings observados foram metadata de
+claims/question_kind descartados, sem falha de prova, duplicidade ou outbound
+real.
+
+Houve uma tentativa sintetica anterior (`e0d8486c-5541-460d-8a71-e8a9b65aa926`)
+em que o modelo gerou resposta vazia logo apos a troca para PPF. O runtime
+terminalizou o turno, registrou proof/commit e nao enviou texto; nenhuma
+mensagem externa foi enviada. O codigo segue a politica de nao reparar a
+resposta no mesmo turno. As duas sessoes completas seguintes passaram. O
+auditor WA Validator tambem foi corrigido para comparar somente evidencias de
+operacoes `add` reais (nao spans `keep` como “Onix”), sincronizar o perfil v13
+no workflow e restaurar o worker QA sem healthcheck usando estado `running`.
+Cobertura focada final: 18 testes; `bash -n` passou. O worker QA foi restaurado
+pelo proprio cleanup e a execucao final completou com sucesso.
+
+Commits auxiliares em `main`: `33b96ed` (campo canonico do servico no auditor),
+`bc69436` (evidencia e spans resolvidos), `8d620e7` e `70ac63a` (nao confundir
+spans `keep` com selecao), `ae2904d`, `62c0e0c`, `697deb7` e `891656f`
+(sync/restauracao/diagnostico do WA Validator). O checkpoint historico abaixo,
+inclusive falhas e pendencias da LP, foi preservado como evidencia de antes da
+retomada; consultar os resultados acima para o estado atual.
+
 # Checkpoint 2026-09-25 - branch switch corrigido, candidate barrado por nome
 
 O usuario confirmou que o agente pode mudar de branch quando o cliente pede
