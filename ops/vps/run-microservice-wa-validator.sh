@@ -193,7 +193,21 @@ cleanup() {
     docker rm -f "$validator_name" >/dev/null 2>&1 || true
     # Restore the configured immutable QA worker after removing the
     # source-injected container, even when the source run failed.
-    "${COMPOSE[@]}" up -d --no-deps "$validator_service" >/dev/null || true
+    if "${COMPOSE[@]}" up -d --no-deps "$validator_service" >/dev/null; then
+      restore_deadline=$((SECONDS + 120))
+      until [[ "$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$validator_name" 2>/dev/null || true)" == "healthy" ]]; do
+        if (( SECONDS >= restore_deadline )); then
+          echo "configured WA Validator worker failed to restore: $validator_name" >&2
+          status=1
+          break
+        fi
+        sleep 3
+      done
+      [[ "$(docker inspect -f '{{.State.Health.Status}}' "$validator_name" 2>/dev/null || true)" == "healthy" ]] || status=1
+    else
+      echo "configured WA Validator worker failed to recreate: $validator_name" >&2
+      status=1
+    fi
   elif [[ "$validator_was_running" != "true" ]]; then
     docker stop -t 120 "$validator_name" >/dev/null || true
   fi
