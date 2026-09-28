@@ -1,3 +1,5 @@
+"""Historical monolith route; production /messaging uses apps/control-plane."""
+
 from __future__ import annotations
 
 from typing import Any, Literal

@@ -130,7 +130,6 @@ export function CampaignsAndTemplates({
   const [provider, setProvider] = useState<"meta_cloud" | "evolution_baileys">("meta_cloud");
   const [templates, setTemplates] = useState<any[]>([]);
   const [templateId, setTemplateId] = useState("");
-  const [controlledTest, setControlledTest] = useState(false);
   const [message, setMessage] = useState("");
   const [reason, setReason] = useState("");
   const [policy, setPolicy] = useState(DEFAULT_POLICY);
@@ -218,10 +217,10 @@ export function CampaignsAndTemplates({
     import_batch_ids: selectedImports, audience_id: audienceId,
     provider, template_name: null,
     template_language: "pt_BR", template_id: templateId || null,
-    send_mode: provider === "meta_cloud" && controlledTest ? "controlled_test" : "",
+    send_mode: "",
     message: message || null,
     variables: {}, assets: [], policy_overrides: policy,
-  }), [name, objective, purpose, kind, selectedImports, audienceId, provider, templateId, controlledTest, message, policy]);
+  }), [name, objective, purpose, kind, selectedImports, audienceId, provider, templateId, message, policy]);
 
   async function runPreview() {
     setBusy(true); setError(""); setNotice("");
@@ -242,7 +241,7 @@ export function CampaignsAndTemplates({
         reason,
       });
       setNotice("Draft criado com revisao, politica e destinatarios congelados.");
-      setPreview(null); setName(""); setObjective(""); setMessage(""); setReason(""); setTemplateId(""); setControlledTest(false);
+      setPreview(null); setName(""); setObjective(""); setMessage(""); setReason(""); setTemplateId("");
       await load();
     } catch (reason: any) { setError(reason?.message || "Falha ao criar campanha."); }
     finally { setBusy(false); }
@@ -459,19 +458,11 @@ export function CampaignsAndTemplates({
               {templates.map((row) => <option key={row.id} value={row.id}>{row.meta_template_name || row.template_key}</option>)}
             </select>
           </Field>
-          {provider === "meta_cloud" && (
-            <Field cx={cx} label="Modo texto controlado (teste)">
-              <label className={`flex items-center gap-2 text-xs ${cx.text}`}>
-                <input type="checkbox" checked={controlledTest} onChange={(e) => setControlledTest(e.target.checked)} disabled={!capabilities.edit} />
-                Permite texto simples sem template, so com conversa ativa nas ultimas 24h
-              </label>
-            </Field>
-          )}
         </div>
         <Field cx={cx} label="Mensagem / snapshot de conteudo"><textarea value={message} onChange={(e) => setMessage(e.target.value)} disabled={!capabilities.edit} className={`${cx.input} min-h-24`} placeholder="Texto de referencia do template" /></Field>
         <Field cx={cx} label="Justificativa (motivo da campanha)"><textarea value={reason} onChange={(e) => setReason(e.target.value)} disabled={!capabilities.edit} className={`${cx.input} min-h-16`} placeholder="Por que esta campanha está sendo criada" /></Field>
         <div>
-          <p className={`mb-2 text-xs font-medium ${cx.subtle}`}>Imports (deduplicados por lead)</p>
+          <p className={`mb-2 text-xs font-medium ${cx.subtle}`}>Origem: imports concluídos ou membros do grupo semântico</p>
           <div className="grid gap-2 md:grid-cols-2">
             {imports.map((row) => (
               <label key={row.id} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs ${cx.text} ${cx.inlineBox}`}>
@@ -481,7 +472,7 @@ export function CampaignsAndTemplates({
                 <span className={`ml-auto ${cx.faint}`}>{row.valid_rows} leads</span>
               </label>
             ))}
-            {!imports.length && <p className={`text-xs ${cx.faint}`}>Importe uma lista antes de criar a campanha.</p>}
+            {!imports.length && <p className={`text-xs ${cx.faint}`}>Sem import concluído: o grupo selecionado será usado diretamente.</p>}
           </div>
         </div>
         <div className="grid gap-3 md:grid-cols-5">
@@ -493,7 +484,7 @@ export function CampaignsAndTemplates({
           ))}
         </div>
         <div className="flex justify-end">
-          <button disabled={!capabilities.edit || busy || !name || !purpose || !audienceId || !selectedImports.length} onClick={runPreview} className={cx.btnPrimary}>
+          <button disabled={!capabilities.edit || busy || !name || !purpose || !audienceId} onClick={runPreview} className={cx.btnPrimary}>
             {busy ? <Loader2 size={13} className="animate-spin" /> : <ShieldCheck size={13} />} Avaliar elegibilidade
           </button>
         </div>

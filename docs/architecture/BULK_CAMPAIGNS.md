@@ -1,6 +1,38 @@
 # Campanhas em massa
 
-Arquitetura expand-first para imports, consentimento e campanhas. O rollout 1 nao envia mensagens: ele cria coortes operacionais, calcula elegibilidade e congela drafts auditaveis. O envio individual e a conversa atual permanecem inalterados.
+## Estado operacional em 2026-09-27
+
+O gateway produtivo encaminha `/messaging*` ao `apps/control-plane`; a copia
+em `api/routes/messaging_campaigns.py` e `api/services/campaigns_service.py`
+pertence ao monolito historico. Ela permanece como referencia ate uma auditoria
+de referencias e rollback permitir removê-la. Os registros de campanhas,
+imports, consentimentos e auditoria nao sao descartados.
+
+O fluxo candidato agora aceita preview e draft a partir de membros do grupo
+semantico quando nenhum import concluido foi selecionado. A revisao congela
+destinatarios deduplicados e a origem. O envio Meta exige template local ativo,
+da mesma persona/provider, com `meta_approval_status=approved` e ID Meta.
+Texto simples de teste deixa de ser caminho de campanha.
+
+A migration `20260928014611_campaign_atomic_admission.sql` prepara a admissao
+na outbox e a atualizacao do destinatario na mesma transacao. A trava por
+persona serializa campanhas simultaneas; os limites efetivos nunca excedem
+20 por hora e 100 por dia (dia de Sao Paulo). Cada lead recebe no maximo uma
+primeira mensagem de campanha; consentimento, binding, resposta nova e
+reativacao ativa bloqueiam a admissao. O worker revalida antes de chamar o
+provider. Capacidade esgotada deixa o destinatario elegivel para um lote
+posterior. A migration e as imagens ainda exigem auditoria, candidate e
+autorizacoes produtivas proprias antes de qualquer envio.
+
+Fila de reativacao, limpeza de conversa e campanhas sao operacoes separadas.
+Cada campanha segmentada requer revisao individual do publico, bloqueios,
+template, mensagem e sobreposicao com a fila. A limpeza da conversa de Allan
+exige dry-run e autorizacao especifica; consentimentos e eventos imutaveis
+permanecem preservados.
+
+Historico do rollout 1: ele criava coortes operacionais, calculava elegibilidade
+e congelava drafts sem enviar. O envio atual passa pelo control-plane e pelo
+transport; o candidato descrito acima depende da migration de admissao.
 
 ## Modelo
 

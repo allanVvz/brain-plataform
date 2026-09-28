@@ -17,7 +17,7 @@ class CampaignPreviewBody(BaseModel):
     objective: str | None = None
     purpose: str
     campaign_kind: Literal["consent_request", "promotional"]
-    import_batch_ids: list[str] = Field(min_length=1)
+    import_batch_ids: list[str] = Field(default_factory=list)
     audience_id: str
     provider: Literal["meta_cloud", "evolution_baileys"] = "meta_cloud"
     template_name: str | None = None

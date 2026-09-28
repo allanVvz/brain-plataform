@@ -1045,6 +1045,34 @@ def enqueue_whatsapp_envelope(
     return payload
 
 
+def admit_campaign_outbound(*, buffer: dict, message: dict) -> dict:
+    """Admit a campaign row and reserve capacity in one database transaction."""
+    result = get_client().rpc(
+        "admit_campaign_outbound_v1",
+        {"p_buffer": buffer, "p_message": message},
+    ).execute()
+    payload = getattr(result, "data", None)
+    if isinstance(payload, list):
+        payload = payload[0] if payload else None
+    if not isinstance(payload, dict) or "admitted" not in payload:
+        raise RuntimeError("admit_campaign_outbound_v1 returned an invalid result")
+    return payload
+
+
+def authorize_campaign_dispatch(buffer_id: str) -> bool:
+    result = get_client().rpc(
+        "authorize_campaign_dispatch_v1", {"p_buffer_id": buffer_id}
+    ).execute()
+    return getattr(result, "data", None) is True
+
+
+def reactivation_dispatch_blocked(buffer_id: str) -> bool:
+    result = get_client().rpc(
+        "reactivation_dispatch_blocked_v1", {"p_buffer_id": buffer_id}
+    ).execute()
+    return getattr(result, "data", None) is True
+
+
 def enqueue_proactive_with_proof(*, buffer: dict, message: dict, publication_id: str,
                                  evidence_node_ids: list[str], proof_result: dict,
                                  model_proposal: dict | None = None) -> dict:

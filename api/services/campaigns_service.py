@@ -1,4 +1,6 @@
-"""Campaign delivery domain service.
+"""Historical monolith campaign service; production /messaging uses apps/control-plane.
+
+Campaign delivery domain service.
 
 The service deliberately separates policy resolution, consent resolution and
 recipient eligibility. `send_campaign` (delivery two) re-runs the same

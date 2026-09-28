@@ -333,6 +333,12 @@ def enqueue_outbound(*, lead: dict[str, Any], text: str, sender_type: str,
     )
     binding = prepared["binding"]
     lock_key = idempotency_key or correlation_id
+    if campaign_scope:
+        admitted = supabase_client.admit_campaign_outbound(
+            buffer=prepared["buffer"], message=prepared["message"],
+        )
+        return {**admitted, "binding": binding}
+
     existing = supabase_client.get_whatsapp_buffer_by_idempotency(lock_key)
     if existing:
         if (
