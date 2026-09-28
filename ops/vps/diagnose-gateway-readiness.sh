@@ -203,6 +203,44 @@ select 'CONSENTED_BRANCH',s.branch_node,count(*)
 from scoped s join latest_consent c on c.lead_id=s.id and c.status='granted'
 group by s.branch_node order by s.branch_node;
 
+with latest_consent as (
+  select distinct on (c.lead_id) c.lead_id,c.status,c.valid_until
+  from public.contact_consents c join public.personas p on p.id=c.persona_id
+  where p.slug='tock-fatal' and c.channel='whatsapp'
+    and c.purpose='ofertas_e_novidades'
+  order by c.lead_id,c.effective_at desc,c.created_at desc
+), reseller as (
+  select l.id,l.persona_id from public.leads l
+  join public.personas p on p.id=l.persona_id
+  join latest_consent c on c.lead_id=l.id and c.status='granted'
+    and (c.valid_until is null or c.valid_until>now())
+  where p.slug='tock-fatal'
+    and coalesce(l.metadata->'conversation_state'->>'active_branch_node_id',
+      l.metadata->'conversation_runtime'->>'active_branch_node_id','')='audience:tock-reseller'
+), queue_leads as (
+  select distinct (item->>'lead_ref')::bigint as lead_id
+  from jsonb_array_elements(public.list_actionable_message_queue_v1(
+    array(select id from public.personas where slug='tock-fatal'),
+    'conversation','awaiting_customer',0,100)->'items') item
+)
+select 'RESELLER_CANDIDATE_OVERLAP',count(*),
+  count(*) filter (where q.lead_id is not null),
+  count(*) filter (where exists(select 1 from public.lead_buffer b
+    where b.lead_ref=r.id and b.persona_id=r.persona_id
+      and b.direction='outbound' and b.message_origin='proactive')),
+  count(*) filter (where exists(select 1 from public.lead_buffer b
+    where b.lead_ref=r.id and b.persona_id=r.persona_id
+      and b.direction='outbound' and b.message_origin='campaign')),
+  count(*) filter (where exists(select 1 from public.contact_consents c
+    where c.lead_id=r.id and c.persona_id=r.persona_id and c.channel='whatsapp'
+      and c.status in ('refused','revoked') and (c.valid_until is null or c.valid_until>now())))
+from reseller r left join queue_leads q on q.lead_id=r.id;
+
+select 'VALIDATOR_PROOF_FACTS',p.canonical_inbound_id,
+  p.proof_result->'accepted_facts',p.proof_result->'consumed_service_spans'
+from public.conversation_turn_proofs p
+where p.canonical_inbound_id='2429af67-f44b-4532-b635-0635502f3f13';
+
 select 'CAMPAIGN',c.id,c.status,c.campaign_kind,c.provider,c.audience_id
 from public.campaigns c join public.personas p on p.id=c.persona_id
 where p.slug='tock-fatal' order by c.created_at desc limit 50;
