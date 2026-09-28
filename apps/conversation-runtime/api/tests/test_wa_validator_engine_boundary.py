@@ -425,7 +425,7 @@ def test_sales_driver_answers_optional_name_before_final_confirmation():
     assert state.get("confirmation_sent") is None
 
 
-def test_semantic_turn_audit_flags_immediate_name_retry_but_allows_later_resume():
+def test_semantic_turn_audit_flags_name_retry_even_after_an_intervening_turn():
     inputs = _audit_inputs(conversation_mode="n8n_agents")
     inputs["contract"]["fields"][0]["key"] = "nome_cliente"
     inputs["contract"]["questions"]["q:name"]["field_key"] = "nome_cliente"
@@ -447,7 +447,7 @@ def test_semantic_turn_audit_flags_immediate_name_retry_but_allows_later_resume(
     inputs["recent_replies"].append("Sua dúvida foi respondida. Podemos seguir quando quiser.")
     later = wa_validator_service._semantic_turn_audit(**inputs)
 
-    assert later["criteria"]["customer_name_question_timing"] is True
+    assert later["criteria"]["customer_name_question_timing"] is False
     assert later["criteria"]["question_repetition_budget"] is True
     assert later["passed"] is True
 

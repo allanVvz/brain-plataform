@@ -203,9 +203,26 @@ def askable_pending_fields(
     for that one-attempt budget.
     """
     asked_ids = {str(value) for value in asked_question_node_ids or [] if value}
+    fields_by_key = {
+        str(item.get("key") or ""): item for item in contract.get("fields") or []
+    }
+
+    def dependencies_resolved(field: dict[str, Any]) -> bool:
+        return all(
+            bool(
+                dependency
+                and _resolved_for_field_owner(
+                    dependency, facts.get(str(key)),
+                )
+            )
+            for key in field.get("depends_on") or []
+            for dependency in [fields_by_key.get(str(key))]
+        )
+
     return [
         field for field in contract.get("fields") or []
         if _condition_matches(field.get("condition"), facts)
+        and dependencies_resolved(field)
         and not _resolved_for_field_owner(field, facts.get(field["key"]))
         and (
             field.get("required", True)
@@ -836,13 +853,17 @@ def check(
             if field.get("question_node_id")
         }
         field = askable_by_question.get(str(question_id))
-        if not question or not field or question.get("field_key") != field.get("key"):
-            errors.append("next_question_not_askable")
-        elif any(
+        declared_field = next((
+            item for item in contract.get("fields") or []
+            if str(item.get("question_node_id") or "") == str(question_id)
+        ), None)
+        if question and declared_field and any(
             dependency in missing_keys
             for dependency in question.get("depends_on") or []
         ):
             errors.append("next_question_dependencies_unsatisfied")
+        elif not question or not field or question.get("field_key") != field.get("key"):
+            errors.append("next_question_not_askable")
     # qualification_complete is 100% derivable from `missing` -- the same
     # reasoning as re-deriving "servico" from active_branch_node_id
     # server-side (graph_agent_runtime_v3.decide()) rather than trusting a

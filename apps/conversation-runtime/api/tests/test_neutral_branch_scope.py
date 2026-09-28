@@ -17,6 +17,7 @@ branch ever means "both brands visible" again.
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 import sys
 from pathlib import Path
 
@@ -283,6 +284,42 @@ def branchless_turn(monkeypatch, document):
         persona_slug="tock-fatal", lead_ref=208,
         message="oi, tudo bem?", message_id="msg-1",
     )
+
+
+def test_crm_name_without_ledger_fact_reaches_real_context(
+    branchless_turn, document, monkeypatch,
+):
+    compiled = deepcopy(document)
+    name_field = {
+        "key": "customer_identity", "owner_node_id": "persona:tock-fatal",
+        "scope": "persona", "required": False,
+        "collection_mode": "ask_once_optional",
+        "question_node_id": "faq:tock-customer-name",
+        "validation": {"semantic_type": "human_full_name", "min_tokens": 1, "max_tokens": 3},
+    }
+    compiled["common_contract"]["fields"].append(name_field)
+    compiled["common_contract"].setdefault("questions", {})[
+        "faq:tock-customer-name"
+    ] = {"text": "Como prefere que eu te chame?", "field_key": "customer_identity"}
+    publication = {
+        "id": "pub-1", "version": 13, "status": "active",
+        "checksum": branchless_turn.graph_checksum,
+        "document_json": compiled,
+    }
+    client = graph_agent_runtime_v3.supabase_client
+    monkeypatch.setattr(client, "get_lead_by_ref", lambda _ref: {
+        "id": "lead-1", "persona_id": "persona-1", "nome": "Ana", "metadata": {},
+    })
+    monkeypatch.setattr(client, "get_graph_turn_context_batch_v4", lambda **_kwargs: {
+        "publication": publication, "messages": [], "branches": [],
+    })
+    context = graph_agent_runtime_v3.build_context(
+        persona_slug="tock-fatal", lead_ref=208,
+        message="oi, tudo bem?", message_id="msg-1",
+    )
+    assert context.retrieval_trace["profile_name"]["candidate"] == "Ana"
+    assert context.retrieval_trace["profile_name"]["state"] == "confirm_once"
+    assert not context.cart["facts"].get("customer_identity")
 
 
 @pytest.mark.unit

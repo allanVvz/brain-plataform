@@ -3,11 +3,46 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
+import unicodedata
 from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
 
 from services import agentic_turn, conversation_runtime, supabase_client, wa_validator_service
+
+
+def _fold(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value.casefold())
+    return "".join(char for char in normalized if not unicodedata.combining(char))
+
+
+def forbidden_questions_in_reply(case: dict, result: dict) -> list[str]:
+    """Check the public text as well as the model's question pointer."""
+    forbidden = set(case.get("forbidden_asked_fields") or [])
+    if not forbidden:
+        return []
+    context = result["context"]
+    reply = str(result["response"].reply_text or "")
+    if "?" not in reply:
+        return []
+    contracts = [context.graph_contract, context.retrieval_trace.get("common_contract") or {}]
+    detected: list[str] = []
+    for contract in contracts:
+        questions = contract.get("questions") or {}
+        for field in contract.get("fields") or []:
+            key = str(field.get("key") or "")
+            if key not in forbidden or key in detected:
+                continue
+            question = str((questions.get(field.get("question_node_id")) or {}).get("text") or "")
+            name_question = (
+                (field.get("validation") or {}).get("semantic_type") == "human_full_name"
+                and bool(re.search(r"\b(nome|cham\w*|name|call)\b", _fold(reply)))
+                and bool(re.search(r"\b(voce|te|seu|sua|you|your)\b", _fold(reply)))
+            )
+            if (question and wa_validator_service._question_already_asked(question, reply)) or name_question:
+                detected.append(key)
+    return detected
 
 
 def validate_case(case: dict, result: dict) -> None:
@@ -19,6 +54,9 @@ def validate_case(case: dict, result: dict) -> None:
                    for f in proof.get("accepted_facts") or []), "contextual answer misclassified"
     assert proof.get("asked_field_key") not in case.get("forbidden_asked_fields", []), (
         "candidate repeated the interrupted qualification field"
+    )
+    assert not forbidden_questions_in_reply(case, result), (
+        "candidate repeated the interrupted qualification field in public text"
     )
     if case.get("allowed_question_kinds"):
         assert proof.get("question_kind") in case["allowed_question_kinds"], (
@@ -78,10 +116,25 @@ def run(case: dict) -> dict:
             "quality_warnings": proof.get("quality_warnings") or []}
 
 
+def select_cases(fixture_name: str, case_name: str | None) -> list[dict]:
+    fixture = Path(__file__).resolve().parents[1] / "evaluation" / (fixture_name + ".json")
+    cases = json.loads(fixture.read_text(encoding="utf-8"))
+    if case_name is None:
+        return cases
+    selected = [case for case in cases if case.get("name") == case_name]
+    if len(selected) != 1:
+        raise ValueError(f"candidate probe case must match exactly once: {case_name}")
+    return selected
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("fixture", choices=["human-conversation-2026-09-25"])
+    parser.add_argument("fixture", help="Baked fixture, optionally followed by :case-name")
     args = parser.parse_args()
-    fixture = Path(__file__).resolve().parents[1] / "evaluation" / (args.fixture + ".json")
-    for case in json.loads(fixture.read_text(encoding="utf-8")):
+    fixture_name, _, case_name = args.fixture.partition(":")
+    if fixture_name != "human-conversation-2026-09-25":
+        parser.error(f"unsupported candidate fixture: {fixture_name}")
+    if ":" in args.fixture and not case_name:
+        parser.error("candidate probe case name is empty")
+    for case in select_cases(fixture_name, case_name or None):
         print("CANDIDATE_CONVERSATION_PROBE=" + json.dumps(run(case), ensure_ascii=True), flush=True)

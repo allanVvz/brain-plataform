@@ -2101,6 +2101,18 @@ def _question_already_asked(question: str, text: str) -> bool:
     return False
 
 
+def _name_question_in_text(text: str, variants: list[str]) -> bool:
+    if any(_question_already_asked(variant, text) for variant in variants):
+        return True
+    if "?" not in text:
+        return False
+    folded = _semantic_fold(text)
+    return bool(
+        re.search(r"\b(nome|cham\w*|name|call)\b", folded)
+        and re.search(r"\b(voce|te|seu|sua|you|your)\b", folded)
+    )
+
+
 def _fact_matches_expected(fact: dict | None, expected: object) -> bool:
     if not fact or fact.get("status") != "known":
         return False
@@ -2595,16 +2607,15 @@ def _semantic_turn_audit(
         )
         if value
     ]
-    current_asks_name = bool(
-        (name_question_id and question_id == name_question_id)
-        or any(_question_already_asked(variant, reply) for variant in name_variants)
+    current_name_text = _name_question_in_text(reply, name_variants)
+    name_question_text_count = sum(
+        _name_question_in_text(text, name_variants)
+        for text in [*recent_replies, reply]
     )
-    previous_asks_name = bool(
-        recent_replies and any(
-            _question_already_asked(variant, recent_replies[-1])
-            for variant in name_variants
-        )
-    )
+    name_question_id_count = sum(
+        str(item or "") == name_question_id
+        for item in ledger_after.get("asked_question_node_ids") or []
+    ) if name_question_id else 0
     criteria = {
         "intent_identified": bool(decision.get("intent")),
         "doubt_answered_first": (
@@ -2618,7 +2629,16 @@ def _semantic_turn_audit(
         "unsupported_claim_not_invented": unsupported_claim_not_invented,
         **reply_requirements,
         "sales_internal_language_absent": _sales_internal_language_absent(reply, contract),
-        "customer_name_question_timing": not (current_asks_name and previous_asks_name),
+        "customer_name_question_timing": max(
+            name_question_text_count, name_question_id_count,
+        ) <= 1,
+        "question_text_matches_metadata": (
+            not name_question_id
+            or (
+                (not current_name_text or question_id == name_question_id)
+                and (question_id != name_question_id or current_name_text)
+            )
+        ),
         "handoff_without_new_question": (
             not handoff_observed or (question_id is None and "?" not in reply)
         ),

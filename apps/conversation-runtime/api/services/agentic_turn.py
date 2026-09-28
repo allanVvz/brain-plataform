@@ -744,6 +744,11 @@ def execute(
     origin = site_origin.resolve(message, str(lead.get("persona_id") or ""))
     binding = _model_binding(str(lead.get("persona_id") or ""))
     fields = context.graph_contract.get("fields") or []
+    pending_profile_name = (
+        conversation_runtime.graph_agent_runtime_v3._pending_profile_name_confirmation(
+            context.messages, context.graph_contract,
+        )
+    )
     understanding_raw, understanding_usage = _call_json(
         binding,
         stage="understanding_model",
@@ -779,6 +784,8 @@ def execute(
             ),
             "active_branch_node_id": context.active_branch_node_id,
             "known_facts": context.cart.get("facts_by_key") or {},
+            "profile_name": context.retrieval_trace.get("profile_name"),
+            "pending_profile_name_confirmation": pending_profile_name,
             "asked_field_keys": context.cart.get("asked_field_keys") or [],
             "recent_messages": context.messages[-10:],
             "last_assistant_message": conversation_prompts.last_assistant_message(context.messages),
