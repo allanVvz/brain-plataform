@@ -4162,24 +4162,24 @@ def resolve_understanding(
                 "branch_anchor_node_id": active,
                 "evidence_type": "explicit_change",
             })
-        operation_action = (
-            "keep" if action is BranchAction.KEEP else "add"
-        )
-        operations.append({
-            "action": operation_action,
-            "branch_anchor_node_id": focused_branch,
-            "branch_path_checksum": branch_checksum,
-            "evidence_span": evidence_span,
-            "evidence_type": "confirmed_candidate",
-            "resolution_method": "turn_understanding_v1",
-            "score": 1.0,
-            "margin": 1.0,
-        })
-        consumed.append({
-            "text": evidence_span,
-            "branch_anchor_node_id": focused_branch,
-            "evidence_type": "confirmed_candidate",
-        })
+        # KEEP only identifies the branch already in scope. It does not
+        # select a service and must not consume the customer's field answer.
+        if action is not BranchAction.KEEP:
+            operations.append({
+                "action": "add",
+                "branch_anchor_node_id": focused_branch,
+                "branch_path_checksum": branch_checksum,
+                "evidence_span": evidence_span,
+                "evidence_type": "confirmed_candidate",
+                "resolution_method": "turn_understanding_v1",
+                "score": 1.0,
+                "margin": 1.0,
+            })
+            consumed.append({
+                "text": evidence_span,
+                "branch_anchor_node_id": focused_branch,
+                "evidence_type": "confirmed_candidate",
+            })
         focused_context = focused_context.model_copy(update={
             "retrieval_trace": {
                 **focused_context.retrieval_trace,

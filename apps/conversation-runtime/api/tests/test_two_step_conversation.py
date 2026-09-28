@@ -553,6 +553,7 @@ def test_tock_understanding_persists_retail_need_before_reply_and_refocuses_rag(
     retail = "audience:tock-retail"
     contract = document["branch_contracts"][retail]
     retail_need = next(field for field in contract["fields"] if field["key"] == "retail_need")
+    retail_style = next(field for field in contract["fields"] if field["key"] == "retail_style")
     context = ConversationContext(
         persona_slug="tock-fatal", agent_slug="vitoria", agent_role="sdr",
         execution_strategy="interpret_then_respond", graph_version=36,
@@ -620,6 +621,37 @@ def test_tock_understanding_persists_retail_need_before_reply_and_refocuses_rag(
         for guide in resolved.conversation_brief["eligible_question_guides"]
     )
     assert resolved.context_manifest["strategy"] == "graph_scoped_relevance"
+    followup_text = "Prefiro peças discretas"
+    for branch_action in ("keep", "select"):
+        # A model may report SELECT again; the active branch resolves it to KEEP.
+        followup_context = context.model_copy(deep=True, update={
+            "messages": [{"role": "user", "content": followup_text, "message_id": "message-2"}],
+            "cart": resolved.prospective_state,
+            "graph_contract": contract,
+            "active_branch_node_id": retail,
+            "active_branch_node_ids": [retail],
+        })
+        followup = TurnUnderstandingV1(
+            facts=[{
+                "field_key": "retail_style", "value": "peças discretas",
+                "status": "known", "owner_node_id": retail_style["owner_node_id"],
+                "evidence_span": followup_text, "source_message_id": "message-2",
+                "confidence": 1.0, "metadata": {},
+            }],
+            branch_selections=[{
+                "action": branch_action, "branch_anchor_node_id": retail,
+                "evidence_span": followup_text,
+            }],
+            confirmation={"state": "none"},
+            customer_questions=[],
+        )
+        kept = graph_agent_runtime_v3.resolve_understanding(followup_context, followup)
+        assert kept.resolution_proof["consumed_service_spans"] == []
+        assert kept.resolution_proof["applied_service_operations"] == []
+        assert any(
+            fact["field_key"] == "retail_style" and fact["value"] == "peças discretas"
+            for fact in kept.resolution_proof["accepted_facts"]
+        )
     assert "prospective_state" not in resolved.conversation_brief
     # The final stage must neither re-extract facts nor replay branch/journey resolution.
     monkeypatch.setattr(graph_agent_runtime_v3, "_decide", lambda *_a, **_k: pytest.fail("state resolved twice"))
@@ -710,8 +742,10 @@ def test_select_with_active_branch_resolves_customer_intent(
     assert resolved.prospective_state["active_branch_node_ids"] == [target]
     operations = resolved.resolution_proof["service_operations"]
     assert [item["action"] for item in operations] == (
-        ["drop", "add"] if expected_action == "switch" else ["keep"]
+        ["drop", "add"] if expected_action == "switch" else []
     )
+    if expected_action == "keep":
+        assert resolved.resolution_proof["consumed_service_spans"] == []
 
 
 def test_final_reply_preserves_confirmed_handoff_and_checks_publication(monkeypatch):
