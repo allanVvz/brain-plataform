@@ -91,6 +91,53 @@ select 'SCOPED_LEAD_IDENTITY_LOOKUP',
   case when count(*) filter (where name_match)=1
     then min(id) filter (where name_match)::text else '' end
 from matched;
+
+with recursive pages(page_offset,data) as (
+  select 0, public.list_actionable_message_queue_v1(
+    array(select id from public.personas where slug='tock-fatal'),null,null,0,100)
+  union all
+  select (data->>'next_offset')::integer,
+    public.list_actionable_message_queue_v1(
+      array(select id from public.personas where slug='tock-fatal'),null,null,
+      (data->>'next_offset')::integer,100)
+  from pages where data->>'next_offset' is not null and page_offset<10000
+), items as (
+  select item from pages, lateral jsonb_array_elements(coalesce(data->'items','[]'::jsonb)) item
+)
+select 'QUEUE_PROJECTION_STATE',item->>'queue_state',item->>'origin',
+  count(*),count(distinct item->>'lead_ref')
+from items group by item->>'queue_state',item->>'origin'
+order by item->>'queue_state',item->>'origin';
+
+select 'AUDIENCE_GROUP',a.id,a.slug,a.name,a.source_type,count(m.lead_id)
+from public.audiences a join public.personas p on p.id=a.persona_id
+left join public.lead_audience_memberships m on m.audience_id=a.id
+where p.slug='tock-fatal' and coalesce(a.metadata->>'kind','semantic_group')='semantic_group'
+group by a.id,a.slug,a.name,a.source_type order by a.slug;
+
+select 'IMPORT_STATUS',b.status,count(*),sum(b.valid_rows)
+from public.lead_import_batches b join public.personas p on p.id=b.persona_id
+where p.slug='tock-fatal' group by b.status order by b.status;
+
+select 'CONSENT_STATUS',c.purpose,c.status,count(*),count(distinct c.lead_id)
+from public.contact_consents c join public.personas p on p.id=c.persona_id
+where p.slug='tock-fatal' and c.channel='whatsapp'
+group by c.purpose,c.status order by c.purpose,c.status;
+
+select 'TEMPLATE',t.id,t.provider,t.status,t.meta_approval_status,
+  coalesce(t.meta_template_name,t.template_key)
+from public.message_templates t join public.personas p on p.id=t.persona_id
+where p.slug='tock-fatal' order by t.created_at desc;
+
+select 'CAMPAIGN',c.id,c.status,c.campaign_kind,c.provider,c.audience_id
+from public.campaigns c join public.personas p on p.id=c.persona_id
+where p.slug='tock-fatal' order by c.created_at desc limit 50;
+
+select 'ACTIVE_GRAPH',g.id,g.version,g.checksum,g.activated_at
+from public.graph_publications g join public.personas p on p.id=g.persona_id
+where p.slug='tock-fatal' and g.status='active';
 SQL
+
+bash ops/vps/rollout-microservices.sh status
 
 echo "GATEWAY_READINESS_DIAGNOSTIC_END"
