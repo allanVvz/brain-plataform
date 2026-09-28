@@ -78,10 +78,25 @@ def run(case: dict) -> dict:
             "quality_warnings": proof.get("quality_warnings") or []}
 
 
+def select_cases(fixture_name: str, case_name: str | None) -> list[dict]:
+    fixture = Path(__file__).resolve().parents[1] / "evaluation" / (fixture_name + ".json")
+    cases = json.loads(fixture.read_text(encoding="utf-8"))
+    if case_name is None:
+        return cases
+    selected = [case for case in cases if case.get("name") == case_name]
+    if len(selected) != 1:
+        raise ValueError(f"candidate probe case must match exactly once: {case_name}")
+    return selected
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("fixture", choices=["human-conversation-2026-09-25"])
+    parser.add_argument("fixture", help="Baked fixture, optionally followed by :case-name")
     args = parser.parse_args()
-    fixture = Path(__file__).resolve().parents[1] / "evaluation" / (args.fixture + ".json")
-    for case in json.loads(fixture.read_text(encoding="utf-8")):
+    fixture_name, _, case_name = args.fixture.partition(":")
+    if fixture_name != "human-conversation-2026-09-25":
+        parser.error(f"unsupported candidate fixture: {fixture_name}")
+    if ":" in args.fixture and not case_name:
+        parser.error("candidate probe case name is empty")
+    for case in select_cases(fixture_name, case_name or None):
         print("CANDIDATE_CONVERSATION_PROBE=" + json.dumps(run(case), ensure_ascii=True), flush=True)

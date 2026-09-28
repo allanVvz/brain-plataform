@@ -2,7 +2,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.probe_conversation_candidate import validate_case
+from scripts.probe_conversation_candidate import select_cases, validate_case
+
+
+def test_candidate_can_select_one_baked_case_for_the_affected_persona():
+    cases = select_cases("human-conversation-2026-09-25", "tock-consultative-answer-with-name-pending")
+    assert [case["name"] for case in cases] == ["tock-consultative-answer-with-name-pending"]
+    with pytest.raises(ValueError, match="must match exactly once"):
+        select_cases("human-conversation-2026-09-25", "missing-case")
 
 
 def test_candidate_rejects_interrupted_field_repeated_by_model():
