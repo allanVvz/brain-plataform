@@ -181,6 +181,28 @@ select 'TEMPLATE',t.id,t.provider,t.status,t.meta_approval_status,
 from public.message_templates t join public.personas p on p.id=t.persona_id
 where p.slug='tock-fatal' order by t.created_at desc;
 
+select 'TEMPLATE_CONTENT',t.id,t.meta_component_schema
+from public.message_templates t join public.personas p on p.id=t.persona_id
+where p.slug='tock-fatal' and t.provider='meta_cloud'
+  and t.status='active' and t.meta_approval_status='approved'
+order by t.created_at desc;
+
+with scoped as (
+  select l.id,coalesce(l.metadata->'conversation_state'->>'active_branch_node_id',
+    l.metadata->'conversation_runtime'->>'active_branch_node_id','') as branch_node
+  from public.leads l join public.personas p on p.id=l.persona_id
+  where p.slug='tock-fatal'
+), latest_consent as (
+  select distinct on (c.lead_id) c.lead_id,c.status
+  from public.contact_consents c join public.personas p on p.id=c.persona_id
+  where p.slug='tock-fatal' and c.channel='whatsapp'
+    and c.purpose='ofertas_e_novidades'
+  order by c.lead_id,c.effective_at desc,c.created_at desc
+)
+select 'CONSENTED_BRANCH',s.branch_node,count(*)
+from scoped s join latest_consent c on c.lead_id=s.id and c.status='granted'
+group by s.branch_node order by s.branch_node;
+
 select 'CAMPAIGN',c.id,c.status,c.campaign_kind,c.provider,c.audience_id
 from public.campaigns c join public.personas p on p.id=c.persona_id
 where p.slug='tock-fatal' order by c.created_at desc limit 50;
