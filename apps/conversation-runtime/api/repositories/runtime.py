@@ -405,6 +405,18 @@ def update_lead(lead_ref: int, data: dict) -> None:
     _execute_with_retry(get_client().table("leads").update(data).eq("id", lead_ref))
 
 
+def update_lead_name_if_unchanged(
+    lead_ref: int, *, expected_name: str | None, new_name: str,
+) -> bool:
+    """Project a customer confirmed name without overwriting a human edit."""
+    query = get_client().table("leads").update({"nome": new_name}).eq("id", lead_ref)
+    query = (
+        query.is_("nome", "null") if expected_name is None
+        else query.eq("nome", expected_name)
+    )
+    return bool(getattr(_execute_with_retry(query.select("id")), "data", None))
+
+
 def merge_commercial_note(metadata: dict, commercial_note: dict[str, str]) -> dict:
     """Apply a manual commercial-note edit into a lead's metadata.
 

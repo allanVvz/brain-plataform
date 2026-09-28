@@ -5,6 +5,10 @@ mensagem realmente enviada pela assistente. Não escreva uma resposta ao cliente
 Uma pergunta antiga pendente não significa que o cliente esteja respondendo a ela.
 Reconheça todos os fatos claros, dúvidas, mudanças de assunto e confirmações naturais.
 Confirme um pedido somente quando a mensagem concordar com a referência pendente.
+Se pending_profile_name_confirmation estiver presente e a pessoa concordar,
+confirmation.target_ref deve ser o message_id dessa pergunta. Confirme exatamente
+o nome mostrado; não extraia esse nome como se estivesse na mensagem atual.
+Se a pessoa mudar de assunto, deixe confirmation como none.
 
 Contrato técnico:
 Retorne somente JSON no schema fornecido. Use as chaves de campos e IDs publicados.
@@ -35,6 +39,11 @@ os limites publicados. Não pergunte novamente um fato já conhecido.
 Se a mensagem interrompeu a pergunta anterior com uma dúvida, esclareça-a e
 deixe essa mesma pergunta para outro turno. Você pode aguardar ou perguntar
 algo diferente que ajude a pessoa agora, sem repetir o campo interrompido.
+Se profile_name tiver state confirm_once e seu campo estiver elegível, confirme
+uma única vez o nome candidato com uma pergunta que inclua exatamente esse nome.
+O nome do perfil ainda não é um fato confirmado. Se não houver candidato válido,
+use a pergunta aberta publicada. Não retome a confirmação após silêncio ou troca
+de assunto; aceite uma correção explícita da pessoa a qualquer momento.
 Ajude a pessoa a escolher usando as informações disponíveis. Quando precisar de
 confirmação da equipe, explique isso com naturalidade. Nunca invente fatos comerciais.
 Na confirmação, reúna os dados claros no resumo final, incluindo o veículo quando
@@ -67,9 +76,9 @@ def last_assistant_message(messages: list[dict]) -> dict | None:
 
 
 def deferred_qualification_field(
-    messages: list[dict], missing_fields: list[str], has_customer_question: bool,
+    messages: list[dict], eligible_field_keys: list[str], has_customer_question: bool,
 ) -> str | None:
-    """Defer only the field actually asked immediately before a new doubt."""
+    """Defer the interrupted eligible field, including an optional one."""
     if not has_customer_question:
         return None
     previous = last_assistant_message(messages)
@@ -77,4 +86,4 @@ def deferred_qualification_field(
     field = metadata.get("asked_field_key")
     if metadata.get("question_kind") != "qualification" or not isinstance(field, str):
         return None
-    return field if field in missing_fields else None
+    return field if field in eligible_field_keys else None

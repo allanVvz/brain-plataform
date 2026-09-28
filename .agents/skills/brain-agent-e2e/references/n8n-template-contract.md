@@ -2,29 +2,23 @@
 
 ## Canonical source
 
-Treat `apps/conversation-runtime/n8n/persona-conversation-template.json` as the only provisionable conversation workflow template.
+`apps/conversation-runtime/api/services/agentic_turn.py` runs the productive
+`interpret_then_respond` path. The transport worker calls the runtime's
+internal endpoint directly. `workflow_bindings.metadata.decision_owner` may
+still contain `n8n_agents` for storage compatibility; it does not authorize
+n8n to make, prove, commit or send a conversational decision.
 
-The dashboard persists the engine choice in
-`workflow_bindings.metadata.decision_owner`. `deterministic` enters only the
-private execute path; `n8n_agents` enters only context/decide/commit. Proof
-never chooses the engine and never chooses a FAQ, authored question or public
-wording.
+`apps/conversation-runtime/n8n/persona-conversation-template.json` is a
+historical audit fixture. Do not provision or edit it for a runtime fix.
 
-Persona-specific exports such as `baita-vitoria.json` are audit fixtures only. Do not import, provision, clone or evolve them as runtime sources.
-
-The provisioner may substitute only technical bindings such as:
-
-- `__PERSONA_NAME__`
-- `__PERSONA_SLUG__`
-- `__AGENT_SLUG__`
-- `__WEBHOOK_ID__`
-- credential and workflow IDs
+Persona-specific exports such as `baita-vitoria.json` are audit fixtures only.
+Do not import, provision, clone or evolve them as runtime sources.
 
 Business prompts, services, prices, policies, qualification fields and copy must come from the published graph, persona configuration, approved context cards or runtime binding.
 
-## Portable workflow requirements
+## Runtime requirements
 
-Require the template to:
+Require the runtime to:
 
 1. Validate `persona_slug`, `lead_ref`, `buffer_id`, `correlation_id` and `channel_binding_id`.
 2. Load the published graph context from the backend.
@@ -34,10 +28,11 @@ Require the template to:
 6. Preserve a valid grounded model reply: the model owns explanation, recommendation, language, conversational flow and its next natural question.
 7. Proof-check cited published evidence plus persona/agent isolation; do not deterministically select FAQ, force `missing_fields[0]`, or rewrite a valid reply into a scripted question.
 8. Commit once using the canonical inbound correlation/buffer identity (CAS/atomic claim).
-9. Route every node failure to a generic fail-safe handoff with non-secret diagnostics.
-10. Start inactive and contain no production URL, phone, token or customer-specific credential.
+9. Terminalize the first model, JSON or proof failure with non-secret diagnostics; hand off once after two consecutive failures.
+10. Keep model credentials in the existing encrypted persona integration.
 
-Provision the same unmodified JSON structure for at least two fixture personas. Differences may exist only in substituted binding values and graph-driven runtime data.
+Exercise the same runtime code with at least two fixture personas. Differences
+may exist only in binding and published graph data.
 
 ## Backend anti-hardcoded rule
 
@@ -70,7 +65,7 @@ During review, search the changed production files for newly introduced commerci
 ## Publication boundary
 
 - Before publication, validate active top-down FAQ accumulation from Persona through the hierarchy to every FAQ used as commercial evidence, including source/status and persona/agent scope.
-- Tock Fatal and Aurora both run on GraphBundle/runtime v3. Their publications, checksums, bindings and memory remain isolated; the shared template/runtime must never blend the two persona contracts.
+- Tock Fatal and Aurora both run on GraphBundle/runtime v3. Their publications, checksums, bindings and memory remain isolated; the shared runtime must never blend the two persona contracts.
 
 ## Required regression matrix
 

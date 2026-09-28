@@ -1644,6 +1644,31 @@ def decide_agentic(
             or resolved_context.persona_slug != context.persona_slug
         ):
             raise RuntimeError("resolved understanding does not belong to turn context")
+        public_question = "?" in conversation_reply.reply
+        kind = conversation_reply.question_kind
+        asked_key = str(conversation_reply.asked_field_key or "")
+        eligible_keys = {
+            str(field.get("key") or "")
+            for field in resolved_understanding.eligible_fields
+        }
+        if public_question and kind in {None, "none"}:
+            raise RuntimeError("question_kind_required_for_public_question")
+        if kind == "qualification" and (
+            not public_question or not asked_key or asked_key not in eligible_keys
+        ):
+            raise RuntimeError("qualification_question_field_not_eligible")
+        if kind != "qualification" and asked_key:
+            raise RuntimeError("asked_field_key_requires_qualification_question")
+        if kind in {"consultative", "confirmation"} and not public_question:
+            raise RuntimeError("question_kind_without_public_question")
+        profile_name = resolved_understanding.conversation_brief.get("profile_name") or {}
+        if (
+            kind == "qualification"
+            and asked_key == profile_name.get("field_key")
+            and profile_name.get("state") == "confirm_once"
+            and str(profile_name.get("candidate") or "") not in conversation_reply.reply
+        ):
+            raise RuntimeError("profile_name_confirmation_must_quote_candidate")
         matching_questions = {
             str(field.get("question_node_id"))
             for field in resolved_understanding.eligible_fields
@@ -3239,7 +3264,12 @@ def commit(
     lead_update = {"metadata": metadata, "stage": qualified_stage}
     if context.runtime_version == graph_agent_runtime_v3.RUNTIME_VERSION:
         facts = response.cart_state.get("facts") or {}
-        customer_name = (facts.get("nome_cliente") or {}).get("value")
+        identity_field = graph_agent_runtime_v3._profile_name_field(
+            context.graph_contract
+        ) or graph_agent_runtime_v3._profile_name_field(
+            context.retrieval_trace.get("common_contract") or {}
+        ) or {}
+        customer_name = (facts.get(identity_field.get("key")) or {}).get("value")
         # No hardcoded "servico": the selector field key is whatever the
         # compiled contract flags as branch_selection_field (product,
         # service, catalog item -- all the same mechanism). facts (above) is
@@ -3290,7 +3320,7 @@ def commit(
         # "confirm_order") already only fire once qualification is fully
         # complete, so this always resolves to "full" -- unchanged behavior.
         handoff_level = "full"
-    if customer_name:
+    if customer_name and context.runtime_version != graph_agent_runtime_v3.RUNTIME_VERSION:
         lead_update["nome"] = str(customer_name).strip()
     if service_interest:
         lead_update["interesse_produto"] = str(service_interest).strip()
@@ -3445,6 +3475,22 @@ def commit(
             )
             buffer = {"id": envelope.get("buffer_id"), "status": envelope.get("status")}
 
+    if prepared_outbound and context.runtime_version == graph_agent_runtime_v3.RUNTIME_VERSION:
+        profile_name = context.retrieval_trace.get("profile_name") or {}
+        if (
+            profile_name.get("state") == "confirm_once"
+            and response.proof.get("question_kind") == "qualification"
+            and response.proof.get("asked_field_key") == profile_name.get("field_key")
+            and str(profile_name.get("candidate") or "") in str(response.reply_text or "")
+        ):
+            prepared_outbound["message"].setdefault("metadata", {})[
+                "profile_name_candidate"
+            ] = {
+                "field_key": profile_name["field_key"],
+                "owner_node_id": profile_name["owner_node_id"],
+                "candidate": profile_name["candidate"],
+            }
+
     if prepared_outbound and response.images:
         from services import catalog_images
         # Re-resolve model choices at commit; never trust caller-supplied URLs.
@@ -3560,6 +3606,28 @@ def commit(
                 "lead_audience_membership_sync_failed lead_ref=%s correlation_id=%s",
                 lead_ref, correlation_id,
             )
+        current_inbound_id = next((
+            row.get("message_id") for row in reversed(context.messages)
+            if row.get("role") == "user"
+        ), None)
+        accepted_name = next((
+            fact for fact in response.proof.get("accepted_facts") or []
+            if identity_field
+            and fact.get("field_key") == identity_field.get("key")
+            and fact.get("status") == "known"
+            and fact.get("value")
+            and str(fact.get("source_message_id") or "") == str(current_inbound_id or "")
+        ), None)
+        if accepted_name:
+            expected_name = context.retrieval_trace.get("lead_name_at_context")
+            if (accepted_name.get("metadata") or {}).get("source") == "profile_name_confirmation":
+                if str(expected_name or "") != str(accepted_name["value"]):
+                    accepted_name = None
+            if accepted_name:
+                supabase_client.update_lead_name_if_unchanged(
+                    lead_ref, expected_name=expected_name,
+                    new_name=str(accepted_name["value"]).strip(),
+                )
         # Projection only: ledger/facts/proof/outbox above are already durable.
         if response.proof.get("journey_action") == "none":
             pass

@@ -347,7 +347,9 @@ def _known_facts_payload(
                 fact.get("carried_from_journey")
                 or (fact.get("metadata") or {}).get("reuse_policy") == "carry_over"
             )
+            profile_reference = (fact.get("metadata") or {}).get("source") == "lead_profile"
             origem = (
+                "perfil_nao_confirmado" if profile_reference else
                 "pedido_anterior" if carried else
                 "esta_mensagem" if current_message_id and source_id == str(current_message_id)
                 else "esta_conversa"
@@ -362,6 +364,7 @@ def _known_facts_payload(
                 # _carry_over_field_keys) -- i.e. this is never a
                 # this-order fact, always customer identity.
                 "carregado_do_pedido_anterior": carried,
+                "confirmado": not profile_reference,
             })
     return payload
 
@@ -2103,7 +2106,9 @@ def _project_recent_messages(messages: list[dict[str, Any]], limit: int = 6) -> 
             "role": row.get("role") or ("user" if row.get("direction") == "inbound" else "assistant"),
             "content": row.get("content") or row.get("texto") or row.get("text") or "",
             "created_at": row.get("created_at"),
-            "metadata": {key: (row.get("metadata") or {}).get(key) for key in ("question_kind", "asked_field_key")},
+            "metadata": {key: (row.get("metadata") or {}).get(key) for key in (
+                "question_kind", "asked_field_key", "profile_name_candidate",
+            )},
         })
     return projected
 
@@ -2120,6 +2125,68 @@ def _recent_messages_with_question_metadata(lead_ref: int, batch_messages: list[
     except Exception:
         # The batch still has the latest wording if metadata is unavailable.
         return batch_messages
+
+
+def _profile_name_field(contract: dict[str, Any]) -> dict[str, Any] | None:
+    return next((
+        field for field in contract.get("fields") or []
+        if (field.get("validation") or {}).get("semantic_type") == "human_full_name"
+        and field.get("scope") == "persona"
+    ), None)
+
+
+def _profile_name_reference(
+    *, lead: dict[str, Any], contract: dict[str, Any],
+    facts: dict[str, Any], asked_question_node_ids: list[str],
+    journey_sequence: int,
+) -> dict[str, Any] | None:
+    """An unconfirmed CRM name may guide one question, never become ledger proof."""
+    field = _profile_name_field(contract)
+    if not field:
+        return None
+    key = str(field.get("key") or "")
+    current = facts.get(key) or {}
+    if (
+        current.get("owner_node_id") == field.get("owner_node_id")
+        and current.get("status") in {"known", "declined", "unknown"}
+    ):
+        return None
+    candidate = str(lead.get("nome") or "").strip()
+    minimum, maximum = graph_proof_checker_v3.name_token_bounds(field.get("validation"))
+    if not graph_proof_checker_v3.is_human_full_name(
+        candidate, min_tokens=minimum, max_tokens=maximum,
+    ):
+        return None
+    previously_asked = str(field.get("question_node_id") or "") in {
+        str(item) for item in asked_question_node_ids
+    }
+    return {
+        "field_key": key, "owner_node_id": field.get("owner_node_id"),
+        "question_node_id": field.get("question_node_id"),
+        "candidate": candidate,
+        "state": "reference" if journey_sequence > 1 or previously_asked else "confirm_once",
+    }
+
+
+def _pending_profile_name_confirmation(
+    messages: list[dict[str, Any]], contract: dict[str, Any],
+) -> dict[str, Any] | None:
+    field = _profile_name_field(contract)
+    previous = next((row for row in reversed(messages) if row.get("role") == "assistant"), None)
+    pending = ((previous or {}).get("metadata") or {}).get("profile_name_candidate")
+    if not field or not isinstance(pending, dict):
+        return None
+    if (pending.get("field_key"), pending.get("owner_node_id")) != (
+        field.get("key"), field.get("owner_node_id"),
+    ):
+        return None
+    candidate = str(pending.get("candidate") or "").strip()
+    minimum, maximum = graph_proof_checker_v3.name_token_bounds(field.get("validation"))
+    if not graph_proof_checker_v3.is_human_full_name(
+        candidate, min_tokens=minimum, max_tokens=maximum,
+    ):
+        return None
+    return {**pending, "message_id": (previous or {}).get("message_id")}
 
 
 
@@ -2139,6 +2206,11 @@ def _assistant_replies(messages: Sequence[dict[str, Any]], limit: int = 4) -> li
         or str(row.get("sender_type") or "") in {"agent", "assistant", "ai"}
         if (text := str(row.get("content") or row.get("texto") or "").strip())
     ][-limit:]
+
+
+def _last_public_question(text: str) -> str:
+    questions = re.findall(r"[^.!?]*\?", str(text or ""))
+    return questions[-1].strip() if questions else ""
 
 
 
@@ -3146,6 +3218,24 @@ def build_context(
         ledger["asked_question_node_ids"] = []
         ledger["publication_id"] = publication["id"]
         ledger["graph_checksum"] = publication["checksum"]
+    profile_name = _profile_name_reference(
+        lead=lead,
+        contract=active_contract if _profile_name_field(active_contract) else common_contract,
+        facts=ledger["facts"],
+        asked_question_node_ids=ledger.get("asked_question_node_ids") or [],
+        journey_sequence=int(journey.get("sequence") or 1),
+    )
+    if profile_name and profile_name["state"] == "reference":
+        # Existing journeys may have a CRM name without a ledger fact. Keep
+        # it as a provisional reference and do not ask it on every journey.
+        key = profile_name["field_key"]
+        reference = {
+            "field_key": key, "owner_node_id": profile_name["owner_node_id"],
+            "status": "known", "value": profile_name["candidate"],
+            "metadata": {"source": "lead_profile", "confirmed": False},
+        }
+        ledger["facts"] = {**ledger["facts"], key: reference}
+        ledger["facts_by_key"] = {**ledger["facts_by_key"], key: [reference]}
     pending_fields = graph_proof_checker_v3.askable_pending_fields(
         active_contract, ledger.get("facts") or {},
         asked_question_node_ids=ledger.get("asked_question_node_ids") or [],
@@ -3387,6 +3477,8 @@ def build_context(
         "pending_field": None,
         "askable_fields": pending_fields,
         "missing_fields": missing,
+        "profile_name": profile_name,
+        "lead_name_at_context": lead.get("nome"),
         "confirmation_templates": document.get("confirmation_templates") or {},
         "service_resolution_policy": document.get("service_resolution_policy") or {},
         "post_sale_operation_route": _post_sale_route(document),
@@ -4267,6 +4359,44 @@ def resolve_understanding(
         }
 
     prospective_state = dict(response.cart_state or {})
+    pending_name = _pending_profile_name_confirmation(
+        focused_context.messages, contract,
+    )
+    confirmation = understanding.confirmation
+    if pending_name and confirmation.state in {"affirm", "reject"}:
+        if str(confirmation.target_ref or "") != str(pending_name.get("message_id") or ""):
+            raise RuntimeError("profile name confirmation target mismatch")
+        if not graph_proof_checker_v3._literal_span(
+            _latest_user_message(focused_context), confirmation.evidence_span,
+        ):
+            raise RuntimeError("profile name confirmation evidence is not literal")
+        key = str(pending_name["field_key"])
+        accepted_name = {
+            "field_key": key,
+            "owner_node_id": pending_name["owner_node_id"],
+            "status": "known" if confirmation.state == "affirm" else "declined",
+            "value": pending_name["candidate"] if confirmation.state == "affirm" else None,
+            "source_message_id": _source_message_id(focused_context.messages),
+            "evidence_span": confirmation.evidence_span,
+            "confidence": 1.0,
+            "metadata": {
+                "source": "profile_name_confirmation",
+                "confirmed_candidate_message_id": pending_name["message_id"],
+            },
+        }
+        proof = {
+            **proof,
+            "accepted_facts": [*(proof.get("accepted_facts") or []), accepted_name],
+        }
+        grouped_name = dict(prospective_state.get("facts_by_key") or {})
+        grouped_name[key] = [accepted_name]
+        prospective_state["facts_by_key"] = grouped_name
+        prospective_state["facts"] = {
+            **(prospective_state.get("facts") or {}), key: accepted_name,
+        }
+    response = response.model_copy(update={
+        "cart_state": prospective_state, "proof": proof,
+    })
     active_branch = str(prospective_state.get("active_branch_node_id") or "") or None
     active_branches = list(prospective_state.get("active_branch_node_ids") or [])
     confirmation_state = str(proof.get("confirmation_state") or "")
@@ -4385,7 +4515,7 @@ def resolve_understanding(
     recent_messages = list(resolved_context.messages[-10:])
     deferred_field_key = deferred_qualification_field(
         recent_messages,
-        list(missing),
+        [str(guide.get("key")) for guide in eligible_guides if guide.get("key")],
         bool(understanding.customer_questions)
         or _looks_like_customer_question(_latest_user_message(resolved_context)),
     )
@@ -4414,6 +4544,15 @@ def resolve_understanding(
         "operational_mode": str(resolved_context.operational_mode),
         "missing_fields": list(missing),
         "eligible_question_guides": eligible_guides,
+        "profile_name": (
+            resolved_context.retrieval_trace.get("profile_name")
+            if any(
+                guide.get("key") == (
+                    (resolved_context.retrieval_trace.get("profile_name") or {})
+                    .get("field_key")
+                ) for guide in eligible_guides
+            ) else None
+        ),
         "recent_messages": recent_messages,
         "commercial_interests": commercial_interests,
         "historical_commercial_interests": (
@@ -4909,6 +5048,39 @@ def _finalize_resolved_reply(
     gates = list(proof.get("gating_errors") or [])
     if not proposal.reply.strip():
         gates.append("empty_reply")
+    public_question = "?" in proposal.reply
+    if public_question and kind in {None, "none"}:
+        gates.append("question_kind_required_for_public_question")
+    if kind == "qualification" and (
+        not public_question or not field or not question_id
+    ):
+        gates.append("qualification_question_field_not_eligible")
+    if kind in {"consultative", "confirmation"} and not public_question:
+        gates.append("question_kind_without_public_question")
+    profile_name = context.retrieval_trace.get("profile_name") or {}
+    if (
+        kind == "qualification"
+        and profile_name.get("state") == "confirm_once"
+        and asked_field == profile_name.get("field_key")
+        and str(profile_name.get("candidate") or "") not in proposal.reply
+    ):
+        gates.append("profile_name_confirmation_must_quote_candidate")
+    if not repetition["passed"]:
+        gates.extend(repetition["failures"])
+    previous_reply = next((
+        str(row.get("content") or "") for row in reversed(context.messages)
+        if row.get("role") == "assistant"
+    ), "")
+    if (
+        _last_public_question(previous_reply)
+        and _last_public_question(proposal.reply)
+        and conversation_repetition.semantic_similarity(
+            _last_public_question(previous_reply),
+            _last_public_question(proposal.reply),
+        ) >= 0.67
+    ):
+        gates.append("repeated_public_question")
+    gates = list(dict.fromkeys(gates))
     warnings = list(dict.fromkeys([*(resolved.proof.get("quality_warnings") or []), *warnings]))
     state = {**context.cart, "asked_question_node_ids": [
         *(context.cart.get("asked_question_node_ids") or []), *([question_id] if question_id else []),

@@ -122,12 +122,12 @@ If the conversation contains incompatible old history, use a clean or explicitly
 When code or workflow changes are part of the task:
 
 1. Reproduce in the approved controlled environment before the remote run. If the task explicitly forbids local Docker, use automated tests and a safe remote QA/direct-validator path instead.
-2. Validate the canonical n8n template and anti-hardcoded contract.
+2. Validate the direct runtime contract and the historical n8n fixture boundary.
 3. Add regression coverage for canonical inbound idempotency, pause/resume, graph-version migration, field extraction and service changes.
 4. Run proportional backend tests and dashboard build/type checks.
 5. Repeat the live E2E only after local evidence passes.
 
-For n8n qualification, preserve this order:
+For runtime qualification, preserve this order:
 
 `published context/limits -> model interpretation and natural reply -> proof of cited evidence + isolation -> CAS/idempotent commit -> at most one outbound`
 

@@ -286,7 +286,10 @@ def test_final_proof_keeps_understanding_facts_branch_change_and_reply_question(
             "service_resolution": {"focused_branch_node_id": "branch:new"},
         },
     )
-    reply = ConversationReplyV1(reply="E o ano do carro?", asked_field_key="year")
+    reply = ConversationReplyV1(
+        reply="E o ano do carro?", asked_field_key="year",
+        question_kind="qualification",
+    )
 
     def fake_decide(_context, *, model_observation):
         assert model_observation["proposal"]["next_question_node_id"] == "q:year"
