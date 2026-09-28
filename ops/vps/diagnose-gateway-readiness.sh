@@ -64,4 +64,17 @@ probe_from_gateway control-plane http://caddy:8090/control-plane/health/ready
 probe_from_gateway conversation-runtime http://caddy:8090/conversation-runtime/health/ready
 probe_from_gateway transport http://caddy:8090/transport/health/ready
 
+compose=(docker compose --env-file .env.compose -f docker-compose.yml -f infra/microservices/docker-compose.blue-green.yml)
+"${compose[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -AtF "|"' <<'SQL'
+with matched as (
+  select l.id
+  from public.leads l join public.personas p on p.id=l.persona_id
+  where p.slug='tock-fatal'
+    and right(regexp_replace(coalesce(l.telefone,''),'[^0-9]','','g'),4)='8510'
+)
+select 'SCOPED_LEAD_PHONE_SUFFIX_LOOKUP',count(*),
+  case when count(*)=1 then min(id)::text else '' end
+from matched;
+SQL
+
 echo "GATEWAY_READINESS_DIAGNOSTIC_END"
