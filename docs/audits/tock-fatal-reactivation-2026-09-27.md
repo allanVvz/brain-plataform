@@ -158,6 +158,30 @@ consentimento e nenhuma chave de estado de conversa. Não houve pausa global.
   PostgreSQL local; concorrência e índices precisam de validação em candidate
   isolado antes de qualquer cutover.
 
+## Candidate do runtime em 28/09
+
+O fix de ramo `KEEP` foi integrado em `main` no SHA
+`a2d4c52c43ad11001de17ea648ff03f50d699cad`. A imagem imutável do
+conversation-runtime tem digest
+`sha256:057a2b1635291d7fa26ad1ed3268056af1a68ae018c73bc26585f10aac05b244`.
+O manifesto incremental preservou byte a byte as entradas dos outros três
+serviços. Após autorização específica de release, o workflow
+[36376580277](https://github.com/allanVvz/brain-plataform/actions/runs/36376580277)
+passou no preflight e iniciou o candidate isolado na VPS. O probe conversacional
+sem commit falhou no caso `utzig-doubt-interrupting-name`: a resposta perguntou
+novamente o nome, enquanto `question_kind` ficou nulo e o proof registrou
+`reply_metadata_discarded:asked_field_key`. O candidate foi parado **antes**
+de mover workers ou alterar a rota. Não houve canário pós-cutover nem envio real.
+
+O status oficial de leitura
+[36377046661](https://github.com/allanVvz/brain-plataform/actions/runs/36377046661)
+confirmou conversation-runtime no slot green e `up to date` com a publicação
+anterior, claims não pausados, `outbound_rows_15m=0` e
+`unproved_agent_outbound_15m=0`. Control-plane continua `BEHIND` por desvio
+anterior e não foi incluído nesta release. A operação foi encerrada sem
+segundo redeploy corretivo. O gate do candidate precisa de correção e nova
+revisão antes de outra release.
+
 ## Próximas decisões e gates
 
 1. Identificar o ramo das sete demandas com fonte em binding histórico,
