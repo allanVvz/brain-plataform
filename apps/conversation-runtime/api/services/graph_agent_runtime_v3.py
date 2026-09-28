@@ -2164,7 +2164,7 @@ def _profile_name_reference(
         "field_key": key, "owner_node_id": field.get("owner_node_id"),
         "question_node_id": field.get("question_node_id"),
         "candidate": candidate,
-        "state": "reference" if journey_sequence > 1 or previously_asked else "confirm_once",
+        "state": "reference" if previously_asked else "confirm_once",
     }
 
 
@@ -2550,6 +2550,29 @@ def _publication_fact_is_compatible(
     )
 
 
+def _remap_asked_questions(
+    old_document: dict[str, Any], new_document: dict[str, Any],
+    question_ids: list[str],
+) -> list[str]:
+    """Preserve attempts by the stable (field key, owner) identity."""
+    def identities(document: dict[str, Any]) -> dict[str, tuple[str, str]]:
+        return {
+            str(field["question_node_id"]): (
+                str(field.get("key") or ""), str(field.get("owner_node_id") or ""),
+            )
+            for contract in [document.get("common_contract") or {},
+                             *(document.get("branch_contracts") or {}).values()]
+            for field in contract.get("fields") or []
+            if field.get("question_node_id") and field.get("key")
+            and field.get("owner_node_id")
+        }
+    old, new = identities(old_document), identities(new_document)
+    by_identity = {identity: node_id for node_id, identity in new.items()}
+    return [mapped for node_id in question_ids
+            if (identity := old.get(str(node_id)))
+            if (mapped := by_identity.get(identity))]
+
+
 # Matched against _normalized_phrase output, so accents and punctuation are
 # already gone ("Olá!" -> "ola"). Ordered longest-first where two alternatives
 # share a prefix ("boa tarde" before the bare "boa"), because alternation
@@ -2887,7 +2910,8 @@ def _carry_over_field_keys(document: dict) -> set[str]:
     nao) e que o grafo pode sobrescrever campo a campo.
     """
     keys: set[str] = set()
-    for contract in (document.get("branch_contracts") or {}).values():
+    for contract in [document.get("common_contract") or {},
+                     *(document.get("branch_contracts") or {}).values()]:
         for field in (contract or {}).get("fields") or []:
             if isinstance(field, dict) and field.get("carry_over"):
                 key = str(field.get("key") or "").strip()
@@ -2981,10 +3005,15 @@ def _seed_carried_facts(
         if key not in keys or str(row.get("status") or "") != "known":
             continue
         field = carry_fields.get(key) or {}
+        if not field or str(row.get("owner_node_id") or "") != str(field.get("owner_node_id") or ""):
+            continue
         semantic_type = str((field.get("validation") or {}).get("semantic_type") or "")
+        minimum, maximum = graph_proof_checker_v3.name_token_bounds(field.get("validation"))
         if (
             semantic_type == "human_full_name"
-            and not graph_proof_checker_v3.is_human_full_name(row.get("value_json"))
+            and not graph_proof_checker_v3.is_human_full_name(
+                row.get("value_json"), min_tokens=minimum, max_tokens=maximum,
+            )
         ):
             continue
         fact = {
@@ -2997,6 +3026,8 @@ def _seed_carried_facts(
                 "policy_version": shared_lead_memory.POLICY_VERSION,
             },
         }
+        if not graph_proof_checker_v3.fact_compatible(field, fact):
+            continue
         carried.setdefault(key, fact)
         grouped.setdefault(key, []).append(fact)
     if not carried:
@@ -3200,6 +3231,16 @@ def build_context(
         (document.get("branch_contracts") or {}).get(active_branch) or {}
         if active_branch else common_contract
     )
+    if publication_changed:
+        previous_id = str(ledger.get("publication_id") or "")
+        previous = (
+            supabase_client.get_graph_publication_by_id(previous_id)
+            if previous_id else None
+        )
+        ledger["asked_question_node_ids"] = _remap_asked_questions(
+            (previous or {}).get("document_json") or {}, document,
+            ledger.get("asked_question_node_ids") or [],
+        )
     facts_by_key = ledger.get("facts_by_key") or _facts_by_key(
         list((ledger.get("facts") or {}).values())
     )
@@ -3208,6 +3249,13 @@ def build_context(
     invalidated_fact_keys: list[str] = []
     if publication_changed:
         previous_facts = ledger.get("facts") or {}
+        ledger["facts_by_key"] = {
+            key: compatible for key, values in (ledger.get("facts_by_key") or {}).items()
+            if (compatible := [value for value in values
+                              if _publication_fact_is_compatible(
+                                  document, active_contract, key, value,
+                              )])
+        }
         ledger["facts"] = {
             key: value for key, value in previous_facts.items()
             if _publication_fact_is_compatible(
@@ -3215,7 +3263,6 @@ def build_context(
             )
         }
         invalidated_fact_keys = sorted(set(previous_facts) - set(ledger["facts"]))
-        ledger["asked_question_node_ids"] = []
         ledger["publication_id"] = publication["id"]
         ledger["graph_checksum"] = publication["checksum"]
     profile_name = _profile_name_reference(
@@ -3225,17 +3272,6 @@ def build_context(
         asked_question_node_ids=ledger.get("asked_question_node_ids") or [],
         journey_sequence=int(journey.get("sequence") or 1),
     )
-    if profile_name and profile_name["state"] == "reference":
-        # Existing journeys may have a CRM name without a ledger fact. Keep
-        # it as a provisional reference and do not ask it on every journey.
-        key = profile_name["field_key"]
-        reference = {
-            "field_key": key, "owner_node_id": profile_name["owner_node_id"],
-            "status": "known", "value": profile_name["candidate"],
-            "metadata": {"source": "lead_profile", "confirmed": False},
-        }
-        ledger["facts"] = {**ledger["facts"], key: reference}
-        ledger["facts_by_key"] = {**ledger["facts_by_key"], key: [reference]}
     pending_fields = graph_proof_checker_v3.askable_pending_fields(
         active_contract, ledger.get("facts") or {},
         asked_question_node_ids=ledger.get("asked_question_node_ids") or [],
@@ -3546,6 +3582,9 @@ def build_context(
                                       "facts_by_key": ledger.get("facts_by_key") or {},
                                       "active_branch_node_id": active_branch,
                                       "asked_question_node_ids": ledger.get("asked_question_node_ids") or [],
+                                      "asked_field_keys": conversation_repetition.asked_field_keys(
+                                          contract, ledger.get("asked_question_node_ids") or [],
+                                      ),
                                       "_ledger_revision": ledger.get("revision") or 0},
         rag_nodes=[document["node_by_id"][node_id] for node_id in by_source if node_id in document["node_by_id"]],
         rag_paths=[card.path for card in cards],
@@ -5057,6 +5096,9 @@ def _finalize_resolved_reply(
         gates.append("qualification_question_field_not_eligible")
     if kind in {"consultative", "confirmation"} and not public_question:
         gates.append("question_kind_without_public_question")
+    matched_keys = conversation_repetition.question_field_matches(proposal.reply, contract)
+    if matched_keys and (kind != "qualification" or matched_keys != {asked_field}):
+        gates.append("public_question_field_metadata_mismatch")
     profile_name = context.retrieval_trace.get("profile_name") or {}
     if (
         kind == "qualification"

@@ -43,7 +43,28 @@ def test_candidate_rejects_interrupted_field_repeated_by_model():
     result["response"].proof.update(asked_field_key=None, question_kind="none")
     with pytest.raises(AssertionError, match="public text"):
         validate_case(case, result)
-
     result["response"].proof["repetition_audit"] = {"passed": True}
     with pytest.raises(AssertionError, match="public text"):
         validate_case(case, result)
+
+
+def test_candidate_rejects_utzig_name_question_marked_consultative():
+    result = {
+        "model_calls": 2,
+        "context": SimpleNamespace(
+            graph_contract={
+                "fields": [{"key": "nome_cliente", "question_node_id": "faq:name",
+                            "validation": {"semantic_type": "human_full_name"}}],
+                "questions": {"faq:name": {"field_key": "nome_cliente",
+                                           "text": "Como você prefere que eu te chame?"}},
+            }, retrieval_trace={},
+        ),
+        "response": SimpleNamespace(
+            reply_text="Posso te chamar de Utzig?",
+            proof={"valid": True, "delivery_authorized": True,
+                   "accepted_facts": [], "asked_field_key": None,
+                   "question_kind": "consultative"},
+        ),
+    }
+    with pytest.raises(AssertionError, match="contradicts its metadata"):
+        validate_case({}, result)
