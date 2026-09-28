@@ -109,6 +109,42 @@ select 'QUEUE_PROJECTION_STATE',item->>'queue_state',item->>'origin',
 from items group by item->>'queue_state',item->>'origin'
 order by item->>'queue_state',item->>'origin';
 
+with queue_items as (
+  select item from jsonb_array_elements(
+    public.list_actionable_message_queue_v1(
+      array(select id from public.personas where slug='tock-fatal'),
+      'conversation','awaiting_customer',0,100)->'items'
+  ) item
+)
+select 'QUEUE_REACTIVATION_DRY_RUN',b.id,b.lead_ref,
+  b.status,
+  coalesce(l.handoff_level,'none')='none' as no_handoff,
+  coalesce(l.ai_paused,false)=false as lead_active,
+  w.active and coalesce((w.metadata->>'safety_paused')::boolean,false)=false
+    and w.connection_status in ('connected','open') as binding_ready,
+  not exists(select 1 from public.lead_buffer newer
+    where newer.direction='inbound' and newer.lead_ref=b.lead_ref
+      and newer.channel_binding_id is not distinct from b.channel_binding_id
+      and newer.created_at>b.created_at) as no_new_inbound,
+  not exists(select 1 from public.contact_consents c
+    where c.lead_id=b.lead_ref and c.persona_id=b.persona_id
+      and c.channel='whatsapp' and c.status in ('refused','revoked')
+      and (c.valid_until is null or c.valid_until>now())) as no_opt_out,
+  not exists(select 1 from public.campaign_recipients r
+    where r.lead_id=b.lead_ref and r.persona_id=b.persona_id
+      and r.contact_status='provider_blocked') as provider_allowed,
+  not exists(select 1 from public.campaigns c
+    where c.id=b.campaign_id and c.status='cancelled') as campaign_allowed,
+  not exists(select 1 from public.lead_buffer proactive
+    where proactive.lead_ref=b.lead_ref and proactive.persona_id=b.persona_id
+      and proactive.direction='outbound' and proactive.message_origin='proactive') as no_prior_reactivation,
+  coalesce(l.metadata->'conversation_state'->>'active_branch_node_id',
+    l.metadata->'conversation_runtime'->>'active_branch_node_id','') as branch_node
+from queue_items q join public.lead_buffer b on b.id=(q.item->>'id')::uuid
+join public.leads l on l.id=b.lead_ref
+join public.workflow_bindings w on w.id=b.channel_binding_id
+order by b.created_at,b.id;
+
 select 'AUDIENCE_GROUP',a.id,a.slug,a.name,a.source_type,count(m.lead_id)
 from public.audiences a join public.personas p on p.id=a.persona_id
 left join public.lead_audience_memberships m on m.audience_id=a.id
