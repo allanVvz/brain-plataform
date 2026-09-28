@@ -341,6 +341,28 @@ class WhatsAppDispatchWorker(BaseWorker):
             return
 
     def _dispatch_outbound(self, row: dict[str, Any]) -> None:
+        if row.get("message_origin") == "campaign":
+            try:
+                allowed = supabase_client.authorize_campaign_dispatch(row["id"])
+            except Exception:
+                allowed = False
+            if not allowed:
+                supabase_client.complete_whatsapp_buffer(
+                    row["id"], "waiting_human",
+                    error="campaign eligibility changed before dispatch",
+                )
+                return
+        if row.get("message_origin") == "proactive":
+            try:
+                blocked = supabase_client.reactivation_dispatch_blocked(row["id"])
+            except Exception:
+                blocked = True
+            if blocked:
+                supabase_client.complete_whatsapp_buffer(
+                    row["id"], "waiting_human",
+                    error="reactivation eligibility changed before dispatch",
+                )
+                return
         binding = supabase_client.get_workflow_binding_by_id(row.get("channel_binding_id"))
         if (
             not binding

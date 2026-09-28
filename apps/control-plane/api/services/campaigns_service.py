@@ -133,6 +133,18 @@ def _rows(query) -> list[dict]:
     return supabase_client._q(query)
 
 
+def _paged_rows(query_factory, *, maximum: int = 100000) -> list[dict]:
+    rows: list[dict] = []
+    page_size = 500
+    while True:
+        page = _rows(query_factory().range(len(rows), len(rows) + page_size - 1))
+        rows.extend(page)
+        if len(rows) > maximum:
+            raise HTTPException(422, "Publico excede o limite de 100000 linhas; divida o publico.")
+        if len(page) < page_size:
+            return rows
+
+
 def normalize_contact_policy(policy: dict[str, Any]) -> dict[str, Any]:
     unknown = sorted(set(policy or {}) - _POLICY_FIELDS)
     if unknown:
@@ -247,23 +259,15 @@ def resolve_applicable_consent(
     return str(consent.get("status") or "unknown"), consent.get("id")
 
 
-def _semantic_membership_map(persona_id: str, lead_ids: list[int]) -> dict[int, str]:
+def _semantic_membership_map(persona_id: str, lead_ids: list[int], audience_id: str) -> dict[int, str]:
     if not lead_ids:
         return {}
     client = supabase_client.get_client()
-    audiences = _rows(
-        client.table("audiences")
-        .select("id,metadata,source_type,slug")
-        .eq("persona_id", persona_id)
-        .limit(1000)
-    )
-    semantic_ids = {
-        row["id"] for row in audiences
-        if str((row.get("metadata") or {}).get("kind") or "semantic_group") == "semantic_group"
-        and row.get("source_type") != "import"
-        and row.get("slug") != "import"
-    }
-    if not semantic_ids:
+    audience = _rows(client.table("audiences").select("id,metadata,source_type,slug")
+                     .eq("id", audience_id).eq("persona_id", persona_id).limit(1))
+    if not audience or str((audience[0].get("metadata") or {}).get("kind") or "semantic_group") != "semantic_group":
+        return {}
+    if audience[0].get("source_type") == "import" or audience[0].get("slug") == "import":
         return {}
     result: dict[int, str] = {}
     for group in _chunks(lead_ids):
@@ -271,8 +275,8 @@ def _semantic_membership_map(persona_id: str, lead_ids: list[int]) -> dict[int, 
             client.table("lead_audience_memberships")
             .select("lead_id,audience_id")
             .in_("lead_id", group)
-            .in_("audience_id", list(semantic_ids))
-            .limit(5000)
+            .eq("audience_id", audience_id)
+            .limit(len(group))
         )
         for row in memberships:
             result[int(row["lead_id"])] = str(row["audience_id"])
@@ -281,12 +285,12 @@ def _semantic_membership_map(persona_id: str, lead_ids: list[int]) -> dict[int, 
 
 def _campaign_leads(import_batch_ids: list[str]) -> tuple[list[dict[str, Any]], dict[int, set[str]]]:
     client = supabase_client.get_client()
-    rows = _rows(
+    rows = _paged_rows(lambda:
         client.table("lead_import_rows")
-        .select("batch_id,lead_id,status")
+        .select("id,batch_id,lead_id,status")
         .in_("batch_id", import_batch_ids)
         .in_("status", ["created", "updated"])
-        .limit(100000)
+        .order("id")
     )
     batches_by_lead: dict[int, set[str]] = {}
     for row in rows:
@@ -299,6 +303,82 @@ def _campaign_leads(import_batch_ids: list[str]) -> tuple[list[dict[str, Any]], 
         leads.extend(_rows(client.table("leads").select("*").in_("id", group).limit(len(group))))
     leads.sort(key=lambda row: int(row["id"]))
     return leads, batches_by_lead
+
+
+def _semantic_group_leads(persona_id: str, audience_id: str) -> tuple[list[dict[str, Any]], dict[int, set[str]]]:
+    """Resolve a group directly when no completed import is available."""
+    client = supabase_client.get_client()
+    memberships = _paged_rows(lambda:
+        client.table("lead_audience_memberships").select("lead_id")
+        .eq("audience_id", audience_id).order("lead_id")
+    )
+    lead_ids = sorted({int(row["lead_id"]) for row in memberships if row.get("lead_id") is not None})
+    leads: list[dict[str, Any]] = []
+    for group in _chunks(lead_ids):
+        leads.extend(_rows(
+            client.table("leads").select("*").eq("persona_id", persona_id)
+            .in_("id", group).limit(len(group))
+        ))
+    leads.sort(key=lambda row: int(row["id"]))
+    return leads, {int(row["id"]): set() for row in leads}
+
+
+def _campaign_overlaps(persona_id: str, lead_ids: list[int], hold_hours: int) -> dict[int, str]:
+    """Show campaign and reactivation overlap in the reviewable preview."""
+    client = supabase_client.get_client()
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hold_hours)
+    result: dict[int, str] = {}
+    active = {"awaiting_proof", "preview_ready", "pending_send", "buffered", "retry", "processing"}
+    for group in _chunks(lead_ids):
+        rows = _paged_rows(lambda:
+            client.table("lead_buffer").select("id,lead_ref,message_origin,status,created_at")
+            .eq("persona_id", persona_id).eq("direction", "outbound")
+            .in_("lead_ref", group).in_("message_origin", ["campaign", "proactive"])
+            .order("id")
+        )
+        for row in rows:
+            lead_id = int(row["lead_ref"])
+            if row.get("message_origin") == "campaign":
+                result[lead_id] = "campaign_already_contacted"
+                continue
+            if lead_id in result:
+                continue
+            created = str(row.get("created_at") or "")
+            try:
+                recent = datetime.fromisoformat(created.replace("Z", "+00:00")) >= cutoff
+            except ValueError:
+                recent = False
+            if row.get("status") in active or recent:
+                result[lead_id] = "reactivation_pending"
+    return result
+
+
+def validate_campaign_template(
+    template: dict[str, Any] | None, *, template_id: str | None,
+    persona_id: str, provider: str,
+) -> None:
+    if not template_id:
+        return
+    if not template or str(template.get("persona_id")) != persona_id or template.get("provider") != provider:
+        raise HTTPException(409, "Template nao pertence a persona e ao provider da campanha.")
+    if template.get("status") != "active":
+        raise HTTPException(409, "Template nao esta ativo.")
+    if provider == "meta_cloud" and (
+        template.get("meta_approval_status") != "approved" or not template.get("meta_template_id")
+    ):
+        raise HTTPException(409, "Template Meta nao esta aprovado.")
+
+
+def verify_meta_template_approval(template: dict[str, Any], persona_id: str) -> None:
+    """Check Meta at send admission so a stale local approval cannot send."""
+    try:
+        status = transport_client.get_meta_template_status(
+            persona_id, meta_template_id=str(template["meta_template_id"]),
+        )
+    except Exception as exc:
+        raise HTTPException(409, "Nao foi possivel confirmar a aprovacao do template na Meta.") from exc
+    if str(status.get("status") or "").upper() != "APPROVED":
+        raise HTTPException(409, "Template Meta nao esta aprovado na Meta.")
 
 
 def _valid_phone(lead: dict[str, Any]) -> bool:
@@ -411,9 +491,7 @@ def resolve_send_payload(
 ) -> dict[str, Any]:
     """Decide template vs. plain text for one recipient.
 
-    Meta: plain text is only ever allowed when explicitly flagged as a
-    controlled test AND there's evidence of an active conversation window for
-    this specific lead; otherwise an approved template is mandatory.
+    Meta campaigns require a template tracked as approved for this persona.
     Evolution has no Meta-style approval/window constraint — it sends the
     template's rendered body (if attached) or the frozen reference message.
     """
@@ -440,12 +518,6 @@ def resolve_send_payload(
                 "components": components,
             },
         }
-
-    if send_mode == "controlled_test" and has_active_conversation_window(persona_id, int(lead["id"])):
-        text = str(revision_content.get("message") or "").strip()
-        if not text:
-            return {"mode": "blocked", "reason": "message_required"}
-        return {"mode": "text", "text": text}
 
     return {"mode": "blocked", "reason": "template_required"}
 
@@ -798,8 +870,8 @@ def preview_campaign(payload: dict[str, Any]) -> dict[str, Any]:
     persona_id = str(payload.get("persona_id") or "")
     audience_id = str(payload.get("audience_id") or "")
     import_ids = [str(value) for value in (payload.get("import_batch_ids") or []) if value]
-    if not persona_id or not audience_id or not import_ids:
-        raise HTTPException(422, "Persona, grupo e ao menos um import sao obrigatorios.")
+    if not persona_id or not audience_id:
+        raise HTTPException(422, "Persona e grupo sao obrigatorios.")
 
     persona = supabase_client.get_persona_by_id(persona_id)
     audience = supabase_client.get_audience(audience_id)
@@ -811,7 +883,10 @@ def preview_campaign(payload: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(422, "A campanha exige um grupo semantico.")
 
     client = supabase_client.get_client()
-    batches = _rows(client.table("lead_import_batches").select("*").in_("id", import_ids).limit(len(import_ids)))
+    batches = (
+        _rows(client.table("lead_import_batches").select("*").in_("id", import_ids).limit(len(import_ids)))
+        if import_ids else []
+    )
     by_id = {str(row["id"]): row for row in batches}
     if len(by_id) != len(set(import_ids)):
         raise HTTPException(404, "Um ou mais imports nao foram encontrados.")
@@ -837,10 +912,14 @@ def preview_campaign(payload: dict[str, Any]) -> dict[str, Any]:
     binding = supabase_client.get_active_whatsapp_binding(persona_id)
     provider_ready = resolve_provider_ready(binding, provider)
 
-    leads, batches_by_lead = _campaign_leads(import_ids)
+    leads, batches_by_lead = (
+        _campaign_leads(import_ids) if import_ids
+        else _semantic_group_leads(persona_id, audience_id)
+    )
     lead_ids = [int(row["id"]) for row in leads]
-    memberships = _semantic_membership_map(persona_id, lead_ids)
+    memberships = _semantic_membership_map(persona_id, lead_ids, audience_id)
     consents = _latest_consents(persona_id=persona_id, lead_ids=lead_ids, channel="whatsapp", purpose=purpose)
+    overlaps = _campaign_overlaps(persona_id, lead_ids, policy["response_hold_hours"])
 
     recipients: list[dict[str, Any]] = []
     blocked = Counter()
@@ -856,6 +935,10 @@ def preview_campaign(payload: dict[str, Any]) -> dict[str, Any]:
             provider_ready=provider_ready,
             persona_id=persona_id,
         )
+        if eligible and lead_id in overlaps:
+            eligible = False
+            reason = overlaps[lead_id]
+            suppression = "cooldown"
         if reason:
             blocked[reason] += 1
         recipients.append({
@@ -894,6 +977,7 @@ def preview_campaign(payload: dict[str, Any]) -> dict[str, Any]:
         "persona_id": persona_id,
         "audience_id": audience_id,
         "import_batch_ids": sorted(set(import_ids)),
+        "source": "completed_imports" if import_ids else "semantic_group",
         "campaign_kind": campaign_kind,
         "purpose": purpose,
         "provider": provider,
@@ -949,7 +1033,7 @@ def create_campaign_draft(payload: dict[str, Any], *, actor_user_id: str | None)
     if preview["preview_checksum"] != str(payload.get("expected_preview_checksum") or ""):
         raise HTTPException(409, "A elegibilidade mudou; execute o preview novamente.")
     if preview["counts"]["selected_unique"] == 0:
-        raise HTTPException(422, "Os imports selecionados nao possuem leads utilizaveis.")
+        raise HTTPException(422, "O publico selecionado nao possui leads utilizaveis.")
     persona = supabase_client.get_persona_by_id(preview["persona_id"]) or {}
     graph_version, graph_checksum = _current_graph_snapshot(persona)
     campaign_id = str(uuid.uuid4())
@@ -1010,6 +1094,7 @@ def create_campaign_draft(payload: dict[str, Any], *, actor_user_id: str | None)
         "policy": preview["policy"],
         "policy_checksum": preview["policy_checksum"],
         "import_batch_ids": [row["id"] for row in preview["imports"]],
+        "source": "completed_imports" if preview["imports"] else "semantic_group",
     }
     revision_row = {
         "id": revision_id,
@@ -1087,17 +1172,21 @@ def list_campaigns(persona_id: str | None = None) -> list[dict[str, Any]]:
         query = query.eq("persona_id", persona_id)
     campaigns = _rows(query.order("created_at", desc=True).limit(500))
     for campaign in campaigns:
-        recipients = _rows(
+        recipients = _paged_rows(lambda:
             supabase_client.get_client().table("campaign_recipients")
             .select("sequence_status,blocked_reason")
             .eq("campaign_id", campaign["id"])
             .eq("campaign_revision", campaign.get("current_revision") or 1)
-            .limit(100000)
+            .order("id")
         )
+        statuses = Counter(row.get("sequence_status") for row in recipients)
         campaign["counts"] = {
             "selected_unique": len(recipients),
-            "eligible": sum(row.get("sequence_status") == "eligible" for row in recipients),
-            "blocked": sum(row.get("sequence_status") == "blocked" for row in recipients),
+            "eligible": statuses["eligible"],
+            "blocked": statuses["blocked"],
+            "queued": statuses["queued"],
+            "awaiting_reply": statuses["awaiting_reply"],
+            "send_failed": statuses["send_failed"],
         }
     return campaigns
 
@@ -1115,12 +1204,11 @@ def get_campaign_detail(campaign_id: str) -> dict[str, Any]:
         .limit(1)
     )
     revision = revision_rows[0] if revision_rows else None
-    recipients = _rows(
+    recipients = _paged_rows(lambda:
         client.table("campaign_recipients").select("*")
         .eq("campaign_id", campaign_id)
         .eq("campaign_revision", campaign.get("current_revision") or 1)
-        .order("created_at")
-        .limit(100000)
+        .order("id")
     )
     import_ids: list[str] = []
     imports: list[dict[str, Any]] = []
@@ -1132,16 +1220,15 @@ def get_campaign_detail(campaign_id: str) -> dict[str, Any]:
     reasons = Counter(row.get("blocked_reason") for row in recipients if row.get("blocked_reason"))
     provider = (revision or {}).get("provider")
     if recipients:
-        send_rows = _rows(
+        send_rows = _paged_rows(lambda:
             client.table("lead_buffer")
             .select("campaign_recipient_id,status,external_message_id,last_error,updated_at,created_at")
             .eq("campaign_id", campaign_id)
             .eq("campaign_revision", campaign.get("current_revision") or 1)
-            .order("created_at", desc=True)
-            .limit(100000)
+            .order("id")
         )
         latest_send: dict[str, dict[str, Any]] = {}
-        for row in send_rows:
+        for row in sorted(send_rows, key=lambda item: item.get("created_at") or "", reverse=True):
             key = str(row.get("campaign_recipient_id") or "")
             if key and key not in latest_send:
                 latest_send[key] = row
@@ -1162,6 +1249,9 @@ def get_campaign_detail(campaign_id: str) -> dict[str, Any]:
             "selected_unique": len(recipients),
             "eligible": sum(row.get("sequence_status") == "eligible" for row in recipients),
             "blocked": sum(row.get("sequence_status") == "blocked" for row in recipients),
+            "queued": sum(row.get("sequence_status") == "queued" for row in recipients),
+            "awaiting_reply": sum(row.get("sequence_status") == "awaiting_reply" for row in recipients),
+            "send_failed": sum(row.get("sequence_status") == "send_failed" for row in recipients),
             "responded": sum(row.get("response_attributed_at") is not None for row in recipients),
         },
         "blocked_reasons": dict(sorted(reasons.items())),
@@ -1262,18 +1352,26 @@ def send_campaign(
             .eq("id", template_id).limit(1)
         )
         template_row = rows[0] if rows else None
+    validate_campaign_template(
+        template_row, template_id=str(template_id) if template_id else None,
+        persona_id=persona_id, provider=provider,
+    )
+    if provider == "meta_cloud" and not template_id:
+        raise HTTPException(409, "Template Meta aprovado e obrigatorio para campanha.")
+    if provider == "meta_cloud":
+        verify_meta_template_approval(template_row, persona_id)
 
     audience_id = str(revision.get("audience_id") or "")
     campaign_kind = str(revision.get("campaign_kind") or "consent_request")
     purpose = str(revision.get("purpose") or "")
 
     client = supabase_client.get_client()
-    recipients = _rows(
+    recipients = _paged_rows(lambda:
         client.table("campaign_recipients").select("*")
         .eq("campaign_id", campaign_id)
         .eq("campaign_revision", campaign.get("current_revision") or 1)
         .eq("sequence_status", "eligible")
-        .limit(100000)
+        .order("id")
     )
     if not recipients:
         raise HTTPException(422, "Nenhum destinatario elegivel para envio.")
@@ -1283,11 +1381,12 @@ def send_campaign(
     for group in _chunks(lead_ids):
         for lead in _rows(client.table("leads").select("*").in_("id", group).limit(len(group))):
             leads_by_id[int(lead["id"])] = lead
-    memberships = _semantic_membership_map(persona_id, lead_ids)
+    memberships = _semantic_membership_map(persona_id, lead_ids, audience_id)
     consents = _latest_consents(persona_id=persona_id, lead_ids=lead_ids, channel="whatsapp", purpose=purpose)
 
     queued = 0
     failed = 0
+    deferred = 0
     for recipient in recipients:
         lead_id = int(recipient["lead_id"])
         lead = leads_by_id.get(lead_id)
@@ -1325,7 +1424,7 @@ def send_campaign(
 
         step = int(recipient.get("commercial_attempt_count") or 0) + 1
         try:
-            transport_client.enqueue_campaign_outbound({
+            admission = transport_client.enqueue_campaign_outbound({
                 "lead": lead,
                 "text": resolved["text"],
                 "sender_type": "campaign",
@@ -1339,19 +1438,21 @@ def send_campaign(
                     "campaign_recipient_id": recipient["id"],
                     "campaign_step": step,
                     "policy_checksum": recipient.get("policy_checksum"),
+                    "template_id": template_id,
                 },
             })
-        except HTTPException as exc:
-            _mark_recipient_send_failed(recipient["id"], f"enqueue_error:{exc.status_code}")
-            failed += 1
-            continue
-
-        client.table("campaign_recipients").update({
-            "sequence_status": "queued",
-            "commercial_attempt_count": step,
-            "last_commercial_attempt_at": _now_iso(),
-        }).eq("id", recipient["id"]).execute()
-        queued += 1
+        except HTTPException:
+            # A transport timeout may occur after the database commit. Keep
+            # the row eligible for an idempotent retry instead of declaring a
+            # permanent failure or attempting a second commercial step.
+            deferred += 1
+            break
+        if admission.get("admitted") or admission.get("deduplicated"):
+            queued += 1
+        else:
+            deferred += 1
+            if admission.get("reason") == "capacity_exhausted":
+                break
 
     if queued and campaign.get("status") != "running":
         client.table("campaigns").update({
@@ -1370,6 +1471,7 @@ def send_campaign(
             "actor_user_id": actor_user_id,
             "queued": queued,
             "failed": failed,
+            "deferred": deferred,
         },
         source="campaigns.send",
     )

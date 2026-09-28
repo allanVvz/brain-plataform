@@ -503,7 +503,7 @@ def generate_reactivation_previews(
         try:
             line = _one(
                 supabase_client.get_client().table("lead_buffer")
-                .select("id,persona_id,lead_ref,direction,status,payload,queue_parent_buffer_id,queue_group_id,queue_sequence,queue_revision")
+                .select("id,persona_id,lead_ref,direction,status,payload,created_at,queue_parent_buffer_id,queue_group_id,queue_sequence,queue_revision")
                 .eq("id", buffer_id).maybe_single()
             ) or {}
             if line.get("direction") != "outbound":
@@ -560,7 +560,7 @@ def generate_reactivation_previews(
             if str(source_id) != str(buffer_id):
                 source = _one(
                     supabase_client.get_client().table("lead_buffer")
-                    .select("id,persona_id,lead_ref,direction,status")
+                    .select("id,persona_id,lead_ref,direction,status,created_at")
                     .eq("id", source_id).maybe_single()
                 ) or {}
                 if (
@@ -573,6 +573,7 @@ def generate_reactivation_previews(
                     raise RuntimeError("preview de reativacao ou fonte nao esta elegivel")
             elif source.get("status") not in {"sent", "delivered", "read"}:
                 raise RuntimeError("mensagem nao esta elegivel para reativacao")
+            _assert_reactivation_source_current(source)
             persona = _one(
                 supabase_client.get_client().table("personas").select("slug")
                 .eq("id", line.get("persona_id")).maybe_single()
@@ -597,6 +598,41 @@ def generate_reactivation_previews(
         except Exception as exc:
             results.append({"buffer_id": buffer_id, "result": "bloqueado", "reason": str(exc)[:300]})
     return {"items": results}
+
+
+def _assert_reactivation_source_current(source: dict[str, Any]) -> None:
+    """Check the lead's current binding and replies across all bindings."""
+    lead_ref = source.get("lead_ref")
+    persona_id = source.get("persona_id")
+    created_at = source.get("created_at")
+    if not lead_ref or not persona_id or not created_at:
+        raise RuntimeError("fonte de reativacao incompleta")
+    client = supabase_client.get_client()
+    lead = _one(
+        client.table("leads")
+        .select("id,persona_id,channel_binding_id,ai_paused,handoff_level")
+        .eq("id", lead_ref).eq("persona_id", persona_id).maybe_single()
+    ) or {}
+    binding_id = lead.get("channel_binding_id")
+    binding = _one(
+        client.table("workflow_bindings")
+        .select("id,persona_id,active,connection_status,metadata")
+        .eq("id", binding_id).eq("persona_id", persona_id).maybe_single()
+    ) if binding_id else None
+    if (not binding or not binding.get("active")
+            or binding.get("connection_status") not in {"connected", "open"}
+            or (binding.get("metadata") or {}).get("safety_paused")
+            or lead.get("ai_paused")
+            or str(lead.get("handoff_level") or "none") != "none"):
+        raise RuntimeError("binding atual ou lead indisponivel para reativacao")
+    newer = _one(
+        client.table("lead_buffer").select("id")
+        .eq("persona_id", persona_id).eq("lead_ref", lead_ref)
+        .eq("direction", "inbound").gt("created_at", created_at)
+        .order("created_at", desc=True).limit(1).maybe_single()
+    )
+    if newer:
+        raise RuntimeError("reativacao obsoleta apos resposta nova")
 
 
 def handoff_reactivation_lines(*, buffer_ids: list[str], actor_user_id: str | None) -> dict[str, Any]:
