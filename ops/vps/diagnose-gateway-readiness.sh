@@ -66,14 +66,30 @@ probe_from_gateway transport http://caddy:8090/transport/health/ready
 
 compose=(docker compose --env-file .env.compose -f docker-compose.yml -f infra/microservices/docker-compose.blue-green.yml)
 "${compose[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -AtF "|"' <<'SQL'
-with matched as (
-  select l.id
+with scoped as (
+  select l.*
   from public.leads l join public.personas p on p.id=l.persona_id
   where p.slug='tock-fatal'
-    and right(regexp_replace(coalesce(l.telefone,''),'[^0-9]','','g'),4)='8510'
+), matched as (
+  select l.id,
+    exists (
+      select 1 from unnest(array[
+        l.telefone, l.lead_id, l.external_contact_id,
+        l.metadata->'identities'->>'remote_jid',
+        l.metadata->'identities'->>'remote_jid_alt'
+      ]) as identity(value)
+      where right(regexp_replace(coalesce(value,''),'[^0-9]','','g'),4)='8510'
+    ) as phone_match,
+    lower(coalesce(l.nome,'')) like '%allan%' as name_match
+  from scoped l
 )
-select 'SCOPED_LEAD_PHONE_SUFFIX_LOOKUP',count(*),
-  case when count(*)=1 then min(id)::text else '' end
+select 'SCOPED_LEAD_IDENTITY_LOOKUP',
+  count(*) filter (where phone_match),
+  case when count(*) filter (where phone_match)=1
+    then min(id) filter (where phone_match)::text else '' end,
+  count(*) filter (where name_match),
+  case when count(*) filter (where name_match)=1
+    then min(id) filter (where name_match)::text else '' end
 from matched;
 SQL
 
