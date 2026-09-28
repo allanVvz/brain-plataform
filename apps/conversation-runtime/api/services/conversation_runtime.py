@@ -25,6 +25,7 @@ from schemas.conversation import (
     TurnUnderstandingV1,
 )
 from services import (
+    conversation_repetition,
     context_cards as context_cards_service,
     deterministic_composer,
     graph_agent_runtime_v3,
@@ -1661,6 +1662,11 @@ def decide_agentic(
             raise RuntimeError("asked_field_key_requires_qualification_question")
         if kind in {"consultative", "confirmation"} and not public_question:
             raise RuntimeError("question_kind_without_public_question")
+        matched_keys = conversation_repetition.question_field_matches(
+            conversation_reply.reply, resolved_context.graph_contract,
+        )
+        if matched_keys and (kind != "qualification" or matched_keys != {asked_key}):
+            raise RuntimeError("public_question_field_metadata_mismatch")
         profile_name = resolved_understanding.conversation_brief.get("profile_name") or {}
         if (
             kind == "qualification"

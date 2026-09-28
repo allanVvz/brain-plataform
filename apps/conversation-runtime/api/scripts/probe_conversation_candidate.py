@@ -3,46 +3,26 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
-import unicodedata
 from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
 
-from services import agentic_turn, conversation_runtime, supabase_client, wa_validator_service
+from services import agentic_turn, conversation_repetition, conversation_runtime, supabase_client, wa_validator_service
 
 
-def _fold(value: str) -> str:
-    normalized = unicodedata.normalize("NFKD", value.casefold())
-    return "".join(char for char in normalized if not unicodedata.combining(char))
+def question_fields_in_reply(result: dict) -> set[str]:
+    """Use the same published-text matcher as runtime and Validator proof."""
+    context = result["context"]
+    reply = str(result["response"].reply_text or "")
+    contracts = [context.graph_contract, context.retrieval_trace.get("common_contract") or {}]
+    return set().union(*(
+        conversation_repetition.question_field_matches(reply, contract)
+        for contract in contracts
+    ))
 
 
 def forbidden_questions_in_reply(case: dict, result: dict) -> list[str]:
-    """Check the public text as well as the model's question pointer."""
-    forbidden = set(case.get("forbidden_asked_fields") or [])
-    if not forbidden:
-        return []
-    context = result["context"]
-    reply = str(result["response"].reply_text or "")
-    if "?" not in reply:
-        return []
-    contracts = [context.graph_contract, context.retrieval_trace.get("common_contract") or {}]
-    detected: list[str] = []
-    for contract in contracts:
-        questions = contract.get("questions") or {}
-        for field in contract.get("fields") or []:
-            key = str(field.get("key") or "")
-            if key not in forbidden or key in detected:
-                continue
-            question = str((questions.get(field.get("question_node_id")) or {}).get("text") or "")
-            name_question = (
-                (field.get("validation") or {}).get("semantic_type") == "human_full_name"
-                and bool(re.search(r"\b(nome|cham\w*|name|call)\b", _fold(reply)))
-                and bool(re.search(r"\b(voce|te|seu|sua|you|your)\b", _fold(reply)))
-            )
-            if (question and wa_validator_service._question_already_asked(question, reply)) or name_question:
-                detected.append(key)
-    return detected
+    return sorted(question_fields_in_reply(result) & set(case.get("forbidden_asked_fields") or []))
 
 
 def validate_case(case: dict, result: dict) -> None:
@@ -58,6 +38,11 @@ def validate_case(case: dict, result: dict) -> None:
     assert not forbidden_questions_in_reply(case, result), (
         "candidate repeated the interrupted qualification field in public text"
     )
+    text_fields = question_fields_in_reply(result)
+    assert not text_fields or (
+        proof.get("question_kind") == "qualification"
+        and text_fields == {proof.get("asked_field_key")}
+    ), "candidate question text contradicts its metadata"
     if case.get("allowed_question_kinds"):
         assert proof.get("question_kind") in case["allowed_question_kinds"], (
             "candidate chose an unexpected question kind"

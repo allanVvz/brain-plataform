@@ -62,6 +62,60 @@ def is_semantic_repetition(left: Any, right: Any) -> bool:
     return a == b or semantic_similarity(a, b) >= REPETITION_THRESHOLD
 
 
+def asked_field_keys(contract: dict[str, Any], question_ids: Iterable[Any]) -> list[str]:
+    """Project persisted question IDs through the current published contract."""
+    questions = contract.get("questions") or {}
+    fields = {
+        str(field.get("question_node_id") or ""): str(field.get("key") or "")
+        for field in contract.get("fields") or []
+        if field.get("question_node_id") and field.get("key")
+    }
+    return [key for node_id in question_ids
+            if (key := str((questions.get(str(node_id)) or {}).get("field_key")
+                            or fields.get(str(node_id)) or ""))]
+
+
+def is_name_field(field: dict[str, Any], contract: dict[str, Any]) -> bool:
+    if (field.get("validation") or {}).get("semantic_type") == "human_full_name":
+        return True
+    question = (contract.get("questions") or {}).get(
+        str(field.get("question_node_id") or ""),
+    ) or {}
+    variants = [question.get("text"), *(question.get("paraphrases") or [])]
+    return any(re.search(r"\b(nome|name|cham\w*|call)\b", normalize_text(item))
+               for item in variants)
+
+
+def question_field_matches(reply: Any, contract: dict[str, Any]) -> set[str]:
+    """Find clear published field questions in public text without composing it."""
+    text = str(reply or "")
+    if "?" not in text:
+        return set()
+    questions = contract.get("questions") or {}
+    matches: set[str] = set()
+    for field in contract.get("fields") or []:
+        key = str(field.get("key") or "")
+        question = questions.get(str(field.get("question_node_id") or "")) or {}
+        variants = [question.get("text"), *(question.get("paraphrases") or [])]
+        is_name = is_name_field(field, contract)
+        for sentence in re.findall(r"[^?!]*[?]", text):
+            folded = normalize_text(sentence)
+            if is_name and re.search(r"\b(nome|cham\w*|name|call)\b", folded) and (
+                re.search(r"\b(voce|te|seu|sua|your|you)\b", folded)
+                or re.search(r"\b(chamar|chama|chame) de \w+", folded)
+            ):
+                matches.add(key)
+                continue
+            for variant in variants:
+                normalized = normalize_text(variant)
+                if normalized and (
+                    normalized in folded or semantic_similarity(folded, normalized) >= 0.83
+                ):
+                    matches.add(key)
+                    break
+    return matches
+
+
 def _contextual_bridge(reply: Any, question_text: Any) -> str:
     raw_reply = str(reply or "").strip()
     folded_reply = normalize_text(reply)

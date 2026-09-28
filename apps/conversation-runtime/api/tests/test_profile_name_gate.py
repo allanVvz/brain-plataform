@@ -10,7 +10,7 @@ from schemas.conversation import (
     AgentResponse, ConversationContext, ConversationDecision,
     ConversationReplyV1, ResolvedUnderstandingV1, TurnUnderstandingV1,
 )
-from services import conversation_runtime, graph_agent_runtime_v3, graph_proof_checker_v3
+from services import conversation_repetition, conversation_runtime, graph_agent_runtime_v3, graph_proof_checker_v3
 from repositories import runtime as repository
 
 
@@ -21,6 +21,24 @@ NAME_FIELD = {
     "question_node_id": "faq:identity",
     "validation": {"semantic_type": "human_full_name", "min_tokens": 1, "max_tokens": 3},
 }
+
+
+def test_question_id_change_preserves_attempt_by_field_and_owner():
+    old = {"common_contract": {"fields": [{**NAME_FIELD, "question_node_id": "faq:old"}]}}
+    new = {"common_contract": {"fields": [{**NAME_FIELD, "question_node_id": "faq:new"}]}}
+    assert graph_agent_runtime_v3._remap_asked_questions(old, new, ["faq:old"]) == ["faq:new"]
+    new["common_contract"]["fields"][0]["owner_node_id"] = "persona:other"
+    assert graph_agent_runtime_v3._remap_asked_questions(old, new, ["faq:old"]) == []
+
+
+def test_published_name_question_matches_natural_wording_and_ledger_key():
+    contract = {"fields": [NAME_FIELD], "questions": {
+        "faq:identity": {"field_key": "customer_identity", "text": "Como prefere ser chamado?",
+                         "paraphrases": ["Qual é o seu nome?"]}}}
+    assert conversation_repetition.asked_field_keys(contract, ["faq:identity"]) == ["customer_identity"]
+    assert conversation_repetition.question_field_matches(
+        "Posso te chamar de Utzig?", contract,
+    ) == {"customer_identity"}
 
 
 def test_tock_source_bundle_publishes_optional_name_contract():
@@ -71,7 +89,31 @@ def test_crm_name_is_provisional_and_uses_published_validation():
     assert graph_agent_runtime_v3._profile_name_reference(
         lead={"nome": "Ana"}, contract=contract, facts={},
         asked_question_node_ids=[], journey_sequence=3,
+    )["state"] == "confirm_once"
+    assert graph_agent_runtime_v3._profile_name_reference(
+        lead={"nome": "Ana"}, contract=contract, facts={},
+        asked_question_node_ids=["faq:identity"], journey_sequence=3,
     )["state"] == "reference"
+
+
+def test_confirmed_profile_fact_carries_to_new_journey(monkeypatch):
+    field = {**NAME_FIELD, "carry_over": True}
+    document = {"common_contract": {"fields": [field]}, "branch_contracts": {}}
+    monkeypatch.setattr(graph_agent_runtime_v3.supabase_client,
+                        "get_lead_carry_over_facts", lambda *_args: [{
+                            "id": "fact:1", "journey_id": "journey:old",
+                            "field_key": "customer_identity", "owner_node_id": "persona:fixture",
+                            "status": "known", "value_json": "Ana", "metadata": {},
+                        }])
+    seeded = graph_agent_runtime_v3._seed_carried_facts(
+        {"facts": {}, "facts_by_key": {}}, document, {"id": "journey:old"},
+        persona_id="persona:fixture", lead_ref=7,
+    )
+    assert seeded["facts"]["customer_identity"]["value"] == "Ana"
+    assert graph_agent_runtime_v3._profile_name_reference(
+        lead={"nome": "Other"}, contract=document["common_contract"],
+        facts=seeded["facts"], asked_question_node_ids=[], journey_sequence=2,
+    ) is None
 
 
 def test_confirmed_or_declined_ledger_fact_beats_crm_name():
@@ -163,6 +205,8 @@ def test_qualification_question_requires_valid_field_and_kind(monkeypatch):
     with pytest.raises(RuntimeError, match="field_not_eligible"):
         decide(ConversationReplyV1(reply="Qual é seu nome?", question_kind="qualification",
                                    asked_field_key="wrong"))
+    with pytest.raises(RuntimeError, match="field_metadata_mismatch"):
+        decide(ConversationReplyV1(reply="Posso te chamar de Utzig?", question_kind="consultative"))
     with pytest.raises(RuntimeError, match="must_quote_candidate"):
         decide(ConversationReplyV1(reply="Qual é seu nome?", question_kind="qualification",
                                    asked_field_key="customer_identity"))

@@ -2592,24 +2592,21 @@ def _semantic_turn_audit(
         (contract.get("conversation_policy") or {}).get("handoff") or {}
     )
     pre_handoff_required = bool(handoff_policy.get("pre_notice_required"))
-    name_question_id, name_question = next(
+    name_field = next((field for field in contract.get("fields") or []
+                       if conversation_repetition.is_name_field(field, contract)), {})
+    name_field_key = str(name_field.get("key") or "")
+    name_question_id = next(
         (
-            (str(question_id), item)
+            str(question_id)
             for question_id, item in (contract.get("questions") or {}).items()
-            if str(item.get("field_key") or "") == "nome_cliente"
+            if name_field_key and str(item.get("field_key") or "") == name_field_key
         ),
-        ("", {}),
+        "",
     )
-    name_variants = [
-        value for value in (
-            str(name_question.get("text") or "").strip(),
-            *[str(item or "").strip() for item in name_question.get("paraphrases") or []],
-        )
-        if value
-    ]
-    current_name_text = _name_question_in_text(reply, name_variants)
+    text_field_matches = conversation_repetition.question_field_matches(reply, contract)
+    current_name_text = name_field_key in text_field_matches
     name_question_text_count = sum(
-        _name_question_in_text(text, name_variants)
+        name_field_key in conversation_repetition.question_field_matches(text, contract)
         for text in [*recent_replies, reply]
     )
     name_question_id_count = sum(
@@ -2633,11 +2630,14 @@ def _semantic_turn_audit(
             name_question_text_count, name_question_id_count,
         ) <= 1,
         "question_text_matches_metadata": (
-            not name_question_id
-            or (
+            (not text_field_matches or (
+                text_field_matches == {str(proof.get("asked_field_key") or asked_field or "")}
+                and str(proof.get("question_kind") or "qualification") == "qualification"
+            ))
+            and (not name_question_id or (
                 (not current_name_text or question_id == name_question_id)
                 and (question_id != name_question_id or current_name_text)
-            )
+            ))
         ),
         "handoff_without_new_question": (
             not handoff_observed or (question_id is None and "?" not in reply)
