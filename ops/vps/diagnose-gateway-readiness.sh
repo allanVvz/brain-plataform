@@ -145,6 +145,22 @@ join public.leads l on l.id=b.lead_ref
 join public.workflow_bindings w on w.id=b.channel_binding_id
 order by b.created_at,b.id;
 
+with queue_items as (
+  select item from jsonb_array_elements(
+    public.list_actionable_message_queue_v1(
+      array(select id from public.personas where slug='tock-fatal'),
+      'conversation','awaiting_customer',0,100)->'items'
+  ) item
+)
+select 'QUEUE_SOURCE_BINDING',b.channel_binding_id,w.provider,w.active,
+  w.connection_status,coalesce((w.metadata->>'safety_paused')::boolean,false),
+  count(*),string_agg(b.lead_ref::text,',' order by b.lead_ref)
+from queue_items q join public.lead_buffer b on b.id=(q.item->>'id')::uuid
+left join public.workflow_bindings w on w.id=b.channel_binding_id
+group by b.channel_binding_id,w.provider,w.active,w.connection_status,
+  coalesce((w.metadata->>'safety_paused')::boolean,false)
+order by b.channel_binding_id;
+
 select 'AUDIENCE_GROUP',a.id,a.slug,a.name,a.source_type,count(m.lead_id)
 from public.audiences a join public.personas p on p.id=a.persona_id
 left join public.lead_audience_memberships m on m.audience_id=a.id
