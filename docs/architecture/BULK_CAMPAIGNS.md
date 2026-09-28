@@ -14,21 +14,22 @@ destinatarios deduplicados e a origem. O envio Meta exige template local ativo,
 da mesma persona/provider, com `meta_approval_status=approved` e ID Meta.
 Texto simples de teste deixa de ser caminho de campanha.
 
-A migration `20260928014611_campaign_atomic_admission.sql` prepara a admissao
+A migration `161_campaign_atomic_admission.sql` prepara a admissao
 na outbox e a atualizacao do destinatario na mesma transacao. A trava por
 persona serializa campanhas simultaneas; os limites efetivos nunca excedem
 20 por hora e 100 por dia (dia de Sao Paulo). Cada lead recebe no maximo uma
 primeira mensagem de campanha; consentimento, binding, resposta nova e
 reativacao ativa bloqueiam a admissao. O worker revalida antes de chamar o
 provider. Capacidade esgotada deixa o destinatario elegivel para um lote
-posterior. A migration e as imagens ainda exigem auditoria, candidate e
+posterior, que exige nova chamada de envio apos a janela; nao ha agendamento
+automatico desses lotes. A migration e as imagens ainda exigem auditoria, candidate e
 autorizacoes produtivas proprias antes de qualquer envio.
 
 Fila de reativacao, limpeza de conversa e campanhas sao operacoes separadas.
 Cada campanha segmentada requer revisao individual do publico, bloqueios,
 template, mensagem e sobreposicao com a fila. A limpeza da conversa de Allan
-exige dry-run e autorizacao especifica; consentimentos e eventos imutaveis
-permanecem preservados.
+foi feita apos dry-run e autorizacao especifica; consentimentos e eventos
+imutaveis permaneceram preservados.
 
 Historico do rollout 1: ele criava coortes operacionais, calculava elegibilidade
 e congelava drafts sem enviar. O envio atual passa pelo control-plane e pelo

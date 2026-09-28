@@ -138,7 +138,7 @@ consentimento e nenhuma chave de estado de conversa. Não houve pausa global.
   checksum/snapshot; o preview mostra sobreposição com reativação e campanhas.
 - O envio Meta exige template ativo da própria persona e provider, com ID Meta
   e aprovação local. O modo de texto simples foi removido das campanhas.
-- A migration candidata `20260928014611_campaign_atomic_admission.sql` reserva
+- A migration candidata `161_campaign_atomic_admission.sql` reserva
   capacidade e cria a outbox na mesma transação, com limite efetivo de até
   20/hora, 100/dia e uma primeira campanha por lead. O transporte revalida
   consentimento, público, resposta nova, reativação e template antes do

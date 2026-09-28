@@ -1,7 +1,7 @@
 # Roadmap de Agentes de IA — Brain AI
 
-Publicações de conteúdo isoladas pausam somente a persona alvo. Personas não
-envolvidas continuam operando.
+Publicações de GraphBundle e conteúdo não pausam binding, persona, IA ou worker.
+Uma falha mantém a publicação anterior ativa.
 
 > **Este documento é a autoridade máxima do projeto.**
 > Quando qualquer outro arquivo contradiz este, este vence. Um agente que

@@ -39,5 +39,5 @@ def test_documents_keep_pause_and_publisher_scope_explicit():
     assert "Pausa global e excepcional" in AGENTS
     assert "GraphBundle" in ROADMAP
     assert "GraphBundle" in RELEASE_GATES
-    assert "Personas não\nenvolvidas continuam operando" in ROADMAP
+    assert "não pausam binding, persona, IA ou worker" in ROADMAP
     assert "it does not\n  publish a GraphBundle" in RELEASE_GATES
