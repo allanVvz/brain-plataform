@@ -241,6 +241,11 @@ select 'VALIDATOR_PROOF_FACTS',p.canonical_inbound_id,
 from public.conversation_turn_proofs p
 where p.canonical_inbound_id='2429af67-f44b-4532-b635-0635502f3f13';
 
+select 'QUEUE_LEAD_BINDING',l.id,l.channel_binding_id,wb.active,wb.connection_status,wb.persona_id=p.id
+from public.leads l join public.personas p on p.id=l.persona_id
+left join public.workflow_bindings wb on wb.id=l.channel_binding_id
+where p.slug='tock-fatal' and l.id in (208,209,242,245,246,247,248,297) order by l.id;
+
 select 'CAMPAIGN',c.id,c.status,c.campaign_kind,c.provider,c.audience_id
 from public.campaigns c join public.personas p on p.id=c.persona_id
 where p.slug='tock-fatal' order by c.created_at desc limit 50;
