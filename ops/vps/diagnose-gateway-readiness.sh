@@ -237,7 +237,7 @@ select 'RESELLER_CANDIDATE_OVERLAP',count(*),
 from reseller r left join queue_leads q on q.lead_id=r.id;
 
 select 'VALIDATOR_PROOF_FACTS',p.canonical_inbound_id,
-  p.proof_result->'accepted_facts',p.proof_result->'consumed_service_spans'
+  p.proof_result->'service_resolution',p.proof_result->'service_operations'
 from public.conversation_turn_proofs p
 where p.canonical_inbound_id='2429af67-f44b-4532-b635-0635502f3f13';
 
