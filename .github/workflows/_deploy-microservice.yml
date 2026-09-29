@@ -9,6 +9,7 @@ on:
       canary_persona_slug: {required: false, type: string, default: ""}
       canary_flow_id: {required: false, type: string, default: ""}
       runtime_probe_fixture: {required: false, type: string, default: ""}
+      outbound_policy_personas: {required: false, type: string, default: ""}
     secrets:
       VPS_HOST: {required: true}
       VPS_USER: {required: true}
@@ -46,18 +47,42 @@ jobs:
           AUDIT_ROOT: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           ALLOW_PENDING_MICROSERVICE_DIGESTS: "true"
           AUDIT_SCRIPT: ops/vps/validate-production-release.sh
+          POLICY_PERSONAS: ${{ inputs.outbound_policy_personas }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
           command_timeout: 3m
-          envs: AUDIT_ROOT,ALLOW_PENDING_MICROSERVICE_DIGESTS,AUDIT_SCRIPT
+          envs: AUDIT_ROOT,ALLOW_PENDING_MICROSERVICE_DIGESTS,AUDIT_SCRIPT,POLICY_PERSONAS
           script: |
             set -Eeuo pipefail
             cd "$AUDIT_ROOT"
             bash "$AUDIT_SCRIPT"
             bash ops/vps/rollout-microservices.sh status
+            if [[ "${{ inputs.service }}" == conversation-runtime && "${{ inputs.action }}" == deploy ]]; then
+              [[ "$POLICY_PERSONAS" =~ ^[a-z0-9-]+(,[a-z0-9-]+)*$ ]] || {
+                echo 'runtime deploy requires outbound_policy_personas' >&2
+                exit 1
+              }
+              transport_slot="$(python3 -c 'import json; print(json.load(open(".deploy/microservices/slots.json", encoding="utf-8"))["transport"]["active"])')"
+              [[ "$transport_slot" == blue || "$transport_slot" == green ]]
+              docker exec -e POLICY_PERSONAS="$POLICY_PERSONAS" "brain-ai-transport-${transport_slot}-1" python -c '
+            import os
+            from services import control_plane_client, supabase_client
+
+            slugs = os.environ["POLICY_PERSONAS"].split(",")
+            rows = supabase_client.get_client().table("personas").select("id,slug").in_("slug", slugs).execute().data or []
+            by_slug = {str(row["slug"]): str(row["id"]) for row in rows}
+            assert set(by_slug) == set(slugs), "outbound policy persona scope is incomplete"
+            for slug in slugs:
+                result = control_plane_client.published_outbound_policy(by_slug[slug])
+                hours = result.get("published_business_hours")
+                checksum = (hours or result).get("graph_checksum")
+                assert checksum, "outbound policy is not pinned to an active publication"
+                print("OUTBOUND_POLICY_PREFLIGHT|" + slug + "|passed|" + str(checksum), flush=True)
+            '
+            fi
 
   mutate:
     needs: production-preflight
