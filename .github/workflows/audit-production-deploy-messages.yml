@@ -340,23 +340,6 @@ jobs:
             select 'SCOPED_MESSAGE_TAIL',slug,direction,created_at
             from recent where rn<=8 order by slug,created_at;
 
-            with matched as (
-              select l.id from public.leads l join public.personas p on p.id=l.persona_id
-              where p.slug='tock-fatal'
-                and (
-                  right(regexp_replace(coalesce(l.telefone,''),'[^0-9]','','g'),4)=:'PHONE_LAST4'
-                  or right(regexp_replace(coalesce(l.external_contact_id,''),'[^0-9]','','g'),4)=:'PHONE_LAST4'
-                  or right(regexp_replace(coalesce(l.metadata->'identities'->>'remote_jid_alt',''),'[^0-9]','','g'),4)=:'PHONE_LAST4'
-                )
-            ), unique_lead as (select min(id) as id from matched having count(*)=1)
-            select 'SCOPED_CUSTOMER_MESSAGE',m.created_at,
-                   left(regexp_replace(coalesce(to_jsonb(m)->>'content',to_jsonb(m)->>'texto',''),
-                                       '[0-9]{7,}','[number]','g'),1000)
-            from unique_lead l join public.messages m on m.lead_id=l.id
-            where m.direction='inbound' and m.created_at>=:'WINDOW_START'::timestamptz
-              and m.created_at<:'WINDOW_END'::timestamptz
-            order by m.created_at;
-
             with matches as (
               select l.id,p.slug,count(*) over (partition by p.slug) as match_count
               from public.leads l join public.personas p on p.id=l.persona_id
