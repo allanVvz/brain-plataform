@@ -333,11 +333,11 @@ jobs:
                 )
             ), scoped as (select id,slug from matches where match_count=1),
             recent as (
-              select s.slug,m.direction,m.sender_type,m.created_at,
+              select s.slug,m.direction,m.created_at,
                      row_number() over (partition by s.slug order by m.created_at desc) as rn
               from scoped s join public.messages m on m.lead_id=s.id
             )
-            select 'SCOPED_MESSAGE_TAIL',slug,direction,sender_type,created_at
+            select 'SCOPED_MESSAGE_TAIL',slug,direction,created_at
             from recent where rn<=8 order by slug,created_at;
 
             with matches as (
