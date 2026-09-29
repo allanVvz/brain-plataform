@@ -16,7 +16,7 @@ on:
       persona_slug:
         description: Persona that owns the lead
         type: choice
-        options: [tock-fatal, aurora, vz-lupas]
+        options: [tock-fatal, utzig-garage, aurora, vz-lupas]
         required: true
       lead_ref:
         description: Exact numeric lead id
