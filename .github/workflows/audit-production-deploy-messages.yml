@@ -102,6 +102,15 @@ jobs:
             except Exception as exc:
                 print("LIVE_POLICY_CALL|"+slug+"|"+type(exc).__name__+"|"+str(exc))' "$policy_slug" "$policy_persona_id"
             done <<< "$policy_ids"
+            transport_token_hash="$(docker exec brain-ai-transport-blue-1 python -c 'import hashlib,os; t=(os.environ.get("AI_BRAIN_WEBHOOK_TOKEN") or "").strip(); print(hashlib.sha256(t.encode()).hexdigest() if t else "")')"
+            control_token_hash="$(docker exec brain-ai-control-plane-green-1 python -c 'import hashlib,os; t=(os.environ.get("AI_BRAIN_WEBHOOK_TOKEN") or "").strip(); print(hashlib.sha256(t.encode()).hexdigest() if t else "")')"
+            [[ -n "$transport_token_hash" && -n "$control_token_hash" ]]
+            if [[ "$transport_token_hash" == "$control_token_hash" ]]; then
+              echo 'INTERNAL_TOKEN_PARITY|transport|control-plane|match'
+            else
+              echo 'INTERNAL_TOKEN_PARITY|transport|control-plane|mismatch'
+            fi
+            docker exec brain-ai-transport-blue-1 python -c 'import os,urllib.parse; u=urllib.parse.urlparse(os.environ.get("BRAIN_CONTROL_PLANE_URL") or ""); print("CONTROL_PLANE_TARGET|"+u.scheme+"|"+u.hostname.__str__())'
             "${compose[@]}" exec -T \
               -e WINDOW_START="$WINDOW_START" -e WINDOW_END="$WINDOW_END" -e PERSONA_SLUG="$PERSONA_SLUG" \
               db sh -c 'psql -v ON_ERROR_STOP=1 -v WINDOW_START="$WINDOW_START" -v WINDOW_END="$WINDOW_END" -v PERSONA_SLUG="$PERSONA_SLUG" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -AtF "|"' <<'SQL'
