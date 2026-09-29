@@ -111,6 +111,18 @@ jobs:
               echo 'INTERNAL_TOKEN_PARITY|transport|control-plane|mismatch'
             fi
             docker exec brain-ai-transport-blue-1 python -c 'import os,urllib.parse; u=urllib.parse.urlparse(os.environ.get("BRAIN_CONTROL_PLANE_URL") or ""); print("CONTROL_PLANE_TARGET|"+u.scheme+"|"+u.hostname.__str__())'
+            echo 'INTERNAL_ROUTE_CONFIG_BEGIN'
+            sed -n '1,90p' infra/caddy-dynamic/internal-upstreams.caddy
+            echo 'INTERNAL_ROUTE_CONFIG_END'
+            while IFS='|' read -r policy_slug policy_persona_id; do
+              docker exec brain-ai-transport-blue-1 python -c 'import os,sys,httpx; slug,pid=sys.argv[1:]; token=(os.environ.get("AI_BRAIN_WEBHOOK_TOKEN") or "").strip();
+            for host in ("control-plane-green","control-plane-blue"):
+                try:
+                    response=httpx.get("http://"+host+":8080/internal/v1/control-plane/personas/"+pid+"/outbound-policy",headers={"X-Webhook-Token":token},timeout=4)
+                    print("DIRECT_POLICY_CALL|"+slug+"|"+host+"|"+str(response.status_code))
+                except Exception as exc:
+                    print("DIRECT_POLICY_CALL|"+slug+"|"+host+"|"+type(exc).__name__)' "$policy_slug" "$policy_persona_id"
+            done <<< "$policy_ids"
             "${compose[@]}" exec -T \
               -e WINDOW_START="$WINDOW_START" -e WINDOW_END="$WINDOW_END" -e PERSONA_SLUG="$PERSONA_SLUG" \
               db sh -c 'psql -v ON_ERROR_STOP=1 -v WINDOW_START="$WINDOW_START" -v WINDOW_END="$WINDOW_END" -v PERSONA_SLUG="$PERSONA_SLUG" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -AtF "|"' <<'SQL'
