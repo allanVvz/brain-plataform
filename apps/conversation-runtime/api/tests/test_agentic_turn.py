@@ -49,7 +49,7 @@ def _context() -> ConversationContext:
     )
 
 
-def test_public_question_metadata_is_required_and_requested_by_reply_contract():
+def test_public_question_metadata_is_normalized_only_when_unambiguous(monkeypatch):
     assert agentic_turn._reply_schema()["properties"]["question_kind"]["enum"] == [
         "qualification", "consultative", "confirmation", "none",
     ]
@@ -62,11 +62,48 @@ def test_public_question_metadata_is_required_and_requested_by_reply_contract():
         prospective_state={}, conversation_brief={}, context_manifest={},
         resolution_proof={"valid": True},
     )
-    with pytest.raises(RuntimeError, match="question_kind_required_for_public_question"):
+    observed = []
+    def capture(_context, *, model_observation):
+        observed.append(model_observation["interpretation"])
+        raise RuntimeError("captured before proof")
+    monkeypatch.setattr(graph_agent_runtime_v3, "decide", capture)
+    with pytest.raises(RuntimeError, match="captured before proof"):
         conversation_runtime.decide_agentic(
             context, resolved_understanding=resolved,
             conversation_reply=ConversationReplyV1(
                 reply="Posso ajudar?", question_kind="none",
+            ),
+        )
+    assert observed[-1]["question_kind"] == "consultative"
+    assert observed[-1]["asked_field_key"] is None
+
+    context = context.model_copy(update={"graph_contract": {
+        "fields": [{"key": "nome_cliente", "question_node_id": "faq:name"}],
+        "questions": {"faq:name": {"field_key": "nome_cliente",
+                                    "text": "Como você prefere que eu te chame?"}},
+    }})
+    resolved = resolved.model_copy(update={
+        "context": context,
+        "eligible_fields": [{"key": "nome_cliente", "question_node_id": "faq:name"}],
+    })
+    with pytest.raises(RuntimeError, match="captured before proof"):
+        conversation_runtime.decide_agentic(
+            context, resolved_understanding=resolved,
+            conversation_reply=ConversationReplyV1(
+                reply="Como você prefere que eu te chame?", question_kind="consultative",
+            ),
+        )
+    assert observed[-1]["question_kind"] == "qualification"
+    assert observed[-1]["asked_field_key"] == "nome_cliente"
+
+    # A confirmed name is not eligible even when the reply text matches its
+    # published question. It must never be sent as a new qualification prompt.
+    resolved = resolved.model_copy(update={"eligible_fields": []})
+    with pytest.raises(RuntimeError, match="public_question_field_not_eligible"):
+        conversation_runtime.decide_agentic(
+            context, resolved_understanding=resolved,
+            conversation_reply=ConversationReplyV1(
+                reply="Como você prefere que eu te chame?", question_kind="none",
             ),
         )
 
