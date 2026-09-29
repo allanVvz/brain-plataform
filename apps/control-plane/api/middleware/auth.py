@@ -94,6 +94,19 @@ def is_public_path(path: str, method: str = "GET") -> bool:
         return True
     if path in PUBLIC_EXACT_PATHS:
         return True
+    # The service token is validated by the route. Only this exact read-only
+    # endpoint may bypass the operator session middleware.
+    if str(method or "").upper() == "GET" and path.startswith(
+        "/internal/v1/control-plane/personas/"
+    ) and path.endswith("/outbound-policy"):
+        persona_id = path.removeprefix(
+            "/internal/v1/control-plane/personas/"
+        ).removesuffix("/outbound-policy")
+        try:
+            uuid.UUID(persona_id)
+            return True
+        except (ValueError, AttributeError):
+            return False
     if path.startswith("/internal/agents/leads/"):
         for suffix in ("/purchase-completed", "/journey-events"):
             if path.endswith(suffix):

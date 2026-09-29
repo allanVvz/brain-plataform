@@ -80,6 +80,25 @@ def test_manual_envelope_fetches_published_policy_when_not_pinned(monkeypatch):
     assert envelope["message"]["metadata"]["published_business_hours"] == policy
 
 
+def test_manual_envelope_without_published_hours_remains_sendable(monkeypatch):
+    monkeypatch.setattr(whatsapp_outbox, "resolve_lead_binding", lambda lead: {"id": "binding"})
+    monkeypatch.setattr(whatsapp_outbox, "_recipient_for_lead", lambda lead: "5511999999999")
+    monkeypatch.setattr(whatsapp_outbox, "_observe_duplicate_content", lambda **_: None)
+    monkeypatch.setattr(
+        whatsapp_outbox.control_plane_client,
+        "published_outbound_policy",
+        lambda _persona_id: {"published_business_hours": None, "graph_checksum": "sha256:appointment"},
+    )
+
+    envelope = whatsapp_outbox.prepare_outbound_envelope(
+        lead={"id": 7, "persona_id": "persona"}, text="oi", sender_type="agent",
+        message_id="agent:1", correlation_id="agent:1",
+    )
+
+    assert envelope["buffer"]["status"] == "pending_send"
+    assert envelope["message"]["metadata"]["published_business_hours"] is None
+
+
 def test_preview_envelope_remains_inert_until_operator_sends(monkeypatch):
     policy = {
         "timezone": "America/Sao_Paulo", "start": "08:00", "end": "20:00",
