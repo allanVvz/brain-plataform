@@ -1,0 +1,62 @@
+{
+  "approval_scope": "publication_plan",
+  "branches_affected": [
+    "audience:tock-reseller",
+    "audience:tock-retail"
+  ],
+  "breaking_contract_changes": [
+    "node_removed:faq:tock-fulfillment-preference",
+    "node_removed:faq:tock-store-visit",
+    "edge_removed:edge:v17:campaign:tock-whatsapp-qualification:faq:tock-fulfillment-preference:contains",
+    "edge_removed:edge:v17:campaign:tock-whatsapp-qualification:faq:tock-store-visit:contains",
+    "edge_removed:edge:v17:faq:tock-fulfillment-preference:embed:tock-default:publishes_to",
+    "edge_removed:edge:v17:faq:tock-store-visit:embed:tock-default:publishes_to",
+    "branch_contract_changed:audience:tock-reseller",
+    "branch_structure_changed:audience:tock-reseller",
+    "branch_contract_changed:audience:tock-retail",
+    "branch_structure_changed:audience:tock-retail"
+  ],
+  "chunks_reused": 1473,
+  "chunks_to_embed": 2,
+  "compiler_version": "graph-compiler-v3.6.5",
+  "disposition": "awaiting_approval",
+  "draft_checksum": "sha256:398c9762b119f2b8a0b558708191828145583d22d5ced1066143345adfb8789d",
+  "edge_changes": {
+    "added": [],
+    "changed": [],
+    "removed": [
+      "edge:v17:campaign:tock-whatsapp-qualification:faq:tock-fulfillment-preference:contains",
+      "edge:v17:campaign:tock-whatsapp-qualification:faq:tock-store-visit:contains",
+      "edge:v17:faq:tock-fulfillment-preference:embed:tock-default:publishes_to",
+      "edge:v17:faq:tock-store-visit:embed:tock-default:publishes_to"
+    ]
+  },
+  "edges_added": 0,
+  "edges_changed": 0,
+  "edges_removed": 4,
+  "estimated_embedding_cost": {
+    "amount": null,
+    "currency": "USD",
+    "reason": "provider_pricing_not_configured"
+  },
+  "next_version": 39,
+  "node_changes": {
+    "added": [],
+    "changed": [
+      "faq:tock-shipping",
+      "persona:tock-fatal",
+      "rule:tock-atacado-preco-sob-consulta"
+    ],
+    "removed": [
+      "faq:tock-fulfillment-preference",
+      "faq:tock-store-visit"
+    ]
+  },
+  "nodes_added": 0,
+  "nodes_changed": 3,
+  "nodes_removed": 2,
+  "plan_version": "1.0",
+  "publication_allowed": true,
+  "runtime_checksum": "sha256:88e0499d477e5af9e60eaae0b291f86eb30b5f21ffe02bf99a60cceaf7f88fc9",
+  "validation_errors": []
+}
