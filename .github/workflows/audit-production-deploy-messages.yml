@@ -88,6 +88,20 @@ jobs:
             WHERE p.slug IN ('tock-fatal','utzig-garage')
             ORDER BY p.slug;
             SQL
+            policy_ids="$("${compose[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -AtF "|"' <<'SQL'
+            SELECT slug,id FROM public.personas WHERE slug IN ('tock-fatal','utzig-garage') ORDER BY slug;
+            SQL
+            )"
+            while IFS='|' read -r policy_slug policy_persona_id; do
+              [[ "$policy_slug" == tock-fatal || "$policy_slug" == utzig-garage ]] || exit 1
+              [[ "$policy_persona_id" =~ ^[0-9a-f-]{36}$ ]] || exit 1
+              docker exec brain-ai-transport-blue-1 python -c 'import sys; from services.control_plane_client import published_outbound_policy; slug,pid=sys.argv[1:];
+            try:
+                result=published_outbound_policy(pid)
+                print("LIVE_POLICY_CALL|"+slug+"|ok|"+str(result.get("published_business_hours",{}).get("graph_checksum","")))
+            except Exception as exc:
+                print("LIVE_POLICY_CALL|"+slug+"|"+type(exc).__name__+"|"+str(exc))' "$policy_slug" "$policy_persona_id"
+            done <<< "$policy_ids"
             "${compose[@]}" exec -T \
               -e WINDOW_START="$WINDOW_START" -e WINDOW_END="$WINDOW_END" -e PERSONA_SLUG="$PERSONA_SLUG" \
               db sh -c 'psql -v ON_ERROR_STOP=1 -v WINDOW_START="$WINDOW_START" -v WINDOW_END="$WINDOW_END" -v PERSONA_SLUG="$PERSONA_SLUG" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -AtF "|"' <<'SQL'
