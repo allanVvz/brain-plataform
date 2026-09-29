@@ -13,7 +13,7 @@ from schemas.conversation import (
     ResolvedUnderstandingV1,
     TurnUnderstandingV1,
 )
-from services import agentic_turn, graph_agent_runtime_v3, graph_proof_checker_v3
+from services import agentic_turn, conversation_prompts, conversation_runtime, graph_agent_runtime_v3, graph_proof_checker_v3
 
 
 class _HttpClient:
@@ -47,6 +47,28 @@ def _context() -> ConversationContext:
         publication_id="publication-1",
         runtime_version=graph_agent_runtime_v3.RUNTIME_VERSION,
     )
+
+
+def test_public_question_metadata_is_required_and_requested_by_reply_contract():
+    assert agentic_turn._reply_schema()["properties"]["question_kind"]["enum"] == [
+        "qualification", "consultative", "confirmation", "none",
+    ]
+    assert "question_kind nunca pode ser none ou null" in conversation_prompts.REPLY
+    assert "use qualification e a chave desse campo" in conversation_prompts.REPLY
+
+    context = _context()
+    resolved = ResolvedUnderstandingV1(
+        understanding=TurnUnderstandingV1(), context=context,
+        prospective_state={}, conversation_brief={}, context_manifest={},
+        resolution_proof={"valid": True},
+    )
+    with pytest.raises(RuntimeError, match="question_kind_required_for_public_question"):
+        conversation_runtime.decide_agentic(
+            context, resolved_understanding=resolved,
+            conversation_reply=ConversationReplyV1(
+                reply="Posso ajudar?", question_kind="none",
+            ),
+        )
 
 
 def test_active_publication_is_not_a_shadow_session():

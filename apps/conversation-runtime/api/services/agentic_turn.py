@@ -283,7 +283,7 @@ def _reply_schema() -> dict[str, Any]:
             "contract_version": {"const": "conversation_reply_v1"},
             "reply": {"type": "string", "minLength": 1},
             "asked_field_key": {"type": ["string", "null"]},
-            "question_kind": {"enum": ["qualification", "consultative", "confirmation", "none", None]},
+            "question_kind": {"enum": ["qualification", "consultative", "confirmation", "none"]},
             "claims": {"type": "array", "items": {
                 "type": "object", "additionalProperties": False,
                 "required": ["claim_type", "value", "evidence_node_ids", "evidence_chunk_ids"],
