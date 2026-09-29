@@ -264,6 +264,19 @@ jobs:
             from matches order by slug,id;
 
             with matches as (
+              select l.id,p.slug,l.metadata,count(*) over (partition by p.slug) as match_count
+              from public.leads l join public.personas p on p.id=l.persona_id
+              where p.slug in ('tock-fatal','utzig-garage')
+                and (
+                  right(regexp_replace(coalesce(l.telefone,''),'[^0-9]','','g'),4)=:'PHONE_LAST4'
+                  or right(regexp_replace(coalesce(l.external_contact_id,''),'[^0-9]','','g'),4)=:'PHONE_LAST4'
+                  or right(regexp_replace(coalesce(l.metadata->'identities'->>'remote_jid_alt',''),'[^0-9]','','g'),4)=:'PHONE_LAST4'
+                )
+            )
+            select 'SCOPED_HANDOFF_REASON',slug,left(coalesce(metadata->>'handoff_reason',''),160)
+            from matches where match_count=1 order by slug;
+
+            with matches as (
               select l.id,p.slug,count(*) over (partition by p.slug) as match_count
               from public.leads l join public.personas p on p.id=l.persona_id
               where p.slug in ('tock-fatal','utzig-garage')
@@ -308,6 +321,44 @@ jobs:
                     from public.system_events e where e.entity_type='lead_buffer' and e.entity_id=r.id::text
                       and e.event_type in ('conversation.technical_failure','conversation.technical_handoff'))
             from recent r where r.rn<=12 order by r.slug,r.created_at;
+
+            with matches as (
+              select l.id,p.slug,count(*) over (partition by p.slug) as match_count
+              from public.leads l join public.personas p on p.id=l.persona_id
+              where p.slug in ('tock-fatal','utzig-garage')
+                and (
+                  right(regexp_replace(coalesce(l.telefone,''),'[^0-9]','','g'),4)=:'PHONE_LAST4'
+                  or right(regexp_replace(coalesce(l.external_contact_id,''),'[^0-9]','','g'),4)=:'PHONE_LAST4'
+                  or right(regexp_replace(coalesce(l.metadata->'identities'->>'remote_jid_alt',''),'[^0-9]','','g'),4)=:'PHONE_LAST4'
+                )
+            ), scoped as (select id,slug from matches where match_count=1),
+            recent as (
+              select s.slug,m.direction,m.sender_type,m.created_at,
+                     row_number() over (partition by s.slug order by m.created_at desc) as rn
+              from scoped s join public.messages m on m.lead_id=s.id
+            )
+            select 'SCOPED_MESSAGE_TAIL',slug,direction,sender_type,created_at
+            from recent where rn<=8 order by slug,created_at;
+
+            with matches as (
+              select l.id,p.slug,count(*) over (partition by p.slug) as match_count
+              from public.leads l join public.personas p on p.id=l.persona_id
+              where p.slug in ('tock-fatal','utzig-garage')
+                and (
+                  right(regexp_replace(coalesce(l.telefone,''),'[^0-9]','','g'),4)=:'PHONE_LAST4'
+                  or right(regexp_replace(coalesce(l.external_contact_id,''),'[^0-9]','','g'),4)=:'PHONE_LAST4'
+                  or right(regexp_replace(coalesce(l.metadata->'identities'->>'remote_jid_alt',''),'[^0-9]','','g'),4)=:'PHONE_LAST4'
+                )
+            ), scoped as (select id,slug from matches where match_count=1),
+            recent as (
+              select s.slug,e.event_type,e.created_at,
+                     row_number() over (partition by s.slug order by e.created_at desc) as rn
+              from scoped s join public.system_events e
+                on e.entity_type='lead' and e.entity_id=s.id::text
+              where e.created_at>=:'WINDOW_START'::timestamptz-interval '14 days'
+            )
+            select 'SCOPED_LEAD_EVENT',slug,event_type,created_at
+            from recent where rn<=20 order by slug,created_at;
 
             with matches as (
               select l.id,p.slug,count(*) over (partition by p.slug) as match_count
