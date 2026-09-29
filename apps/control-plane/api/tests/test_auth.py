@@ -19,6 +19,14 @@ def test_internal_asset_attachment_uses_route_level_service_auth():
     )
 
 
+def test_internal_outbound_policy_allows_only_exact_token_authenticated_get():
+    path = "/internal/v1/control-plane/personas/71b364c4-9875-47c6-b66e-34ecde677922/outbound-policy"
+    assert is_public_path(path, "GET")
+    assert not is_public_path(path, "POST")
+    assert not is_public_path(path.replace("/outbound-policy", "/other"), "GET")
+    assert not is_public_path(path.replace("71b364c4-9875-47c6-b66e-34ecde677922", "invalid"), "GET")
+
+
 def test_session_cookie_is_not_persistent_without_remember(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "qa")
     monkeypatch.setenv("AI_BRAIN_COOKIE_SECURE", "false")

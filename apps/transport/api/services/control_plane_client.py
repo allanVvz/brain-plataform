@@ -51,6 +51,12 @@ def published_outbound_policy(persona_id: str) -> dict:
         result = response.json()
     except ValueError as exc:
         raise RuntimeError("control plane returned an invalid response") from exc
-    if not isinstance(result, dict) or not isinstance(result.get("published_business_hours"), dict):
+    if not isinstance(result, dict):
+        raise RuntimeError("control plane returned an invalid outbound policy")
+    hours = result.get("published_business_hours")
+    if hours is None:
+        if not str(result.get("graph_checksum") or "").strip():
+            raise RuntimeError("control plane returned an unpinned outbound policy")
+    elif not isinstance(hours, dict):
         raise RuntimeError("control plane returned an invalid outbound policy")
     return result

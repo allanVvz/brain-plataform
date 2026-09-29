@@ -23,6 +23,8 @@ def published_outbound_policy(
     # The active GraphBundle document is already immutable and publication
     # validated; resolve the policy directly from that document.
     publication = supabase_client.get_active_graph_publication(str(persona_id)) or {}
+    if not publication:
+        raise HTTPException(409, "Persona sem publicacao ativa.")
     graph = publication.get("document_json") or {}
     nodes = graph.get("nodes") if isinstance(graph, dict) else []
     persona_node = next((
@@ -32,10 +34,17 @@ def published_outbound_policy(
     ), {})
     node_data = persona_node.get("data") or persona_node.get("metadata") or {}
     policy = (node_data.get("conversation_policy") or {}).get("business_hours")
+    # An active publication may deliberately omit a send window. That means
+    # replies are not time-restricted; appointment confirmation remains a
+    # separate business decision owned by the graph and a human attendant.
+    if policy is None or (isinstance(policy, dict) and policy.get("enabled") is False):
+        return {
+            "published_business_hours": None,
+            "graph_version": publication.get("version"),
+            "graph_checksum": publication.get("checksum"),
+        }
     if (
-        not publication
-        or not isinstance(policy, dict)
-        or policy.get("enabled") is False
+        not isinstance(policy, dict)
         or not all(str(policy.get(key) or "").strip() for key in ("timezone", "start", "end"))
     ):
         raise HTTPException(409, "Persona sem politica publicada de horario comercial.")
