@@ -23,7 +23,8 @@ class _Client:
     def __exit__(self, *_args):
         return None
 
-    def get(self, *_args, **_kwargs):
+    def get(self, url, **_kwargs):
+        assert "/internal/v1/control-plane/personas/" in url
         return self.response
 
 
