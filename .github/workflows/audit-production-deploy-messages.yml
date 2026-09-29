@@ -295,6 +295,30 @@ jobs:
                   or right(regexp_replace(coalesce(l.metadata->'identities'->>'remote_jid_alt',''),'[^0-9]','','g'),4)=:'PHONE_LAST4'
                 )
             ), scoped as (select id,slug from matches where match_count=1),
+            recent as (
+              select s.slug,b.id,b.status,b.created_at,b.last_error,
+                     row_number() over (partition by s.slug order by b.created_at desc) as rn
+              from scoped s join public.lead_buffer b on b.lead_ref=s.id and b.direction='inbound'
+              where b.created_at<:'WINDOW_END'::timestamptz
+                and coalesce(b.external_message_id,'') not like 'validator:%'
+            )
+            select 'SCOPED_HISTORY',r.slug,r.id,r.status,r.created_at,
+                   left(coalesce(r.last_error,''),180),
+                   (select string_agg(e.event_type||':'||coalesce(e.payload->>'reason',''),',')
+                    from public.system_events e where e.entity_type='lead_buffer' and e.entity_id=r.id::text
+                      and e.event_type in ('conversation.technical_failure','conversation.technical_handoff'))
+            from recent r where r.rn<=12 order by r.slug,r.created_at;
+
+            with matches as (
+              select l.id,p.slug,count(*) over (partition by p.slug) as match_count
+              from public.leads l join public.personas p on p.id=l.persona_id
+              where p.slug in ('tock-fatal','utzig-garage')
+                and (
+                  right(regexp_replace(coalesce(l.telefone,''),'[^0-9]','','g'),4)=:'PHONE_LAST4'
+                  or right(regexp_replace(coalesce(l.external_contact_id,''),'[^0-9]','','g'),4)=:'PHONE_LAST4'
+                  or right(regexp_replace(coalesce(l.metadata->'identities'->>'remote_jid_alt',''),'[^0-9]','','g'),4)=:'PHONE_LAST4'
+                )
+            ), scoped as (select id,slug from matches where match_count=1),
             inbound as (
               select b.id,b.lead_ref from public.lead_buffer b join scoped s on s.id=b.lead_ref
               where b.direction='inbound' and b.created_at>=:'WINDOW_START'::timestamptz
