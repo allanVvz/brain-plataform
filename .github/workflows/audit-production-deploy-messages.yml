@@ -237,7 +237,24 @@ jobs:
                      count(*) over (partition by p.slug) as match_count
               from public.leads l join public.personas p on p.id=l.persona_id
               where p.slug in ('tock-fatal','utzig-garage')
-                and right(regexp_replace(coalesce(l.telefone,''),'[^0-9]','','g'),4)=:'PHONE_LAST4'
+                and (
+                  right(regexp_replace(coalesce(l.telefone,''),'[^0-9]','','g'),4)=:'PHONE_LAST4'
+                  or right(regexp_replace(coalesce(l.external_contact_id,''),'[^0-9]','','g'),4)=:'PHONE_LAST4'
+                  or right(regexp_replace(coalesce(l.metadata->'identities'->>'remote_jid_alt',''),'[^0-9]','','g'),4)=:'PHONE_LAST4'
+                )
+            )
+            select 'SCOPED_MATCH_COUNT',slug,count(*) from matches group by slug;
+
+            with matches as (
+              select l.id, p.slug, l.ai_paused, l.handoff_level, l.updated_at,
+                     count(*) over (partition by p.slug) as match_count
+              from public.leads l join public.personas p on p.id=l.persona_id
+              where p.slug in ('tock-fatal','utzig-garage')
+                and (
+                  right(regexp_replace(coalesce(l.telefone,''),'[^0-9]','','g'),4)=:'PHONE_LAST4'
+                  or right(regexp_replace(coalesce(l.external_contact_id,''),'[^0-9]','','g'),4)=:'PHONE_LAST4'
+                  or right(regexp_replace(coalesce(l.metadata->'identities'->>'remote_jid_alt',''),'[^0-9]','','g'),4)=:'PHONE_LAST4'
+                )
             )
             select 'SCOPED_LEAD',slug,match_count,
                    case when match_count=1 then id::text else '' end,
@@ -250,7 +267,11 @@ jobs:
               select l.id,p.slug,count(*) over (partition by p.slug) as match_count
               from public.leads l join public.personas p on p.id=l.persona_id
               where p.slug in ('tock-fatal','utzig-garage')
-                and right(regexp_replace(coalesce(l.telefone,''),'[^0-9]','','g'),4)=:'PHONE_LAST4'
+                and (
+                  right(regexp_replace(coalesce(l.telefone,''),'[^0-9]','','g'),4)=:'PHONE_LAST4'
+                  or right(regexp_replace(coalesce(l.external_contact_id,''),'[^0-9]','','g'),4)=:'PHONE_LAST4'
+                  or right(regexp_replace(coalesce(l.metadata->'identities'->>'remote_jid_alt',''),'[^0-9]','','g'),4)=:'PHONE_LAST4'
+                )
             ), scoped as (select id,slug from matches where match_count=1)
             select 'SCOPED_INBOUND',s.slug,b.id,b.status,b.created_at,b.updated_at,
                    left(coalesce(b.last_error,''),180),
@@ -268,7 +289,11 @@ jobs:
               select l.id,p.slug,count(*) over (partition by p.slug) as match_count
               from public.leads l join public.personas p on p.id=l.persona_id
               where p.slug in ('tock-fatal','utzig-garage')
-                and right(regexp_replace(coalesce(l.telefone,''),'[^0-9]','','g'),4)=:'PHONE_LAST4'
+                and (
+                  right(regexp_replace(coalesce(l.telefone,''),'[^0-9]','','g'),4)=:'PHONE_LAST4'
+                  or right(regexp_replace(coalesce(l.external_contact_id,''),'[^0-9]','','g'),4)=:'PHONE_LAST4'
+                  or right(regexp_replace(coalesce(l.metadata->'identities'->>'remote_jid_alt',''),'[^0-9]','','g'),4)=:'PHONE_LAST4'
+                )
             ), scoped as (select id,slug from matches where match_count=1),
             inbound as (
               select b.id,b.lead_ref from public.lead_buffer b join scoped s on s.id=b.lead_ref
