@@ -73,6 +73,20 @@ jobs:
             join public.personas p on p.id = b.persona_id
             where p.slug in ('tock-fatal', 'utzig-garage') and b.channel = 'whatsapp'
             order by p.slug, b.active desc, b.created_at desc;
+            SELECT 'SCOPED_DELIVERY_POLICY',p.slug,
+              coalesce(g.version::text,''),coalesce(g.checksum,''),
+              coalesce(policy.node->'data'->'conversation_policy'->'business_hours',
+                       policy.node->'metadata'->'conversation_policy'->'business_hours',
+                       '{}'::jsonb)
+            FROM public.personas p
+            LEFT JOIN public.graph_publications g ON g.persona_id=p.id AND g.status='active'
+            LEFT JOIN LATERAL (
+              SELECT node FROM jsonb_array_elements(coalesce(g.document_json->'nodes','[]'::jsonb)) node
+              WHERE lower(coalesce(node->>'node_type',node->>'type',''))='persona'
+              LIMIT 1
+            ) policy ON true
+            WHERE p.slug IN ('tock-fatal','utzig-garage')
+            ORDER BY p.slug;
             SQL
             "${compose[@]}" exec -T \
               -e WINDOW_START="$WINDOW_START" -e WINDOW_END="$WINDOW_END" -e PERSONA_SLUG="$PERSONA_SLUG" \
