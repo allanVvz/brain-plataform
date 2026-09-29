@@ -30,6 +30,10 @@ def validate_case(case: dict, result: dict) -> None:
     proof = response.proof
     assert result["model_calls"] == 2 and proof["valid"] is True
     assert response.reply_text and proof.get("delivery_authorized") is not False
+    if "?" in response.reply_text:
+        assert proof.get("question_kind") in {"qualification", "consultative", "confirmation"}, (
+            "candidate public question has no valid question kind"
+        )
     assert not any(f.get("field_key") in case.get("forbidden_extracted_fields", [])
                    for f in proof.get("accepted_facts") or []), "contextual answer misclassified"
     assert proof.get("asked_field_key") not in case.get("forbidden_asked_fields", []), (

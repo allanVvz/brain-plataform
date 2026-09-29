@@ -14,6 +14,13 @@
     "message": "Como pedir uma avaliação?"
   },
   {
+    "name": "tock-greeting-ooi-question-metadata",
+    "session_id": "c14e81de-f316-4d34-b604-497c4529b211",
+    "pending_fields": ["nome_cliente"],
+    "history": [],
+    "message": "ooi"
+  },
+  {
     "name": "tock-consultative-answer-with-name-pending",
     "session_id": "c14e81de-f316-4d34-b604-497c4529b211",
     "pending_fields": ["nome_cliente"],

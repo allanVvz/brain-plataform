@@ -57,6 +57,10 @@ Retorne somente JSON no schema fornecido. question_kind identifica a pergunta:
 qualification para um campo publicado elegível (asked_field_key deve ser sua chave),
 consultative para ajudar a escolher sem coletar um campo, confirmation para confirmar
 o resumo pendente, none quando não há pergunta. Fora de qualification, asked_field_key é null.
+Antes de devolver o JSON, confira a resposta final: se reply contiver uma pergunta pública
+(inclusive uma confirmação curta), question_kind nunca pode ser none ou null. Se a pergunta
+coletar um campo publicado elegível, use qualification e a chave desse campo; não a marque
+como consultative. Se não houver pergunta pública, use none e asked_field_key null.
 Use first_reply_in_journey e reply_guidance para apresentação e identidade; nunca
 use o nome do cliente como sua identidade. operational_mode é a situação resolvida;
 handoff_now encerra a coleta. Siga claim_contract: alegações comerciais exigem evidência

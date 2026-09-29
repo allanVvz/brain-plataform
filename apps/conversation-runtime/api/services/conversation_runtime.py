@@ -1652,6 +1652,32 @@ def decide_agentic(
             str(field.get("key") or "")
             for field in resolved_understanding.eligible_fields
         }
+        matched_keys = conversation_repetition.question_field_matches(
+            conversation_reply.reply, resolved_context.graph_contract,
+        )
+        if public_question and matched_keys - eligible_keys:
+            raise RuntimeError("public_question_field_not_eligible")
+        # The model owns the wording. A question with missing or generic
+        # metadata has an unambiguous classification when its text matches one
+        # eligible published field, or matches no field at all. Normalize that
+        # metadata before proof; conflicting keys and ineligible fields still
+        # fail closed below.
+        if public_question and not asked_key:
+            if len(matched_keys) == 1 and matched_keys <= eligible_keys and kind in {
+                None, "none", "consultative",
+            }:
+                asked_key = next(iter(matched_keys))
+                kind = "qualification"
+            elif not matched_keys and kind in {None, "none"}:
+                kind = "consultative"
+            if (kind, asked_key) != (
+                conversation_reply.question_kind,
+                str(conversation_reply.asked_field_key or ""),
+            ):
+                conversation_reply = conversation_reply.model_copy(update={
+                    "question_kind": kind,
+                    "asked_field_key": asked_key or None,
+                })
         if public_question and kind in {None, "none"}:
             raise RuntimeError("question_kind_required_for_public_question")
         if kind == "qualification" and (
@@ -1662,9 +1688,6 @@ def decide_agentic(
             raise RuntimeError("asked_field_key_requires_qualification_question")
         if kind in {"consultative", "confirmation"} and not public_question:
             raise RuntimeError("question_kind_without_public_question")
-        matched_keys = conversation_repetition.question_field_matches(
-            conversation_reply.reply, resolved_context.graph_contract,
-        )
         if matched_keys and (kind != "qualification" or matched_keys != {asked_key}):
             raise RuntimeError("public_question_field_metadata_mismatch")
         profile_name = resolved_understanding.conversation_brief.get("profile_name") or {}
