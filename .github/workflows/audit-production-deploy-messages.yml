@@ -123,6 +123,24 @@ jobs:
                 except Exception as exc:
                     print("DIRECT_POLICY_CALL|"+slug+"|"+host+"|"+type(exc).__name__)' "$policy_slug" "$policy_persona_id"
             done <<< "$policy_ids"
+            docker exec brain-ai-control-plane-green-1 python -c 'import os; from services.internal_auth import authorize_webhook_token; t=(os.environ.get("AI_BRAIN_WEBHOOK_TOKEN") or "").strip();
+            try:
+                authorize_webhook_token(t)
+                print("CONTROL_AUTH_SELF_CHECK|pass")
+            except Exception as exc:
+                print("CONTROL_AUTH_SELF_CHECK|"+type(exc).__name__)'
+            while IFS='|' read -r policy_slug policy_persona_id; do
+              docker exec brain-ai-transport-blue-1 python -c 'import os,sys,httpx; slug,pid=sys.argv[1:]; token=(os.environ.get("AI_BRAIN_WEBHOOK_TOKEN") or "").strip();
+            print("PROXY_PRESENT|"+str(bool(os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy")))+"|"+str(bool(os.environ.get("NO_PROXY") or os.environ.get("no_proxy"))))
+            for host,base in (("control-plane-green","http://control-plane-green:8080"),("caddy","http://caddy:8090/control-plane")):
+                url=base+"/internal/v1/control-plane/personas/"+pid+"/outbound-policy"
+                try:
+                    with httpx.Client(timeout=4,trust_env=False) as client:
+                        response=client.get(url,headers={"X-Webhook-Token":token})
+                    print("NO_PROXY_POLICY_CALL|"+slug+"|"+host+"|"+str(response.status_code)+"|"+response.text[:100].replace("|","/"))
+                except Exception as exc:
+                    print("NO_PROXY_POLICY_CALL|"+slug+"|"+host+"|"+type(exc).__name__)' "$policy_slug" "$policy_persona_id"
+            done <<< "$policy_ids"
             "${compose[@]}" exec -T \
               -e WINDOW_START="$WINDOW_START" -e WINDOW_END="$WINDOW_END" -e PERSONA_SLUG="$PERSONA_SLUG" \
               db sh -c 'psql -v ON_ERROR_STOP=1 -v WINDOW_START="$WINDOW_START" -v WINDOW_END="$WINDOW_END" -v PERSONA_SLUG="$PERSONA_SLUG" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -AtF "|"' <<'SQL'
