@@ -8,12 +8,16 @@ on:
         required: true
       action:
         type: choice
-        options: [preflight, deploy]
+        options: [preflight, bootstrap-prepare, bootstrap-apply, deploy]
         default: preflight
         required: true
       image:
         description: Immutable ghcr.io/allanvvz/akia-<service>@sha256:<digest>
         required: true
+        type: string
+      reviewed_sql_sha256:
+        description: Exact private SQL digest from bootstrap-prepare (bootstrap-apply only)
+        required: false
         type: string
 permissions:
   contents: read
@@ -32,7 +36,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           [[ "$SERVICE" == operations-api || "$SERVICE" == gateway ]]
-          [[ "$ACTION" == preflight || "$ACTION" == deploy ]]
+          [[ "$ACTION" == preflight || "$ACTION" == bootstrap-prepare || "$ACTION" == bootstrap-apply || "$ACTION" == deploy ]]
           [[ "$IMAGE" =~ ^ghcr\.io/allanvvz/akia-${SERVICE}@sha256:[0-9a-f]{64}$ ]]
   preflight:
     needs: validate
@@ -87,6 +91,52 @@ jobs:
             print('AKIA_BRAIN_READINESS=pass source_sha=' + str(body.get('source_sha', 'unknown')))
             PY
             echo 'AKIA_PREFLIGHT=read_only_complete'
+  bootstrap:
+    if: inputs.action == 'bootstrap-prepare' || inputs.action == 'bootstrap-apply'
+    needs: preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Sync additive bootstrap controls only
+        uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          fingerprint: SHA256:bB5eg8WRYnDC4DgAsZbINfvwW7CmhIo9Jze22YhWHRY
+          port: ${{ secrets.VPS_PORT || 22 }}
+          source: ops/akia-bridge/prepare-first-north.py,ops/akia-bridge/000_north_read_through.sql
+          target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+          overwrite: true
+      - name: Prepare private configuration or apply exact reviewed SQL
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        env:
+          AKIA_ROOT: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+          AKIA_ACTION: ${{ inputs.action }}
+          REVIEWED_SQL_SHA256: ${{ inputs.reviewed_sql_sha256 }}
+          NORTH_SUPABASE_URL: ${{ secrets.AKIA_NORTH_SUPABASE_URL }}
+          NORTH_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.AKIA_NORTH_SUPABASE_SERVICE_ROLE_KEY }}
+          AKIA_BOOTSTRAP_MANIFEST: ${{ secrets.AKIA_BOOTSTRAP_MANIFEST }}
+          AKIA_PORTAL_PATH_ORIGINS: '{"north":"https://north-portal.pages.dev","south":"https://south-portal.pages.dev","akia":"https://akia-os.pages.dev"}'
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          fingerprint: SHA256:bB5eg8WRYnDC4DgAsZbINfvwW7CmhIo9Jze22YhWHRY
+          port: ${{ secrets.VPS_PORT || 22 }}
+          envs: AKIA_ROOT,AKIA_ACTION,REVIEWED_SQL_SHA256,NORTH_SUPABASE_URL,NORTH_SUPABASE_SERVICE_ROLE_KEY,AKIA_BOOTSTRAP_MANIFEST,AKIA_PORTAL_PATH_ORIGINS
+          command_timeout: 3m
+          script: |
+            set -Eeuo pipefail
+            cd "$AKIA_ROOT"
+            args=(--brain-root "$AKIA_ROOT" --portal-origins "$AKIA_PORTAL_PATH_ORIGINS")
+            if [[ "$AKIA_ACTION" == bootstrap-prepare ]]; then
+              python3 ops/akia-bridge/prepare-first-north.py "${args[@]}"
+              python3 ops/akia-bridge/prepare-first-north.py "${args[@]}" --write
+            else
+              [[ "$REVIEWED_SQL_SHA256" =~ ^[0-9a-f]{64}$ ]]
+              python3 ops/akia-bridge/prepare-first-north.py "${args[@]}" --apply-sql --reviewed-sql-sha256 "$REVIEWED_SQL_SHA256"
+            fi
   deploy:
     if: inputs.action == 'deploy'
     needs: preflight
