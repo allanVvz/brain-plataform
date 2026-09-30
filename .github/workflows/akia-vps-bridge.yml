@@ -151,7 +151,7 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           fingerprint: SHA256:bB5eg8WRYnDC4DgAsZbINfvwW7CmhIo9Jze22YhWHRY
           port: ${{ secrets.VPS_PORT || 22 }}
-          source: ops/akia-bridge/activate-portal-route.py
+          source: ops/akia-bridge/activate-portal-route.py,ops/akia-bridge/north-internal-smoke.mjs
           target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           overwrite: true
       - name: Validate isolated prefix and optionally activate with rollback
@@ -172,6 +172,9 @@ jobs:
             cd "$AKIA_ROOT"
             python3 ops/akia-bridge/activate-portal-route.py --brain-root "$AKIA_ROOT" --dry-run
             if [[ "$AKIA_ACTION" == route-apply ]]; then
+              operations_container="$(docker ps -q --filter label=com.docker.compose.project=brain-ai --filter label=com.docker.compose.service=operations-api)"
+              [[ -n "$operations_container" ]]
+              docker exec -i "$operations_container" node --input-type=module < ops/akia-bridge/north-internal-smoke.mjs
               python3 ops/akia-bridge/activate-portal-route.py --brain-root "$AKIA_ROOT" --apply
             fi
   deploy:
