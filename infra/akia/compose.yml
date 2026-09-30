@@ -1,0 +1,31 @@
+# Add this overlay only for the AKIA operations release. The existing Brain
+# graph, conversation and agent services keep their own release lifecycle.
+services:
+  operations-api:
+    image: ${AKIA_OPERATIONS_API_IMAGE:?set an immutable operations API image}
+    env_file: ["${AKIA_OPERATIONS_ENV_FILE:?set the private operations env file}"]
+    environment:
+      OPERATIONS_API_PORT: "8096"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8096/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+    networks: [backend]
+
+  # A one-shot execution target for the future VPS timer. Activation requires
+  # a complete, audited North jobs adapter and an explicit env flag.
+  operations-worker:
+    image: ${AKIA_OPERATIONS_WORKER_IMAGE:-akia-operations-worker:disabled}
+    env_file: ["${AKIA_OPERATIONS_ENV_FILE:?set the private operations env file}"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+    profiles: ["akia-worker"]
+    networks: [backend]

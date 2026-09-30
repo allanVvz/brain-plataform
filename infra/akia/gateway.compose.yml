@@ -1,0 +1,21 @@
+# Independent AKIA OS portal edge. The existing Brain gateway stays on its
+# current Caddy route and keeps its own release process.
+services:
+  akia-gateway:
+    image: ${AKIA_GATEWAY_IMAGE:?set an immutable AKIA gateway image}
+    env_file: ["${AKIA_GATEWAY_ENV_FILE:?set the private gateway env file}"]
+    environment:
+      BRAIN_CONTROL_PLANE_URL: http://caddy:8090/control-plane
+      BRAIN_RUNTIME_URL: http://caddy:8090/conversation-runtime
+      BRAIN_TRANSPORT_URL: http://caddy:8090/transport
+      AKIA_OPERATIONS_URL: http://operations-api:8096
+      AKIA_PORTAL_PATH_HOST: ${AKIA_PORTAL_PATH_HOST:?set the existing public API hostname}
+      AKIA_PORTAL_PATH_ORIGINS: ${AKIA_PORTAL_PATH_ORIGINS:?set exact three Pages origins as JSON}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health/ready', timeout=4)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+    networks: [backend]
