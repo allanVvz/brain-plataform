@@ -61,6 +61,10 @@ for _ in $(seq 1 12); do
   sleep 5
 done
 [[ "$candidate_ready" == true ]] || { echo 'candidate failed DB/schema readiness' >&2; exit 1; }
+if [[ -n "${AKIA_OPERATIONS_SMOKE_SCRIPT:-}" ]]; then
+  [[ -s "$AKIA_OPERATIONS_SMOKE_SCRIPT" ]] || { echo 'selected smoke script missing' >&2; exit 1; }
+  docker exec -i "$candidate" node --input-type=module < "$AKIA_OPERATIONS_SMOKE_SCRIPT"
+fi
 check_disk before_cutover
 
 wait_for_health() {
