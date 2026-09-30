@@ -203,7 +203,7 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           fingerprint: SHA256:bB5eg8WRYnDC4DgAsZbINfvwW7CmhIo9Jze22YhWHRY
           port: ${{ secrets.VPS_PORT || 22 }}
-          source: ops/akia-bridge/deploy-akia-operations.sh,ops/akia-bridge/deploy-akia-gateway.sh,infra/akia/compose.yml,infra/akia/gateway.compose.yml
+          source: ops/akia-bridge/deploy-akia-operations.sh,ops/akia-bridge/deploy-akia-gateway.sh,ops/akia-bridge/north-internal-smoke.mjs,infra/akia/compose.yml,infra/akia/gateway.compose.yml
           target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           overwrite: true
       - name: Candidate, readiness, selected-service cutover and rollback
@@ -233,6 +233,7 @@ jobs:
               release_script=ops/akia-bridge/deploy-akia-gateway.sh
             else
               export AKIA_OPERATIONS_ENV_FILE="$AKIA_ROOT/secrets/akia-operations.env"
+              export AKIA_OPERATIONS_SMOKE_SCRIPT="$AKIA_ROOT/ops/akia-bridge/north-internal-smoke.mjs"
               release_script=ops/akia-bridge/deploy-akia-operations.sh
             fi
             [[ -n "${GHCR_TOKEN:-}" && -n "${GHCR_USERNAME:-}" ]]

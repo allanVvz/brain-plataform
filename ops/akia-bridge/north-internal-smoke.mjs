@@ -17,5 +17,12 @@ try{
  for(const id of expected){const r=await call(`/api/operations/tasks?clientId=${id}`);assert('tasks_http',r.status===200,r.status,{clientId:id});const b=await r.json();assert('tasks_scope',b.clientId===id&&Array.isArray(b.tasks)&&b.tasks.every(x=>x.client_id===id),r.status,{clientId:id,count:Array.isArray(b.tasks)?b.tasks.length:0});}
  const r=await call('/api/operations/tasks?clientId=00000000-0000-4000-8000-000000000000');assert('ungranted_client_denied',r.status===403,r.status);
  const invalid=await call('/api/operations/clients',{'x-brain-principal-signature':'0'.repeat(64)});assert('invalid_signature_denied',invalid.status===401,invalid.status);
+ for(const resource of ['clients-bootstrap','shell','cards','routines','task-types']){
+  const response=await call('/api/operations/north/'+resource);assert('original_'+resource+'_http',response.status===200,response.status);
+  const body=await response.json();
+  if(resource==='clients-bootstrap')assert('original_exact_clients',JSON.stringify(body.clients.map(c=>c.id).sort())===JSON.stringify(expected),response.status,{count:body.clients.length,leads:body.leads.length});
+  if(resource==='cards'||resource==='routines')assert('original_'+resource+'_scope',Array.isArray(body.tasks)&&body.tasks.every(t=>expected.includes(t.client_id)),response.status,{count:body.tasks?.length});
+ }
+ const write=await fetch(new URL('/api/operations/north/tasks',base),{method:'POST',headers,redirect:'error',signal:AbortSignal.timeout(20000)});assert('mutations_disabled',write.status===405,write.status);
  console.log(JSON.stringify({mode:'internal_api_only',login_e2e:false,passed:true,checks}));
 }catch{console.log(JSON.stringify({mode:'internal_api_only',login_e2e:false,passed:false,checks,error:'smoke_failed_no_response_data_logged'}));process.exitCode=1;}
