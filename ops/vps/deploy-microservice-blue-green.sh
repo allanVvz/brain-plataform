@@ -320,6 +320,13 @@ else
     "$expected_sha"
 fi
 
+# Prove North operations-only identity before this control-plane cutover.
+if [[ "$ACTION" == "--apply" && "$SERVICE" == "control-plane" ]]; then
+  fixture="$ROOT_DIR/secrets/north-e2e-fixture.json"
+  [[ -s "$fixture" ]] || { echo 'isolated North auth fixture required before cutover' >&2; exit 1; }
+  "${COMPOSE[@]}" exec -T "$target_service" python -m scripts.verify_north_operations_auth < "$fixture"
+fi
+
 if [[ "$ACTION" == "--apply" && "$SERVICE" == "conversation-runtime" ]]; then
   # Candidate-only contract smoke: execute the exact image through its private
   # application surface before any worker starts or public route changes. The
@@ -333,6 +340,11 @@ if [[ "$ACTION" == "--apply" && "$SERVICE" == "conversation-runtime" ]]; then
   "${COMPOSE[@]}" exec -T "$target_service" python -c \
     'import sys; from services.wa_validator_service import supports_semantic_validator_flow; assert supports_semantic_validator_flow(sys.argv[1]), "unsupported semantic validator flow: " + sys.argv[1]' \
     "$CANARY_FLOW_ID"
+  [[ -n "${RUNTIME_PROBE_FIXTURE:-}" ]] || {
+    echo "runtime candidate requires a no-commit conversation probe fixture" >&2
+    exit 1
+  }
+  "${COMPOSE[@]}" exec -T "$target_service" python -m scripts.probe_conversation_candidate "$RUNTIME_PROBE_FIXTURE"
 fi
 
 # Move only this service's consumers. The old consumers receive at most the

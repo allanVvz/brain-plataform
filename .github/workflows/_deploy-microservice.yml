@@ -8,6 +8,8 @@ on:
       action: {required: true, type: string}
       canary_persona_slug: {required: false, type: string, default: ""}
       canary_flow_id: {required: false, type: string, default: ""}
+      runtime_probe_fixture: {required: false, type: string, default: ""}
+      outbound_policy_personas: {required: false, type: string, default: ""}
     secrets:
       VPS_HOST: {required: true}
       VPS_USER: {required: true}
@@ -45,18 +47,43 @@ jobs:
           AUDIT_ROOT: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           ALLOW_PENDING_MICROSERVICE_DIGESTS: "true"
           AUDIT_SCRIPT: ops/vps/validate-production-release.sh
+          POLICY_PERSONAS: ${{ inputs.outbound_policy_personas }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          fingerprint: SHA256:bB5eg8WRYnDC4DgAsZbINfvwW7CmhIo9Jze22YhWHRY
           port: ${{ secrets.VPS_PORT || 22 }}
           command_timeout: 3m
-          envs: AUDIT_ROOT,ALLOW_PENDING_MICROSERVICE_DIGESTS,AUDIT_SCRIPT
+          envs: AUDIT_ROOT,ALLOW_PENDING_MICROSERVICE_DIGESTS,AUDIT_SCRIPT,POLICY_PERSONAS
           script: |
             set -Eeuo pipefail
             cd "$AUDIT_ROOT"
             bash "$AUDIT_SCRIPT"
             bash ops/vps/rollout-microservices.sh status
+            if [[ "${{ inputs.service }}" == conversation-runtime && "${{ inputs.action }}" == deploy ]]; then
+              [[ "$POLICY_PERSONAS" =~ ^[a-z0-9-]+(,[a-z0-9-]+)*$ ]] || {
+                echo 'runtime deploy requires outbound_policy_personas' >&2
+                exit 1
+              }
+              transport_slot="$(python3 -c 'import json; print(json.load(open(".deploy/microservices/slots.json", encoding="utf-8"))["transport"]["active"])')"
+              [[ "$transport_slot" == blue || "$transport_slot" == green ]]
+              docker exec -e POLICY_PERSONAS="$POLICY_PERSONAS" "brain-ai-transport-${transport_slot}-1" python -c '
+            import os
+            from services import control_plane_client, supabase_client
+
+            slugs = os.environ["POLICY_PERSONAS"].split(",")
+            rows = supabase_client.get_client().table("personas").select("id,slug").in_("slug", slugs).execute().data or []
+            by_slug = {str(row["slug"]): str(row["id"]) for row in rows}
+            assert set(by_slug) == set(slugs), "outbound policy persona scope is incomplete"
+            for slug in slugs:
+                result = control_plane_client.published_outbound_policy(by_slug[slug])
+                hours = result.get("published_business_hours")
+                checksum = (hours or result).get("graph_checksum")
+                assert checksum, "outbound policy is not pinned to an active publication"
+                print("OUTBOUND_POLICY_PREFLIGHT|" + slug + "|passed|" + str(checksum), flush=True)
+            '
+            fi
 
   mutate:
     needs: production-preflight
@@ -80,9 +107,10 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          fingerprint: SHA256:bB5eg8WRYnDC4DgAsZbINfvwW7CmhIo9Jze22YhWHRY
           port: ${{ secrets.VPS_PORT || 22 }}
           timeout: 120s
-          source: ops/microservices/route-map.json,ops/microservices/render-active-routes.py,ops/microservices/validate-release-manifest.py,ops/vps/deploy-microservice-blue-green.sh,ops/vps/run-microservice-wa-validator.sh,${{ inputs.manifest_path }}
+          source: ops/microservices/route-map.json,ops/microservices/render-active-routes.py,ops/microservices/validate-release-manifest.py,ops/microservices/verify-selective-rollout-status.py,ops/vps/deploy-microservice-blue-green.sh,ops/vps/run-microservice-wa-validator.sh,${{ inputs.manifest_path }}
           target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           overwrite: true
       - name: Wait before retrying service-control sync
@@ -95,9 +123,10 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          fingerprint: SHA256:bB5eg8WRYnDC4DgAsZbINfvwW7CmhIo9Jze22YhWHRY
           port: ${{ secrets.VPS_PORT || 22 }}
           timeout: 120s
-          source: ops/microservices/route-map.json,ops/microservices/render-active-routes.py,ops/microservices/validate-release-manifest.py,ops/vps/deploy-microservice-blue-green.sh,ops/vps/run-microservice-wa-validator.sh,${{ inputs.manifest_path }}
+          source: ops/microservices/route-map.json,ops/microservices/render-active-routes.py,ops/microservices/validate-release-manifest.py,ops/microservices/verify-selective-rollout-status.py,ops/vps/deploy-microservice-blue-green.sh,ops/vps/run-microservice-wa-validator.sh,${{ inputs.manifest_path }}
           target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           overwrite: true
       - name: Deploy or rollback one service by immutable digest
@@ -107,14 +136,16 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
           CANARY_PERSONA_SLUG: ${{ inputs.canary_persona_slug }}
           CANARY_FLOW_ID: ${{ inputs.canary_flow_id }}
+          RUNTIME_PROBE_FIXTURE: ${{ inputs.runtime_probe_fixture }}
           WA_VALIDATOR_TIMEOUT_SECONDS: "300"
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          fingerprint: SHA256:bB5eg8WRYnDC4DgAsZbINfvwW7CmhIo9Jze22YhWHRY
           port: ${{ secrets.VPS_PORT || 22 }}
           command_timeout: 15m
-          envs: GHCR_USERNAME,GHCR_TOKEN,CANARY_PERSONA_SLUG,CANARY_FLOW_ID,WA_VALIDATOR_TIMEOUT_SECONDS
+          envs: GHCR_USERNAME,GHCR_TOKEN,CANARY_PERSONA_SLUG,CANARY_FLOW_ID,WA_VALIDATOR_TIMEOUT_SECONDS,RUNTIME_PROBE_FIXTURE
           script: |
             set -Eeuo pipefail
             cd "${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}"
@@ -143,4 +174,30 @@ jobs:
                   "${{ inputs.manifest_path }}" conversation-runtime --rollback
                 exit 1
               fi
+            fi
+            if [[ "${{ inputs.action }}" == "deploy" ]]; then
+              canonical=ops/microservices/release-manifest.json
+              previous_manifest="$(mktemp)"
+              next_manifest="${canonical}.next-${{ github.run_id }}"
+              cp "$canonical" "$previous_manifest"
+              cp "${{ inputs.manifest_path }}" "$next_manifest"
+              mv "$next_manifest" "$canonical"
+              if ! status_output="$(bash ops/vps/rollout-microservices.sh status)"; then
+                cp "$previous_manifest" "$canonical"
+                echo "manifest promotion verification failed; rolling back service" >&2
+                bash ops/vps/deploy-microservice-blue-green.sh \
+                  "${{ inputs.manifest_path }}" "${{ inputs.service }}" --rollback
+                exit 1
+              fi
+              if ! printf '%s\n' "$status_output" | \
+                python3 ops/microservices/verify-selective-rollout-status.py "${{ inputs.service }}"; then
+                cp "$previous_manifest" "$canonical"
+                printf '%s\n' "$status_output"
+                echo "affected service or its workers are not current; rolling back service" >&2
+                bash ops/vps/deploy-microservice-blue-green.sh \
+                  "${{ inputs.manifest_path }}" "${{ inputs.service }}" --rollback
+                exit 1
+              fi
+              rm "$previous_manifest"
+              printf '%s\n' "$status_output"
             fi
