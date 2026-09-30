@@ -61,6 +61,8 @@ for _ in $(seq 1 12); do
   sleep 5
 done
 [[ "$candidate_ready" == true ]] || { echo 'candidate failed DB/schema readiness' >&2; exit 1; }
+# Focused North read-only contract gate; failure occurs before cutover.
+docker exec "$candidate" node /app/verification/north-read-contract-smoke.mjs
 check_disk before_cutover
 
 wait_for_health() {
