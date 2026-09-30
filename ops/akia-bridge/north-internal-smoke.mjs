@@ -1,6 +1,8 @@
 // Private API protocol test only: NOT login E2E and NOT a browser session.
 // Run inside operations container with its runtime shared HMAC; coordinator verifies gateway parity.
-import {createHmac} from 'node:crypto';
+import {createHmac,createHash} from 'node:crypto';
+import {readFile} from 'node:fs/promises';
+import {Pool} from 'pg';
 const secret=process.env.BRAIN_INTERNAL_AUTH_SECRET;
 if(!secret||Buffer.byteLength(secret)<32){console.log(JSON.stringify({mode:'internal_api_only',blocked:true,reason:'runtime_hmac_unavailable'}));process.exit(2);}
 const base=new URL(process.env.AKIA_SMOKE_INTERNAL_ORIGIN||'http://127.0.0.1:8096');
@@ -12,6 +14,13 @@ const expected=["0d6167c2-acb5-4d3b-a0e7-a713f0d3d7a2", "1b479f4d-f7aa-4ec0-a560
 async function call(path,override={}){return fetch(new URL(path,base),{redirect:'error',signal:AbortSignal.timeout(20000),headers:{...headers,...override}});}
 function assert(check,passed,status,extra={}){checks.push({check,passed:!!passed,status,...extra});if(!passed)throw new Error('check_failed');}
 try{
+ assert('cron_execution_disabled',process.env.OPERATIONS_CRON_ENABLED!=='true'&&process.env.NORTH_CANONICAL_EXECUTION_ENABLED!=='true',200);
+ const runtime='/app/src/north-automation/generated/';
+ const bundle=await readFile(runtime+'canonical.mjs');const bundleHash='c43c8958fde97b19e37f31ee4f740dac6161b0098856fc745440c4fe1f8c9ac1';
+ assert('canonical_bundle_checksum',createHash('sha256').update(bundle).digest('hex')===bundleHash,200);
+ const {createJobs}=await import(runtime+'runtime.mjs');process.env.NORTH_CANONICAL_REVIEWED_SHA256=bundleHash;
+ const pool=new Pool({connectionString:process.env.DATABASE_URL,max:1});
+ try{const jobs=await createJobs(pool);const plan=await jobs.dryRun(new Intl.DateTimeFormat('en-CA',{timeZone:'America/Sao_Paulo'}).format(new Date()));assert('canonical_planner_only',plan.status==='dry-run'&&plan.mutations===0,200,{configs:plan.plan.length,mutations:plan.mutations});}finally{await pool.end();}
  const a=await call('/api/operations/portal-access');assert('portal_access_http',a.status===200,a.status);const grant=await a.json();assert('portal_access_grant',grant.portal_scope==='north'&&grant.allowed===true,a.status);
  const c=await call('/api/operations/clients');assert('clients_http',c.status===200,c.status);const clients=await c.json();assert('exact_clients',Array.isArray(clients)&&JSON.stringify(clients.map(x=>x.id).sort())===JSON.stringify(expected),c.status,{count:Array.isArray(clients)?clients.length:0});
  for(const id of expected){const r=await call(`/api/operations/tasks?clientId=${id}`);assert('tasks_http',r.status===200,r.status,{clientId:id});const b=await r.json();assert('tasks_scope',b.clientId===id&&Array.isArray(b.tasks)&&b.tasks.every(x=>x.client_id===id),r.status,{clientId:id,count:Array.isArray(b.tasks)?b.tasks.length:0});}
