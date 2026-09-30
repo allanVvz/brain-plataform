@@ -8,7 +8,7 @@ on:
         required: true
       action:
         type: choice
-        options: [preflight, bootstrap-prepare, bootstrap-apply, deploy, route-dry-run, route-apply]
+        options: [preflight, bootstrap-prepare, bootstrap-apply, deploy, route-dry-run, route-apply, registry-dry-run, registry-apply]
         default: preflight
         required: true
       image:
@@ -36,7 +36,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           [[ "$SERVICE" == operations-api || "$SERVICE" == gateway ]]
-          [[ "$ACTION" == preflight || "$ACTION" == bootstrap-prepare || "$ACTION" == bootstrap-apply || "$ACTION" == deploy || "$ACTION" == route-dry-run || "$ACTION" == route-apply ]]
+          [[ "$ACTION" == preflight || "$ACTION" == bootstrap-prepare || "$ACTION" == bootstrap-apply || "$ACTION" == deploy || "$ACTION" == route-dry-run || "$ACTION" == route-apply || "$ACTION" == registry-dry-run || "$ACTION" == registry-apply ]]
           [[ "$IMAGE" =~ ^ghcr\.io/allanvvz/akia-${SERVICE}@sha256:[0-9a-f]{64}$ ]]
   preflight:
     needs: validate
@@ -137,6 +137,44 @@ jobs:
               [[ "$REVIEWED_SQL_SHA256" =~ ^[0-9a-f]{64}$ ]]
               python3 ops/akia-bridge/prepare-first-north.py "${args[@]}" --apply-sql --reviewed-sql-sha256 "$REVIEWED_SQL_SHA256"
             fi
+  registry:
+    if: inputs.action == 'registry-dry-run' || inputs.action == 'registry-apply'
+    needs: preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Sync additive registry controls
+        uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          fingerprint: SHA256:bB5eg8WRYnDC4DgAsZbINfvwW7CmhIo9Jze22YhWHRY
+          port: ${{ secrets.VPS_PORT || 22 }}
+          source: ops/akia-bridge/extend-north-registry.py,ops/akia-bridge/extend-north-registry-vps.py
+          target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+          overwrite: true
+      - name: Rehearse transaction and optionally commit exact reviewed registry
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        env:
+          AKIA_ROOT: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+          AKIA_ACTION: ${{ inputs.action }}
+          REVIEWED_SQL_SHA256: ${{ inputs.reviewed_sql_sha256 }}
+          AKIA_EXPANDED_CLIENTS_MANIFEST: ${{ secrets.AKIA_EXPANDED_CLIENTS_MANIFEST }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          fingerprint: SHA256:bB5eg8WRYnDC4DgAsZbINfvwW7CmhIo9Jze22YhWHRY
+          port: ${{ secrets.VPS_PORT || 22 }}
+          envs: AKIA_ROOT,AKIA_ACTION,REVIEWED_SQL_SHA256,AKIA_EXPANDED_CLIENTS_MANIFEST
+          command_timeout: 3m
+          script: |
+            set -Eeuo pipefail
+            cd "$AKIA_ROOT"
+            args=(--brain-root "$AKIA_ROOT" --generator ops/akia-bridge/extend-north-registry.py --reviewed-sha256 "$REVIEWED_SQL_SHA256")
+            if [[ "$AKIA_ACTION" == registry-apply ]]; then args+=(--apply); fi
+            python3 ops/akia-bridge/extend-north-registry-vps.py "${args[@]}"
   portal-route:
     if: inputs.action == 'route-dry-run' || inputs.action == 'route-apply'
     needs: preflight
