@@ -19,9 +19,10 @@ raw=subprocess.run(['docker','inspect','--format','{{json .Config.Env}}',contain
 env=dict(v.split('=',1) for v in json.loads(raw) if '=' in v)
 def query(text):
  result=subprocess.run(['docker','exec','-i',container,'psql','-X','-q','-v','ON_ERROR_STOP=1','-t','-A','-U',env.get('POSTGRES_USER','postgres'),'-d',env.get('POSTGRES_DB','postgres')],input=text,capture_output=True,text=True)
- if result.returncode: raise SystemExit('Registry validation/apply failed: '+result.stderr[-1200:])
+ if result.returncode: raise SystemExit('Registry validation/apply failed; inspect private database logs')
  return json.loads(result.stdout.strip())
 # Exercise the exact constraints and inserts without retaining any row.
+if not sql.endswith('COMMIT;\n'): raise SystemExit('Unsupported transaction terminator')
 preview=query(sql.removesuffix('COMMIT;\n')+'ROLLBACK;\n')
 print(json.dumps({'mode':'transaction_rollback_dry_run','requested':preview['requested_count'],'would_insert':preview['inserted_count'],'sql_sha256':a.reviewed_sha256}))
 if a.apply:
@@ -32,6 +33,6 @@ if a.apply:
  fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
  with os.fdopen(fd,'w') as handle:
   handle.write(json.dumps({'status':'pending','sql_sha256':a.reviewed_sha256})+'\n');handle.flush();os.fsync(handle.fileno())
-  result=query(sql);result.update(status='committed',sql_sha256=a.reviewed_sha256)
+  result=query(sql);result.update(status='committed',sql_sha256=a.reviewed_sha256,approval_reference=manifest['approval_reference'])
   handle.seek(0);handle.truncate();handle.write(json.dumps(result,indent=2)+'\n');handle.flush();os.fsync(handle.fileno())
  print(json.dumps({'mode':'applied','requested':result['requested_count'],'inserted':result['inserted_count'],'sql_sha256':a.reviewed_sha256}))
