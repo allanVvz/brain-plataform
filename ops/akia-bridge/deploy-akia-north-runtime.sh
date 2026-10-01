@@ -81,40 +81,48 @@ import fs from 'node:fs';
 import {createHmac} from 'node:crypto';
 import {createAdapterFromEnvironment} from '/app/dist/src/adapter.js';
 const check=value=>{if(!value)throw Error('North native contract unavailable');};
-let adapter,context,principal;
+let adapter,context,principal,stage='fixture';
 try {
  const f=JSON.parse(fs.readFileSync(0,'utf8'));
  const uuid=v=>typeof v==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
  check(f.approved===true&&f.isolated===true&&f.agency_slug==='north'&&[f.brainId,f.northId,f.clientId,f.fixtureTaskId,f.foreignTaskId].every(uuid)&&f.fixtureTaskId!==f.foreignTaskId&&typeof f.email==='string'&&typeof f.password==='string');
  const control='http://caddy:8090/control-plane';
+ stage='brain_login';
  const login=await fetch(control+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({identifier:f.email,password:f.password}),redirect:'error',signal:AbortSignal.timeout(15000)});
- check(login.ok);const cookie=login.headers.getSetCookie().find(v=>v.startsWith('ai_brain_session='))?.split(';')[0];check(cookie);
+ check(login.ok);stage='brain_cookie';const cookie=login.headers.getSetCookie().find(v=>v.startsWith('ai_brain_session='))?.split(';')[0];check(cookie);
  const token=cookie.slice('ai_brain_session='.length);check(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token));
- const me=await fetch(control+'/auth/me',{headers:{cookie},redirect:'error',signal:AbortSignal.timeout(15000)});check(me.ok);const session=await me.json();
+ stage='brain_identity';const me=await fetch(control+'/auth/me',{headers:{cookie},redirect:'error',signal:AbortSignal.timeout(15000)});check(me.ok);const session=await me.json();
  check(session.user?.id===f.brainId&&session.user.role==='user'&&session.user.account_type==='agency'&&Array.isArray(session.personas)&&session.personas.length===0&&Array.isArray(session.navigation?.allowed_portals)&&session.navigation.allowed_portals.includes('north'));
- const claims=JSON.parse(Buffer.from(token.split('.')[0],'base64url').toString());check(claims.sub===f.brainId&&Number.isSafeInteger(claims.exp)&&claims.exp*1000>Date.now());
+ stage='brain_claims';const claims=JSON.parse(Buffer.from(token.split('.')[0],'base64url').toString());check(claims.sub===f.brainId&&Number.isSafeInteger(claims.exp)&&claims.exp*1000>Date.now());
  const fingerprint=createHmac('sha256',process.env.BRAIN_INTERNAL_AUTH_SECRET).update('north-delegation-v1\0'+token,'ascii').digest('hex');
  principal={userId:f.brainId,tokenFingerprint:fingerprint,brainExpiresAt:claims.exp*1000,expiresAt:Math.min(Date.now()+90000,claims.exp*1000)};
- adapter=createAdapterFromEnvironment();check(await adapter.ready());context=await adapter.resolve(principal);
+ stage='adapter_configuration';adapter=createAdapterFromEnvironment();
+ stage='adapter_readiness';check(await adapter.ready());
+ stage='delegation_context';context=await adapter.resolve(principal);
+ stage='delegation_scope';
  check(context.northProfileId===f.northId&&context.agency==='north'&&context.northRole==='admin'&&context.allowedClientIds.size===1&&context.allowedClientIds.has(f.clientId)&&await adapter.revalidate(context));
- const delegated=await adapter.sessions.get(context);check(delegated.northProfileId===f.northId);
- const north=await adapter.scoped(context,delegated),task=await north.taskDto(f.fixtureTaskId);
+ stage='native_session';const delegated=await adapter.sessions.get(context);check(delegated.northProfileId===f.northId);
+ stage='native_scope';const north=await adapter.scoped(context,delegated);
+ stage='fixture_task';const task=await north.taskDto(f.fixtureTaskId);
  check(task.id===f.fixtureTaskId&&task.client_id===f.clientId);
- check(await north.task(f.foreignTaskId)===null);
- check(await adapter.revalidate(context));
+ stage='foreign_task_denied';check(await north.task(f.foreignTaskId)===null);
+ stage='delegation_revalidate';check(await adapter.revalidate(context));
 
 } catch {
- console.error('NORTH_NATIVE_CONTRACT=failed');process.exitCode=1;
+ // Only fixed stage labels leave this gate; never print caught provider errors,
+ // auth response bodies, credentials, claims, cookies or fixture identifiers.
+ console.error('NORTH_NATIVE_CONTRACT=failed stage='+stage);process.exitCode=1;
 } finally {
  if(principal){
   if(adapter&&context)adapter.sessions.invalidate(context.brainUserId,context.northDelegationId);
   try {
+   stage='delegation_revoke';
    const now=Math.floor(Date.now()/1000),claims={iss:'brain-gateway',aud:'operations-api',sub:principal.userId,portal_scope:'north',iat:now,exp:Math.min(now+60,Math.floor(principal.brainExpiresAt/1000)),north_delegation:{token_fingerprint:principal.tokenFingerprint,brain_expires_at:Math.floor(principal.brainExpiresAt/1000)}};
    const token=Buffer.from(JSON.stringify(claims)).toString('base64url'),signature=createHmac('sha256',process.env.BRAIN_INTERNAL_AUTH_SECRET).update(token,'ascii').digest('hex');
    const response=await fetch(new URL('/internal/v1/north-delegations/revoke',process.env.NORTH_OPERATIONS_PRIVATE_URL),{method:'POST',headers:{'Content-Type':'application/json','x-brain-principal':token,'x-brain-principal-signature':signature},body:'{}',redirect:'error',signal:AbortSignal.timeout(10000)});
    check(response.ok&&(await response.json()).revoked===true);
-   if(adapter&&context)check(!await adapter.revalidate(context));
-  }catch{console.error('NORTH_NATIVE_CONTRACT=revocation_failed');process.exitCode=1;}
+   stage='revocation_revalidate';if(adapter&&context)check(!await adapter.revalidate(context));
+  }catch{console.error('NORTH_NATIVE_CONTRACT=revocation_failed stage='+stage);process.exitCode=1;}
  }
 }
 if(!process.exitCode)console.log('NORTH_NATIVE_CONTRACT=passed fixture_scope=one_client business_mutations=0 revocation=verified');
