@@ -4,11 +4,11 @@ on:
     inputs:
       service:
         type: choice
-        options: [operations-api, gateway]
+        options: [operations-api, gateway, north-runtime]
         required: true
       action:
         type: choice
-        options: [preflight, deploy]
+        options: [preflight, deploy, activate]
         default: preflight
         required: true
       image:
@@ -24,6 +24,13 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Check release controls
+        run: |
+          for script in ops/akia-bridge/*.sh; do bash -n "$script"; done
+          node --check ops/akia-bridge/north-activation-smoke.mjs
+          python3 ops/akia-bridge/test-release-controls.py
+          python3 -c "import ast,pathlib; ast.parse(pathlib.Path('ops/akia-bridge/north-gateway-activation-smoke.py').read_text())"
       - name: Restrict image and action
         env:
           SERVICE: ${{ inputs.service }}
@@ -31,8 +38,9 @@ jobs:
           IMAGE: ${{ inputs.image }}
         run: |
           set -Eeuo pipefail
-          [[ "$SERVICE" == operations-api || "$SERVICE" == gateway ]]
-          [[ "$ACTION" == preflight || "$ACTION" == deploy ]]
+          [[ "$SERVICE" == operations-api || "$SERVICE" == gateway || "$SERVICE" == north-runtime ]]
+          [[ "$ACTION" == preflight || "$ACTION" == deploy || "$ACTION" == activate ]]
+          [[ "$ACTION" != activate || "$SERVICE" != north-runtime ]]
           [[ "$IMAGE" =~ ^ghcr\.io/allanvvz/akia-${SERVICE}@sha256:[0-9a-f]{64}$ ]]
   preflight:
     needs: validate
@@ -66,11 +74,12 @@ jobs:
             echo 'AKIA_DISK_GATE=pass required=<50%'
             env_path="$AKIA_ROOT/secrets/akia-operations.env"
             if [[ "$AKIA_SERVICE" == gateway ]]; then env_path="$AKIA_ROOT/secrets/akia-gateway.env"; fi
+            if [[ "$AKIA_SERVICE" == north-runtime ]]; then env_path="$AKIA_ROOT/secrets/akia-north-runtime.env"; fi
             if [[ -s "$env_path" ]]; then
               echo "AKIA_PRIVATE_ENV=present service=$AKIA_SERVICE"
             else
               echo "AKIA_PRIVATE_ENV=missing service=$AKIA_SERVICE"
-              [[ "$AKIA_ACTION" != deploy ]] || exit 1
+              [[ "$AKIA_ACTION" == preflight ]] || exit 1
             fi
             cd "$AKIA_ROOT"
             db_container="$(docker compose --env-file .env.compose -f docker-compose.yml ps -q db)"
@@ -88,7 +97,7 @@ jobs:
             PY
             echo 'AKIA_PREFLIGHT=read_only_complete'
   deploy:
-    if: inputs.action == 'deploy'
+    if: inputs.action == 'deploy' || inputs.action == 'activate'
     needs: preflight
     runs-on: ubuntu-latest
     steps:
@@ -113,7 +122,7 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           fingerprint: SHA256:bB5eg8WRYnDC4DgAsZbINfvwW7CmhIo9Jze22YhWHRY
           port: ${{ secrets.VPS_PORT || 22 }}
-          source: ops/akia-bridge/deploy-akia-operations.sh,ops/akia-bridge/deploy-akia-gateway.sh,infra/akia/compose.yml,infra/akia/gateway.compose.yml
+          source: ops/akia-bridge,infra/akia/compose.yml,infra/akia/gateway.compose.yml,infra/akia/north-runtime.compose.yml
           target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           overwrite: true
       - name: Candidate, readiness, selected-service cutover and rollback
@@ -122,6 +131,7 @@ jobs:
           AKIA_ROOT: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           AKIA_SERVICE: ${{ inputs.service }}
           AKIA_IMAGE: ${{ inputs.image }}
+          AKIA_ACTION: ${{ inputs.action }}
           GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
           AKIA_PORTAL_PATH_HOST: api.vzforeal.com
@@ -132,13 +142,17 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           fingerprint: SHA256:bB5eg8WRYnDC4DgAsZbINfvwW7CmhIo9Jze22YhWHRY
           port: ${{ secrets.VPS_PORT || 22 }}
-          envs: AKIA_ROOT,AKIA_SERVICE,AKIA_IMAGE,GHCR_USERNAME,GHCR_TOKEN,AKIA_PORTAL_PATH_HOST,AKIA_PORTAL_PATH_ORIGINS
+          envs: AKIA_ROOT,AKIA_SERVICE,AKIA_ACTION,AKIA_IMAGE,GHCR_USERNAME,GHCR_TOKEN,AKIA_PORTAL_PATH_HOST,AKIA_PORTAL_PATH_ORIGINS
           command_timeout: 10m
           script: |
             set -Eeuo pipefail
             [[ "$AKIA_IMAGE" =~ ^ghcr\.io/allanvvz/akia-${AKIA_SERVICE}@sha256:[0-9a-f]{64}$ ]]
             cd "$AKIA_ROOT"
-            if [[ "$AKIA_SERVICE" == gateway ]]; then
+            export AKIA_NORTH_RUNTIME_FIXTURE_FILE="$AKIA_ROOT/secrets/north-e2e-fixture.json"
+            if [[ "$AKIA_SERVICE" == north-runtime ]]; then
+              export AKIA_NORTH_RUNTIME_ENV_FILE="$AKIA_ROOT/secrets/akia-north-runtime.env"
+              release_script=ops/akia-bridge/deploy-akia-north-runtime.sh
+            elif [[ "$AKIA_SERVICE" == gateway ]]; then
               export AKIA_GATEWAY_ENV_FILE="$AKIA_ROOT/secrets/akia-gateway.env"
               release_script=ops/akia-bridge/deploy-akia-gateway.sh
             else
@@ -149,6 +163,11 @@ jobs:
             export DOCKER_CONFIG="$(mktemp -d)"
             trap 'rm -f "$DOCKER_CONFIG/config.json"; rmdir "$DOCKER_CONFIG"' EXIT
             printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin >/dev/null
-            bash "$release_script" --dry-run "$AKIA_IMAGE"
-            bash "$release_script" --apply "$AKIA_IMAGE"
+            if [[ "$AKIA_ACTION" == activate ]]; then
+              bash "$release_script" --activation-plan "$AKIA_IMAGE"
+              timeout --signal=TERM --kill-after=120s 420s bash "$release_script" --activate "$AKIA_IMAGE"
+            else
+              bash "$release_script" --dry-run "$AKIA_IMAGE"
+              timeout --signal=TERM --kill-after=120s 420s bash "$release_script" --apply "$AKIA_IMAGE"
+            fi
             echo "AKIA_BRIDGE_RESULT=healthy service=$AKIA_SERVICE"
