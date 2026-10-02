@@ -65,3 +65,17 @@ def test_compiled_offer_reads_data_offer_only():
     offer = normalize_offer(product_node.get("data") or {}, product_node.get("metadata") or {})
     assert offer_to_price_cents(offer) == 9990
     assert offer_to_price_cents(offer) == round(offer.amount * 100)
+
+
+def test_compiled_offer_passes_the_published_price_qualifier():
+    """Utzig shows "A partir de" only where the client published a starting price."""
+    product_node = {"id": "product:x", "node_type": "product", "data": {}}
+    starting = {"id": "offer:x", "node_type": "offer", "data": {
+        "offer": {"amount": 450.0, "currency": "BRL"}, "price_qualifier": "a_partir_de"}}
+    base = {"id": "offer:y", "node_type": "offer", "data": {
+        "offer": {"amount": 650.0, "currency": "BRL"}, "price_qualifier": "valor_base"}}
+
+    assert menu._compiled_offer(product_node, starting) == {
+        "amount": 450.0, "currency": "BRL", "qualifier": "a_partir_de"}
+    assert menu._compiled_offer(product_node, base) == {
+        "amount": 650.0, "currency": "BRL", "qualifier": "valor_base"}

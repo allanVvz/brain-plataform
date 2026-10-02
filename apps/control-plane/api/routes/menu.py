@@ -815,7 +815,12 @@ def _compiled_offer(node: dict, offer_node: dict | None = None) -> Optional[dict
     offer = normalize_offer(data, metadata)
     if offer is None:
         return None
-    return {"amount": offer.amount, "currency": offer.currency}
+    qualifier = str(data.get("price_qualifier") or "").strip()
+    return {
+        "amount": offer.amount, "currency": offer.currency,
+        # "a_partir_de" or "valor_base"; absent for legacy offers.
+        **({"qualifier": qualifier} if qualifier else {}),
+    }
 
 
 def _compiled_asset_payload(
