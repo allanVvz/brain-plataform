@@ -1,0 +1,90 @@
+name: Send one queue preview
+
+# Operator-equivalent "Enviar prévia" for one lead while the client Disparos
+# screen lacks the button. Calls the same canonical RPC as the dashboard
+# (control_message_queue_v2, action send_preview): an atomic transition that
+# only acts on an outbound still in preview_ready, so a repeat is a no-op.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Audit the preview, or send it
+        type: choice
+        options: [dry-run, apply]
+        default: dry-run
+      persona_slug:
+        description: Persona that owns the lead
+        type: choice
+        options: [utzig-garage]
+        required: true
+      lead_ref:
+        description: Exact numeric lead id
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: brain-ai-production
+  cancel-in-progress: false
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Audit or send the single preview_ready outbound of one lead
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        env:
+          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+          SEND_ACTION: ${{ inputs.action }}
+          PERSONA_SLUG: ${{ inputs.persona_slug }}
+          LEAD_REF: ${{ inputs.lead_ref }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          envs: VPS_APP_DIR,SEND_ACTION,PERSONA_SLUG,LEAD_REF
+          command_timeout: 5m
+          script: |
+            set -Eeuo pipefail
+            cd "$VPS_APP_DIR"
+            [[ "$SEND_ACTION" == dry-run || "$SEND_ACTION" == apply ]]
+            [[ "$PERSONA_SLUG" == utzig-garage ]]
+            [[ "$LEAD_REF" =~ ^[0-9]{1,12}$ ]]
+            compose=(docker compose --env-file .env.compose -f docker-compose.yml -f infra/microservices/docker-compose.blue-green.yml)
+            psql=("${compose[@]}" exec -T -e "PERSONA_SLUG=$PERSONA_SLUG" -e "LEAD_REF=$LEAD_REF"
+              db sh -c 'exec psql -v ON_ERROR_STOP=1 -v PERSONA_SLUG="$PERSONA_SLUG" -v LEAD_REF="$LEAD_REF" -AtF "|" -U "$POSTGRES_USER" -d "$POSTGRES_DB"')
+
+            audit="$("${psql[@]}" <<'SQL'
+            SELECT b.id, b.created_at,
+                   coalesce((b.payload->>'queue_pause')::boolean, false),
+                   EXISTS (SELECT 1 FROM public.lead_buffer i
+                           WHERE i.direction = 'inbound' AND i.lead_ref = b.lead_ref
+                             AND i.created_at > b.created_at),
+                   (SELECT count(*) FROM public.lead_buffer o
+                     WHERE o.direction = 'outbound' AND o.lead_ref = b.lead_ref
+                       AND o.status IN ('pending_send', 'sent', 'delivered', 'read')
+                       AND o.created_at >= b.created_at)
+            FROM public.lead_buffer b JOIN public.personas p ON p.id = b.persona_id
+            WHERE p.slug = :'PERSONA_SLUG' AND b.lead_ref = :'LEAD_REF'::bigint
+              AND b.direction = 'outbound' AND b.status = 'preview_ready'
+            ORDER BY b.created_at;
+            SQL
+            )"
+            echo "PREVIEW_AUDIT id|created_at|queue_paused|newer_inbound|outbound_after_preview"
+            printf 'PREVIEW_AUDIT %s\n' "$audit"
+            [[ -n "$audit" ]] || { echo "no preview_ready outbound for this lead" >&2; exit 1; }
+            (( $(printf '%s\n' "$audit" | wc -l) == 1 )) || { echo "more than one preview_ready outbound; refusing" >&2; exit 1; }
+            preview_id="${audit%%|*}"
+            [[ "$preview_id" =~ ^[0-9a-f-]{36}$ ]]
+            [[ "$SEND_ACTION" == apply ]] || exit 0
+
+            "${compose[@]}" exec -T -e "PREVIEW_ID=$preview_id" db sh -c \
+              'exec psql -v ON_ERROR_STOP=1 -v PREVIEW_ID="$PREVIEW_ID" -At -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
+            SELECT 'SEND_RESULT ' || public.control_message_queue_v2(ARRAY[:'PREVIEW_ID']::uuid[], 'send_preview', NULL)::text;
+            SELECT 'PREVIEW_AFTER ' || status || ' available_at=' || coalesce(available_at::text, '')
+            FROM public.lead_buffer WHERE id = :'PREVIEW_ID'::uuid;
+            SQL
