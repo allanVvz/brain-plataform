@@ -222,12 +222,13 @@ def askable_pending_fields(
     return [
         field for field in contract.get("fields") or []
         if _condition_matches(field.get("condition"), facts)
+        and field.get("question_mode") != "disabled"
         and dependencies_resolved(field)
         and not _resolved_for_field_owner(field, facts.get(field["key"]))
         and (
             field.get("required", True)
             or (
-                field.get("collection_mode") == "ask_once_optional"
+                (field.get("question_mode") == "optional" or field.get("collection_mode") == "ask_once_optional")
                 and str(field.get("question_node_id") or "") not in asked_ids
             )
         )

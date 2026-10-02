@@ -5089,16 +5089,16 @@ def _finalize_resolved_reply(
         gates.append("empty_reply")
     public_question = "?" in proposal.reply
     if public_question and kind in {None, "none"}:
-        gates.append("question_kind_required_for_public_question")
+        warnings.append("question_kind_required_for_public_question")
     if kind == "qualification" and (
         not public_question or not field or not question_id
     ):
-        gates.append("qualification_question_field_not_eligible")
+        warnings.append("qualification_question_field_not_eligible")
     if kind in {"consultative", "confirmation"} and not public_question:
-        gates.append("question_kind_without_public_question")
+        warnings.append("question_kind_without_public_question")
     matched_keys = conversation_repetition.question_field_matches(proposal.reply, contract)
     if matched_keys and (kind != "qualification" or matched_keys != {asked_field}):
-        gates.append("public_question_field_metadata_mismatch")
+        warnings.append("public_question_field_metadata_mismatch")
     profile_name = context.retrieval_trace.get("profile_name") or {}
     if (
         kind == "qualification"
@@ -5106,9 +5106,9 @@ def _finalize_resolved_reply(
         and asked_field == profile_name.get("field_key")
         and str(profile_name.get("candidate") or "") not in proposal.reply
     ):
-        gates.append("profile_name_confirmation_must_quote_candidate")
+        warnings.append("profile_name_confirmation_must_quote_candidate")
     if not repetition["passed"]:
-        gates.extend(repetition["failures"])
+        warnings.extend(repetition["failures"])
     previous_reply = next((
         str(row.get("content") or "") for row in reversed(context.messages)
         if row.get("role") == "assistant"
@@ -5121,7 +5121,7 @@ def _finalize_resolved_reply(
             _last_public_question(proposal.reply),
         ) >= 0.67
     ):
-        gates.append("repeated_public_question")
+        warnings.append("repeated_public_question")
     gates = list(dict.fromkeys(gates))
     warnings = list(dict.fromkeys([*(resolved.proof.get("quality_warnings") or []), *warnings]))
     state = {**context.cart, "asked_question_node_ids": [

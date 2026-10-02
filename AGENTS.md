@@ -16,8 +16,12 @@ usar uma stack Docker local para implementar, auditar ou testar este projeto.
   candidate, cutover atomico, verificacao e rollback automatico da mesma
   release. Migration e limpeza destrutiva continuam exigindo autorizacoes
   proprias e nunca sao implicadas pelo deploy.
-- Mudancas de conversa devem ser testadas somente pelo WA Validator
-  direto/interno, sem WhatsApp real.
+- Na recuperacao da lead real de teste Allan, WhatsApp final 8510, verificar
+  primeiro o inbound, a ausencia de outbound entregue e o caminho canonico
+  runtime -> decisao -> proof -> commit -> fila -> WhatsApp. Confirmar a
+  resposta no aparelho e reconciliar os IDs antes do WA Validator interno.
+  Esse contato e permanentemente elegivel a testes operacionais da Utzig;
+  nunca contornar isolamento, idempotencia ou comprovacao de entrega.
 - Publicacao de GraphBundle e conteudo nunca pausa binding, persona, IA ou
   worker. Stage e validacao usam a publicacao candidata; ativacao e CAS e a
   publicacao anterior continua ativa quando qualquer etapa falha.
@@ -694,6 +698,10 @@ Se nao aparece no grafo, esta incompleto.
 - Grafo de agendamento incompleto deve falhar na validacao antes da publicacao.
 - Sofia deve auxiliar o operador a preencher a matriz campo/pergunta, preservar
   fonte/status e nao copiar perguntas de outra persona ou exemplo.
+- Campos de qualificacao publicados podem ser obrigatorios, opcionais ou
+  desativados. A publicacao atomica do GraphBundle altera esse roteiro sem
+  deploy do runtime; fatos ja coletados permanecem no ledger. O RAG fornece
+  fatos e orientacao, enquanto o modelo responde duvidas e formula a pergunta.
 
 ## 28. Fronteiras de microsservicos e cutover
 
@@ -719,6 +727,16 @@ Se nao aparece no grafo, esta incompleto.
   publicacao e commit exactly-once, nao aprovacao editorial. Continuam gates
   publicacao/checksum, persona/binding, duplicidade, texto vazio, confirmacao
   indevida de preco/data/horario e politica publicada de preco humano.
+- Divergencia entre texto e `asked_field_key`, pergunta formulada de outro
+  modo, campo ja satisfeito e similaridade com roteiro geram correcao de
+  metadados ou aviso de qualidade. Nao descartam uma resposta util antes do
+  proof. Persistir texto candidato, motivo, tentativa de correcao e estado
+  final em eventos escopados quando houver falha tecnica posterior.
+- Separar politica de conteudo da mensagem, politica do servico e agendamento
+  da persona, e horario operacional dos Disparos. Utzig presta servicos:
+  sua politica de agendamento nao e politica de entrega de produto. Sem janela
+  operacional de Disparos publicada, o envio elegivel e imediato; com janela,
+  agendar para o proximo horario permitido e expor motivo, previa e acao.
 - Control plane, conversation runtime e transport usam imagens, health,
   rollback e roles de banco independentes; nenhum importa codigo de outro.
 - Contratos entre servicos vem somente de `brain-contracts` em versao exata.

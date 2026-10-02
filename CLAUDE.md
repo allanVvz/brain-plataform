@@ -37,6 +37,21 @@ em vez de escolher em silêncio.
   deterministico; proof valida evidencia, isolamento, seguranca e exactly-once.
 - Toda mudanca conversacional deve executar o teste-canario que prova a
   fronteira entre os dois motores e a preservacao byte a byte da reply agentic.
+- Para a lead de teste Allan da Utzig, WhatsApp final 8510, a recuperacao
+  segue a trilha real inbound -> decisao -> proof -> commit -> fila -> entrega
+  e confirma recebimento no aparelho antes da bateria WA Validator. O numero
+  permanece liberado para testes operacionais sem duplicar outbound.
+- `n8n_agents` e somente compatibilidade de armazenamento. O runtime decide e
+  prova a conversa; n8n nao e dono da decisao, do proof ou do commit.
+- Metadados de pergunta e similaridade editorial produzem correcao ou avisos
+  auditaveis, sem veto de resposta util. Gates tecnicos preservam identidade,
+  publicacao, isolamento, idempotencia e compromissos comerciais reais.
+- Conteudo da mensagem, servico/agendamento da Utzig e horario dos Disparos
+  sao politicas distintas. Utzig presta servico e nao tem entrega de produto.
+  Sem janela de Disparos, enviar imediatamente; com janela, programar o proximo
+  horario permitido e expor espera, previa e acao persistida.
+- Perguntas SDR publicadas podem ser obrigatorias, opcionais ou desativadas
+  sem deploy do runtime; manter fatos ja coletados no ledger.
 - O isolamento de galho e deterministico; o vocabulario do cliente nao. Enum
   fechado e alias sao exemplos de fraseado, nunca o filtro que decide se o fato
   existe - invariante 4 do `docs/roadmaps/AGENT_ROADMAP.md`.
