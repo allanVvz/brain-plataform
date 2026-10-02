@@ -59,7 +59,7 @@ ativa v13 (`6b85bf7a-ab87-4f3b-a1d1-4a6b4ae4c05f`, draft `sha256:b23cea31…`).
    script, rodar dry-run + `--apply` antes dos tombstones e `--restore` no trap
    de rollback.
 3. Depois disso: `publish-graphbundle` plan → stage → activate com os checksums
-   do `.PLAN.json` regenerado; deploy do control-plane (qualifier no menu);
+   do `.PLAN.json` regenerado; deploy do control-plane (menu ignora ofertas `registered_only`);
    deploy da LP em `test.utziggarage.pages.dev` e depois `main`.
 
 ## Confirmar com a Luiza / o Alemão
