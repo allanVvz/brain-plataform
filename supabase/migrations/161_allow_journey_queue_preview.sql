@@ -171,3 +171,7 @@ REVOKE ALL ON FUNCTION public.commit_graph_turn_and_outbox_v3(jsonb,jsonb,jsonb,
   FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.commit_graph_turn_and_outbox_v3(jsonb,jsonb,jsonb,jsonb)
   TO service_role;
+GRANT EXECUTE ON FUNCTION public.commit_graph_turn_and_outbox_v3(jsonb,jsonb,jsonb,jsonb)
+  TO brain_runtime;
+
+NOTIFY pgrst, 'reload schema';
