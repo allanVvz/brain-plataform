@@ -1,3 +1,12 @@
+## Ownership — North login release (2026-10-02)
+
+Codex owns the control-plane auth_service.py and portal-auth tests for the
+isolated North staff login release in fix/north-staff-login-release. Base
+5ad1678 contains the identical control-plane code deployed at ae511333. Only
+control-plane is promoted, with runtime, transport, gateway and schema 162
+preserved. Read-only audit confirmed explicit North grants for Cintia, Alisson
+and Luiza; Cintia has a linked North admin profile. No conversation mutation.
+
 # Go-live controlado — Utzig Garage
 
 ## Escopo e guardrails
