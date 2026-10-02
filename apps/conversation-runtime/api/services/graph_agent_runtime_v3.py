@@ -39,6 +39,7 @@ from schemas.conversation import (
 from services import (
     context_cards,
     conversation_repetition,
+    reply_metadata,
     graph_compiler_v3,
     graph_proof_checker_v3,
     shared_lead_memory,
@@ -5058,21 +5059,20 @@ def _finalize_resolved_reply(
         asked_question_node_ids=context.cart.get("asked_question_node_ids") or [],
     ))
     metadata = observation.get("interpretation") or {}
-    kind = metadata.get("question_kind")
-    warnings = list(proof.get("quality_warnings") or [])
-    if kind not in {"qualification", "consultative", "confirmation", "none"}:
-        kind = None
-        warnings.append("reply_metadata_discarded:question_kind")
-    field = next((field for field in eligible
-                  if field.get("key") == metadata.get("asked_field_key")), None)
-    question_id = None
-    asked_field = None
-    if kind in {None, "qualification"} and field and not resolved.handoff_required:
-        asked_field = field["key"]
-        question_id = field.get("question_node_id")
-    elif metadata.get("asked_field_key") or kind == "qualification":
-        warnings.append("reply_metadata_discarded:asked_field_key")
-        kind = None
+    # Revalidate original semantic input, not already-detached metadata.
+    # Otherwise a second pass could recover a pointer the first pass refused.
+    original_metadata = (observation.get("reply_metadata_audit") or {}).get("original") or metadata
+    reconciled = reply_metadata.reconcile_question_metadata(
+        reply=proposal.reply, question_kind=original_metadata.get("question_kind"),
+        asked_field_key=original_metadata.get("asked_field_key"), eligible_fields=eligible,
+        contract=contract, handoff_required=resolved.handoff_required,
+    )
+    kind, asked_field = reconciled["question_kind"], reconciled["asked_field_key"]
+    warnings = [*(proof.get("quality_warnings") or []),
+                *(observation.get("reply_metadata_warnings") or []),
+                *reconciled["warnings"]]
+    field = next((f for f in eligible if f.get("key") == asked_field), None)
+    question_id = field.get("question_node_id") if field else None
     repetition = conversation_repetition.assess_repetition(
         current_reply=proposal.reply, recent_replies=_assistant_replies(context.messages),
         question_node_id=question_id,
@@ -5087,28 +5087,8 @@ def _finalize_resolved_reply(
     gates = list(proof.get("gating_errors") or [])
     if not proposal.reply.strip():
         gates.append("empty_reply")
-    public_question = "?" in proposal.reply
-    if public_question and kind in {None, "none"}:
-        gates.append("question_kind_required_for_public_question")
-    if kind == "qualification" and (
-        not public_question or not field or not question_id
-    ):
-        gates.append("qualification_question_field_not_eligible")
-    if kind in {"consultative", "confirmation"} and not public_question:
-        gates.append("question_kind_without_public_question")
-    matched_keys = conversation_repetition.question_field_matches(proposal.reply, contract)
-    if matched_keys and (kind != "qualification" or matched_keys != {asked_field}):
-        gates.append("public_question_field_metadata_mismatch")
-    profile_name = context.retrieval_trace.get("profile_name") or {}
-    if (
-        kind == "qualification"
-        and profile_name.get("state") == "confirm_once"
-        and asked_field == profile_name.get("field_key")
-        and str(profile_name.get("candidate") or "") not in proposal.reply
-    ):
-        gates.append("profile_name_confirmation_must_quote_candidate")
     if not repetition["passed"]:
-        gates.extend(repetition["failures"])
+        warnings.extend(repetition["failures"])
     previous_reply = next((
         str(row.get("content") or "") for row in reversed(context.messages)
         if row.get("role") == "assistant"
@@ -5121,12 +5101,18 @@ def _finalize_resolved_reply(
             _last_public_question(proposal.reply),
         ) >= 0.67
     ):
-        gates.append("repeated_public_question")
+        warnings.append("repeated_public_question")
     gates = list(dict.fromkeys(gates))
     warnings = list(dict.fromkeys([*(resolved.proof.get("quality_warnings") or []), *warnings]))
     state = {**context.cart, "asked_question_node_ids": [
         *(context.cart.get("asked_question_node_ids") or []), *([question_id] if question_id else []),
     ]}
+    metadata_audit = dict(observation.get("reply_metadata_audit") or reconciled["audit"])
+    metadata_audit["normalized"] = reconciled["audit"]["normalized"]
+    metadata_audit["corrections"] = list(dict.fromkeys([
+        *metadata_audit.get("corrections", []), *reconciled["audit"]["corrections"],
+    ]))
+    metadata_audit["status"] = "corrected" if metadata_audit["corrections"] else "preserved"
     final_proof = {
         **resolved.proof,
         # Resolution owns facts, branch changes and completion. Only the reply
@@ -5137,6 +5123,7 @@ def _finalize_resolved_reply(
         ) if key in proof},
         "question_kind": kind, "asked_field_key": asked_field, "next_question_node_id": question_id,
         "quality_warnings": warnings, "quality_pass": not warnings,
+        "reply_metadata_audit": metadata_audit,
         "gating_errors": gates, "valid": not gates, "technical_pass": not gates,
         "delivery_authorized": not gates, "repair_required": False,
         "model_reply_preserved": True, "repetition_audit": repetition,

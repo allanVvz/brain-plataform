@@ -284,3 +284,35 @@ Cada jornada crítica deve ter exatamente um inbound canônico, uma decisão, um
 proof válido, um commit concluído e no máximo um outbound interno; ambos os
 vereditos precisam ser verdadeiros. Qualquer falha nova mantém o piloto
 restrito e interrompe novos envios automáticos.
+
+
+## Ownership temporario — revisao SDR Tock — 2026-10-02
+
+Dono: Codex, branch `fix/tock-sdr-free`, worktree
+`/home/allan/src/agent-work/tock-sdr-free-20261002/tock-brain-prod`.
+Revisao somente leitura do trabalho Claude `f59cd370ba68225b9efae967c6a52574c5d8400b`;
+sem incorporar ou fazer push dos commits Utzig. Arquivos genericos reservados
+para esta revisao: `apps/conversation-runtime/api/services/conversation_runtime.py`,
+`graph_agent_runtime_v3.py`, novo normalizador de metadados e cobertura focada.
+Outro agente avisado pelo canal de coordenacao. Nao editar transport,
+control-plane nem worktree Utzig. Nenhuma migration, publicacao, reprocessamento
+ou release produtiva autorizada nesta etapa.
+
+Objetivo: preservar texto util, confiar nos metadados semanticos do modelo
+quando apontam para campo publicado elegivel, registrar incertezas de qualidade
+e manter guards de publicacao, isolamento, idempotencia e compromissos comerciais.
+
+Ownership estendido ao parser `services/agentic_turn.py`: preservar campo informado ate normalizacao e registrar candidato em falha tecnica. Nenhum outro arquivo generico reservado.
+
+Checkpoint da revisao Tock: 106 testes focados aprovados; normalizacao central
+sem regex/similaridade decisorias, avisos editoriais, audit original/final e
+texto preservado. Revisao Claude e riscos comerciais documentados em
+`tock-sdr-free-review-20261002.md`. Quatro testes legados adicionais chamam uma
+assinatura antiga; nao ocultados. Nenhuma prova de entrega ou release declarada.
+Ownership dos arquivos reservado ate fechamento do commit desta revisao;
+nenhuma mutacao produtiva executada.
+
+Fechamento de ownership: patch local finalizado para commit/revisao; arquivos
+genericos liberados para coordenacao. Qualquer integracao deve revisar o diff
+contra a branch Claude antes de aplicar, sem cherry-pick automatico ou push
+de commits Utzig. Artefatos e dependencias desta sessao ficam em agent-work.

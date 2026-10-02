@@ -97,15 +97,17 @@ def test_public_question_metadata_is_normalized_only_when_unambiguous(monkeypatc
     assert observed[-1]["asked_field_key"] == "nome_cliente"
 
     # A confirmed name is not eligible even when the reply text matches its
-    # published question. It must never be sent as a new qualification prompt.
+    # published question. Detach its pointer; text remains a quality concern.
     resolved = resolved.model_copy(update={"eligible_fields": []})
-    with pytest.raises(RuntimeError, match="public_question_field_not_eligible"):
+    with pytest.raises(RuntimeError, match="captured before proof"):
         conversation_runtime.decide_agentic(
             context, resolved_understanding=resolved,
             conversation_reply=ConversationReplyV1(
                 reply="Como você prefere que eu te chame?", question_kind="none",
             ),
         )
+    assert observed[-1]["asked_field_key"] is None
+    assert observed[-1]["question_kind"] == "consultative"
 
 
 def test_active_publication_is_not_a_shadow_session():
@@ -674,10 +676,27 @@ def test_unknown_question_metadata_preserves_reply(kind):
 
 
 @pytest.mark.parametrize("kind", ["consultative", "confirmation", "none"])
-def test_nonqualification_question_never_spends_a_field(kind):
+def test_parser_preserves_semantic_input_until_eligibility_is_known(kind):
     reply, warnings = agentic_turn._usable_reply_with_metadata({
         "reply": "Prefere algo discreto?", "question_kind": kind, "asked_field_key": "name",
     })
     assert reply.question_kind == kind
-    assert reply.asked_field_key is None
-    assert "reply_metadata_discarded:asked_field_key" in warnings
+    assert reply.asked_field_key == "name"
+    from services.reply_metadata import reconcile_question_metadata
+    reconciled = reconcile_question_metadata(
+        reply=reply.reply, question_kind=reply.question_kind,
+        asked_field_key=reply.asked_field_key, eligible_fields=[], contract={},
+    )
+    assert reconciled["asked_field_key"] is None
+    assert "question_field_not_eligible" in reconciled["warnings"]
+
+
+@pytest.mark.parametrize("version", [None, "invented_v9", 3, {}])
+def test_model_reply_version_metadata_never_discards_usable_text(version):
+    reply, warnings = agentic_turn._usable_reply_with_metadata({
+        "reply": "Vou esclarecer sua dúvida primeiro.", "contract_version": version,
+        "question_kind": "none", "asked_field_key": None,
+    })
+    assert reply.reply == "Vou esclarecer sua dúvida primeiro."
+    assert reply.contract_version == type(reply).model_fields["contract_version"].default
+    assert "reply_metadata_corrected:contract_version" in warnings

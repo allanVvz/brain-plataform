@@ -179,41 +179,39 @@ def test_affirmation_reads_exact_candidate_from_last_outbound(monkeypatch):
     assert resolved.prospective_state["facts"]["customer_identity"]["status"] == "known"
 
 
-def test_qualification_question_requires_valid_field_and_kind(monkeypatch):
+def test_question_metadata_is_advisory_and_model_text_survives(monkeypatch):
     context = _context()
     resolved = ResolvedUnderstandingV1(
         understanding=TurnUnderstandingV1(), context=context,
         prospective_state={}, eligible_fields=[NAME_FIELD],
-        conversation_brief={"profile_name": {
-            "state": "confirm_once", "candidate": "Ana",
-            "field_key": "customer_identity",
-        }}, resolution_proof={"valid": True, "accepted_facts": []},
+        conversation_brief={}, resolution_proof={"valid": True, "accepted_facts": []},
     )
-    monkeypatch.setattr(graph_agent_runtime_v3, "decide", lambda *_args, **_kwargs: (
-        ConversationDecision(intent="collect_graph_fields", route="SDR", confidence=1,
-                             lead_stage="engajado"),
-        AgentResponse(reply_text="Posso te chamar de Ana?", role="SDR", cart_state={},
-                      proof={"valid": True, "delivery_authorized": True,
-                             "question_kind": "qualification"}),
-    ))
-    def decide(reply):
-        return conversation_runtime.decide_agentic(
+    observed = []
+    def decide(_context, *, model_observation):
+        observed.append(model_observation)
+        return (
+            ConversationDecision(intent="collect_graph_fields", route="SDR", confidence=1,
+                                 lead_stage="engajado"),
+            AgentResponse(reply_text=model_observation["proposal"]["reply"], role="SDR", cart_state={},
+                          proof={"valid": True, "delivery_authorized": True}),
+        )
+    monkeypatch.setattr(graph_agent_runtime_v3, "decide", decide)
+    for reply in [
+        ConversationReplyV1(reply="Qual é seu nome?"),
+        ConversationReplyV1(reply="Posso saber como chamar você", question_kind="qualification",
+                            asked_field_key="customer_identity"),
+        ConversationReplyV1(reply="Vou esclarecer isso primeiro.", question_kind="qualification",
+                            asked_field_key="wrong"),
+        ConversationReplyV1(reply="Está tudo certo no resumo?", question_kind="confirmation"),
+    ]:
+        _, response = conversation_runtime.decide_agentic(
             context, resolved_understanding=resolved, conversation_reply=reply,
         )
-    with pytest.raises(RuntimeError, match="question_kind_required"):
-        decide(ConversationReplyV1(reply="Qual é seu nome?"))
-    with pytest.raises(RuntimeError, match="field_not_eligible"):
-        decide(ConversationReplyV1(reply="Qual é seu nome?", question_kind="qualification",
-                                   asked_field_key="wrong"))
-    with pytest.raises(RuntimeError, match="field_metadata_mismatch"):
-        decide(ConversationReplyV1(reply="Posso te chamar de Utzig?", question_kind="consultative"))
-    with pytest.raises(RuntimeError, match="must_quote_candidate"):
-        decide(ConversationReplyV1(reply="Qual é seu nome?", question_kind="qualification",
-                                   asked_field_key="customer_identity"))
-    _, response = decide(ConversationReplyV1(reply="Posso te chamar de Ana?",
-                                               question_kind="qualification",
-                                               asked_field_key="customer_identity"))
-    assert response.proof["question_kind"] == "qualification"
+        assert response.reply_text == reply.reply
+        assert response.proof["valid"] is True
+    assert observed[1]["interpretation"]["asked_field_key"] == "customer_identity"
+    assert observed[2]["interpretation"]["asked_field_key"] is None
+    assert observed[3]["interpretation"]["question_kind"] == "confirmation"
 
 
 def test_crm_name_write_is_compare_and_swap(monkeypatch):

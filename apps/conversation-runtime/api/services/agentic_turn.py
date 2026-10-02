@@ -393,6 +393,12 @@ def _usable_reply_with_metadata(raw: dict[str, Any]) -> tuple[ConversationReplyV
     }
     cleaned = {key: value for key, value in raw.items() if key in allowed}
     warnings = [f"reply_metadata_discarded:extra:{key}" for key in raw if key not in allowed]
+    # This version is model output metadata, not publication identity.
+    # Rebuild it from the supported schema instead of discarding useful text.
+    expected_version = ConversationReplyV1.model_fields["contract_version"].default
+    if "contract_version" in cleaned and cleaned["contract_version"] != expected_version:
+        cleaned["contract_version"] = expected_version
+        warnings.append("reply_metadata_corrected:contract_version")
     if cleaned.get("asked_field_key") is not None and not isinstance(cleaned["asked_field_key"], str):
         cleaned["asked_field_key"] = None
         warnings.append("reply_metadata_discarded:asked_field_key")
@@ -400,9 +406,6 @@ def _usable_reply_with_metadata(raw: dict[str, Any]) -> tuple[ConversationReplyV
         cleaned["question_kind"] = None
         warnings.append("reply_metadata_discarded:question_kind")
     if "asked_field_key" not in cleaned:
-        warnings.append("reply_metadata_discarded:asked_field_key")
-    if cleaned.get("question_kind") in {"consultative", "confirmation", "none"} and cleaned.get("asked_field_key"):
-        cleaned["asked_field_key"] = None
         warnings.append("reply_metadata_discarded:asked_field_key")
     claims = cleaned.get("claims", [])
     if not isinstance(claims, list):
@@ -865,6 +868,8 @@ def execute(
             "reply_proof",
             str(exc),
             diagnostic={
+                "candidate_reply": reply.reply,
+                "candidate_status": "technical_proof_failed",
                 "asked_field_key": reply.asked_field_key,
                 "claim_types": [claim.claim_type for claim in reply.claims],
                 "cited_node_ids": reply.cited_node_ids,

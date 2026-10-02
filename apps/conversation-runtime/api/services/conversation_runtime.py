@@ -26,6 +26,7 @@ from schemas.conversation import (
 )
 from services import (
     conversation_repetition,
+    reply_metadata,
     context_cards as context_cards_service,
     deterministic_composer,
     graph_agent_runtime_v3,
@@ -1645,59 +1646,17 @@ def decide_agentic(
             or resolved_context.persona_slug != context.persona_slug
         ):
             raise RuntimeError("resolved understanding does not belong to turn context")
-        public_question = "?" in conversation_reply.reply
-        kind = conversation_reply.question_kind
-        asked_key = str(conversation_reply.asked_field_key or "")
-        eligible_keys = {
-            str(field.get("key") or "")
-            for field in resolved_understanding.eligible_fields
-        }
-        matched_keys = conversation_repetition.question_field_matches(
-            conversation_reply.reply, resolved_context.graph_contract,
+        metadata = reply_metadata.reconcile_question_metadata(
+            reply=conversation_reply.reply,
+            question_kind=conversation_reply.question_kind,
+            asked_field_key=conversation_reply.asked_field_key,
+            eligible_fields=resolved_understanding.eligible_fields,
+            contract=resolved_context.graph_contract,
         )
-        if public_question and matched_keys - eligible_keys:
-            raise RuntimeError("public_question_field_not_eligible")
-        # The model owns the wording. A question with missing or generic
-        # metadata has an unambiguous classification when its text matches one
-        # eligible published field, or matches no field at all. Normalize that
-        # metadata before proof; conflicting keys and ineligible fields still
-        # fail closed below.
-        if public_question and not asked_key:
-            if len(matched_keys) == 1 and matched_keys <= eligible_keys and kind in {
-                None, "none", "consultative",
-            }:
-                asked_key = next(iter(matched_keys))
-                kind = "qualification"
-            elif not matched_keys and kind in {None, "none"}:
-                kind = "consultative"
-            if (kind, asked_key) != (
-                conversation_reply.question_kind,
-                str(conversation_reply.asked_field_key or ""),
-            ):
-                conversation_reply = conversation_reply.model_copy(update={
-                    "question_kind": kind,
-                    "asked_field_key": asked_key or None,
-                })
-        if public_question and kind in {None, "none"}:
-            raise RuntimeError("question_kind_required_for_public_question")
-        if kind == "qualification" and (
-            not public_question or not asked_key or asked_key not in eligible_keys
-        ):
-            raise RuntimeError("qualification_question_field_not_eligible")
-        if kind != "qualification" and asked_key:
-            raise RuntimeError("asked_field_key_requires_qualification_question")
-        if kind in {"consultative", "confirmation"} and not public_question:
-            raise RuntimeError("question_kind_without_public_question")
-        if matched_keys and (kind != "qualification" or matched_keys != {asked_key}):
-            raise RuntimeError("public_question_field_metadata_mismatch")
-        profile_name = resolved_understanding.conversation_brief.get("profile_name") or {}
-        if (
-            kind == "qualification"
-            and asked_key == profile_name.get("field_key")
-            and profile_name.get("state") == "confirm_once"
-            and str(profile_name.get("candidate") or "") not in conversation_reply.reply
-        ):
-            raise RuntimeError("profile_name_confirmation_must_quote_candidate")
+        conversation_reply = conversation_reply.model_copy(update={
+            "question_kind": metadata["question_kind"],
+            "asked_field_key": metadata["asked_field_key"],
+        })
         matching_questions = {
             str(field.get("question_node_id"))
             for field in resolved_understanding.eligible_fields
@@ -1734,6 +1693,8 @@ def decide_agentic(
         usage = (model_observation or {}).get("token_usage") or {}
         model_observation = {
             "proposal": proposal.model_dump(mode="json"),
+            "reply_metadata_audit": metadata["audit"],
+            "reply_metadata_warnings": metadata["warnings"],
             "interpretation": {
                 "asked_field_key": conversation_reply.asked_field_key,
                 "question_kind": conversation_reply.question_kind,
@@ -1805,6 +1766,7 @@ def decide_agentic(
             *(response.proof.get("quality_warnings") or []),
             *(resolved_understanding.resolution_proof.get("quality_warnings") or []),
             *understanding_warnings,
+            *((model_observation or {}).get("reply_metadata_warnings") or []),
         ]))
         response = response.model_copy(update={
             "proof": {
