@@ -807,10 +807,9 @@ def check(
                     errors.append(f"fact_correction_not_explicit:{key}")
             elif policy == "higher_confidence" and float(fact.get("confidence") or 0) <= float(previous.get("confidence") or 0):
                 errors.append(f"fact_overwrite_confidence_too_low:{key}")
-        for dependency in field.get("depends_on") or []:
-            dependency_field = fields_by_key_any_owner.get(dependency) or {}
-            if not _resolved_for_field_owner(dependency_field, facts.get(dependency)):
-                errors.append(f"fact_dependency_unsatisfied:{key}:{dependency}")
+        # Dependencies guide when to ask (askable_pending_fields), not when
+        # to remember a valid volunteered answer. Rejecting an early answer
+        # makes the next turn falsely report that the customer never gave it.
         if not _condition_matches(field.get("condition"), facts):
             errors.append(f"fact_condition_not_met:{key}")
         if len(errors) != fact_error_count:

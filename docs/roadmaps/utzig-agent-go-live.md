@@ -316,3 +316,63 @@ Fechamento de ownership: patch local finalizado para commit/revisao; arquivos
 genericos liberados para coordenacao. Qualquer integracao deve revisar o diff
 contra a branch Claude antes de aplicar, sem cherry-pick automatico ou push
 de commits Utzig. Artefatos e dependencias desta sessao ficam em agent-work.
+
+## Correção da memória da lead — 2026-10-02
+
+Decisão do usuário: nome e modelo do veículo são informações essenciais da
+lead. Guardar respostas espontâneas, preservar fatos coletados e não perguntar
+novamente pelo dado conhecido. O grafo publica quais perguntas são obrigatórias,
+opcionais ou desativadas; não embutir nomes de campos no runtime.
+
+Evidência: auditoria somente leitura GitHub run `37048513315`, lead `328`.
+Às 15:20:42 BRT, inbound `3582` (`4cbeadf8-1419-4667-bfc7-b6dd37831dac`)
+recebeu “Fordka”. O modelo reconheceu o veículo, mas o proof rejeitou seu fato
+com `fact_dependency_unsatisfied:modelo_veiculo:servico`. O outbound `3583`
+foi entregue. Nos turnos seguintes o ledger continuou sem modelo, provocando
+novas perguntas, inclusive após “já falei”. Só o inbound `3594`, “ford Ka”,
+registrou o fato às 15:25:41. Repetição de conteúdo entre inbounds distintos
+não equivale a duplicação técnica do mesmo inbound.
+
+Estratégia: separar elegibilidade da pergunta de aceitação do fato. `depends_on`
+orienta quando oferecer uma pergunta; não veta informação válida fornecida
+antes da ordem prevista. O proof conserva evidência literal, fonte, dono,
+schema, publicação e isolamento, e registra fatos válidos para o próximo turno.
+Divergência editorial ou de metadados gera aviso/correção auditável, sem apagar
+candidato útil ou pausar a lead. Não criar regex para “Fordka” nem bloqueio de
+envio por repetição. A memória persistida alimenta o modelo; qualidade é
+avaliada separadamente da autorização técnica de envio.
+
+Ownership desta correção: Codex em `fix/tock-sdr-free`, exclusivamente
+`apps/conversation-runtime/api/services/graph_proof_checker_v3.py` e testes
+focados. Agente de configuração avisado. Não editar transport/control-plane.
+Verificar aceitação antecipada, preservação no turno seguinte e rejeição de
+fonte/dono/evidência inválidos. Publicação, release e reprocessamento continuam
+pendentes de autorização específica; esta alteração local não prova correção
+em produção. Configurar nome/modelo como essenciais na publicação é etapa
+separada, sem deploy de runtime, preservando valores existentes.
+
+Verificação local: 99 testes aprovados (fatos espontâneos, metadados, geração,
+fronteira do engine, conversa em dois passos e execução interna). A suíte
+legada `tests/test_graph_proof_checker_v3.py` apresenta 18 falhas e 37 sucessos
+antes da mudança; com a correção e oito casos novos, 18 falhas e 45 sucessos.
+Baseline executado carregando o módulo de HEAD, sem alterar o worktree.
+Nenhuma regressão adicional observada nesse conjunto; não declarar suíte ampla
+verde nem teste de modelo real a partir dos testes locais.
+
+Melhorias seguintes: fornecer ao modelo memória de fatos aceitos e perguntas
+efetivamente enviadas; distinguir confirmação pendente de dado ausente; ao
+detectar semanticamente uma pergunta redundante, permitir revisão pelo próprio
+modelo com o histórico, mantendo candidato e revisão auditáveis. Não comparar
+frases com regex ou exigir a redação de exemplo. Um aviso de qualidade não
+substitui corrigir memória e contexto. A confirmação de preço/agendamento exige
+evidência/autorização real separada da liberdade editorial; remover seu guard
+sem substituto verificável permanece um risco na branch Claude. Verificação
+de confirmação e handoff humano, encerramento sem novas perguntas redundantes,
+candidate com publicação ativa e WA Validator permanecem pendentes da integração
+e da sequência de prova real autorizada.
+
+Revisão independente Astra: sem bloqueador; escopo limitado a `depends_on` na
+aceitação de fatos, demais verificações preservadas. Ressalva: memória correta
+remove a causa medida, mas não garante sozinha ausência universal de repetição
+pelo modelo. Ownership encerrado após esta revisão; arquivo liberado para
+integração coordenada do diff, sem promover produção nesta etapa.
