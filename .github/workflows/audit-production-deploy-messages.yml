@@ -81,6 +81,11 @@ jobs:
               -e PGOPTIONS='-c default_transaction_read_only=on' \
               -e WINDOW_START="$WINDOW_START" -e WINDOW_END="$WINDOW_END" -e PERSONA_SLUG="$PERSONA_SLUG" \
               db sh -c 'psql -v ON_ERROR_STOP=1 -v WINDOW_START="$WINDOW_START" -v WINDOW_END="$WINDOW_END" -v PERSONA_SLUG="$PERSONA_SLUG" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -AtF "|"' <<'SQL'
+            select 'PERSONA_LEAD', p.slug, l.id, left(l.nome,80), l.ai_paused, l.handoff_level
+            from public.leads l join public.personas p on p.id=l.persona_id
+            where :'PERSONA_SLUG' <> 'all' and p.slug=:'PERSONA_SLUG'
+            order by l.id limit 20;
+
             with scope as (
               select id from public.personas
               where :'PERSONA_SLUG' = 'all' or slug = :'PERSONA_SLUG'
