@@ -41,7 +41,7 @@ REMOVAL_REASON = "servico_descontinuado_pela_utzig_2026_09_28"
 # v15a (default) keeps the discontinued services in the graph and only takes
 # them off the site; v15b (UTZIG_V15_RETIRE=1) archives them once the publish
 # workflow runs apply_graph_node_retirements.py.
-RETIRE_NODES = os.environ.get("UTZIG_V15_RETIRE", "0") == "1"
+RETIRE_NODES = os.environ.get("UTZIG_V15_RETIRE", "1") == "1"
 MONEY = re.compile(r"R\$\s?\d|\d+,\d{2}\b")
 SENTENCE = re.compile(r"(?<=[.!?])\s+")
 
@@ -343,22 +343,14 @@ def build() -> tuple[dict, dict]:
         clean = (" ".join(kept).strip() + " " + CONFIRM).strip()
         patch_nodes.append({"id": node["id"], "patch": {"summary": clean, "data": {"answer": clean}}})
 
-    # 4c. The asset gallery created by uploads (destination of the images the
-    # site uses). It lives in production outside the bundle; declare it with its
-    # real projection id so the publisher recognises it (read 2026-10-02, no edges).
-    upsert_nodes.append({
+    # 4c. Production has a second, empty gallery (gallery:gallery-default, no
+    # edges) created by asset uploads outside the bundle. The public site needs
+    # exactly one gallery (gallery:utzig), so the empty one is archived at
+    # publication (read 2026-10-02, projection c5220eae-994b-45ec-8ea9-34fea41a2885).
+    production_only_retired = [{
         "id": "gallery:gallery-default", "node_type": "gallery", "slug": "gallery-default",
-        "projection_node_id": "c5220eae-994b-45ec-8ea9-34fea41a2885",
-        "status": "active", "title": "Gallery",
-        "summary": "Bloco protegido para materiais visuais. Nodes ligados aqui aparecem em Assets.",
-        "tags": ["assets", "gallery", "visual"],
-        "data": {
-            "asset_scope": "visual_media", "capabilities": {"detached_terminal": True},
-            "graph_json_node_id": "gallery:gallery-default", "open_url": "/marketing/assets",
-            "protected": True, "system_node": True, "status": "active",
-            "source": "production_readonly_audit_2026_10_02",
-        },
-    })
+        "removal_reason": "galeria_vazia_duplicada_criada_por_upload",
+    }]
 
     # 5. New FAQs. A bundle only carries publishable nodes: FAQs awaiting the
     # client's confirmation are written to PENDING_FILE instead.
@@ -423,7 +415,7 @@ def build() -> tuple[dict, dict]:
                 {"id": node_id, "node_type": nodes[node_id]["node_type"],
                  "slug": nodes[node_id]["slug"], "removal_reason": REMOVAL_REASON}
                 for node_id in sorted(retired)
-            ],
+            ] + production_only_retired,
             "visual_media_reconciliation": {
                 "soft_disabled_edges": [
                     {"id": e["id"], "source": e["source"], "target": e["target"],

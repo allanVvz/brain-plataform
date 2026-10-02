@@ -8,14 +8,594 @@
   "metadata": {
     "purpose": "Utzig commercial alignment: three sectors, Luiza prices on offers only, services discontinued, retrievable FAQs, lead-scoped vehicle and name",
     "source": "luiza_camargo_whatsapp_2026_09_28",
-    "retired_nodes": [],
+    "retired_nodes": [
+      {
+        "id": "asset:repair-paint-representative-v1",
+        "node_type": "asset",
+        "slug": "repair-paint-representative-v1",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "copy:bodywork",
+        "node_type": "copy",
+        "slug": "copy-bodywork",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "copy:painting",
+        "node_type": "copy",
+        "slug": "copy-painting",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "copy:site-faq:window-film-benefit",
+        "node_type": "copy",
+        "slug": "site-faq-window-film-benefit",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "copy:vehicle-wrap",
+        "node_type": "copy",
+        "slug": "copy-vehicle-wrap",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "copy:window-film",
+        "node_type": "copy",
+        "slug": "copy-window-film",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "faq:qualification:vehicle_color",
+        "node_type": "faq",
+        "slug": "qualification-vehicle_color",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "faq:service:bodywork",
+        "node_type": "faq",
+        "slug": "faq-bodywork",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "faq:service:bodywork:chapeacao-preco-tempo",
+        "node_type": "faq",
+        "slug": "faq-service-bodywork-chapeacao-preco-tempo",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "faq:service:bodywork:chapeacao-remota",
+        "node_type": "faq",
+        "slug": "faq-service-bodywork-chapeacao-remota",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "faq:service:painting",
+        "node_type": "faq",
+        "slug": "faq-painting",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "faq:service:painting:pintura-preco-tempo",
+        "node_type": "faq",
+        "slug": "faq-service-painting-pintura-preco-tempo",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "faq:service:painting:pintura-remota",
+        "node_type": "faq",
+        "slug": "faq-service-painting-pintura-remota",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "faq:service:vehicle-wrap",
+        "node_type": "faq",
+        "slug": "faq-vehicle-wrap",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "faq:service:window-film",
+        "node_type": "faq",
+        "slug": "faq-window-film",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "faq:site:window-film-benefit",
+        "node_type": "faq",
+        "slug": "site-window-film-benefit",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "group:repair-paint",
+        "node_type": "product_group",
+        "slug": "repair-paint",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "offer:window-film:starting-price",
+        "node_type": "offer",
+        "slug": "window-film-starting-price",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "product:bodywork",
+        "node_type": "product",
+        "slug": "bodywork",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "product:painting",
+        "node_type": "product",
+        "slug": "painting",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "product:vehicle-wrap",
+        "node_type": "product",
+        "slug": "vehicle-wrap",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "product:window-film",
+        "node_type": "product",
+        "slug": "window-film",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "gallery:gallery-default",
+        "node_type": "gallery",
+        "slug": "gallery-default",
+        "removal_reason": "galeria_vazia_duplicada_criada_por_upload"
+      }
+    ],
     "visual_media_reconciliation": {
-      "soft_disabled_edges": [],
-      "soft_disabled_edge_count": 0
+      "soft_disabled_edges": [
+        {
+          "id": "edge:bodywork-copy",
+          "source": "product:bodywork",
+          "target": "copy:bodywork",
+          "relation_type": "supports_copy",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:bodywork:chapeacao-preco-tempo",
+          "source": "product:bodywork",
+          "target": "faq:service:bodywork:chapeacao-preco-tempo",
+          "relation_type": "answers_question",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:bodywork:chapeacao-preco-tempo:contains",
+          "source": "product:bodywork",
+          "target": "faq:service:bodywork:chapeacao-preco-tempo",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:bodywork:chapeacao-preco-tempo:embedded",
+          "source": "faq:service:bodywork:chapeacao-preco-tempo",
+          "target": "embedded:utzig",
+          "relation_type": "publishes_to",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:bodywork:chapeacao-remota",
+          "source": "product:bodywork",
+          "target": "faq:service:bodywork:chapeacao-remota",
+          "relation_type": "answers_question",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:bodywork:chapeacao-remota:contains",
+          "source": "product:bodywork",
+          "target": "faq:service:bodywork:chapeacao-remota",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:bodywork:chapeacao-remota:embedded",
+          "source": "faq:service:bodywork:chapeacao-remota",
+          "target": "embedded:utzig",
+          "relation_type": "publishes_to",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:brand-repair-paint",
+          "source": "brand:utzig-garage",
+          "target": "group:repair-paint",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:copy-faq-bodywork",
+          "source": "copy:bodywork",
+          "target": "faq:service:bodywork",
+          "relation_type": "answers_question",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:copy-faq-painting",
+          "source": "copy:painting",
+          "target": "faq:service:painting",
+          "relation_type": "answers_question",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:editorial-enhancement-painting",
+          "source": "product:painting",
+          "target": "campaign:editorial-enhancement",
+          "relation_type": "part_of_campaign",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:editorial-enhancement-vehicle-wrap",
+          "source": "product:vehicle-wrap",
+          "target": "campaign:editorial-enhancement",
+          "relation_type": "part_of_campaign",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:faq-embed-bodywork",
+          "source": "faq:service:bodywork",
+          "target": "embedded:utzig",
+          "relation_type": "publishes_to",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:faq-embed-painting",
+          "source": "faq:service:painting",
+          "target": "embedded:utzig",
+          "relation_type": "publishes_to",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:group-cover:repair-paint",
+          "source": "group:repair-paint",
+          "target": "asset:repair-paint-representative-v1",
+          "relation_type": "category_has_asset",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:painting-copy",
+          "source": "product:painting",
+          "target": "copy:painting",
+          "relation_type": "supports_copy",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:painting:pintura-preco-tempo",
+          "source": "product:painting",
+          "target": "faq:service:painting:pintura-preco-tempo",
+          "relation_type": "answers_question",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:painting:pintura-preco-tempo:contains",
+          "source": "product:painting",
+          "target": "faq:service:painting:pintura-preco-tempo",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:painting:pintura-preco-tempo:embedded",
+          "source": "faq:service:painting:pintura-preco-tempo",
+          "target": "embedded:utzig",
+          "relation_type": "publishes_to",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:painting:pintura-remota",
+          "source": "product:painting",
+          "target": "faq:service:painting:pintura-remota",
+          "relation_type": "answers_question",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:painting:pintura-remota:contains",
+          "source": "product:painting",
+          "target": "faq:service:painting:pintura-remota",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:painting:pintura-remota:embedded",
+          "source": "faq:service:painting:pintura-remota",
+          "target": "embedded:utzig",
+          "relation_type": "publishes_to",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:persona-question-vehicle_color",
+          "source": "persona:utzig-garage",
+          "target": "faq:qualification:vehicle_color",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:primary:bodywork-copy",
+          "source": "product:bodywork",
+          "target": "copy:bodywork",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:primary:bodywork-faq",
+          "source": "copy:bodywork",
+          "target": "faq:service:bodywork",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:primary:painting-copy",
+          "source": "product:painting",
+          "target": "copy:painting",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:primary:painting-faq",
+          "source": "copy:painting",
+          "target": "faq:service:painting",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:primary:repair-paint-representative-v1",
+          "source": "group:repair-paint",
+          "target": "asset:repair-paint-representative-v1",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:public-group:repair-paint",
+          "source": "group:repair-paint",
+          "target": "gallery:utzig",
+          "relation_type": "publishes_to",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:public-product:vehicle-wrap",
+          "source": "product:vehicle-wrap",
+          "target": "gallery:utzig",
+          "relation_type": "publishes_to",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:public-product:window-film",
+          "source": "product:window-film",
+          "target": "gallery:utzig",
+          "relation_type": "publishes_to",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:public:a89bc65897263c664979",
+          "source": "product:painting",
+          "target": "gallery:utzig",
+          "relation_type": "publishes_to",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:public:f3326cdb1851ecc4536c",
+          "source": "product:bodywork",
+          "target": "gallery:utzig",
+          "relation_type": "publishes_to",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:public:repair-paint-representative-v1",
+          "source": "asset:repair-paint-representative-v1",
+          "target": "gallery:utzig",
+          "relation_type": "publishes_to",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:repair-paint-bodywork",
+          "source": "group:repair-paint",
+          "target": "product:bodywork",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:repair-paint-painting",
+          "source": "group:repair-paint",
+          "target": "product:painting",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:repair-paint-representative-gallery",
+          "source": "asset:repair-paint-representative-v1",
+          "target": "gallery:utzig",
+          "relation_type": "gallery_asset",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:site-faq:window-film-benefit:answers",
+          "source": "copy:site-faq:window-film-benefit",
+          "target": "faq:site:window-film-benefit",
+          "relation_type": "answers_question",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:site-faq:window-film-benefit:copy",
+          "source": "copy:site-faq:window-film-benefit",
+          "target": "faq:site:window-film-benefit",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:site-faq:window-film-benefit:parent",
+          "source": "campaign:automotive-detailing",
+          "target": "copy:site-faq:window-film-benefit",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:vehicle-wrap:answers",
+          "source": "copy:vehicle-wrap",
+          "target": "faq:service:vehicle-wrap",
+          "relation_type": "answers_question",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:vehicle-wrap:copy",
+          "source": "product:vehicle-wrap",
+          "target": "copy:vehicle-wrap",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:vehicle-wrap:faq",
+          "source": "copy:vehicle-wrap",
+          "target": "faq:service:vehicle-wrap",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:vehicle-wrap:group",
+          "source": "group:repair-paint",
+          "target": "product:vehicle-wrap",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:vehicle-wrap:supports-copy",
+          "source": "product:vehicle-wrap",
+          "target": "copy:vehicle-wrap",
+          "relation_type": "supports_copy",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:window-film:answers",
+          "source": "copy:window-film",
+          "target": "faq:service:window-film",
+          "relation_type": "answers_question",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:window-film:copy",
+          "source": "product:window-film",
+          "target": "copy:window-film",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:window-film:faq",
+          "source": "copy:window-film",
+          "target": "faq:service:window-film",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:window-film:group",
+          "source": "group:enhancement",
+          "target": "product:window-film",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:window-film:offer",
+          "source": "product:window-film",
+          "target": "offer:window-film:starting-price",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:window-film:offer-product",
+          "source": "offer:window-film:starting-price",
+          "target": "product:window-film",
+          "relation_type": "about_product",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:window-film:supports-copy",
+          "source": "product:window-film",
+          "target": "copy:window-film",
+          "relation_type": "supports_copy",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        }
+      ],
+      "soft_disabled_edge_count": 52
     }
   },
-  "remove_edge_ids": [],
-  "remove_node_ids": [],
+  "remove_edge_ids": [
+    "edge:bodywork-copy",
+    "edge:bodywork:chapeacao-preco-tempo",
+    "edge:bodywork:chapeacao-preco-tempo:contains",
+    "edge:bodywork:chapeacao-preco-tempo:embedded",
+    "edge:bodywork:chapeacao-remota",
+    "edge:bodywork:chapeacao-remota:contains",
+    "edge:bodywork:chapeacao-remota:embedded",
+    "edge:brand-repair-paint",
+    "edge:copy-faq-bodywork",
+    "edge:copy-faq-painting",
+    "edge:editorial-enhancement-painting",
+    "edge:editorial-enhancement-vehicle-wrap",
+    "edge:faq-embed-bodywork",
+    "edge:faq-embed-painting",
+    "edge:group-cover:repair-paint",
+    "edge:painting-copy",
+    "edge:painting:pintura-preco-tempo",
+    "edge:painting:pintura-preco-tempo:contains",
+    "edge:painting:pintura-preco-tempo:embedded",
+    "edge:painting:pintura-remota",
+    "edge:painting:pintura-remota:contains",
+    "edge:painting:pintura-remota:embedded",
+    "edge:persona-question-vehicle_color",
+    "edge:primary:bodywork-copy",
+    "edge:primary:bodywork-faq",
+    "edge:primary:painting-copy",
+    "edge:primary:painting-faq",
+    "edge:primary:repair-paint-representative-v1",
+    "edge:public-group:repair-paint",
+    "edge:public-product:vehicle-wrap",
+    "edge:public-product:window-film",
+    "edge:public:a89bc65897263c664979",
+    "edge:public:f3326cdb1851ecc4536c",
+    "edge:public:repair-paint-representative-v1",
+    "edge:repair-paint-bodywork",
+    "edge:repair-paint-painting",
+    "edge:repair-paint-representative-gallery",
+    "edge:site-faq:window-film-benefit:answers",
+    "edge:site-faq:window-film-benefit:copy",
+    "edge:site-faq:window-film-benefit:parent",
+    "edge:vehicle-wrap:answers",
+    "edge:vehicle-wrap:copy",
+    "edge:vehicle-wrap:faq",
+    "edge:vehicle-wrap:group",
+    "edge:vehicle-wrap:supports-copy",
+    "edge:window-film:answers",
+    "edge:window-film:copy",
+    "edge:window-film:faq",
+    "edge:window-film:group",
+    "edge:window-film:offer",
+    "edge:window-film:offer-product",
+    "edge:window-film:supports-copy"
+  ],
+  "remove_node_ids": [
+    "asset:repair-paint-representative-v1",
+    "copy:bodywork",
+    "copy:painting",
+    "copy:site-faq:window-film-benefit",
+    "copy:vehicle-wrap",
+    "copy:window-film",
+    "faq:qualification:vehicle_color",
+    "faq:service:bodywork",
+    "faq:service:bodywork:chapeacao-preco-tempo",
+    "faq:service:bodywork:chapeacao-remota",
+    "faq:service:painting",
+    "faq:service:painting:pintura-preco-tempo",
+    "faq:service:painting:pintura-remota",
+    "faq:service:vehicle-wrap",
+    "faq:service:window-film",
+    "faq:site:window-film-benefit",
+    "group:repair-paint",
+    "offer:window-film:starting-price",
+    "product:bodywork",
+    "product:painting",
+    "product:vehicle-wrap",
+    "product:window-film"
+  ],
   "upsert_nodes": [
     {
       "id": "offer:chassis-wash:starting-price",
@@ -204,32 +784,6 @@
         "graph_json_node_id": "offer:ppf:multimedia-starting-price",
         "source": "luiza_camargo_whatsapp_2026_09_28",
         "validation_status": "approved"
-      }
-    },
-    {
-      "id": "gallery:gallery-default",
-      "node_type": "gallery",
-      "slug": "gallery-default",
-      "projection_node_id": "c5220eae-994b-45ec-8ea9-34fea41a2885",
-      "status": "active",
-      "title": "Gallery",
-      "summary": "Bloco protegido para materiais visuais. Nodes ligados aqui aparecem em Assets.",
-      "tags": [
-        "assets",
-        "gallery",
-        "visual"
-      ],
-      "data": {
-        "asset_scope": "visual_media",
-        "capabilities": {
-          "detached_terminal": true
-        },
-        "graph_json_node_id": "gallery:gallery-default",
-        "open_url": "/marketing/assets",
-        "protected": true,
-        "system_node": true,
-        "status": "active",
-        "source": "production_readonly_audit_2026_10_02"
       }
     },
     {
@@ -2283,15 +2837,6 @@
       }
     },
     {
-      "id": "faq:service:window-film",
-      "patch": {
-        "summary": "Sim. Mais conforto e privacidade ao dirigir. A película de vidros ajuda a reduzir o calor interno e filtrar os raios UV, com tonalidade e aplicação escolhidas para o veículo. O valor o atendente confirma depois de avaliar o veículo.",
-        "data": {
-          "answer": "Sim. Mais conforto e privacidade ao dirigir. A película de vidros ajuda a reduzir o calor interno e filtrar os raios UV, com tonalidade e aplicação escolhidas para o veículo. O valor o atendente confirma depois de avaliar o veículo."
-        }
-      }
-    },
-    {
       "id": "campaign:automotive-detailing",
       "patch": {
         "data": {
@@ -2456,15 +3001,6 @@
             "template_key": "automotive_detailing",
             "title": "Estética Automotiva Premium"
           }
-        }
-      }
-    },
-    {
-      "id": "offer:window-film:starting-price",
-      "patch": {
-        "data": {
-          "price_kind": "service_reference",
-          "visibility": "registered_only"
         }
       }
     }
