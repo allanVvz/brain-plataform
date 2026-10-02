@@ -23,4 +23,14 @@ sha256:b70b0b79881d46b742ec6cda5b0adc1bb617de27c503cd20fbd2122b6f0deb3e.
 Manifest preserves schema162 and every other service entry from production.
 Independent review approved auth isolation, candidate hook and manifest scope.
 
-Deployment and post-cutover access results will be added after the release.
+Release 37071328808 completed successfully. The candidate verified all three
+staff IDs before cutover. Public /portal-api/north/auth/me, admin shell and
+clients returned HTTP 200 for all three accounts. Cintia’s five-minute privileged
+audit session loaded https://north-portal.pages.dev/admin/home, showed Cintia in
+the user menu and recorded zero failed API GETs or persona errors. Her password
+was not tested or changed. No business-data writes were performed.
+
+The canonical source manifest now records the deployed control-plane entry, so
+subsequent incremental releases can preserve this fix. The release branch was
+frozen at a6935a5 during deployment; workflow checkout resolved that commit.
+

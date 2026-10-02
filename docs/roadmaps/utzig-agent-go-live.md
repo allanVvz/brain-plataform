@@ -5,7 +5,8 @@ isolated North staff login release in fix/north-staff-login-release. Base
 5ad1678 contains the identical control-plane code deployed at ae511333. Only
 control-plane is promoted, with runtime, transport, gateway and schema 162
 preserved. Read-only audit confirmed explicit North grants for Cintia, Alisson
-and Luiza; Cintia has a linked North admin profile. No conversation mutation.
+and Luiza; Cintia has a linked North admin profile. No conversation mutation. Release complete; North public API and Cintia admin
+browser access passed. Control-plane ownership is released for coordination.
 
 # Go-live controlado — Utzig Garage
 

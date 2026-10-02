@@ -1,5 +1,5 @@
 {
-  "source_sha": "50366d1c1b4ca74e1fcabea8e45a5bdd1fd6d570",
+  "source_sha": "a1dc611da8dc02b8f77b34837884f0647577069f",
   "contracts_version": "3.2.0",
   "contracts_checksum": "sha256:b905cfb87111ac50197a495ad487694eb379e192e3e92c07179bbb45ad2fda2a",
   "schema_version": 162,
@@ -14,17 +14,17 @@
     },
     "control-plane": {
       "repository": "allanVvz/brain-plataform",
-      "sha": "ae511333b92b0f7d6b7a757f6f27d88b9dbe8d91",
-      "digest": "sha256:d46c54ce73003d714d257f3cb78705bc0436a73d335413e619ffe4aefda8d1b2",
-      "required_schema_version": 160,
+      "sha": "a1dc611da8dc02b8f77b34837884f0647577069f",
+      "digest": "sha256:b70b0b79881d46b742ec6cda5b0adc1bb617de27c503cd20fbd2122b6f0deb3e",
+      "required_schema_version": 162,
       "contracts_version": "3.2.0",
-      "contracts_checksum": "sha256:4fef73451747a4b482067a0a50b9c239f0a50d778ff0d5d82ea99fdf211270e4",
+      "contracts_checksum": "sha256:b905cfb87111ac50197a495ad487694eb379e192e3e92c07179bbb45ad2fda2a",
       "build_context": "apps/control-plane"
     },
     "conversation-runtime": {
       "repository": "allanVvz/brain-plataform",
-      "sha": "50366d1c1b4ca74e1fcabea8e45a5bdd1fd6d570",
-      "digest": "sha256:9ded111abdff398a736b687108c2e011d962a3c6d4248f8fe4427f26c5cfc4be",
+      "sha": "5ad1678bb7840706cb040163d14d62838ee9b6ad",
+      "digest": "sha256:51bd8f6b566c14f1af4d378bc7e829b5d2c6b327a17bd8f347aea0fcb20ffa80",
       "required_schema_version": 161,
       "contracts_version": "3.2.0",
       "contracts_checksum": "sha256:b905cfb87111ac50197a495ad487694eb379e192e3e92c07179bbb45ad2fda2a",
@@ -39,5 +39,12 @@
       "contracts_checksum": "sha256:b905cfb87111ac50197a495ad487694eb379e192e3e92c07179bbb45ad2fda2a",
       "build_context": "apps/transport"
     }
+  },
+  "verification": {
+    "control_plane_auth_user_ids": [
+      "bd77ff15-1bcb-478b-9b25-008ddb2b4036",
+      "75a408ae-af2b-4d68-b8e5-afe2d6a9d650",
+      "e16db46d-7778-4967-8040-0e37b61b2079"
+    ]
   }
 }
