@@ -389,3 +389,22 @@ send-preview do mesmo outbound. Workflow de auditoria recebe recuperação
 opcional explícita e confirmação de nome; chamada normal permanece somente
 leitura. Escopo exato, janela real de atendimento, binding ativo e ausência de
 envio anterior são rechecados antes da ação. Recibo posterior ainda pendente.
+
+Resultado comprovado: operação `37056014147` sucesso; único outbound para o
+inbound recuperado: `633d2834-47a4-4f12-9549-b6624e92f8c1`, mensagem `3613`,
+criado em 2026-10-02 às 16:44:23 BRT. Reconciliação read-only `37057851138`
+confirmou inbound `sent` com conversation_commit `completed`, proof `valid=true`
+e `technical_pass=true`, mesmo outbound em `read` às 16:49:58 BRT. O contato
+respondeu “Tenho uma Tracker” às 16:50:37; continuou conversando sobre lavar,
+polir, riscos e valor, com respostas subsequentes entregues/lidas. Lead continua
+com IA ligada. Nenhuma mensagem anterior foi duplicada, nenhuma conversa apagada
+e nenhum serviço/grafo foi publicado por esta recuperação.
+
+Qualidade separada: primeiro proof `quality_pass=false`, aviso
+`reply_metadata_discarded:claims:0`; preservou texto útil e envio. A saudação
+“Boa noite” foi gerada às 16:44 e merece revisão do contexto temporal em etapa
+de qualidade, sem bloquear a conversa. Primeira tentativa `37054898125` falhou
+antes de mutar por SELECT proibido de proof no papel control-plane; corrigido
+sem ampliar grants: claim e send-preview validam proof/publicação no banco.
+Revisão independente aprovou o caminho corrigido. Correlação atual não vazia
+foi medida; operações futuras devem validá-la antes da geração de prévia.
