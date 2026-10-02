@@ -1,0 +1,84 @@
+name: Read one lead conversation (read-only)
+
+# Read-only trail of one lead: the messages, the facts the ledger holds and
+# what each turn's proof accepted, rejected or still considered missing.
+# The transaction is forced read-only; long digit runs (phones) are masked.
+
+on:
+  workflow_dispatch:
+    inputs:
+      persona_slug:
+        description: Persona that owns the lead
+        type: choice
+        options: [utzig-garage, tock-fatal]
+        required: true
+      lead_ref:
+        description: Exact numeric lead id
+        required: true
+      window_start:
+        description: Inclusive UTC window start (ISO 8601)
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: brain-ai-production-read-only
+  cancel-in-progress: false
+
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print one lead's conversation trail
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        env:
+          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+          PERSONA_SLUG: ${{ inputs.persona_slug }}
+          LEAD_REF: ${{ inputs.lead_ref }}
+          WINDOW_START: ${{ inputs.window_start }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          command_timeout: 5m
+          envs: VPS_APP_DIR,PERSONA_SLUG,LEAD_REF,WINDOW_START
+          script: |
+            set -Eeuo pipefail
+            cd "$VPS_APP_DIR"
+            [[ "$PERSONA_SLUG" =~ ^(utzig-garage|tock-fatal)$ ]]
+            [[ "$LEAD_REF" =~ ^[0-9]{1,12}$ ]]
+            [[ "$WINDOW_START" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$ ]]
+            compose=(docker compose --env-file .env.compose -f docker-compose.yml -f infra/microservices/docker-compose.blue-green.yml)
+            "${compose[@]}" exec -T \
+              -e PGOPTIONS='-c default_transaction_read_only=on' \
+              -e PERSONA_SLUG="$PERSONA_SLUG" -e LEAD_REF="$LEAD_REF" -e WINDOW_START="$WINDOW_START" \
+              db sh -c 'psql -v ON_ERROR_STOP=1 -v PERSONA_SLUG="$PERSONA_SLUG" -v LEAD_REF="$LEAD_REF" -v WINDOW_START="$WINDOW_START" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -AtF " | "' <<'SQL'
+            SELECT 'MSG', m.created_at, to_jsonb(m)->>'role', to_jsonb(m)->>'direction', to_jsonb(m)->>'status',
+                   coalesce(m.metadata->>'question_kind', ''), coalesce(m.metadata->>'asked_field_key', ''),
+                   left(regexp_replace(replace(coalesce(m.content, ''), E'\n', ' '), '[0-9]{9,}', '#', 'g'), 600)
+            FROM public.messages m
+            WHERE m.lead_id = :'LEAD_REF'::bigint AND m.created_at >= :'WINDOW_START'::timestamptz
+            ORDER BY m.created_at;
+
+            SELECT 'FACT', f.field_key, f.status, left(coalesce(f.value_json::text, ''), 120), f.source_message_id
+            FROM public.conversation_facts f
+            JOIN public.conversation_ledgers l ON l.id = f.ledger_id
+            JOIN public.personas p ON p.id = l.persona_id
+            WHERE p.slug = :'PERSONA_SLUG' AND l.lead_ref = :'LEAD_REF'::bigint
+            ORDER BY f.field_key;
+
+            SELECT 'TURN', t.created_at, t.canonical_inbound_id,
+                   coalesce(t.proof_result->>'asked_field_key', ''),
+                   coalesce(t.proof_result->'missing_fields', '[]'::jsonb)::text,
+                   coalesce((SELECT jsonb_agg(a->>'field_key') FROM jsonb_array_elements(coalesce(t.proof_result->'accepted_facts', '[]'::jsonb)) a), '[]'::jsonb)::text,
+                   left(coalesce(t.proof_result->'quality_warnings', '[]'::jsonb)::text, 500),
+                   left(coalesce(t.proof_result->'errors', '[]'::jsonb)::text, 500)
+            FROM public.conversation_turn_proofs t
+            WHERE t.canonical_inbound_id IN (
+              SELECT b.id::text FROM public.lead_buffer b JOIN public.personas p ON p.id = b.persona_id
+              WHERE p.slug = :'PERSONA_SLUG' AND b.lead_ref = :'LEAD_REF'::bigint
+                AND b.created_at >= :'WINDOW_START'::timestamptz)
+            ORDER BY t.created_at;
+            SQL
