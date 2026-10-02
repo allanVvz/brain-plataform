@@ -320,6 +320,36 @@ else
     "$expected_sha"
 fi
 
+if [[ "$ACTION" == "--apply" && "$SERVICE" == "control-plane" ]]; then
+  # This release can opt into a precise, read-only authorization probe. IDs
+  # belong to the verification fixture, never to runtime authorization rules.
+  auth_probe_ids="$(python3 - "$MANIFEST" <<'PY_IDS'
+import json, sys, uuid
+ids = json.load(open(sys.argv[1], encoding="utf-8")).get("verification", {}).get("control_plane_auth_user_ids", [])
+assert isinstance(ids, list) and len(ids) == len(set(ids))
+for value in ids:
+    assert isinstance(value, str) and str(uuid.UUID(value)) == value
+print(json.dumps(ids))
+PY_IDS
+)"
+  if [[ "$auth_probe_ids" != '[]' ]]; then
+    "${COMPOSE[@]}" exec -T -e CONTROL_PLANE_AUTH_PROBE_USER_IDS="$auth_probe_ids" "$target_service" python - <<'PY_AUTH'
+import json, os
+from services import auth_service
+
+ids = json.loads(os.environ["CONTROL_PLANE_AUTH_PROBE_USER_IDS"])
+for user_id in ids:
+    user = auth_service.get_user_by_id(user_id)
+    assert user and user["is_active"] and user["account_type"] in {"internal", "agency"}
+    assert auth_service._akia_portal_grants(user_id) == ["north"]
+    session = auth_service.build_session_response(user)
+    assert session["navigation"]["surface"] == "operations"
+    assert session["navigation"]["home_url"] == "/north/admin"
+print(f"CONTROL_PLANE_AUTH_PROBE=passed expected_staff={len(ids)} verified_staff={len(ids)} writes=0")
+PY_AUTH
+  fi
+fi
+
 if [[ "$ACTION" == "--apply" && "$SERVICE" == "conversation-runtime" ]]; then
   # Candidate-only contract smoke: execute the exact image through its private
   # application surface before any worker starts or public route changes. The

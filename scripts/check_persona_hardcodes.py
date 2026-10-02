@@ -24,6 +24,11 @@ FORBIDDEN_MARKERS = {
     "Tock Vitoria Crm Low",
     "https://api.vzforeal.com",
 }
+# A public API origin in a deployment health check is infrastructure config.
+# Commercial facts and all other forbidden markers still apply to this file.
+API_ORIGIN_DEPLOYMENT_FILES = {
+    ROOT / ".github" / "workflows" / "akia-vps-bridge.yml",
+}
 
 RUNTIME_ROOTS = (
     ROOT / "api" / "routes",
@@ -84,6 +89,8 @@ def main() -> None:
     for path in source_files:
         text = path.read_text(encoding="utf-8")
         for marker in FORBIDDEN_MARKERS:
+            if marker == "https://api.vzforeal.com" and path in API_ORIGIN_DEPLOYMENT_FILES:
+                continue
             if marker in text:
                 errors.append(f"{path.relative_to(ROOT)} contains forbidden marker {marker!r}")
         for fact in commercial_facts:

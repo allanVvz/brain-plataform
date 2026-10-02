@@ -222,7 +222,7 @@ def test_internal_validator_uses_real_worker_while_binding_is_paused(monkeypatch
     assert completions == [(("buffer-validator", "sent"), {})]
 
 
-def test_agentic_runtime_transport_failure_terminalizes_once_without_retry(monkeypatch):
+def test_agentic_runtime_transport_failure_terminalizes_once_without_retry_or_handoff(monkeypatch):
     row = {
         "id": "buffer-failed",
         "persona_id": "persona-1",
@@ -274,4 +274,6 @@ def test_agentic_runtime_transport_failure_terminalizes_once_without_retry(monke
     worker._dispatch_inbound(row)
 
     assert len(terminalized) == 1
-    assert handoffs == [9]
+    # A technical failure is audited on the inbound; it is not a commercial
+    # handoff and must not silently pause the lead's next conversation turn.
+    assert handoffs == []

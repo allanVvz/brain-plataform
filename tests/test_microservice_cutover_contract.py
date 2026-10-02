@@ -280,7 +280,11 @@ def test_microservice_schema_gate_covers_the_manifest_target():
     manifest = json.loads(
         (ROOT / "ops/microservices/release-manifest.json").read_text(encoding="utf-8")
     )
-    assert manifest["schema_version"] == 160
+    latest_migration = max(
+        (ROOT / "supabase/migrations").glob("*.sql"),
+        key=lambda path: int(path.name.split("_", 1)[0]),
+    )
+    assert manifest["schema_version"] == int(latest_migration.name.split("_", 1)[0])
 
     audit = (ROOT / "ops/vps/validate-production-release.sh").read_text(encoding="utf-8")
     for migration in (
