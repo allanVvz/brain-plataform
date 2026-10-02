@@ -18,12 +18,20 @@ on:
         description: Optional exact lead id for masked dialogue and proof audit; requires one persona
         required: false
         default: ""
+      recover_buffer:
+        description: Explicitly authorized single inbound recovery after read-only audit; blank never mutates
+        required: false
+        default: ""
+      expected_name:
+        description: Exact lead name required for recovery
+        required: false
+        default: ""
 
 permissions:
   contents: read
 
 concurrency:
-  group: brain-ai-production-read-only
+  group: ${{ inputs.recover_buffer != '' && 'brain-ai-production' || 'brain-ai-production-read-only' }}
   cancel-in-progress: false
 
 jobs:
@@ -317,3 +325,68 @@ jobs:
             order by t.created_at desc limit 20;
             SQL
             fi
+      - name: Recover explicitly authorized single inbound through canonical SDR and send preview
+        if: ${{ inputs.recover_buffer != '' }}
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        env:
+          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+          RECOVER_BUFFER: ${{ inputs.recover_buffer }}
+          LEAD_REF: ${{ inputs.lead_ref }}
+          PERSONA_SLUG: ${{ inputs.persona_slug }}
+          EXPECTED_NAME: ${{ inputs.expected_name }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          envs: VPS_APP_DIR,RECOVER_BUFFER,LEAD_REF,PERSONA_SLUG,EXPECTED_NAME
+          command_timeout: 5m
+          script: |
+            set -Eeuo pipefail
+            cd "$VPS_APP_DIR"
+            slot="$(python3 -c 'import json; print(json.load(open(".deploy/microservices/slots.json"))["control-plane"]["active"])')"
+            [[ "$slot" == blue || "$slot" == green ]]
+            docker exec -i -e RECOVER_BUFFER -e LEAD_REF -e PERSONA_SLUG -e EXPECTED_NAME \
+              "brain-ai-control-plane-${slot}-1" python - <<'PY'
+            import json, os, uuid
+            from datetime import datetime, timezone
+            from services import supabase_client, release_queue_service
+            db = supabase_client.get_client()
+            inbound_id = str(uuid.UUID(os.environ["RECOVER_BUFFER"]))
+            lead_ref = int(os.environ["LEAD_REF"])
+            slug = os.environ["PERSONA_SLUG"]
+            name = os.environ["EXPECTED_NAME"].strip()
+            assert slug == "utzig-garage" and name, "explicit recovery scope required"
+            persona = db.table("personas").select("id,active").eq("slug", slug).single().execute().data
+            lead = db.table("leads").select("id,persona_id,nome,ai_paused,handoff_level").eq("id", lead_ref).single().execute().data
+            row = db.table("lead_buffer").select("*").eq("id", inbound_id).single().execute().data
+            assert persona["active"] and lead["persona_id"] == persona["id"] == row["persona_id"]
+            assert lead["nome"].strip().casefold() == name.casefold(), "lead identity changed"
+            assert lead["ai_paused"] is False and lead["handoff_level"] == "none", "lead ownership changed since reviewed audit"
+            assert row["lead_ref"] == lead_ref and row["direction"] == "inbound"
+            assert row["status"] in {"waiting_human", "dead_letter"}, "inbound no longer pending"
+            assert row["channel_binding_id"] == "6386bc58-ade9-44c4-9211-0f59f23ffca5"
+            binding = db.table("workflow_bindings").select("active,persona_id,connection_status").eq("id", row["channel_binding_id"]).single().execute().data
+            assert binding["active"] and binding["persona_id"] == persona["id"] and binding["connection_status"] == "connected"
+            age = (datetime.now(timezone.utc) - datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))).total_seconds()
+            assert 0 <= age < 86400, "customer-service session expired; approved template required"
+            proofs = db.table("conversation_turn_proofs").select("id").eq("canonical_inbound_id", inbound_id).execute().data or []
+            assert not proofs, "inbound already has a decision"
+            outbound = db.table("lead_buffer").select("id,status").eq("lead_ref", lead_ref).eq("direction", "outbound").eq("channel_binding_id", row["channel_binding_id"]).gte("created_at", row["created_at"]).execute().data or []
+            assert not outbound, "outbound already exists; reconcile instead of replaying"
+            print("RECOVERY_DRY_RUN=" + json.dumps({"lead_ref": lead_ref, "inbound_id": inbound_id, "status": row["status"], "prior_ai_paused": lead["ai_paused"], "prior_outbounds": 0}))
+            result = release_queue_service.generate_operator_queue_previews(buffer_ids=[inbound_id], actor_user_id=None)
+            items = result.get("items") or []
+            assert len(items) == 1 and items[0].get("result") != "bloqueado", json.dumps(result)
+            proofs = db.table("conversation_turn_proofs").select("id,outbound_id,proof_result").eq("canonical_inbound_id", inbound_id).execute().data or []
+            assert len(proofs) == 1, "expected exactly one canonical proof"
+            proof = proofs[0]
+            assert proof.get("outbound_id") and proof["proof_result"].get("valid") is True, "valid proof required"
+            assert proof["proof_result"].get("delivery_authorized") is True, "proof must authorize delivery"
+            out = db.table("lead_buffer").select("id,status").eq("id", proof["outbound_id"]).single().execute().data
+            assert out["status"] == "preview_ready", "outbound state changed; do not send twice"
+            sent = release_queue_service.control_unified_queue(buffer_ids=[out["id"]], action="send_preview", actor_user_id=None)
+            after = db.table("lead_buffer").select("status").eq("id", out["id"]).single().execute().data
+            print("RECOVERY_RESULT=" + json.dumps({"lead_ref": lead_ref, "inbound_id": inbound_id, "proof_id": proof["id"], "outbound_id": out["id"], "send_result": sent, "status": after["status"]}, default=str))
+            assert after["status"] in {"pending_send", "sent", "delivered", "read"}, "send was not admitted; reconcile reported reason"
+            PY

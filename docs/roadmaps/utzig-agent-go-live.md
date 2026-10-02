@@ -376,3 +376,16 @@ aceitação de fatos, demais verificações preservadas. Ressalva: memória corr
 remove a causa medida, mas não garante sozinha ausência universal de repetição
 pelo modelo. Ownership encerrado após esta revisão; arquivo liberado para
 integração coordenada do diff, sem promover produção nesta etapa.
+
+## Recuperação autorizada Alisson — 2026-10-02
+
+Usuário autorizou explicitamente desbloquear Alisson e enviar a resposta agora.
+Auditoria read-only `37053808496`: lead `369`, persona Utzig, IA já ligada,
+handoff `none`; inbound `420d3fb5-33eb-482a-9902-971488e9adf4`, mensagem `3576`,
+às 00:19:11 BRT: “Olá, gostaria de pedir uma avaliação.” Estado `waiting_human`,
+sem proof/commit/outbound associado. Não apagar conversa nem enviar texto manual.
+Usar ação canônica operator-preview com claim atômico, runtime/proof/commit e
+send-preview do mesmo outbound. Workflow de auditoria recebe recuperação
+opcional explícita e confirmação de nome; chamada normal permanece somente
+leitura. Escopo exato, janela real de atendimento, binding ativo e ausência de
+envio anterior são rechecados antes da ação. Recibo posterior ainda pendente.
