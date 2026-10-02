@@ -1,0 +1,71 @@
+name: Read persona graph structure (read-only)
+
+# Graph metadata only (node ids, types, slugs, statuses and edges); no lead or
+# conversation data. Used to align a GraphBundle with production nodes that
+# were created outside it (e.g. the gallery that receives uploaded assets).
+
+on:
+  workflow_dispatch:
+    inputs:
+      persona_slug:
+        description: Persona whose graph structure is read
+        type: choice
+        options: [utzig-garage, tock-fatal]
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: brain-ai-production-read-only
+  cancel-in-progress: false
+
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print nodes created outside the bundle and their edges
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        env:
+          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+          PERSONA_SLUG: ${{ inputs.persona_slug }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          command_timeout: 5m
+          envs: VPS_APP_DIR,PERSONA_SLUG
+          script: |
+            set -Eeuo pipefail
+            cd "$VPS_APP_DIR"
+            [[ "$PERSONA_SLUG" =~ ^(utzig-garage|tock-fatal)$ ]]
+            compose=(docker compose --env-file .env.compose -f docker-compose.yml -f infra/microservices/docker-compose.blue-green.yml)
+            "${compose[@]}" exec -T -e PGOPTIONS='-c default_transaction_read_only=on' -e PERSONA_SLUG="$PERSONA_SLUG" \
+              db sh -c 'psql -v ON_ERROR_STOP=1 -v PERSONA_SLUG="$PERSONA_SLUG" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -AtF " | "' <<'SQL'
+            WITH persona AS (SELECT id FROM public.personas WHERE slug = :'PERSONA_SLUG'),
+            outside AS (
+              SELECT n.* FROM public.knowledge_nodes n JOIN persona p ON p.id = n.persona_id
+              WHERE lower(coalesce(n.status, '')) IN ('approved','active','validated','ativo','embedded')
+                AND coalesce(n.metadata->>'graph_bundle_draft_checksum', '') = ''
+            )
+            SELECT 'OUTSIDE_NODE', o.id, o.node_type, o.slug, o.status, coalesce(o.title, ''),
+                   left(coalesce((o.metadata - 'embedding')::text, ''), 400)
+            FROM outside o ORDER BY o.node_type, o.slug;
+
+            WITH persona AS (SELECT id FROM public.personas WHERE slug = :'PERSONA_SLUG'),
+            outside AS (
+              SELECT n.id FROM public.knowledge_nodes n JOIN persona p ON p.id = n.persona_id
+              WHERE lower(coalesce(n.status, '')) IN ('approved','active','validated','ativo','embedded')
+                AND coalesce(n.metadata->>'graph_bundle_draft_checksum', '') = ''
+            )
+            SELECT 'OUTSIDE_EDGE', e.id, e.relation_type,
+                   s.node_type || ':' || s.slug, coalesce(s.metadata->>'graph_json_node_id', ''), s.id,
+                   t.node_type || ':' || t.slug, coalesce(t.metadata->>'graph_json_node_id', ''), t.id,
+                   coalesce(e.metadata->>'active', 'true')
+            FROM public.knowledge_edges e
+            JOIN public.knowledge_nodes s ON s.id = e.source_node_id
+            JOIN public.knowledge_nodes t ON t.id = e.target_node_id
+            WHERE (e.source_node_id IN (SELECT id FROM outside) OR e.target_node_id IN (SELECT id FROM outside))
+            ORDER BY e.relation_type, s.slug, t.slug;
+            SQL
