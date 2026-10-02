@@ -246,6 +246,11 @@ DIVERGENT_BASELINE: tuple[tuple[str, str], ...] = (
     # criaria uma segunda copia para divergir depois.
     ("control-plane", "agent_harness.py"),
     ("control-plane", "agent_harness_tools.py"),
+    # 2026-10-02: reviewed portal authorization belongs to the login service.
+    # Runtime, transport and frozen legacy auth do not resolve portal grants.
+    # Keep functional coverage in control-plane/test_akia_portal_auth.py rather
+    # than propagating North authorization into unrelated service copies.
+    ("control-plane", "auth_service.py"),
     ("control-plane", "campaigns_service.py"),
     # 2026-09-11: added a graph_publications fallback to current_graph() so
     # /knowledge/chat-context stops 404ing for GraphBundle-published personas
@@ -261,6 +266,10 @@ DIVERGENT_BASELINE: tuple[tuple[str, str], ...] = (
     # actually has. The monolith copy still loads persona-specific skills by
     # default. Production runs apps/, so the isolated behaviour is what ships.
     ("control-plane", "faq_bulk_generator.py"),
+    # Existing publisher-only validation of configurable question_modes
+    # (required/optional/disabled). CP owns publication validation; frozen
+    # legacy and runtime copies do not acquire that publishing responsibility.
+    ("control-plane", "graph_bundle.py"),
     ("control-plane", "graph_bundle_publisher.py"),
     ("control-plane", "graph_bundle_view.py"),
     # Execution strategy is compiled only by the productive control-plane and

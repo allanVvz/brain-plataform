@@ -11,6 +11,8 @@ Detalhes: `docs/research/conversation-candidate-gate-2026-09-25.md`.
 
 As instrucoes do usuario e AGENTS.md regem a operacao. Publicacao de conteudo
 usa candidate e ativacao CAS sem pausa de persona ou binding.
+Personas não envolvidas continuam operando. Uma release compatível de um
+serviço preserva os digests e o tráfego dos demais serviços.
 
 Implementado: contrato minimo de pergunta, continuidade pela conversa real,
 confirmacao sem frase fixa, estado resolvido uma vez, prompts em portugues
