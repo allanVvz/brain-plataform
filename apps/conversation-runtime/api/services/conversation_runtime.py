@@ -1663,7 +1663,11 @@ def decide_agentic(
         if public_question:
             if matched_keys - eligible_keys:
                 metadata_warnings.append("public_question_field_not_eligible")
-            if len(matched_keys) == 1 and matched_keys <= eligible_keys:
+            if kind == "confirmation":
+                # A summary naturally repeats field names; it is still the
+                # confirmation question the next "sim" answers.
+                asked_key = ""
+            elif len(matched_keys) == 1 and matched_keys <= eligible_keys:
                 kind, asked_key = "qualification", next(iter(matched_keys))
             elif kind == "qualification" and asked_key in eligible_keys:
                 pass  # The model may phrase the published field differently.
@@ -3053,7 +3057,13 @@ def commit(
         required_total = int(response.proof.get("required_field_count") or 0)
         resolved_required = max(0, required_total - len(missing))
         qualification_score = _qualification_score(required_total, resolved_required)
+        # A lead never moves backwards automatically; manual terminal stages win.
+        current_stage = str(lead.get("stage") or "novo").lower()
         qualified_stage = decision.lead_stage
+        if current_stage in {"fechado", "perdido"}:
+            qualified_stage = current_stage
+        elif current_stage in STAGES and qualified_stage in STAGES:
+            qualified_stage = STAGES[max(STAGES.index(current_stage), STAGES.index(qualified_stage))]
         qualification = {
             "version": graph_agent_runtime_v3.RUNTIME_VERSION,
             "complete": bool(response.proof.get("qualification_complete", not missing)),

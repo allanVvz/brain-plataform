@@ -2902,6 +2902,15 @@ SYSTEM_PROMPT = (
 
 
 
+def _lead_scoped_field(field: dict) -> bool:
+    """A field the graph scopes to the persona describes the lead, not the order."""
+    return bool(
+        field.get("carry_over")
+        or str(field.get("scope") or "") == "persona"
+        or str(field.get("owner_node_id") or "").startswith("persona:")
+    )
+
+
 def _carry_over_field_keys(document: dict) -> set[str]:
     """Fields que atravessam o fim de um pedido, segundo o contrato compilado.
 
@@ -2913,7 +2922,7 @@ def _carry_over_field_keys(document: dict) -> set[str]:
     for contract in [document.get("common_contract") or {},
                      *(document.get("branch_contracts") or {}).values()]:
         for field in (contract or {}).get("fields") or []:
-            if isinstance(field, dict) and field.get("carry_over"):
+            if isinstance(field, dict) and _lead_scoped_field(field):
                 key = str(field.get("key") or "").strip()
                 if key:
                     keys.add(key)
@@ -2998,7 +3007,7 @@ def _seed_carried_facts(
             *((document.get("branch_contracts") or {}).values()),
         ]
         for field in contract.get("fields") or []
-        if field.get("carry_over")
+        if _lead_scoped_field(field)
     }
     for row in rows:
         key = str(row.get("field_key") or "")
@@ -4995,13 +5004,15 @@ def _qualification_confirmation_accepted(
         )
         or ""
     )
+    # The customer's explicit affirmation of a complete qualification is the
+    # confirmation. The model's reference echo is lineage, not a precondition;
+    # a pending summary of another branch still is not this confirmation.
     return bool(
         qualification_complete
         and active_branch_node_ids
         and not customer_questions
-        and pending_ref == confirmation_ref
+        and (not pending_ref or pending_ref == confirmation_ref)
         and str(confirmation.get("state") or "") == "affirm"
-        and str(confirmation.get("target_ref") or "") == pending_ref
         and graph_proof_checker_v3._literal_span(
             _latest_user_message(context), str(confirmation.get("evidence_span") or "")
         )
@@ -6048,7 +6059,10 @@ def _decide(
         return (
             ConversationDecision(classifier="graph_proof_checker_v3",
                                  intent=resolved_intent,
-                                 route=route, confidence=1, lead_stage="qualificado" if qualification_complete else "engajado",
+                                 route=route, confidence=1, lead_stage=(
+                                     "oportunidade" if confirmation_accepted
+                                     else "qualificado" if qualification_complete else "engajado"
+                                 ),
                                  handoff_reason=(
                                      "graph_qualification_confirmed" if confirmation_accepted
                                      else "graph_terminal_qualification" if terminal_intent else None
