@@ -30,6 +30,26 @@ def _active(row: dict[str, Any]) -> bool:
     return (row.get("metadata") or {}).get("active", True) is not False
 
 
+def _inactive_edges(
+    node_rows: list[dict[str, Any]], active_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    seen = {str(row.get("id") or "") for row in active_rows}
+    node_ids = [str(row.get("id") or "") for row in node_rows if row.get("id")]
+    inactive: list[dict[str, Any]] = []
+    client = supabase_client.get_client()
+    for start in range(0, len(node_ids), 200):
+        batch = node_ids[start:start + 200]
+        rows = (
+            client.table("knowledge_edges").select("*")
+            .in_("source_node_id", batch).limit(5000).execute().data or []
+        )
+        inactive.extend(
+            row for row in rows
+            if not _active(row) and str(row.get("id") or "") not in seen
+        )
+    return inactive
+
+
 def plan_tombstones(
     bundle: dict[str, Any],
     node_rows: list[dict[str, Any]],
@@ -135,6 +155,10 @@ def main() -> int:
     node_rows, edge_rows = supabase_client.list_all_knowledge_graph(
         persona_id=persona_id, limit_nodes=10000
     )
+    # list_all_knowledge_graph returns active edges only. Stage and activate
+    # both run this step, so the second run must still see the edges the first
+    # one soft-disabled (status already_inactive) instead of failing.
+    edge_rows = [*edge_rows, *_inactive_edges(node_rows, edge_rows)]
     planned = plan_tombstones(bundle, node_rows, edge_rows)
     changed = []
     if args.restore:
