@@ -370,23 +370,21 @@ jobs:
             assert binding["active"] and binding["persona_id"] == persona["id"] and binding["connection_status"] == "connected"
             age = (datetime.now(timezone.utc) - datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))).total_seconds()
             assert 0 <= age < 86400, "customer-service session expired; approved template required"
-            proofs = db.table("conversation_turn_proofs").select("id").eq("canonical_inbound_id", inbound_id).execute().data or []
-            assert not proofs, "inbound already has a decision"
+            # Control-plane deliberately cannot read the runtime proof table.
+            # The atomic operator claim rejects any existing proof/commit;
+            # send_preview validates proof and active publication in the DB.
             outbound = db.table("lead_buffer").select("id,status").eq("lead_ref", lead_ref).eq("direction", "outbound").eq("channel_binding_id", row["channel_binding_id"]).gte("created_at", row["created_at"]).execute().data or []
             assert not outbound, "outbound already exists; reconcile instead of replaying"
             print("RECOVERY_DRY_RUN=" + json.dumps({"lead_ref": lead_ref, "inbound_id": inbound_id, "status": row["status"], "prior_ai_paused": lead["ai_paused"], "prior_outbounds": 0}))
             result = release_queue_service.generate_operator_queue_previews(buffer_ids=[inbound_id], actor_user_id=None)
             items = result.get("items") or []
             assert len(items) == 1 and items[0].get("result") != "bloqueado", json.dumps(result)
-            proofs = db.table("conversation_turn_proofs").select("id,outbound_id,proof_result").eq("canonical_inbound_id", inbound_id).execute().data or []
-            assert len(proofs) == 1, "expected exactly one canonical proof"
-            proof = proofs[0]
-            assert proof.get("outbound_id") and proof["proof_result"].get("valid") is True, "valid proof required"
-            assert proof["proof_result"].get("delivery_authorized") is True, "proof must authorize delivery"
-            out = db.table("lead_buffer").select("id,status").eq("id", proof["outbound_id"]).single().execute().data
+            outbounds = db.table("lead_buffer").select("id,status").eq("lead_ref", lead_ref).eq("direction", "outbound").eq("channel_binding_id", row["channel_binding_id"]).eq("correlation_id", "ai:" + row["correlation_id"]).execute().data or []
+            assert len(outbounds) == 1, "expected exactly one correlated canonical outbound"
+            out = outbounds[0]
             assert out["status"] == "preview_ready", "outbound state changed; do not send twice"
             sent = release_queue_service.control_unified_queue(buffer_ids=[out["id"]], action="send_preview", actor_user_id=None)
             after = db.table("lead_buffer").select("status").eq("id", out["id"]).single().execute().data
-            print("RECOVERY_RESULT=" + json.dumps({"lead_ref": lead_ref, "inbound_id": inbound_id, "proof_id": proof["id"], "outbound_id": out["id"], "send_result": sent, "status": after["status"]}, default=str))
+            print("RECOVERY_RESULT=" + json.dumps({"lead_ref": lead_ref, "inbound_id": inbound_id, "outbound_id": out["id"], "send_result": sent, "status": after["status"]}, default=str))
             assert after["status"] in {"pending_send", "sent", "delivered", "read"}, "send was not admitted; reconcile reported reason"
             PY
