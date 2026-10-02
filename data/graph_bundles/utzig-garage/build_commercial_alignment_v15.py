@@ -12,6 +12,8 @@ Run from the repository root:
 from __future__ import annotations
 
 import json
+import os
+import re
 import sys
 from copy import deepcopy
 from pathlib import Path
@@ -36,6 +38,12 @@ SOURCE = "luiza_camargo_whatsapp_2026_09_28"
 EMBEDDED = "embedded:utzig"
 GLOBAL_PARENT = "rule:human-handoff"
 REMOVAL_REASON = "servico_descontinuado_pela_utzig_2026_09_28"
+# v15a (default) keeps the discontinued services in the graph and only takes
+# them off the site; v15b (UTZIG_V15_RETIRE=1) archives them once the publish
+# workflow runs apply_graph_node_retirements.py.
+RETIRE_NODES = os.environ.get("UTZIG_V15_RETIRE", "0") == "1"
+MONEY = re.compile(r"R\$\s?\d|\d+,\d{2}\b")
+SENTENCE = re.compile(r"(?<=[.!?])\s+")
 
 # Services Utzig no longer offers (LP and SDR).
 RETIRED_ROOTS = [
@@ -250,6 +258,14 @@ def build() -> tuple[dict, dict]:
             if isinstance(field, dict) and field.get("key") in {"modelo_veiculo", "nome_cliente"}:
                 if field.get("key") == "modelo_veiculo":
                     field["depends_on"] = []
+                if field.get("key") == "nome_cliente":
+                    # The CRM/WhatsApp profile name is confirmed once ("Posso te
+                    # chamar de Allan?") instead of asked again; one word is a name.
+                    field["validation"] = {
+                        **(field.get("validation") or {}),
+                        "semantic_type": "human_full_name", "min_tokens": 1, "max_tokens": 6,
+                    }
+                    field["scope"] = "persona"
                 field["carry_over"] = True
                 touched = True
         if touched:
@@ -316,6 +332,17 @@ def build() -> tuple[dict, dict]:
             data_patch["aliases"] = aliases
         patch_nodes.append({"id": faq_id, "patch": {"summary": answer, "data": data_patch}})
 
+    # 4b. No FAQ answer anywhere keeps a money value (the SDR never knows prices).
+    rewritten = set(FAQ_REWRITES)
+    for node in base["nodes"]:
+        answer = str((node.get("data") or {}).get("answer") or "")
+        if (node.get("node_type") != "faq" or node["id"] in rewritten
+                or (RETIRE_NODES and node["id"] in retired) or not MONEY.search(answer)):
+            continue
+        kept = [part for part in SENTENCE.split(answer) if not MONEY.search(part)]
+        clean = (" ".join(kept).strip() + " " + CONFIRM).strip()
+        patch_nodes.append({"id": node["id"], "patch": {"summary": clean, "data": {"answer": clean}}})
+
     # 5. New FAQs. A bundle only carries publishable nodes: FAQs awaiting the
     # client's confirmation are written to PENDING_FILE instead.
     pending = []
@@ -358,6 +385,16 @@ def build() -> tuple[dict, dict]:
     patch_nodes.append({"id": campaign["id"], "patch": {"data": {"page": page}}})
 
     # Campaign blocks and edges pointing at retired nodes must not dangle.
+    if not RETIRE_NODES:
+        # v15a: the services stay in the graph (and in the SDR) until v15b; the
+        # site no longer lists them and their offers are registered only.
+        for node_id in sorted(retired):
+            node = nodes[node_id]
+            if node["node_type"] == "offer":
+                patch_nodes.append({"id": node_id, "patch": {"data": {
+                    "price_kind": "service_reference", "visibility": "registered_only"}}})
+        retired, retired_edges = set(), []
+
     overlay = {
         "overlay_version": "1.0",
         "base_publication": ACTIVE,
