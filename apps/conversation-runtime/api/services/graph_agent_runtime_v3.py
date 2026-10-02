@@ -4992,6 +4992,30 @@ def _consultative_support_active(
     return bool(collection_complete and customer_questions and not post_support)
 
 
+def _lead_stage_for_turn(
+    *, confirmation_accepted: bool, qualification_complete: bool,
+    grouped_facts: dict[str, list[dict[str, Any]]],
+) -> str:
+    """Funnel stage from what the conversation proved, never from points.
+
+    contatado: the SDR answered and nothing is known yet; engajado: the customer
+    gave at least one fact; qualificado: every required SDR question answered;
+    oportunidade: the customer confirmed the summary, which is the handoff to
+    the closer. commit() keeps the stage monotonic.
+    """
+    if confirmation_accepted:
+        return "oportunidade"
+    if qualification_complete:
+        return "qualificado"
+    if any(
+        str(fact.get("status") or "") == "known"
+        for rows in grouped_facts.values() for fact in rows or []
+        if isinstance(fact, dict)
+    ):
+        return "engajado"
+    return "contatado"
+
+
 def _qualification_confirmation_accepted(
     context: ConversationContext, *, confirmation: dict[str, Any],
     confirmation_ref: str, qualification_complete: bool,
@@ -6059,9 +6083,10 @@ def _decide(
         return (
             ConversationDecision(classifier="graph_proof_checker_v3",
                                  intent=resolved_intent,
-                                 route=route, confidence=1, lead_stage=(
-                                     "oportunidade" if confirmation_accepted
-                                     else "qualificado" if qualification_complete else "engajado"
+                                 route=route, confidence=1, lead_stage=_lead_stage_for_turn(
+                                     confirmation_accepted=confirmation_accepted,
+                                     qualification_complete=qualification_complete,
+                                     grouped_facts=next_grouped,
                                  ),
                                  handoff_reason=(
                                      "graph_qualification_confirmed" if confirmation_accepted
