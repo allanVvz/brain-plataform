@@ -20,7 +20,7 @@
   "chunks_to_embed": 191,
   "compiler_version": "graph-compiler-v3.6.6",
   "disposition": "awaiting_approval",
-  "draft_checksum": "sha256:dbe1513e4b994a2facf1444a55c477246be0f304be650af66f912165736cafbb",
+  "draft_checksum": "sha256:31c77075876a8c8db2623719b5b577241817d57b0dcfc04dd81655f51fa3ec33",
   "edge_changes": {
     "added": [
       "edge:alemao-perfil-editorial-gallery",
@@ -593,6 +593,7 @@
       "faq:utzig:ppf-areas",
       "faq:utzig:ppf-interior",
       "faq:utzig:services-overview",
+      "gallery:gallery-default",
       "gallery:utzig",
       "group:cleaning",
       "group:enhancement",
@@ -641,11 +642,11 @@
     "changed": [],
     "removed": []
   },
-  "nodes_added": 190,
+  "nodes_added": 191,
   "nodes_changed": 0,
   "nodes_removed": 0,
   "plan_version": "1.0",
   "publication_allowed": true,
-  "runtime_checksum": "sha256:a3eda528e564747db1236f2b1f5477fecf595d9c06b28e65af40954fb03ed39a",
+  "runtime_checksum": "sha256:ad67f10183f36eab0e020566b8e2b73535e501456b2beeda50c438e56d6e159c",
   "validation_errors": []
 }

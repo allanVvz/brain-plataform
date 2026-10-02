@@ -4906,6 +4906,32 @@
       }
     },
     {
+      "id": "gallery:gallery-default",
+      "node_type": "gallery",
+      "slug": "gallery-default",
+      "title": "Gallery",
+      "summary": "Bloco protegido para materiais visuais. Nodes ligados aqui aparecem em Assets.",
+      "tags": [
+        "assets",
+        "gallery",
+        "visual"
+      ],
+      "status": "active",
+      "projection_node_id": "c5220eae-994b-45ec-8ea9-34fea41a2885",
+      "data": {
+        "asset_scope": "visual_media",
+        "capabilities": {
+          "detached_terminal": true
+        },
+        "graph_json_node_id": "gallery:gallery-default",
+        "open_url": "/marketing/assets",
+        "protected": true,
+        "system_node": true,
+        "status": "active",
+        "source": "production_readonly_audit_2026_10_02"
+      }
+    },
+    {
       "id": "gallery:utzig",
       "node_type": "gallery",
       "slug": "utzig-gallery",

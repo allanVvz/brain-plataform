@@ -343,6 +343,23 @@ def build() -> tuple[dict, dict]:
         clean = (" ".join(kept).strip() + " " + CONFIRM).strip()
         patch_nodes.append({"id": node["id"], "patch": {"summary": clean, "data": {"answer": clean}}})
 
+    # 4c. The asset gallery created by uploads (destination of the images the
+    # site uses). It lives in production outside the bundle; declare it with its
+    # real projection id so the publisher recognises it (read 2026-10-02, no edges).
+    upsert_nodes.append({
+        "id": "gallery:gallery-default", "node_type": "gallery", "slug": "gallery-default",
+        "projection_node_id": "c5220eae-994b-45ec-8ea9-34fea41a2885",
+        "status": "active", "title": "Gallery",
+        "summary": "Bloco protegido para materiais visuais. Nodes ligados aqui aparecem em Assets.",
+        "tags": ["assets", "gallery", "visual"],
+        "data": {
+            "asset_scope": "visual_media", "capabilities": {"detached_terminal": True},
+            "graph_json_node_id": "gallery:gallery-default", "open_url": "/marketing/assets",
+            "protected": True, "system_node": True, "status": "active",
+            "source": "production_readonly_audit_2026_10_02",
+        },
+    })
+
     # 5. New FAQs. A bundle only carries publishable nodes: FAQs awaiting the
     # client's confirmation are written to PENDING_FILE instead.
     pending = []
