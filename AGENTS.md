@@ -22,6 +22,10 @@ usar uma stack Docker local para implementar, auditar ou testar este projeto.
   resposta no aparelho e reconciliar os IDs antes do WA Validator interno.
   Esse contato e permanentemente elegivel a testes operacionais da Utzig;
   nunca contornar isolamento, idempotencia ou comprovacao de entrega.
+  Nesse incidente, o release do runtime pode adiar apenas o canario WA
+  interno, usando `canary_persona_slug=utzig-garage` e
+  `canary_flow_id=defer_allan_real_8510`, condicionado ao probe real sem commit
+  do candidate (`runtime_probe_fixture`); executar o Validator apos a prova real.
 - Publicacao de GraphBundle e conteudo nunca pausa binding, persona, IA ou
   worker. Stage e validacao usam a publicacao candidata; ativacao e CAS e a
   publicacao anterior continua ativa quando qualquer etapa falha.

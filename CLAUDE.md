@@ -37,6 +37,9 @@ em vez de escolher em silêncio.
   deterministico; proof valida evidencia, isolamento, seguranca e exactly-once.
 - Toda mudanca conversacional deve executar o teste-canario que prova a
   fronteira entre os dois motores e a preservacao byte a byte da reply agentic.
+- A recuperacao especifica de Allan pode adiar o canario WA interno ate depois
+  da entrega real se o candidate passar probe sem commit; o release usa
+  `canary_persona_slug=utzig-garage` e `canary_flow_id=defer_allan_real_8510`.
 - Para a lead de teste Allan da Utzig, WhatsApp final 8510, a recuperacao
   segue a trilha real inbound -> decisao -> proof -> commit -> fila -> entrega
   e confirma recebimento no aparelho antes da bateria WA Validator. O numero
