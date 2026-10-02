@@ -84,6 +84,10 @@ jobs:
             select 'PERSONA_LEAD', p.slug, l.id, left(l.nome,80), l.ai_paused, l.handoff_level
             from public.leads l join public.personas p on p.id=l.persona_id
             where :'PERSONA_SLUG' <> 'all' and p.slug=:'PERSONA_SLUG'
+              and (lower(l.nome) like '%alisson%' or exists (
+                select 1 from public.lead_buffer b where b.lead_ref=l.id
+                and b.persona_id=p.id and b.direction='inbound'
+                and b.external_message_id like 'wamid.%'))
             order by l.id limit 20;
 
             with scope as (
