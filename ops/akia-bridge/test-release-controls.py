@@ -23,6 +23,17 @@ class Controls(unittest.TestCase):
   c,r=self.render('akia-gateway',old,{'UNRELATED':'no'})
   self.assertEqual(c['environment'],{**old,'AKIA_NORTH_DELEGATION_ENABLED':'true'})
   self.assertEqual(r['environment'],old)
+ def test_gateway_rollout_preserves_active_delegation_and_enables_crm(self):
+  old={'AKIA_NORTH_DELEGATION_ENABLED':'true','AKIA_CRM_ENABLED':'false','SECRET':'opaque'}
+  c,r=self.render('akia-gateway',old,{'AKIA_CRM_ENABLED':'true','SECRET':'opaque'},False)
+  self.assertEqual(c['environment']['AKIA_NORTH_DELEGATION_ENABLED'],'true')
+  self.assertEqual(c['environment']['AKIA_CRM_ENABLED'],'true')
+  self.assertEqual(r['environment'],old)
+ def test_gateway_activation_rechecks_active_delegation_without_dropping_crm(self):
+  old={'AKIA_NORTH_DELEGATION_ENABLED':'true','AKIA_CRM_ENABLED':'true','SECRET':'opaque'}
+  c,r=self.render('akia-gateway',old,{'AKIA_CRM_ENABLED':'true'},True)
+  self.assertEqual(c['environment'],old)
+  self.assertEqual(r['environment'],old)
  def test_invalid_stage_rejected(self):
   self.assertIsNone(self.render('operations-api',{},{}))
  def test_new_keys_removed_by_rollback(self):

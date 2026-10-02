@@ -66,8 +66,12 @@ if activation=='true':
   assert all(previous.get(k)=='false' for k in flags), 'activation already performed or baseline not staged'
   desired.update({k:'true' for k in flags})
  else:
-  assert previous.get('AKIA_NORTH_DELEGATION_ENABLED') in (None,'false')
+  assert previous.get('AKIA_NORTH_DELEGATION_ENABLED') in (None,'false','true')
   desired['AKIA_NORTH_DELEGATION_ENABLED']='true'
+elif unit=='akia-gateway' and old:
+ # A compatible gateway image keeps already activated North writes during CRM rollout.
+ for key in ('AKIA_NORTH_DELEGATION_ENABLED','AKIA_CRM_ENABLED'):
+  if previous.get(key)=='true': desired[key]='true'
 elif unit=='operations-api':
  assert desired.get('OPERATIONS_NORTH_DELEGATION_ENABLED')=='true'
  assert desired.get('NORTH_SHARED_TRILHAS_APPROVED')=='true'
@@ -95,8 +99,13 @@ verify(){
   else
    docker exec "$1" node /app/verification/north-read-contract-smoke.mjs
   fi
- elif [[ "$activating" == true ]]; then
-  docker exec -i "$1" python -I -c "$(cat ops/akia-bridge/north-gateway-activation-smoke.py)" < "$AKIA_NORTH_RUNTIME_FIXTURE_FILE"
+ elif [[ "$service" == gateway ]]; then
+  if docker exec "$1" env | grep -qx 'AKIA_CRM_ENABLED=true'; then
+   docker exec "$1" python -I -c "$(cat ops/akia-bridge/north-gateway-crm-smoke.py)"
+  fi
+  if docker exec "$1" env | grep -qx 'AKIA_NORTH_DELEGATION_ENABLED=true'; then
+   docker exec -i "$1" python -I -c "$(cat ops/akia-bridge/north-gateway-activation-smoke.py)" < "$AKIA_NORTH_RUNTIME_FIXTURE_FILE"
+  fi
  fi
 }
 verify "$candidate"

@@ -31,6 +31,7 @@ jobs:
           node --check ops/akia-bridge/north-activation-smoke.mjs
           python3 ops/akia-bridge/test-release-controls.py
           python3 -c "import ast,pathlib; ast.parse(pathlib.Path('ops/akia-bridge/north-gateway-activation-smoke.py').read_text())"
+          python3 -c "import ast,pathlib; ast.parse(pathlib.Path('ops/akia-bridge/north-gateway-crm-smoke.py').read_text())"
       - name: Restrict image and action
         env:
           SERVICE: ${{ inputs.service }}
@@ -135,7 +136,7 @@ jobs:
           GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
           AKIA_PORTAL_PATH_HOST: api.vzforeal.com
-          AKIA_PORTAL_PATH_ORIGINS: '{"north":["https://north-portal.pages.dev","https://north-original-review.north-portal.pages.dev"],"south":"https://south-portal.pages.dev","akia":"https://akia-os.pages.dev"}'
+          AKIA_PORTAL_PATH_ORIGINS: '{"north":["https://north-portal.pages.dev","https://test.north-portal.pages.dev","https://north-original-review.north-portal.pages.dev"],"south":"https://south-portal.pages.dev","akia":"https://akia-os.pages.dev"}'
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
