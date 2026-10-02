@@ -269,13 +269,14 @@ def build() -> tuple[dict, dict]:
             "data": {
                 "offer": {"amount": amount, "currency": "BRL"},
                 "price_qualifier": qualifier,
-                # Public storefront picks the varejo offer; the SDR price catalog
-                # still stays empty (it needs price-claim FAQs with offer sources).
-                "channel": "varejo",
+                # A service has no fixed price: this is a reference the client
+                # gave, registered so it can be switched back on later. It is
+                # not shown on the site and the SDR never knows it.
+                "price_kind": "service_reference",
+                "visibility": "registered_only",
                 "graph_json_node_id": offer_id,
                 "source": SOURCE,
                 "validation_status": "approved",
-                "visibility": "closer_and_public_site",
             },
         }
         if offer_id in nodes:
@@ -290,11 +291,22 @@ def build() -> tuple[dict, dict]:
             "status": "approved", "title": f"Preço — {label}",
             "summary": f"{label} a partir de R$ {amount:.2f}".replace(".", ","), "tags": [],
             "data": {"offer": {"amount": amount, "currency": "BRL"}, "price_qualifier": qualifier,
+                     "price_kind": "service_reference", "visibility": "registered_only",
                      "graph_json_node_id": offer_id, "source": SOURCE,
-                     "validation_status": "approved", "visibility": "closer_and_public_site"},
+                     "validation_status": "approved"},
         })
         upsert_edges.append(_edge(f"edge:{offer_id}:contains", product, offer_id, "contains", True))
         upsert_edges.append(_edge(f"edge:{offer_id}:about", offer_id, product, "about_product"))
+
+    # Lavagem detalhada has no client-confirmed price (R$ 259,90 came from the
+    # Aura reference): keep the node, drop the value.
+    patch_nodes.append({"id": "offer:detailed-wash:starting-price", "patch": {
+        "title": "Preço — Lavagem detalhada",
+        "summary": "Lavagem detalhada sem preço registrado pela Utzig",
+        "data": {"offer": None, "price_kind": "service_reference",
+                 "visibility": "registered_only", "source": SOURCE,
+                 "price_status": "not_provided_by_client"},
+    }})
 
     # 4. FAQ rewrites (no prices in SDR-retrievable text).
     for faq_id, (answer, aliases) in FAQ_REWRITES.items():

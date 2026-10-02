@@ -815,12 +815,7 @@ def _compiled_offer(node: dict, offer_node: dict | None = None) -> Optional[dict
     offer = normalize_offer(data, metadata)
     if offer is None:
         return None
-    qualifier = str(data.get("price_qualifier") or "").strip()
-    return {
-        "amount": offer.amount, "currency": offer.currency,
-        # "a_partir_de" or "valor_base"; absent for legacy offers.
-        **({"qualifier": qualifier} if qualifier else {}),
-    }
+    return {"amount": offer.amount, "currency": offer.currency}
 
 
 def _compiled_asset_payload(
@@ -932,8 +927,12 @@ def _compiled_catalog_payload(
         node_id: node for node_id, node in nodes.items()
         if node.get("node_type") == "faq" and node_id in granted_node_ids
     }
+    # A service price the client only registered (data.visibility
+    # "registered_only") stays in the graph but never reaches the public site.
     offer_nodes = {
-        node_id: node for node_id, node in nodes.items() if node.get("node_type") == "offer"
+        node_id: node for node_id, node in nodes.items()
+        if node.get("node_type") == "offer"
+        and (node.get("data") or {}).get("visibility") != "registered_only"
     }
 
     products_by_group: dict[str, list[str]] = {}

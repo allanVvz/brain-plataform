@@ -605,11 +605,11 @@
           "currency": "BRL"
         },
         "price_qualifier": "a_partir_de",
-        "channel": "varejo",
+        "price_kind": "service_reference",
+        "visibility": "registered_only",
         "graph_json_node_id": "offer:chassis-wash:starting-price",
         "source": "luiza_camargo_whatsapp_2026_09_28",
-        "validation_status": "approved",
-        "visibility": "closer_and_public_site"
+        "validation_status": "approved"
       }
     },
     {
@@ -626,11 +626,11 @@
           "currency": "BRL"
         },
         "price_qualifier": "a_partir_de",
-        "channel": "varejo",
+        "price_kind": "service_reference",
+        "visibility": "registered_only",
         "graph_json_node_id": "offer:engine-bay-wash:starting-price",
         "source": "luiza_camargo_whatsapp_2026_09_28",
-        "validation_status": "approved",
-        "visibility": "closer_and_public_site"
+        "validation_status": "approved"
       }
     },
     {
@@ -647,11 +647,11 @@
           "currency": "BRL"
         },
         "price_qualifier": "valor_base",
-        "channel": "varejo",
+        "price_kind": "service_reference",
+        "visibility": "registered_only",
         "graph_json_node_id": "offer:leather-conditioning:starting-price",
         "source": "luiza_camargo_whatsapp_2026_09_28",
-        "validation_status": "approved",
-        "visibility": "closer_and_public_site"
+        "validation_status": "approved"
       }
     },
     {
@@ -668,11 +668,11 @@
           "currency": "BRL"
         },
         "price_qualifier": "a_partir_de",
-        "channel": "varejo",
+        "price_kind": "service_reference",
+        "visibility": "registered_only",
         "graph_json_node_id": "offer:glass-polish:starting-price",
         "source": "luiza_camargo_whatsapp_2026_09_28",
-        "validation_status": "approved",
-        "visibility": "closer_and_public_site"
+        "validation_status": "approved"
       }
     },
     {
@@ -689,11 +689,11 @@
           "currency": "BRL"
         },
         "price_qualifier": "valor_base",
-        "channel": "varejo",
+        "price_kind": "service_reference",
+        "visibility": "registered_only",
         "graph_json_node_id": "offer:commercial-polish:starting-price",
         "source": "luiza_camargo_whatsapp_2026_09_28",
-        "validation_status": "approved",
-        "visibility": "closer_and_public_site"
+        "validation_status": "approved"
       }
     },
     {
@@ -710,11 +710,11 @@
           "currency": "BRL"
         },
         "price_qualifier": "valor_base",
-        "channel": "varejo",
+        "price_kind": "service_reference",
+        "visibility": "registered_only",
         "graph_json_node_id": "offer:headlight-restoration:starting-price",
         "source": "luiza_camargo_whatsapp_2026_09_28",
-        "validation_status": "approved",
-        "visibility": "closer_and_public_site"
+        "validation_status": "approved"
       }
     },
     {
@@ -731,11 +731,11 @@
           "currency": "BRL"
         },
         "price_qualifier": "a_partir_de",
-        "channel": "varejo",
+        "price_kind": "service_reference",
+        "visibility": "registered_only",
         "graph_json_node_id": "offer:windshield-crystallization:starting-price",
         "source": "luiza_camargo_whatsapp_2026_09_28",
-        "validation_status": "approved",
-        "visibility": "closer_and_public_site"
+        "validation_status": "approved"
       }
     },
     {
@@ -752,11 +752,11 @@
           "currency": "BRL"
         },
         "price_qualifier": "a_partir_de",
-        "channel": "varejo",
+        "price_kind": "service_reference",
+        "visibility": "registered_only",
         "graph_json_node_id": "offer:seat-vitrification:starting-price",
         "source": "luiza_camargo_whatsapp_2026_09_28",
-        "validation_status": "approved",
-        "visibility": "closer_and_public_site"
+        "validation_status": "approved"
       }
     },
     {
@@ -773,10 +773,11 @@
           "currency": "BRL"
         },
         "price_qualifier": "a_partir_de",
+        "price_kind": "service_reference",
+        "visibility": "registered_only",
         "graph_json_node_id": "offer:ppf:multimedia-starting-price",
         "source": "luiza_camargo_whatsapp_2026_09_28",
-        "validation_status": "approved",
-        "visibility": "closer_and_public_site"
+        "validation_status": "approved"
       }
     },
     {
@@ -2560,11 +2561,11 @@
             "currency": "BRL"
           },
           "price_qualifier": "valor_base",
-          "channel": "varejo",
+          "price_kind": "service_reference",
+          "visibility": "registered_only",
           "graph_json_node_id": "offer:interior-cleaning:starting-price",
           "source": "luiza_camargo_whatsapp_2026_09_28",
-          "validation_status": "approved",
-          "visibility": "closer_and_public_site"
+          "validation_status": "approved"
         }
       }
     },
@@ -2579,11 +2580,11 @@
             "currency": "BRL"
           },
           "price_qualifier": "a_partir_de",
-          "channel": "varejo",
+          "price_kind": "service_reference",
+          "visibility": "registered_only",
           "graph_json_node_id": "offer:technical-polish:starting-price",
           "source": "luiza_camargo_whatsapp_2026_09_28",
-          "validation_status": "approved",
-          "visibility": "closer_and_public_site"
+          "validation_status": "approved"
         }
       }
     },
@@ -2598,11 +2599,11 @@
             "currency": "BRL"
           },
           "price_qualifier": "valor_base",
-          "channel": "varejo",
+          "price_kind": "service_reference",
+          "visibility": "registered_only",
           "graph_json_node_id": "offer:ppf:starting-price",
           "source": "luiza_camargo_whatsapp_2026_09_28",
-          "validation_status": "approved",
-          "visibility": "closer_and_public_site"
+          "validation_status": "approved"
         }
       }
     },
@@ -2617,11 +2618,25 @@
             "currency": "BRL"
           },
           "price_qualifier": "a_partir_de",
-          "channel": "varejo",
+          "price_kind": "service_reference",
+          "visibility": "registered_only",
           "graph_json_node_id": "offer:vitrification:starting-price",
           "source": "luiza_camargo_whatsapp_2026_09_28",
-          "validation_status": "approved",
-          "visibility": "closer_and_public_site"
+          "validation_status": "approved"
+        }
+      }
+    },
+    {
+      "id": "offer:detailed-wash:starting-price",
+      "patch": {
+        "title": "Preço — Lavagem detalhada",
+        "summary": "Lavagem detalhada sem preço registrado pela Utzig",
+        "data": {
+          "offer": null,
+          "price_kind": "service_reference",
+          "visibility": "registered_only",
+          "source": "luiza_camargo_whatsapp_2026_09_28",
+          "price_status": "not_provided_by_client"
         }
       }
     },

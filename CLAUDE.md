@@ -53,6 +53,11 @@ em vez de escolher em silêncio.
   sao politicas distintas. Utzig presta servico e nao tem entrega de produto.
   Sem janela de Disparos, enviar imediatamente; com janela, programar o proximo
   horario permitido e expor espera, previa e acao persistida.
+- Preco de produto e de servico sao diferentes: produto (varejo/atacado, ex.
+  Tock) tem valor publicado que o SDR conhece e o closer pode descontar; servico
+  (ex. Utzig) nao tem valor fixo e o SDR nunca conhece o valor. Valor de
+  referencia de servico fica em `offer` com `visibility: registered_only`, fora
+  da LP e do RAG do SDR (`docs/roadmaps/utzig-commercial-alignment-v15.md`).
 - Perguntas SDR publicadas podem ser obrigatorias, opcionais ou desativadas
   sem deploy do runtime; manter fatos ja coletados no ledger.
 - O isolamento de galho e deterministico; o vocabulario do cliente nao. Enum

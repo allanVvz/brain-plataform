@@ -4991,11 +4991,11 @@
           "currency": "BRL"
         },
         "price_qualifier": "a_partir_de",
-        "channel": "varejo",
+        "price_kind": "service_reference",
+        "visibility": "registered_only",
         "graph_json_node_id": "offer:chassis-wash:starting-price",
         "source": "luiza_camargo_whatsapp_2026_09_28",
-        "validation_status": "approved",
-        "visibility": "closer_and_public_site"
+        "validation_status": "approved"
       }
     },
     {
@@ -5013,34 +5013,34 @@
           "currency": "BRL"
         },
         "price_qualifier": "valor_base",
-        "channel": "varejo",
+        "price_kind": "service_reference",
+        "visibility": "registered_only",
         "graph_json_node_id": "offer:commercial-polish:starting-price",
         "source": "luiza_camargo_whatsapp_2026_09_28",
-        "validation_status": "approved",
-        "visibility": "closer_and_public_site"
+        "validation_status": "approved"
       }
     },
     {
       "id": "offer:detailed-wash:starting-price",
       "node_type": "offer",
       "slug": "detailed-wash-starting-price",
-      "title": "Preço inicial — Lavagem detalhada",
-      "summary": "Lavagem detalhada a partir de R$ 259,90",
+      "title": "Preço — Lavagem detalhada",
+      "summary": "Lavagem detalhada sem preço registrado pela Utzig",
       "tags": [],
       "status": "approved",
       "projection_node_id": "8e18a00b-c753-5611-8e2a-da91683b9982",
       "data": {
         "duration": "1 a 2 horas",
         "graph_json_node_id": "offer:detailed-wash:starting-price",
-        "offer": {
-          "amount": 259.9,
-          "currency": "BRL"
-        },
+        "offer": null,
         "price_qualifier": "a_partir_de",
         "reference_scope": "operator_approved_commercial_catalog",
         "reference_url": "https://auradetail.com.br/",
-        "source": "operator_approved_aura_public_reference_2026_09_23",
-        "validation_status": "approved"
+        "source": "luiza_camargo_whatsapp_2026_09_28",
+        "validation_status": "approved",
+        "price_kind": "service_reference",
+        "visibility": "registered_only",
+        "price_status": "not_provided_by_client"
       }
     },
     {
@@ -5058,11 +5058,11 @@
           "currency": "BRL"
         },
         "price_qualifier": "a_partir_de",
-        "channel": "varejo",
+        "price_kind": "service_reference",
+        "visibility": "registered_only",
         "graph_json_node_id": "offer:engine-bay-wash:starting-price",
         "source": "luiza_camargo_whatsapp_2026_09_28",
-        "validation_status": "approved",
-        "visibility": "closer_and_public_site"
+        "validation_status": "approved"
       }
     },
     {
@@ -5080,11 +5080,11 @@
           "currency": "BRL"
         },
         "price_qualifier": "a_partir_de",
-        "channel": "varejo",
+        "price_kind": "service_reference",
+        "visibility": "registered_only",
         "graph_json_node_id": "offer:glass-polish:starting-price",
         "source": "luiza_camargo_whatsapp_2026_09_28",
-        "validation_status": "approved",
-        "visibility": "closer_and_public_site"
+        "validation_status": "approved"
       }
     },
     {
@@ -5102,11 +5102,11 @@
           "currency": "BRL"
         },
         "price_qualifier": "valor_base",
-        "channel": "varejo",
+        "price_kind": "service_reference",
+        "visibility": "registered_only",
         "graph_json_node_id": "offer:headlight-restoration:starting-price",
         "source": "luiza_camargo_whatsapp_2026_09_28",
-        "validation_status": "approved",
-        "visibility": "closer_and_public_site"
+        "validation_status": "approved"
       }
     },
     {
@@ -5130,8 +5130,8 @@
         "reference_url": "https://auradetail.com.br/",
         "source": "luiza_camargo_whatsapp_2026_09_28",
         "validation_status": "approved",
-        "channel": "varejo",
-        "visibility": "closer_and_public_site"
+        "price_kind": "service_reference",
+        "visibility": "registered_only"
       }
     },
     {
@@ -5149,11 +5149,11 @@
           "currency": "BRL"
         },
         "price_qualifier": "valor_base",
-        "channel": "varejo",
+        "price_kind": "service_reference",
+        "visibility": "registered_only",
         "graph_json_node_id": "offer:leather-conditioning:starting-price",
         "source": "luiza_camargo_whatsapp_2026_09_28",
-        "validation_status": "approved",
-        "visibility": "closer_and_public_site"
+        "validation_status": "approved"
       }
     },
     {
@@ -5171,10 +5171,11 @@
           "currency": "BRL"
         },
         "price_qualifier": "a_partir_de",
+        "price_kind": "service_reference",
+        "visibility": "registered_only",
         "graph_json_node_id": "offer:ppf:multimedia-starting-price",
         "source": "luiza_camargo_whatsapp_2026_09_28",
-        "validation_status": "approved",
-        "visibility": "closer_and_public_site"
+        "validation_status": "approved"
       }
     },
     {
@@ -5198,8 +5199,8 @@
         "reference_url": "https://auradetail.com.br/",
         "source": "luiza_camargo_whatsapp_2026_09_28",
         "validation_status": "approved",
-        "channel": "varejo",
-        "visibility": "closer_and_public_site"
+        "price_kind": "service_reference",
+        "visibility": "registered_only"
       }
     },
     {
@@ -5217,11 +5218,11 @@
           "currency": "BRL"
         },
         "price_qualifier": "a_partir_de",
-        "channel": "varejo",
+        "price_kind": "service_reference",
+        "visibility": "registered_only",
         "graph_json_node_id": "offer:seat-vitrification:starting-price",
         "source": "luiza_camargo_whatsapp_2026_09_28",
-        "validation_status": "approved",
-        "visibility": "closer_and_public_site"
+        "validation_status": "approved"
       }
     },
     {
@@ -5245,8 +5246,8 @@
         "reference_url": "https://auradetail.com.br/",
         "source": "luiza_camargo_whatsapp_2026_09_28",
         "validation_status": "approved",
-        "channel": "varejo",
-        "visibility": "closer_and_public_site"
+        "price_kind": "service_reference",
+        "visibility": "registered_only"
       }
     },
     {
@@ -5270,8 +5271,8 @@
         "reference_url": "https://auradetail.com.br/",
         "source": "luiza_camargo_whatsapp_2026_09_28",
         "validation_status": "approved",
-        "channel": "varejo",
-        "visibility": "closer_and_public_site"
+        "price_kind": "service_reference",
+        "visibility": "registered_only"
       }
     },
     {
@@ -5289,11 +5290,11 @@
           "currency": "BRL"
         },
         "price_qualifier": "a_partir_de",
-        "channel": "varejo",
+        "price_kind": "service_reference",
+        "visibility": "registered_only",
         "graph_json_node_id": "offer:windshield-crystallization:starting-price",
         "source": "luiza_camargo_whatsapp_2026_09_28",
-        "validation_status": "approved",
-        "visibility": "closer_and_public_site"
+        "validation_status": "approved"
       }
     },
     {

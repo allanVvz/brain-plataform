@@ -8,6 +8,22 @@ ativa v13 (`6b85bf7a-ab87-4f3b-a1d1-4a6b4ae4c05f`, draft `sha256:b23cea31…`).
 - O SDR **não fala preço**: diz que o atendente confirma. O closer (humano hoje,
   agêntico depois) tem os preços. Controle por **recuperação**, sem proof/guarda.
 - Funilaria, pintura, envelopamento e películas saem da LP **e** do SDR.
+- **Nenhum valor na página nem no SDR.** Os preços da Luiza ficam só registrados
+  no grafo (`offer.data.visibility: registered_only`) para serem religados
+  depois. A lavagem detalhada fica sem valor (o R$ 259,90 veio da Aura).
+
+## Regra de preço: produto × serviço
+
+- **Produto (varejo/atacado, ex.: Tock Fatal):** a oferta tem `channel`
+  (`varejo`/`atacado`); o SDR conhece o valor publicado e o closer pode dar
+  desconto.
+- **Serviço (ex.: Utzig):** não tem valor fixo nem canal. O SDR **nunca** conhece
+  o valor; responde que o atendente confirma depois da avaliação. O valor de
+  referência, quando o cliente informa, fica em `offer` com
+  `price_kind: service_reference` e `visibility: registered_only`: não vai para
+  a LP (o `menu.py` ignora essas ofertas) nem para o RAG do SDR (só FAQs viram
+  chunk, e as FAQs de serviço não citam valor).
+- A Tock não foi alterada por esta regra.
 
 ## Pronto (branch `feat/utzig-commercial-v15`, commit `f1205c1`)
 
@@ -17,18 +33,19 @@ ativa v13 (`6b85bf7a-ab87-4f3b-a1d1-4a6b4ae4c05f`, draft `sha256:b23cea31…`).
 - Setores: Limpeza e higienização · Brilho e correção · Proteção · Avaliação e
   orientação. 22 nós retirados (`metadata.retired_nodes`) e 52 arestas em
   `soft_disabled_edges`.
-- Preços da Luiza só nos `offer:` (`price_qualifier` `a_partir_de`/`valor_base`,
-  `channel: varejo`). As 40 FAQs recuperáveis pelo SDR não contêm valor.
-  As FAQs de preço antigas (vindas da Aurora/Aura) foram reescritas.
+- Preços da Luiza registrados nos `offer:` (`price_qualifier`
+  `a_partir_de`/`valor_base`, `visibility: registered_only`, sem `channel`).
+  As 40 FAQs recuperáveis pelo SDR não contêm valor. As FAQs de preço antigas
+  (vindas da Aurora/Aura) foram reescritas.
 - FAQs novas a partir do texto da Luiza: serviços, PPF (áreas, multimídia),
   tempos, avaliação/orçamento. `faq:utzig:services-not-offered` fica em
   `utzig-commercial-alignment-v15.pending-faqs.json` até confirmação.
 - Veículo e nome são da lead (`carry_over`); veículo não depende do serviço.
-- `menu.py` expõe `offer.qualifier`; o compilador indexa `aliases` e
+- `menu.py` ignora ofertas `registered_only`; o compilador indexa `aliases` e
   `question_aliases`; o preview da LP projeta catálogo e FAQs do candidato.
-- LP (`utzig-pages`, branch `feat/utzig-lp-v15`, commit `0b2c2a4`): 3 colunas,
-  "A partir de" só quando aplicável, sem "Catálogo completo"/"Seu objetivo"/
-  "Resultados" duplicado, CTA de WhatsApp nas FAQs e botão flutuante.
+- LP (`utzig-pages`, branch `feat/utzig-lp-v15`): 3 colunas **sem preços**, sem
+  "Catálogo completo"/"Seu objetivo"/"Resultados" duplicado, CTA de WhatsApp nas
+  FAQs e botão flutuante. Uma LP futura mais simples, sem preços, está prevista.
   Validado em build de preview (desktop e mobile, sem erros de página).
 
 ## Bloqueios para publicar
@@ -47,8 +64,8 @@ ativa v13 (`6b85bf7a-ab87-4f3b-a1d1-4a6b4ae4c05f`, draft `sha256:b23cea31…`).
 
 ## Confirmar com a Luiza / o Alemão
 
-1. Preço da lavagem detalhada/tradicional (o grafo ainda usa R$ 259,90, vindo da
-   referência Aura).
+1. Valor de referência da lavagem detalhada/tradicional, se houver (hoje sem
+   valor).
 2. Setor da hidratação de couros (hoje em Limpeza e higienização).
 3. Quais valores sem "a partir de" são fixos (higienização, couros, polimento
    comercial, faróis, PPF kit básico).
