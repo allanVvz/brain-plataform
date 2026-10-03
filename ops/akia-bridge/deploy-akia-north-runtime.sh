@@ -31,8 +31,10 @@ state_dir="$root/.deploy/akia/north-runtime"
 if [[ -n "$old_container" ]]; then
   old_image="$(docker inspect --format '{{.Config.Image}}' "$old_container")"
   [[ "$old_image" =~ @sha256:[0-9a-f]{64}$ && -s "$state_dir/current.env" && -s "$state_dir/current.image" && "$(cat "$state_dir/current.image")" == "$old_image" ]] || { echo 'existing runtime requires recorded rollback image/env' >&2; exit 2; }
+  [[ ! -L "$state_dir/current.env" && "$(stat -c '%a' "$state_dir/current.env")" == 600 ]] || { echo 'recorded runtime env must be private mode 600' >&2; exit 2; }
 fi
 printf 'AKIA_RELEASE_PLAN service=north-runtime mode=%s candidate=%s current=%s\n' "$mode" "$image" "${old_image:-none}"
+echo 'AKIA_RUNTIME_WORKER_PLAN=candidate_and_cutover_false rollback_original'
 # Dry-run performs no pull, container, file or native-session mutation.
 [[ "$mode" == --apply ]] || exit 0
 mkdir -p "$state_dir"
@@ -40,12 +42,10 @@ exec 9>"$state_dir/release.lock"
 flock -n 9 || { echo 'North runtime release already active' >&2; exit 1; }
 # Recheck after the lock: the plan must still describe the active container.
 [[ "$("${compose[@]}" ps -q north-runtime 2>/dev/null || true)" == "$old_container" ]] || { echo 'runtime changed during preflight' >&2; exit 1; }
+backup_dir="$(mktemp -d "$state_dir/release-XXXXXXXX")"
 release_env="$state_dir/candidate-$$.env"
-cp "$AKIA_NORTH_RUNTIME_ENV_FILE" "$release_env"
-export AKIA_NORTH_RUNTIME_ENV_FILE="$release_env"
 candidate="akia-north-runtime-candidate-$$"
 rollback_env="$state_dir/rollback-$$.env"
-[[ -z "$old_image" ]] || cp "$state_dir/current.env" "$rollback_env"
 cutover_started=false
 committed=false
 cleanup(){
@@ -61,9 +61,44 @@ cleanup(){
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+# Retain private originals/effective env and hashes even if the release fails.
+# Never print Config.Env or hashes of private files in public release logs.
+cp "$AKIA_NORTH_RUNTIME_ENV_FILE" "$backup_dir/input.env"
+chmod 600 "$backup_dir/input.env"
+if [[ -n "$old_image" ]]; then
+  cp "$state_dir/current.env" "$rollback_env"
+  cp "$rollback_env" "$backup_dir/original.env"
+  printf '%s\n' "$old_image" > "$backup_dir/original.image"
+  docker inspect --format '{{json .Config.Env}}' "$old_container" > "$backup_dir/effective-env.json"
+  chmod 600 "$rollback_env" "$backup_dir/original.env" "$backup_dir/original.image" "$backup_dir/effective-env.json"
+fi
+cp "$backup_dir/input.env" "$release_env"
+chmod 600 "$release_env"
+# Modify only the private candidate copy; original/rollback envs stay intact.
+# Compose run and Compose up both consume this same exported env_file path.
+python3 - "$release_env" <<'PY'
+import pathlib,re,sys
+p=pathlib.Path(sys.argv[1])
+lines=p.read_bytes().splitlines(keepends=True)
+lines=[line for line in lines if not re.match(rb'^\s*(?:export\s+)?NORTH_RUNTIME_COMMENT_EFFECTS_WORKER_ENABLED\s*=',line)]
+body=b''.join(lines)
+if body and not body.endswith(b'\n'):body+=b'\n'
+p.write_bytes(body+b'NORTH_RUNTIME_COMMENT_EFFECTS_WORKER_ENABLED=false\n')
+PY
+export AKIA_NORTH_RUNTIME_ENV_FILE="$release_env"
+# Fail before starting either container if a Compose environment override
+# would defeat the private env_file's worker flag.
+"${compose[@]}" config --format json | python3 -c 'import json,sys; e=json.load(sys.stdin)["services"]["north-runtime"]["environment"]; sys.exit(0 if e.get("NORTH_RUNTIME_COMMENT_EFFECTS_WORKER_ENABLED")=="false" else "runtime Compose worker must be false")'
+cp "$release_env" "$backup_dir/candidate.env"
+chmod 600 "$backup_dir/candidate.env"
+backup_files=(input.env candidate.env)
+[[ -z "$old_image" ]] || backup_files+=(original.env original.image effective-env.json)
+(cd "$backup_dir"; sha256sum "${backup_files[@]}" > SHA256SUMS)
+chmod 600 "$backup_dir/SHA256SUMS"
+printf 'AKIA_RUNTIME_ENV_BACKUP=private mode=600 path=%s\n' "$backup_dir"
 "${compose[@]}" pull north-runtime
 check_disk
-"${compose[@]}" run --no-deps -d -e NORTH_RUNTIME_COMMENT_EFFECTS_WORKER_ENABLED=false --name "$candidate" north-runtime >/dev/null
+"${compose[@]}" run --no-deps -d --name "$candidate" north-runtime >/dev/null
 wait_ready(){
   local container="$1" status
   for _ in $(seq 1 18); do
@@ -138,7 +173,11 @@ try {
 if(!process.exitCode)console.log('NORTH_NATIVE_CONTRACT=passed fixture_scope=agency business_mutations=0 revocation=verified');
 JS
 )"
-verify(){ wait_ready "$1" && docker exec -i "$1" node --input-type=module -e "$smoke" < "$AKIA_NORTH_RUNTIME_FIXTURE_FILE"; }
+worker_disabled(){
+  docker inspect --format '{{json .Config.Env}}' "$1" | python3 -c 'import json,sys; values=[v.split("=",1)[1] for v in json.load(sys.stdin) if v.startswith("NORTH_RUNTIME_COMMENT_EFFECTS_WORKER_ENABLED=")]; sys.exit(0 if values==["false"] else "runtime effective worker must be false")' || return 1
+  echo 'AKIA_RUNTIME_WORKER=verified_false'
+}
+verify(){ worker_disabled "$1" && wait_ready "$1" && docker exec -i "$1" node --input-type=module -e "$smoke" < "$AKIA_NORTH_RUNTIME_FIXTURE_FILE"; }
 verify "$candidate" || { echo 'candidate native contract failed; active runtime unchanged' >&2; exit 1; }
 check_disk
 rollback(){
@@ -151,6 +190,7 @@ rollback(){
   export AKIA_NORTH_RUNTIME_ENV_FILE="$rollback_env"
   "${compose[@]}" up -d --no-deps --force-recreate north-runtime || return 1
   wait_ready "$("${compose[@]}" ps -q north-runtime)" || return 1
+  docker inspect --format '{{json .Config.Env}}' "$("${compose[@]}" ps -q north-runtime)" | python3 -c 'import json,sys; expected=dict(v.split("=",1) for v in json.load(open(sys.argv[1]))); actual=dict(v.split("=",1) for v in json.load(sys.stdin)); sys.exit(0 if actual==expected else "runtime rollback effective env differs")' "$backup_dir/effective-env.json" || return 1
   cp "$rollback_env" "$state_dir/current.env" || return 1
   printf '%s\n' "$old_image" > "$state_dir/current.image" || return 1
   echo 'AKIA_RELEASE_ROLLBACK=healthy'

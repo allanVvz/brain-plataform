@@ -1,5 +1,5 @@
 """Pure env-override tests; never invokes Docker or connects to a service."""
-import json, pathlib, subprocess, sys, tempfile, unittest
+import json, pathlib, re, shutil, subprocess, sys, tempfile, unittest
 SOURCE=pathlib.Path(__file__).with_name('release-akia-service.sh').read_text().split("<<'PY'\n",1)[1].split('\nPY',1)[0]
 FLAGS=['NORTH_RUNTIME_COMMENTS_ENABLED','NORTH_RUNTIME_TASK_EDIT_ENABLED','NORTH_RUNTIME_CLIENT_EDIT_ENABLED','NORTH_RUNTIME_SETTINGS_ENABLED']
 class Controls(unittest.TestCase):
@@ -111,5 +111,48 @@ globalThis.fetch=async(url)=>{
   self.assertIn('NORTH_NATIVE_CONTRACT=passed',result.stdout)
   self.assertIn('revocation=verified',result.stdout)
   self.assertEqual(result.stderr,'')
+
+class NorthRuntimeWorkerRelease(unittest.TestCase):
+ script=pathlib.Path(__file__).with_name('deploy-akia-north-runtime.sh').read_text()
+ prepare=script.split("<<'PY'\n",1)[1].split('\nPY',1)[0]
+ def test_private_candidate_false_preserves_original_and_unrelated_bytes(self):
+  for worker in [b'',b'NORTH_RUNTIME_COMMENT_EFFECTS_WORKER_ENABLED=true\n',b'NORTH_RUNTIME_COMMENT_EFFECTS_WORKER_ENABLED="false"\n',b'export NORTH_RUNTIME_COMMENT_EFFECTS_WORKER_ENABLED = true\nNORTH_RUNTIME_COMMENT_EFFECTS_WORKER_ENABLED=false\n']:
+   with self.subTest(worker=worker),tempfile.TemporaryDirectory() as d:
+    root=pathlib.Path(d);original=root/'original.env';candidate=root/'candidate.env'
+    unrelated=b'PRIVATE_SECRET=a$b${c}\nOTHER="quoted value"\n'
+    original.write_bytes(unrelated+worker);original.chmod(0o600);shutil.copyfile(original,candidate);candidate.chmod(0o600)
+    result=subprocess.run([sys.executable,'-c',self.prepare,str(candidate)],capture_output=True)
+    self.assertEqual(result.returncode,0)
+    self.assertEqual(candidate.read_bytes(),unrelated+b'NORTH_RUNTIME_COMMENT_EFFECTS_WORKER_ENABLED=false\n')
+    self.assertEqual(original.read_bytes(),unrelated+worker)
+    self.assertEqual(candidate.stat().st_mode&0o777,0o600)
+    self.assertEqual(result.stdout+result.stderr,b'')
+ def worker_check(self,env):
+  function='worker_disabled(){'+self.script.split('worker_disabled(){',1)[1].split('\nverify(){',1)[0]
+  # Substitute only inspect's JSON transport. No Docker binary or stack runs.
+  function=function.replace('docker inspect --format \'{{json .Config.Env}}\' "$1"','cat "$TEST_ENV_JSON"')
+  with tempfile.TemporaryDirectory() as d:
+   p=pathlib.Path(d)/'env.json';p.write_text(json.dumps(env))
+   return subprocess.run(['bash','-c',function+'\nworker_disabled candidate'],env={'PATH':'/usr/bin:/bin','TEST_ENV_JSON':str(p)},capture_output=True,text=True)
+ def test_effective_worker_guard_denies_missing_true_and_duplicate_flags(self):
+  for values in [[],['true'],['false','true'],['false','false']]:
+   result=self.worker_check(['PRIVATE_SECRET=sentinel']+['NORTH_RUNTIME_COMMENT_EFFECTS_WORKER_ENABLED='+v for v in values])
+   self.assertNotEqual(result.returncode,0)
+   self.assertNotIn('verified_false',result.stdout)
+   self.assertNotIn('sentinel',result.stdout+result.stderr)
+ def test_effective_worker_guard_accepts_exact_false(self):
+  result=self.worker_check(['PRIVATE_SECRET=sentinel','NORTH_RUNTIME_COMMENT_EFFECTS_WORKER_ENABLED=false'])
+  self.assertEqual(result.returncode,0,result.stderr)
+  self.assertIn('AKIA_RUNTIME_WORKER=verified_false',result.stdout)
+  self.assertNotIn('sentinel',result.stdout+result.stderr)
+ def test_rollback_checks_original_effective_env_including_absent_worker(self):
+  line=next(line for line in self.script.splitlines() if 'runtime rollback effective env differs' in line)
+  code=re.search(r"python3 -c '([^']+)'",line).group(1)
+  with tempfile.TemporaryDirectory() as d:
+   p=pathlib.Path(d)/'original.json';original=['PRIVATE_SECRET=a$b','NORTH_RUNTIME_COMMENTS_ENABLED=true'];p.write_text(json.dumps(original))
+   for actual,expected_code in [(original,0),(original+['NORTH_RUNTIME_COMMENT_EFFECTS_WORKER_ENABLED=false'],1),(['PRIVATE_SECRET=changed'],1)]:
+    result=subprocess.run([sys.executable,'-c',code,str(p)],input=json.dumps(actual),capture_output=True,text=True)
+    self.assertEqual(result.returncode,expected_code)
+    self.assertNotIn('PRIVATE_SECRET',result.stdout+result.stderr)
 
 if __name__=='__main__':unittest.main()
