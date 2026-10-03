@@ -52,6 +52,11 @@ class Controls(unittest.TestCase):
   c,r=self.render('operations-api',old,desired,False)
   for key in FLAGS:self.assertEqual(c['environment'][key],old[key])
   self.assertEqual(r['environment'][FLAGS[1]],'false')
+ def test_operations_cron_allows_only_audited_dry_run(self):
+  old={**dict.fromkeys(FLAGS,'true'),'OPERATIONS_NORTH_DELEGATION_ENABLED':'true','NORTH_SHARED_TRILHAS_APPROVED':'true','OPERATIONS_CRON_ENABLED':'true','OPERATIONS_CRON_DRY_RUN':'true','NORTH_CANONICAL_EXECUTION_ENABLED':'false'}
+  self.assertIsNotNone(self.render('operations-api',old,old,False))
+  self.assertIsNone(self.render('operations-api',old,{**old,'OPERATIONS_CRON_DRY_RUN':'false'},False))
+  self.assertIsNone(self.render('operations-api',old,{**old,'NORTH_CANONICAL_EXECUTION_ENABLED':'true'},False))
 class NativeGateDiagnostics(unittest.TestCase):
  def smoke(self, failure):
   fixture={'approved':True,'isolated':True,'agency_slug':'north',

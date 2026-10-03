@@ -83,7 +83,7 @@ elif unit=='operations-api':
    desired[key]=value
  else:
   assert all(desired.get(k)=='false' for k in flags), 'stage Ops before planned activation'
-assert desired.get('OPERATIONS_CRON_ENABLED')!='true'
+assert desired.get('OPERATIONS_CRON_ENABLED')!='true' or desired.get('OPERATIONS_CRON_DRY_RUN')=='true', 'canonical cron execution must remain disabled'
 assert desired.get('NORTH_CANONICAL_EXECUTION_ENABLED')!='true'
 def save(name,image,env):
  # Compose interpolates strings in JSON/YAML too: escape literal dollars.
