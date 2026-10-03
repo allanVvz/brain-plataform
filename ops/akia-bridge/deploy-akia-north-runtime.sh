@@ -92,7 +92,7 @@ try {
  check(login.ok);stage='brain_cookie';const cookie=login.headers.getSetCookie().find(v=>v.startsWith('ai_brain_session='))?.split(';')[0];check(cookie);
  const token=cookie.slice('ai_brain_session='.length);check(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token));
  stage='brain_identity';const me=await fetch(control+'/auth/me',{headers:{cookie},redirect:'error',signal:AbortSignal.timeout(15000)});check(me.ok);const session=await me.json();
- check(session.user?.id===f.brainId&&session.user.role==='user'&&session.user.account_type==='agency'&&Array.isArray(session.personas)&&session.personas.length===0&&Array.isArray(session.navigation?.allowed_portals)&&session.navigation.allowed_portals.includes('north'));
+ check(session.user?.id===f.brainId&&session.user.role==='user'&&session.user.account_type==='agency'&&Array.isArray(session.personas)&&session.personas.length===0&&session.navigation?.surface==='operations'&&session.navigation?.home_url==='/north/admin');
  stage='brain_claims';const claims=JSON.parse(Buffer.from(token.split('.')[0],'base64url').toString());check(claims.sub===f.brainId&&Number.isSafeInteger(claims.exp)&&claims.exp*1000>Date.now());
  const fingerprint=createHmac('sha256',process.env.BRAIN_INTERNAL_AUTH_SECRET).update('north-delegation-v1\0'+token,'ascii').digest('hex');
  principal={userId:f.brainId,tokenFingerprint:fingerprint,brainExpiresAt:claims.exp*1000,expiresAt:Math.min(Date.now()+90000,claims.exp*1000)};
@@ -102,6 +102,10 @@ try {
  stage='delegation_scope';
  const now=Math.floor(Date.now()/1000),attestation={iss:'brain-gateway',aud:'operations-api',sub:principal.userId,portal_scope:'north',iat:now,exp:Math.min(now+60,claims.exp),north_delegation:{token_fingerprint:principal.tokenFingerprint,brain_expires_at:claims.exp}};
  const encoded=Buffer.from(JSON.stringify(attestation)).toString('base64url');
+ stage='portal_access';
+ const portalAccess=await fetch(new URL('/api/operations/portal-access',process.env.NORTH_OPERATIONS_PRIVATE_URL),{headers:{'x-brain-principal':encoded,'x-brain-principal-signature':createHmac('sha256',process.env.BRAIN_INTERNAL_AUTH_SECRET).update(encoded,'ascii').digest('hex')},redirect:'error',signal:AbortSignal.timeout(10000)});
+ const access=await portalAccess.json();check(portalAccess.ok&&access.portal_scope==='north'&&access.allowed===true);
+ stage='delegation_scope';
  const operationsResponse=await fetch(new URL('/internal/v1/north-delegations/context',process.env.NORTH_OPERATIONS_PRIVATE_URL),{method:'POST',headers:{'Content-Type':'application/json','x-brain-principal':encoded,'x-brain-principal-signature':createHmac('sha256',process.env.BRAIN_INTERNAL_AUTH_SECRET).update(encoded,'ascii').digest('hex')},body:'{}',redirect:'error',signal:AbortSignal.timeout(10000)});
  const authorized=await operationsResponse.json(),expected=authorized.allowedClientIds;
  check(operationsResponse.ok&&authorized.brainUserId===f.brainId&&authorized.northProfileId===f.northId&&Array.isArray(expected)&&expected.length>0&&expected.every(uuid)&&new Set(expected).size===expected.length);

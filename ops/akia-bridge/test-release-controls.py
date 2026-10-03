@@ -87,7 +87,8 @@ globalThis.fetch=async(url)=>{
   const token=Buffer.from(JSON.stringify({sub:testFixture.brainId,exp:Math.floor(Date.now()/1000)+300})).toString('base64url')+'.signature';
   return new Response('{}',{headers:{'Set-Cookie':'ai_brain_session='+token+'; HttpOnly'}});
  }
- if(path.endsWith('/auth/me'))return Response.json({user:{id:testFixture.brainId,role:'user',account_type:'agency'},personas:[],navigation:{allowed_portals:['north']}});
+ if(path.endsWith('/auth/me'))return Response.json({user:{id:testFixture.brainId,role:'user',account_type:'agency'},personas:[],navigation:{surface:'operations',home_url:'/north/admin'}});
+ if(path.endsWith('/portal-access'))return Response.json({portal_scope:'north',allowed:testFailure!=='portal_access'});
  if(path.endsWith('/context'))return Response.json({brainUserId:testFixture.brainId,northProfileId:testFixture.northId,allowedClientIds:[testFixture.clientId]});
  if(path.endsWith('/revoke')){testRevoked=true;console.log('TEST_REVOCATION=called');return Response.json({revoked:true});}
  throw Error('PRIVATE_UNEXPECTED_URL_SENTINEL');
@@ -96,7 +97,7 @@ globalThis.fetch=async(url)=>{
   source=source.replace("import {createAdapterFromEnvironment} from '/app/dist/src/adapter.js';",stub)
   return subprocess.run(['node','--input-type=module','-e',source],input=json.dumps(fixture),capture_output=True,text=True)
  def test_fixed_failure_stages_and_cleanup_without_secret_logging(self):
-  for stage in ['delegation_context','native_session']:
+  for stage in ['delegation_context','native_session','portal_access']:
    with self.subTest(stage=stage):
     result=self.smoke(stage)
     self.assertEqual(result.returncode,1)
