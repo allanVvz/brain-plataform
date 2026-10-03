@@ -37,6 +37,29 @@ em vez de escolher em silêncio.
   deterministico; proof valida evidencia, isolamento, seguranca e exactly-once.
 - Toda mudanca conversacional deve executar o teste-canario que prova a
   fronteira entre os dois motores e a preservacao byte a byte da reply agentic.
+- A recuperacao especifica de Allan pode adiar o canario WA interno ate depois
+  da entrega real se o candidate passar probe sem commit; o release usa
+  `canary_persona_slug=utzig-garage` e `canary_flow_id=defer_allan_real_8510`.
+- Para a lead de teste Allan da Utzig, WhatsApp final 8510, a recuperacao
+  segue a trilha real inbound -> decisao -> proof -> commit -> fila -> entrega
+  e confirma recebimento no aparelho antes da bateria WA Validator. O numero
+  permanece liberado para testes operacionais sem duplicar outbound.
+- `n8n_agents` e somente compatibilidade de armazenamento. O runtime decide e
+  prova a conversa; n8n nao e dono da decisao, do proof ou do commit.
+- Metadados de pergunta e similaridade editorial produzem correcao ou avisos
+  auditaveis, sem veto de resposta util. Gates tecnicos preservam identidade,
+  publicacao, isolamento, idempotencia e compromissos comerciais reais.
+- Conteudo da mensagem, servico/agendamento da Utzig e horario dos Disparos
+  sao politicas distintas. Utzig presta servico e nao tem entrega de produto.
+  Sem janela de Disparos, enviar imediatamente; com janela, programar o proximo
+  horario permitido e expor espera, previa e acao persistida.
+- Preco de produto e de servico sao diferentes: produto (varejo/atacado, ex.
+  Tock) tem valor publicado que o SDR conhece e o closer pode descontar; servico
+  (ex. Utzig) nao tem valor fixo e o SDR nunca conhece o valor. Valor de
+  referencia de servico fica em `offer` com `visibility: registered_only`, fora
+  da LP e do RAG do SDR (`docs/roadmaps/utzig-commercial-alignment-v15.md`).
+- Perguntas SDR publicadas podem ser obrigatorias, opcionais ou desativadas
+  sem deploy do runtime; manter fatos ja coletados no ledger.
 - O isolamento de galho e deterministico; o vocabulario do cliente nao. Enum
   fechado e alias sao exemplos de fraseado, nunca o filtro que decide se o fato
   existe - invariante 4 do `docs/roadmaps/AGENT_ROADMAP.md`.

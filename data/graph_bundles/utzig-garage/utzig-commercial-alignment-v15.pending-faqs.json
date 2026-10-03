@@ -1,0 +1,47 @@
+[
+  {
+    "id": "faq:utzig:services-not-offered",
+    "node_type": "faq",
+    "slug": "faq-utzig-services-not-offered",
+    "status": "pending_validation",
+    "title": "Vocês fazem funilaria, pintura, envelopamento ou película?",
+    "summary": "Não. A Utzig trabalha com limpeza, brilho e correção e proteção da pintura e do interior.",
+    "tags": [],
+    "data": {
+      "question": "Vocês fazem funilaria, pintura, envelopamento ou película?",
+      "answer": "Não. A Utzig trabalha com limpeza, brilho e correção e proteção da pintura e do interior.",
+      "question_aliases": [
+        "fazem funilaria",
+        "fazem pintura",
+        "fazem envelopamento",
+        "colocam insulfilm",
+        "película nos vidros"
+      ],
+      "aliases": [
+        "fazem funilaria",
+        "fazem pintura",
+        "fazem envelopamento",
+        "colocam insulfilm",
+        "película nos vidros"
+      ],
+      "claims": [
+        {
+          "claim_type": "public_information",
+          "evidence_node_ids": [
+            "faq:utzig:services-not-offered"
+          ],
+          "policy": {
+            "mode": "informational"
+          }
+        }
+      ],
+      "graph_json_node_id": "faq:utzig:services-not-offered",
+      "source": "luiza_camargo_whatsapp_2026_09_28",
+      "validation_status": "pending_validation",
+      "capabilities": {
+        "global_context": true
+      }
+    },
+    "parent": "rule:human-handoff"
+  }
+]

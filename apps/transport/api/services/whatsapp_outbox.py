@@ -241,7 +241,9 @@ def prepare_outbound_envelope(
         lead=lead, binding=binding, text=text, correlation_id=correlation_id,
     )
     effective_metadata = dict(metadata or {})
-    if effective_metadata.get("published_business_hours") is None:
+    # Runtime pins an absent delivery window as explicit null. Only a missing
+    # key requires consulting control-plane; appointment policy is separate.
+    if "published_business_hours" not in effective_metadata:
         try:
             effective_metadata.update(control_plane_client.published_outbound_policy(str(lead["persona_id"])))
         except Exception as exc:

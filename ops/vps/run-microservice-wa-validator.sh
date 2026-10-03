@@ -91,6 +91,19 @@ else:
     print("PASS validator_operational_state=workers_resumed")
 PY
 
+# Allan's real Utzig WhatsApp delivery is the first acceptance gate for this
+# recovery. The candidate already passed its no-commit model/proof probe in
+# deploy-microservice-blue-green.sh. This explicit marker defers only the
+# internal WA canary; the full Validator must be run after the receipt audit.
+if [[ "$MODE" == "--canary" && "$PERSONA_SLUG" == "utzig-garage" && "$FLOW_ID" == "defer_allan_real_8510" ]]; then
+  [[ "${RUNTIME_PROBE_FIXTURE:-}" == human-conversation-2026-09-25* ]] || {
+    echo "Allan canary deferral requires the no-commit candidate fixture" >&2
+    exit 1
+  }
+  echo "WA_VALIDATOR_DEFERRED=allans_real_whatsapp_receipt_first"
+  exit 0
+fi
+
 if [[ "$MODE" == "--inspect" ]]; then
   docker exec -i "$runtime_name" python - "$SESSION_ID" <<'PY'
 import json

@@ -99,6 +99,25 @@ def test_manual_envelope_without_published_hours_remains_sendable(monkeypatch):
     assert envelope["message"]["metadata"]["published_business_hours"] is None
 
 
+def test_runtime_pinned_absent_delivery_window_skips_policy_lookup(monkeypatch):
+    monkeypatch.setattr(whatsapp_outbox, "resolve_lead_binding", lambda lead: {"id": "binding"})
+    monkeypatch.setattr(whatsapp_outbox, "_recipient_for_lead", lambda lead: "5511999999999")
+    monkeypatch.setattr(whatsapp_outbox, "_observe_duplicate_content", lambda **_: None)
+    monkeypatch.setattr(
+        whatsapp_outbox.control_plane_client, "published_outbound_policy",
+        lambda _persona_id: pytest.fail("runtime already pinned absence of delivery window"),
+    )
+
+    envelope = whatsapp_outbox.prepare_outbound_envelope(
+        lead={"id": 7, "persona_id": "persona"}, text="Resposta do SDR", sender_type="agent",
+        message_id="agent:no-window", correlation_id="agent:no-window",
+        initial_status="preview_ready", metadata={"published_business_hours": None},
+    )
+
+    assert envelope["buffer"]["status"] == "preview_ready"
+    assert "published_business_hours" not in envelope["buffer"]["payload"]
+
+
 def test_preview_envelope_remains_inert_until_operator_sends(monkeypatch):
     policy = {
         "timezone": "America/Sao_Paulo", "start": "08:00", "end": "20:00",

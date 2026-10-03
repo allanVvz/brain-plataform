@@ -19,7 +19,7 @@ from typing import Any, Callable, Iterable
 from services import graph_conversation_contract, supabase_client
 
 
-COMPILER_VERSION = "graph-compiler-v3.6.5"
+COMPILER_VERSION = "graph-compiler-v3.6.6"
 FAQ_PROJECTION_CONTRACT = "v1"
 LOCAL_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 EMBEDDING_DIMENSION = 1536
@@ -819,6 +819,14 @@ def compile_graph(
     appointment_policy = (
         appointment_policy if isinstance(appointment_policy, dict) else {}
     )
+    qualification_policy = conversation_policy.get("qualification")
+    qualification_policy = qualification_policy if isinstance(qualification_policy, dict) else {}
+    appointment_modes = appointment_policy.get("question_modes")
+    qualification_modes = qualification_policy.get("question_modes")
+    configured_modes = {
+        **(appointment_modes if isinstance(appointment_modes, dict) else {}),
+        **(qualification_modes if isinstance(qualification_modes, dict) else {}),
+    }
     embedded_faq_ids = {
         edge["source"]
         for edge in edges
@@ -905,6 +913,22 @@ def compile_graph(
                     errors.append(f"ambiguous_field_declaration:{anchor}:{field['key']}")
                     continue
                 fields_by_key[field["key"]] = field
+        # The persona-level map is the authoring switch for the SDR question
+        # set. Keep declarations in the contract (including disabled ones) so
+        # collected facts remain recognizable; only required_fields and the
+        # question eligibility metadata change.
+        for field_key, mode in configured_modes.items():
+            field_key = str(field_key)
+            if field_key not in fields_by_key:
+                continue
+            mode = str(mode or "").strip().lower()
+            if mode not in {"required", "optional", "disabled"}:
+                errors.append(f"question_mode_invalid:{anchor}:{field_key}:{mode}")
+                continue
+            fields_by_key[field_key]["question_mode"] = mode
+            fields_by_key[field_key]["required"] = mode == "required"
+        for field in fields_by_key.values():
+            field.setdefault("question_mode", "required" if field["required"] else "optional")
         # Question references are explicit closure members, but a question
         # already rooted below another anchor cannot be imported into this
         # branch. Root-level questions may be shared deliberately.
@@ -1108,6 +1132,7 @@ def compile_graph(
                     "field_key": field["key"],
                     "text": _question_text(node_by_id[field["question_node_id"]]),
                     "paraphrases": _question_paraphrases(node_by_id[field["question_node_id"]]),
+                    "question_mode": field.get("question_mode", "required"),
                     "depends_on": field["depends_on"],
                     "condition": field.get("condition"),
                 }
@@ -1141,6 +1166,15 @@ def compile_graph(
             "compiler_version": COMPILER_VERSION,
         }
         contracts[anchor] = contract
+
+    declared_contract_fields = {
+        str(field.get("key") or "")
+        for contract in contracts.values()
+        for field in contract.get("fields") or []
+    }
+    for field_key in configured_modes:
+        if str(field_key) not in declared_contract_fields:
+            errors.append(f"question_mode_field_not_declared:{field_key}")
 
     # Cross-branch field consistency check: same field key should have
     # consistent owner_node_id across branches unless explicitly scoped to branch.
@@ -1637,10 +1671,14 @@ def compile_persona_publication(
                             **({
                                 "faq_question": _faq_question_answer(node)[0],
                                 "faq_answer": _faq_question_answer(node)[1],
-                                "faq_aliases": [
-                                    str(alias) for alias in (node.get("data") or {}).get("aliases") or []
+                                # The ranker matches these exactly and by keyword;
+                                # authors write customer wording in either key.
+                                "faq_aliases": list(dict.fromkeys(
+                                    str(alias).strip()
+                                    for key in ("aliases", "question_aliases")
+                                    for alias in (node.get("data") or {}).get(key) or []
                                     if str(alias).strip()
-                                ],
+                                )),
                                 "faq_projection_contract": FAQ_PROJECTION_CONTRACT,
                             } if chunk["kind"] == "faq" else {}),
                         },
