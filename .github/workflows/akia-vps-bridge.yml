@@ -136,7 +136,7 @@ jobs:
           GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
           AKIA_PORTAL_PATH_HOST: api.vzforeal.com
-          AKIA_PORTAL_PATH_ORIGINS: '{"north":["https://north-portal.pages.dev","https://test.north-portal.pages.dev","https://north-original-review.north-portal.pages.dev"],"south":"https://south-portal.pages.dev","akia":"https://akia-os.pages.dev"}'
+          AKIA_PORTAL_PATH_ORIGINS: '{"north":["https://north-portal.pages.dev","https://test.north-portal.pages.dev","https://north-original-review.north-portal.pages.dev"],"south":"https://south-portal.pages.dev","akia":["https://akia-os.pages.dev","https://test.akia-os.pages.dev"]}'
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
