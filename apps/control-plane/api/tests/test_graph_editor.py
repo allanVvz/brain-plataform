@@ -45,12 +45,6 @@ def _utzig_acceptance_ops(publication: dict) -> list[dict]:
     persona = _persona(base)
     ops: list[dict] = [{"op": "update_node", "node_id": persona["id"], "patch": {
         "data.conversation_policy.qualification.question_modes": {key: "disabled" for key in OFF}}}]
-    for node in base["nodes"]:
-        for section in ("completion", "booking"):
-            declared = ((node.get("data") or {}).get(section) or {}).get("required_fields")
-            if isinstance(declared, list) and "objective" in declared:
-                ops.append({"op": "update_node", "node_id": node["id"], "patch": {
-                    f"data.{section}.required_fields": [key for key in declared if key != "objective"]}})
     field = {"key": "endereco_cliente", "required": False, "priority": 0.5, "scope": "persona",
              "depends_on": [], "question_node_id": ADDRESS, "owner_node_id": persona["id"],
              "accepted_statuses": ["known"], "overwrite_policy": "explicit_correction",
@@ -96,9 +90,13 @@ def test_utzig_acceptance_plan_keeps_only_four_questions_on():
     for contract in result["contracts"]:
         address = next(field for field in contract["fields"] if field["key"] == "endereco_cliente")
         assert address["text"].startswith("Qual é o seu endereço?") and address["required"] is False
+    lists = [((node.get("data") or {}).get(section) or {}).get("required_fields")
+             for node in result["bundle"]["nodes"] for section in ("completion", "booking")]
+    named = {key for items in lists if isinstance(items, list) for key in items}
+    assert named <= {"servico", "modelo_veiculo"}  # only declared, active questions remain
 
 
-def test_disabled_questions_leave_explicit_required_lists():
+def test_required_lists_only_name_declared_questions_that_are_on():
     publication = _publication()
     persona = _persona(graph_editor.bundle_from_publication(publication))
     edited = graph_editor.apply_operations(graph_editor.bundle_from_publication(publication), [
@@ -108,7 +106,10 @@ def test_disabled_questions_leave_explicit_required_lists():
              for node in edited["nodes"] for section in ("completion", "booking")]
     declared = [items for items in lists if isinstance(items, list)]
     assert declared and all("condicao" not in items for items in declared)
-    assert any("objective" in items for items in declared)  # undeclared keys are not dropped silently
+    # "objective" has a question node but no declared field: it can never be
+    # collected, so it leaves the lists the model reads.
+    assert all("objective" not in items for items in declared)
+    assert any("servico" in items for items in declared)
 
 
 @pytest.mark.parametrize("operation, error", [
