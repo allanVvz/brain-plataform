@@ -123,15 +123,10 @@ def graph_bundle_view_get(
 
 # ── Graph editor (akia/docs/architecture/engenharia-de-grafo.md) ─────────────
 
-class EditorPlanBody(BaseModel):
+class EditorSaveBody(BaseModel):
     persona_slug: str = Field(min_length=1, max_length=128)
     base_publication_id: str = Field(min_length=1, max_length=64)
-    operations: list[dict] = Field(min_length=1, max_length=200)
-
-
-class EditorPublishBody(EditorPlanBody):
-    draft_checksum: str = Field(min_length=8, max_length=128)
-    runtime_checksum: str = Field(min_length=8, max_length=128)
+    changes: list[dict] = Field(min_length=1, max_length=200)
     idempotency_key: str = Field(min_length=8, max_length=128)
 
 
@@ -146,6 +141,23 @@ def _editor_http_error(exc: Exception) -> HTTPException:
     if isinstance(exc, graph_editor.GraphEditorError) and str(exc) in {"persona_not_found", "active_publication_not_found"}:
         return HTTPException(status_code=404, detail=str(exc))
     return HTTPException(status_code=422, detail=str(exc))
+
+
+def _editor_save_error(exc: Exception) -> HTTPException:
+    """Save failures always carry {errors: [{code, message}]} in plain Portuguese."""
+    if isinstance(exc, graph_editor.GraphEditorRejected):
+        return HTTPException(status_code=422, detail={"errors": exc.errors})
+    if isinstance(exc, graph_editor.GraphEditorConflict):
+        return HTTPException(status_code=409, detail={"errors": graph_editor.readable_errors([str(exc)])})
+    if isinstance(exc, graph_editor.GraphEditorError) and str(exc) in {"persona_not_found", "active_publication_not_found"}:
+        return HTTPException(status_code=404, detail={"errors": graph_editor.readable_errors([str(exc)])})
+    if isinstance(exc, (GraphBundlePublishError, graph_editor.GraphEditorError)):
+        # Staging or activation failed; the base publication is active again.
+        return HTTPException(status_code=422, detail={"errors": [{
+            "code": "publication_failed",
+            "message": f"A publicação falhou e a versão anterior continua ativa ({str(exc).split(':')[0]}).",
+        }]})
+    return HTTPException(status_code=422, detail={"errors": graph_editor.readable_errors([str(exc)])})
 
 
 def _assert_editor_publisher(request: Request, persona_slug: str) -> str:
@@ -163,37 +175,22 @@ def graph_editor_get(request: Request, persona_slug: str = Query(..., min_length
     try:
         publication = graph_editor.active_publication(persona_slug)
         view = graph_editor.editor_view(publication)
-        view["previous_publication"] = graph_editor.previous_publication(persona_slug, str(publication.get("id")))
-        return view
+        previous = graph_editor.previous_publication(persona_slug, str(publication.get("id")))
+        return {"publication": view.pop("publication"), "previous_publication": previous, **view}
     except (graph_editor.GraphEditorError, ValueError) as exc:
         raise _editor_http_error(exc) from exc
 
 
-@router.post("/editor/plan")
-def graph_editor_plan(body: EditorPlanBody, request: Request):
-    auth_service.assert_persona_capability(request, "edit", persona_slug=body.persona_slug)
-    try:
-        publication = graph_editor.active_publication(body.persona_slug)
-        if str(publication.get("id")) != body.base_publication_id:
-            raise graph_editor.GraphEditorConflict(f"base_not_active:{body.base_publication_id}:{publication.get('id')}")
-        result = graph_editor.plan(publication, body.operations)
-    except (graph_editor.GraphEditorError, ValueError) as exc:
-        raise _editor_http_error(exc) from exc
-    result.pop("bundle", None)
-    return result
-
-
-@router.post("/editor/publish")
-def graph_editor_publish(body: EditorPublishBody, request: Request):
+@router.post("/editor/save")
+def graph_editor_save(body: EditorSaveBody, request: Request):
     actor = _assert_editor_publisher(request, body.persona_slug)
     try:
-        return graph_editor.publish(
+        return graph_editor.save(
             persona_slug=body.persona_slug, base_publication_id=body.base_publication_id,
-            operations=body.operations, draft_checksum=body.draft_checksum,
-            runtime_checksum=body.runtime_checksum, actor=actor, idempotency_key=body.idempotency_key,
+            changes=body.changes, actor=actor, idempotency_key=body.idempotency_key,
         )
     except (graph_editor.GraphEditorError, GraphBundlePublishError, ValueError) as exc:
-        raise _editor_http_error(exc) from exc
+        raise _editor_save_error(exc) from exc
 
 
 @router.post("/editor/revert")
