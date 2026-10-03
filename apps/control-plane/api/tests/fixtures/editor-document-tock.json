@@ -1,0 +1,2043 @@
+{
+ "_source": "Trimmed from the active tock-fatal publication v38 (sha256:3aa4cd2d4a7c50389534ab9cb7c372474030b3852eaaa4c851fc8b7f14d6a28a), exported read-only on 2026-10-03: only what journey_view reads. 'journey' is the frozen portal fixture apps/portal-web/tests/fixtures/editor-journey-tock.json (akia). Money values redacted.",
+ "document": {
+  "persona": {
+   "id": "4acb2739-127e-4143-acf5-f5c3ea1aaa98",
+   "slug": "tock-fatal"
+  },
+  "compiler_version": "graph-compiler-v3.6.5",
+  "nodes": [
+   {
+    "id": "audience:tock-reseller",
+    "node_type": "audience",
+    "title": "Atacado / revenda",
+    "status": "validated",
+    "summary": "Pessoa interessada em avaliar peças para revenda.",
+    "data": {
+     "qualification": {
+      "fields": [
+       {
+        "key": "purchase_profile",
+        "scope": "branch",
+        "required": true,
+        "validation": {
+         "mode": "enum",
+         "values": [
+          {
+           "value": "uso-proprio-varejo",
+           "aliases": [
+            "uso próprio",
+            "pra mim",
+            "varejo",
+            "comprar para mim"
+           ]
+          },
+          {
+           "value": "atacado-revenda",
+           "aliases": [
+            "revenda",
+            "revender",
+            "atacado",
+            "minha loja",
+            "empreender"
+           ]
+          }
+         ]
+        },
+        "value_schema": {
+         "type": "string",
+         "minLength": 2
+        },
+        "owner_node_id": "audience:tock-reseller",
+        "question_node_id": "faq:tock-purchase-profile",
+        "accepted_statuses": [
+         "known"
+        ]
+       },
+       {
+        "key": "resale_stage",
+        "scope": "branch",
+        "required": true,
+        "depends_on": [
+         "purchase_profile"
+        ],
+        "validation": {
+         "mode": "schema"
+        },
+        "value_schema": {
+         "type": "string",
+         "minLength": 2
+        },
+        "owner_node_id": "audience:tock-reseller",
+        "question_node_id": "faq:tock-reseller-stage",
+        "accepted_statuses": [
+         "known"
+        ]
+       },
+       {
+        "key": "volume_interest",
+        "scope": "branch",
+        "required": true,
+        "depends_on": [
+         "resale_stage"
+        ],
+        "validation": {
+         "mode": "schema"
+        },
+        "value_schema": {
+         "type": "string",
+         "minLength": 2
+        },
+        "owner_node_id": "audience:tock-reseller",
+        "question_node_id": "faq:tock-reseller-volume",
+        "accepted_statuses": [
+         "known",
+         "unknown"
+        ]
+       }
+      ]
+     }
+    }
+   },
+   {
+    "id": "audience:tock-retail",
+    "node_type": "audience",
+    "title": "Uso próprio / varejo",
+    "status": "validated",
+    "summary": "Pessoa interessada em peças para uso próprio.",
+    "data": {
+     "qualification": {
+      "fields": [
+       {
+        "key": "purchase_profile",
+        "scope": "branch",
+        "required": true,
+        "validation": {
+         "mode": "enum",
+         "values": [
+          {
+           "value": "uso-proprio-varejo",
+           "aliases": [
+            "uso próprio",
+            "pra mim",
+            "varejo",
+            "comprar para mim"
+           ]
+          },
+          {
+           "value": "atacado-revenda",
+           "aliases": [
+            "revenda",
+            "revender",
+            "atacado",
+            "minha loja",
+            "empreender"
+           ]
+          }
+         ]
+        },
+        "value_schema": {
+         "type": "string",
+         "minLength": 2
+        },
+        "owner_node_id": "audience:tock-retail",
+        "question_node_id": "faq:tock-purchase-profile",
+        "accepted_statuses": [
+         "known"
+        ]
+       },
+       {
+        "key": "retail_need",
+        "scope": "branch",
+        "required": true,
+        "depends_on": [
+         "purchase_profile"
+        ],
+        "validation": {
+         "mode": "schema",
+         "acknowledgement_requires_fact": true,
+         "extraction_required_when_expected": true
+        },
+        "value_schema": {
+         "type": "string",
+         "minLength": 2
+        },
+        "owner_node_id": "audience:tock-retail",
+        "question_node_id": "faq:tock-retail-need",
+        "accepted_statuses": [
+         "known"
+        ]
+       },
+       {
+        "key": "retail_style",
+        "scope": "branch",
+        "required": true,
+        "depends_on": [
+         "retail_need"
+        ],
+        "validation": {
+         "mode": "schema",
+         "acknowledgement_requires_fact": true,
+         "extraction_required_when_expected": true
+        },
+        "value_schema": {
+         "type": "string",
+         "minLength": 2
+        },
+        "owner_node_id": "audience:tock-retail",
+        "question_node_id": "faq:tock-retail-style",
+        "accepted_statuses": [
+         "known",
+         "unknown"
+        ]
+       }
+      ]
+     }
+    }
+   },
+   {
+    "id": "campaign:tock-whatsapp-qualification",
+    "node_type": "campaign",
+    "title": "Qualificação WhatsApp",
+    "status": "validated",
+    "summary": "Campanha SDR de teste interno, sem disparo ou transporte WhatsApp real.",
+    "data": {}
+   },
+   {
+    "id": "faq:tock-customer-name",
+    "node_type": "faq",
+    "title": "Nome da pessoa",
+    "status": "approved",
+    "summary": "Como você prefere que eu te chame?",
+    "data": {
+     "question": "Como você prefere que eu te chame?"
+    }
+   },
+   {
+    "id": "faq:tock-fulfillment-preference",
+    "node_type": "faq",
+    "title": "Preferência de recebimento",
+    "status": "approved",
+    "summary": "Você prefere receber por envio ou visitar a loja física?",
+    "data": {
+     "question": "Você prefere receber por envio ou visitar a loja física?"
+    }
+   },
+   {
+    "id": "faq:tock-purchase-profile",
+    "node_type": "faq",
+    "title": "Perfil de compra",
+    "status": "approved",
+    "summary": "Pergunta que seleciona o caminho de atendimento.",
+    "data": {
+     "question": "Você procura para uso próprio ou para revender?"
+    }
+   },
+   {
+    "id": "faq:tock-reseller-stage",
+    "node_type": "faq",
+    "title": "Estágio da revenda",
+    "status": "approved",
+    "summary": "Qualifica o momento do interesse de revenda.",
+    "data": {
+     "question": "Você já revende ou está começando agora?"
+    }
+   },
+   {
+    "id": "faq:tock-reseller-volume",
+    "node_type": "faq",
+    "title": "Interesse de volume",
+    "status": "approved",
+    "summary": "Pergunta aberta que não presume pedido mínimo.",
+    "data": {
+     "question": "Que tipo de volume você pretende avaliar para revenda?"
+    }
+   },
+   {
+    "id": "faq:tock-retail-need",
+    "node_type": "faq",
+    "title": "Necessidade de uso próprio",
+    "status": "approved",
+    "summary": "Qualifica o interesse sem presumir um produto.",
+    "data": {
+     "question": "O que você está procurando para uso próprio?"
+    }
+   },
+   {
+    "id": "faq:tock-retail-style",
+    "node_type": "faq",
+    "title": "Preferência de estilo",
+    "status": "approved",
+    "summary": "Pergunta aberta de preferência, sem afirmar catálogo ou disponibilidade.",
+    "data": {
+     "question": "Você tem algum estilo ou ocasião em mente?"
+    }
+   },
+   {
+    "id": "faq:tock-sales-readiness",
+    "node_type": "faq",
+    "title": "Momento da compra",
+    "status": "approved",
+    "summary": "Você está conhecendo as opções, comparando ou já quer avançar com a compra?",
+    "data": {
+     "question": "Você está conhecendo as opções, comparando ou já quer avançar com a compra?"
+    }
+   },
+   {
+    "id": "persona:tock-fatal",
+    "node_type": "persona",
+    "title": "Tock Fatal",
+    "status": "validated",
+    "summary": "Persona comercial em validação interna para qualificar interesse de uso próprio ou revenda.",
+    "data": {
+     "conversation_policy": {
+      "opening": {
+       "request_customer_name": "once_after_purchase_profile_is_understood",
+       "self_introduction_identity": "Vitória, assistente virtual com inteligência artificial da Tock Fatal",
+       "first_reply_required_elements": [
+        "nome_vitoria",
+        "assistente_virtual_com_inteligencia_artificial",
+        "tock_fatal"
+       ],
+       "respond_to_current_content_first": true,
+       "customer_name_required_before_help": false,
+       "self_introduction_required_on_first_reply": true,
+       "introduction_precedes_all_other_first_reply_content": true
+      },
+      "post_qualification_support": {
+       "mode": "temporary_consultative",
+       "transition": "Remain consultative after all qualification fields are resolved. Answer customer questions from approved evidence in the active branch, do not restart qualification, and hand off only after an explicit readiness signal from the customer or another published handoff rule.",
+       "rule_node_id": "rule:tock-post-qualification-consultative-support",
+       "handoff_requested": false
+      }
+     },
+     "qualification": {
+      "fields": [
+       {
+        "key": "nome_cliente",
+        "scope": "persona",
+        "priority": 1,
+        "required": false,
+        "depends_on": [
+         "purchase_profile"
+        ],
+        "validation": {
+         "mode": "semantic",
+         "max_tokens": 6,
+         "min_tokens": 1,
+         "description": "Primeiro nome ou nome informado pela pessoa, inclusive em frases como pode me chamar de X, meu nome é X, sou X ou em uma resposta curta contendo somente o nome.",
+         "semantic_type": "human_full_name",
+         "confirmation_policy": "last_resort",
+         "model_confidence_min": 0,
+         "acknowledgement_requires_fact": true,
+         "extraction_required_when_expected": true
+        },
+        "value_schema": {
+         "type": "string",
+         "minLength": 1
+        },
+        "owner_node_id": "persona:tock-fatal",
+        "collection_mode": "ask_once_optional",
+        "overwrite_policy": "explicit_correction",
+        "question_node_id": "faq:tock-customer-name",
+        "accepted_statuses": [
+         "known"
+        ]
+       },
+       {
+        "key": "grau_qualificacao",
+        "scope": "persona",
+        "priority": 0.8,
+        "required": true,
+        "depends_on": [
+         "purchase_profile"
+        ],
+        "validation": {
+         "mode": "enum",
+         "values": [
+          {
+           "value": "conhecendo",
+           "aliases": [
+            "só olhando",
+            "conhecendo",
+            "pesquisando",
+            "estou conhecendo as opções"
+           ]
+          },
+          {
+           "value": "comparando",
+           "aliases": [
+            "comparando",
+            "vendo opções",
+            "decidindo",
+            "estou comparando as opções"
+           ]
+          },
+          {
+           "value": "pronto_para_avancar",
+           "aliases": [
+            "quero comprar",
+            "quero fechar",
+            "pode avançar",
+            "já quero avançar com a compra"
+           ]
+          }
+         ],
+         "acknowledgement_requires_fact": true,
+         "extract_expected_answer_before_composing_reply": true
+        },
+        "owner_node_id": "persona:tock-fatal",
+        "overwrite_policy": "explicit_correction",
+        "question_node_id": "faq:tock-sales-readiness",
+        "accepted_statuses": [
+         "known",
+         "unknown"
+        ]
+       },
+       {
+        "key": "forma_recebimento",
+        "scope": "persona",
+        "priority": 0.7,
+        "required": true,
+        "depends_on": [
+         "purchase_profile"
+        ],
+        "validation": {
+         "mode": "enum",
+         "values": [
+          {
+           "value": "envio",
+           "aliases": [
+            "envio",
+            "entrega",
+            "frete",
+            "receber em casa",
+            "prefiro receber por envio"
+           ]
+          },
+          {
+           "value": "visita_loja",
+           "aliases": [
+            "ir à loja",
+            "visitar",
+            "buscar",
+            "ver pessoalmente",
+            "prefiro visitar a loja física"
+           ]
+          },
+          {
+           "value": "a_definir",
+           "aliases": [
+            "não sei",
+            "vou decidir",
+            "tanto faz"
+           ]
+          }
+         ],
+         "acknowledgement_requires_fact": true,
+         "extract_expected_answer_before_composing_reply": true
+        },
+        "owner_node_id": "persona:tock-fatal",
+        "overwrite_policy": "explicit_correction",
+        "question_node_id": "faq:tock-fulfillment-preference",
+        "accepted_statuses": [
+         "known",
+         "unknown"
+        ]
+       }
+      ]
+     }
+    }
+   },
+   {
+    "id": "rule:tock-post-qualification-consultative-support",
+    "node_type": "rule",
+    "title": "Atendimento consultivo apos a qualificacao",
+    "status": "validated",
+    "summary": "Apos concluir a qualificacao, Vitoria permanece temporariamente consultiva, responde duvidas com evidencia aprovada e so encaminha diante de prontidao explicita ou outra regra publicada.",
+    "data": {}
+   },
+   {
+    "id": "rule:tock-safe-handoff",
+    "node_type": "rule",
+    "title": "Encaminhamento comercial seguro",
+    "status": "validated",
+    "summary": "Vitória avisa antes de encaminhar e preserva o que a pessoa já informou. A equipe confirma frete, estoque, pagamento, prazo e fotos não disponíveis no atendimento automático.",
+    "data": {}
+   }
+  ],
+  "coordinates": {
+   "persona:tock-fatal": {
+    "depth": 0,
+    "node_id": "persona:tock-fatal",
+    "path_checksum": "sha256:9d48d1c0a13bc3ef0a85f4b233e92a43bf3865338dc89c0f42edb7009a0056c6",
+    "path_edge_ids": [],
+    "path_node_ids": [
+     "persona:tock-fatal"
+    ],
+    "branch_anchor_node_id": null
+   },
+   "audience:tock-retail": {
+    "depth": 2,
+    "node_id": "audience:tock-retail",
+    "path_checksum": "sha256:e5e4d5c7a4b118452a43b9f2f70237e1803c5b67ebb59bb16b5edb19d5b08134",
+    "path_edge_ids": [
+     "edge:tock-persona-campaign",
+     "edge:tock-campaign-retail"
+    ],
+    "path_node_ids": [
+     "persona:tock-fatal",
+     "campaign:tock-whatsapp-qualification",
+     "audience:tock-retail"
+    ],
+    "branch_anchor_node_id": "audience:tock-retail"
+   },
+   "faq:tock-retail-need": {
+    "depth": 3,
+    "node_id": "faq:tock-retail-need",
+    "path_checksum": "sha256:d2608ea8421b2bc613a7395909ae42531d8f6c8d5247713375db203f4ba2c6e2",
+    "path_edge_ids": [
+     "edge:tock-persona-campaign",
+     "edge:tock-campaign-retail",
+     "edge:tock-retail-need"
+    ],
+    "path_node_ids": [
+     "persona:tock-fatal",
+     "campaign:tock-whatsapp-qualification",
+     "audience:tock-retail",
+     "faq:tock-retail-need"
+    ],
+    "branch_anchor_node_id": "audience:tock-retail"
+   },
+   "faq:tock-retail-style": {
+    "depth": 3,
+    "node_id": "faq:tock-retail-style",
+    "path_checksum": "sha256:f5b633a3f67e95bb566028c26acd0fe4dd211ce60c524d2645fadb6a8ae2a496",
+    "path_edge_ids": [
+     "edge:tock-persona-campaign",
+     "edge:tock-campaign-retail",
+     "edge:tock-retail-style"
+    ],
+    "path_node_ids": [
+     "persona:tock-fatal",
+     "campaign:tock-whatsapp-qualification",
+     "audience:tock-retail",
+     "faq:tock-retail-style"
+    ],
+    "branch_anchor_node_id": "audience:tock-retail"
+   },
+   "audience:tock-reseller": {
+    "depth": 2,
+    "node_id": "audience:tock-reseller",
+    "path_checksum": "sha256:73db9a36fb6295efbb99bd924aeb8ca72e51dc079a19bc428fdd9a5cfbc44322",
+    "path_edge_ids": [
+     "edge:tock-persona-campaign",
+     "edge:tock-campaign-reseller"
+    ],
+    "path_node_ids": [
+     "persona:tock-fatal",
+     "campaign:tock-whatsapp-qualification",
+     "audience:tock-reseller"
+    ],
+    "branch_anchor_node_id": "audience:tock-reseller"
+   },
+   "faq:tock-customer-name": {
+    "depth": 2,
+    "node_id": "faq:tock-customer-name",
+    "path_checksum": "sha256:ae5c370d8a07ae8b1ad90b55c758b13db66ca8669e247dcd1316e0e9faddf72b",
+    "path_edge_ids": [
+     "edge:tock-persona-campaign",
+     "edge:v17:campaign:tock-whatsapp-qualification:faq:tock-customer-name:contains"
+    ],
+    "path_node_ids": [
+     "persona:tock-fatal",
+     "campaign:tock-whatsapp-qualification",
+     "faq:tock-customer-name"
+    ],
+    "branch_anchor_node_id": null
+   },
+   "rule:tock-safe-handoff": {
+    "depth": 2,
+    "node_id": "rule:tock-safe-handoff",
+    "path_checksum": "sha256:0727cae72181f475c2da72b3ff3e66187f1475726fd54a0090ca37a7113c9fd8",
+    "path_edge_ids": [
+     "edge:tock-persona-campaign",
+     "edge:tock-campaign-handoff"
+    ],
+    "path_node_ids": [
+     "persona:tock-fatal",
+     "campaign:tock-whatsapp-qualification",
+     "rule:tock-safe-handoff"
+    ],
+    "branch_anchor_node_id": null
+   },
+   "faq:tock-reseller-stage": {
+    "depth": 3,
+    "node_id": "faq:tock-reseller-stage",
+    "path_checksum": "sha256:3ed69d2324e7081127e373281a3e54ab9f22dc87a8b6c3a6ba43b4dba970df81",
+    "path_edge_ids": [
+     "edge:tock-persona-campaign",
+     "edge:tock-campaign-reseller",
+     "edge:tock-reseller-stage"
+    ],
+    "path_node_ids": [
+     "persona:tock-fatal",
+     "campaign:tock-whatsapp-qualification",
+     "audience:tock-reseller",
+     "faq:tock-reseller-stage"
+    ],
+    "branch_anchor_node_id": "audience:tock-reseller"
+   },
+   "faq:tock-reseller-volume": {
+    "depth": 3,
+    "node_id": "faq:tock-reseller-volume",
+    "path_checksum": "sha256:6e7f3c71839352353987e0102b494d34132d3a3e49a25981206b65c3fbf4ce7e",
+    "path_edge_ids": [
+     "edge:tock-persona-campaign",
+     "edge:tock-campaign-reseller",
+     "edge:tock-reseller-volume"
+    ],
+    "path_node_ids": [
+     "persona:tock-fatal",
+     "campaign:tock-whatsapp-qualification",
+     "audience:tock-reseller",
+     "faq:tock-reseller-volume"
+    ],
+    "branch_anchor_node_id": "audience:tock-reseller"
+   },
+   "faq:tock-sales-readiness": {
+    "depth": 2,
+    "node_id": "faq:tock-sales-readiness",
+    "path_checksum": "sha256:a8e9556dc89d0f1bcbd45a1573609ff1874fdb4e71dbd7268b9308363223653b",
+    "path_edge_ids": [
+     "edge:tock-persona-campaign",
+     "edge:v17:campaign:tock-whatsapp-qualification:faq:tock-sales-readiness:contains"
+    ],
+    "path_node_ids": [
+     "persona:tock-fatal",
+     "campaign:tock-whatsapp-qualification",
+     "faq:tock-sales-readiness"
+    ],
+    "branch_anchor_node_id": null
+   },
+   "faq:tock-purchase-profile": {
+    "depth": 2,
+    "node_id": "faq:tock-purchase-profile",
+    "path_checksum": "sha256:be85a10711194f415fade50bfbf760432d2e40cfd5a06c47f7c78ed7787d9073",
+    "path_edge_ids": [
+     "edge:tock-persona-campaign",
+     "edge:tock-campaign-purchase-profile"
+    ],
+    "path_node_ids": [
+     "persona:tock-fatal",
+     "campaign:tock-whatsapp-qualification",
+     "faq:tock-purchase-profile"
+    ],
+    "branch_anchor_node_id": null
+   },
+   "faq:tock-fulfillment-preference": {
+    "depth": 2,
+    "node_id": "faq:tock-fulfillment-preference",
+    "path_checksum": "sha256:eb3c02cf28dce4feb92cc0d7a23ab6fccca23031a893a4cef700fee711add35a",
+    "path_edge_ids": [
+     "edge:tock-persona-campaign",
+     "edge:v17:campaign:tock-whatsapp-qualification:faq:tock-fulfillment-preference:contains"
+    ],
+    "path_node_ids": [
+     "persona:tock-fatal",
+     "campaign:tock-whatsapp-qualification",
+     "faq:tock-fulfillment-preference"
+    ],
+    "branch_anchor_node_id": null
+   },
+   "campaign:tock-whatsapp-qualification": {
+    "depth": 1,
+    "node_id": "campaign:tock-whatsapp-qualification",
+    "path_checksum": "sha256:a1f3868499c041877f5165ca238fc9a3fb3d62926938d1ac0119925721d1a212",
+    "path_edge_ids": [
+     "edge:tock-persona-campaign"
+    ],
+    "path_node_ids": [
+     "persona:tock-fatal",
+     "campaign:tock-whatsapp-qualification"
+    ],
+    "branch_anchor_node_id": null
+   },
+   "rule:tock-post-qualification-consultative-support": {
+    "depth": 2,
+    "node_id": "rule:tock-post-qualification-consultative-support",
+    "path_checksum": "sha256:d63b0cf6989e5c4ffd08b7a0e05b6b113f4223c4a6b0fd48aba8eab75b880c2c",
+    "path_edge_ids": [
+     "edge:tock-persona-campaign",
+     "edge:tock-campaign-post-qualification-consultative-support"
+    ],
+    "path_node_ids": [
+     "persona:tock-fatal",
+     "campaign:tock-whatsapp-qualification",
+     "rule:tock-post-qualification-consultative-support"
+    ],
+    "branch_anchor_node_id": null
+   }
+  },
+  "branch_anchors": [
+   "audience:tock-reseller",
+   "audience:tock-retail"
+  ],
+  "branch_memberships": {
+   "audience:tock-reseller": {
+    "persona:tock-fatal": {
+     "node_id": "persona:tock-fatal",
+     "branch_node_id": "audience:tock-reseller",
+     "graph_distance": 2,
+     "inclusion_reason": "branch_ancestor",
+     "structural_weight": 0.333333
+    },
+    "audience:tock-reseller": {
+     "node_id": "audience:tock-reseller",
+     "branch_node_id": "audience:tock-reseller",
+     "graph_distance": 0,
+     "inclusion_reason": "branch_ancestor",
+     "structural_weight": 1.0
+    },
+    "faq:tock-customer-name": {
+     "node_id": "faq:tock-customer-name",
+     "branch_node_id": "audience:tock-reseller",
+     "graph_distance": 1,
+     "inclusion_reason": "global_context_capability",
+     "structural_weight": 0.5
+    },
+    "rule:tock-safe-handoff": {
+     "node_id": "rule:tock-safe-handoff",
+     "branch_node_id": "audience:tock-reseller",
+     "graph_distance": 1,
+     "inclusion_reason": "global_context_capability",
+     "structural_weight": 0.5
+    },
+    "faq:tock-reseller-stage": {
+     "node_id": "faq:tock-reseller-stage",
+     "branch_node_id": "audience:tock-reseller",
+     "graph_distance": 1,
+     "inclusion_reason": "branch_descendant",
+     "structural_weight": 0.5
+    },
+    "faq:tock-reseller-volume": {
+     "node_id": "faq:tock-reseller-volume",
+     "branch_node_id": "audience:tock-reseller",
+     "graph_distance": 1,
+     "inclusion_reason": "branch_descendant",
+     "structural_weight": 0.5
+    },
+    "faq:tock-sales-readiness": {
+     "node_id": "faq:tock-sales-readiness",
+     "branch_node_id": "audience:tock-reseller",
+     "graph_distance": 1,
+     "inclusion_reason": "global_context_capability",
+     "structural_weight": 0.5
+    },
+    "faq:tock-purchase-profile": {
+     "node_id": "faq:tock-purchase-profile",
+     "branch_node_id": "audience:tock-reseller",
+     "graph_distance": 1,
+     "inclusion_reason": "global_context_capability",
+     "structural_weight": 0.5
+    },
+    "faq:tock-fulfillment-preference": {
+     "node_id": "faq:tock-fulfillment-preference",
+     "branch_node_id": "audience:tock-reseller",
+     "graph_distance": 1,
+     "inclusion_reason": "global_context_capability",
+     "structural_weight": 0.5
+    },
+    "campaign:tock-whatsapp-qualification": {
+     "node_id": "campaign:tock-whatsapp-qualification",
+     "branch_node_id": "audience:tock-reseller",
+     "graph_distance": 1,
+     "inclusion_reason": "branch_ancestor",
+     "structural_weight": 0.5
+    },
+    "rule:tock-post-qualification-consultative-support": {
+     "node_id": "rule:tock-post-qualification-consultative-support",
+     "branch_node_id": "audience:tock-reseller",
+     "graph_distance": 1,
+     "inclusion_reason": "global_context_capability",
+     "structural_weight": 0.5
+    }
+   },
+   "audience:tock-retail": {
+    "persona:tock-fatal": {
+     "node_id": "persona:tock-fatal",
+     "branch_node_id": "audience:tock-retail",
+     "graph_distance": 2,
+     "inclusion_reason": "branch_ancestor",
+     "structural_weight": 0.333333
+    },
+    "audience:tock-retail": {
+     "node_id": "audience:tock-retail",
+     "branch_node_id": "audience:tock-retail",
+     "graph_distance": 0,
+     "inclusion_reason": "branch_ancestor",
+     "structural_weight": 1.0
+    },
+    "faq:tock-retail-need": {
+     "node_id": "faq:tock-retail-need",
+     "branch_node_id": "audience:tock-retail",
+     "graph_distance": 1,
+     "inclusion_reason": "branch_descendant",
+     "structural_weight": 0.5
+    },
+    "faq:tock-retail-style": {
+     "node_id": "faq:tock-retail-style",
+     "branch_node_id": "audience:tock-retail",
+     "graph_distance": 1,
+     "inclusion_reason": "branch_descendant",
+     "structural_weight": 0.5
+    },
+    "faq:tock-customer-name": {
+     "node_id": "faq:tock-customer-name",
+     "branch_node_id": "audience:tock-retail",
+     "graph_distance": 1,
+     "inclusion_reason": "global_context_capability",
+     "structural_weight": 0.5
+    },
+    "rule:tock-safe-handoff": {
+     "node_id": "rule:tock-safe-handoff",
+     "branch_node_id": "audience:tock-retail",
+     "graph_distance": 1,
+     "inclusion_reason": "global_context_capability",
+     "structural_weight": 0.5
+    },
+    "faq:tock-sales-readiness": {
+     "node_id": "faq:tock-sales-readiness",
+     "branch_node_id": "audience:tock-retail",
+     "graph_distance": 1,
+     "inclusion_reason": "global_context_capability",
+     "structural_weight": 0.5
+    },
+    "faq:tock-purchase-profile": {
+     "node_id": "faq:tock-purchase-profile",
+     "branch_node_id": "audience:tock-retail",
+     "graph_distance": 1,
+     "inclusion_reason": "global_context_capability",
+     "structural_weight": 0.5
+    },
+    "faq:tock-fulfillment-preference": {
+     "node_id": "faq:tock-fulfillment-preference",
+     "branch_node_id": "audience:tock-retail",
+     "graph_distance": 1,
+     "inclusion_reason": "global_context_capability",
+     "structural_weight": 0.5
+    },
+    "campaign:tock-whatsapp-qualification": {
+     "node_id": "campaign:tock-whatsapp-qualification",
+     "branch_node_id": "audience:tock-retail",
+     "graph_distance": 1,
+     "inclusion_reason": "branch_ancestor",
+     "structural_weight": 0.5
+    },
+    "rule:tock-post-qualification-consultative-support": {
+     "node_id": "rule:tock-post-qualification-consultative-support",
+     "branch_node_id": "audience:tock-retail",
+     "graph_distance": 1,
+     "inclusion_reason": "global_context_capability",
+     "structural_weight": 0.5
+    }
+   }
+  },
+  "branch_contracts": {
+   "audience:tock-retail": {
+    "fields": [
+     {
+      "key": "purchase_profile",
+      "scope": "branch",
+      "priority": 0.5,
+      "required": true,
+      "condition": null,
+      "depends_on": [],
+      "validation": {
+       "mode": "enum",
+       "values": [
+        {
+         "value": "uso-proprio-varejo",
+         "aliases": [
+          "uso próprio",
+          "pra mim",
+          "varejo",
+          "comprar para mim"
+         ]
+        },
+        {
+         "value": "atacado-revenda",
+         "aliases": [
+          "revenda",
+          "revender",
+          "atacado",
+          "minha loja",
+          "empreender"
+         ]
+        }
+       ]
+      },
+      "confirmation": {
+       "capability": "branch_selector",
+       "template_key": "service_selection",
+       "context_guidance": ""
+      },
+      "value_schema": {
+       "type": "string",
+       "minLength": 2
+      },
+      "normalization": null,
+      "owner_node_id": "audience:tock-retail",
+      "overwrite_policy": "explicit_correction",
+      "question_node_id": "faq:tock-purchase-profile",
+      "accepted_statuses": [
+       "known",
+       "needs_confirmation"
+      ],
+      "branch_selection_field": true
+     },
+     {
+      "key": "nome_cliente",
+      "scope": "persona",
+      "priority": 1.0,
+      "required": false,
+      "condition": null,
+      "depends_on": [
+       "purchase_profile"
+      ],
+      "validation": {
+       "mode": "semantic",
+       "max_tokens": 6,
+       "min_tokens": 1,
+       "description": "Primeiro nome ou nome informado pela pessoa, inclusive em frases como pode me chamar de X, meu nome é X, sou X ou em uma resposta curta contendo somente o nome.",
+       "semantic_type": "human_full_name",
+       "confirmation_policy": "last_resort",
+       "model_confidence_min": 0,
+       "acknowledgement_requires_fact": true,
+       "extraction_required_when_expected": true
+      },
+      "confirmation": {
+       "capability": "common_fact",
+       "template_key": "fact",
+       "context_guidance": ""
+      },
+      "value_schema": {
+       "type": "string",
+       "minLength": 1
+      },
+      "normalization": null,
+      "owner_node_id": "persona:tock-fatal",
+      "collection_mode": "ask_once_optional",
+      "overwrite_policy": "explicit_correction",
+      "question_node_id": "faq:tock-customer-name",
+      "accepted_statuses": [
+       "known",
+       "needs_confirmation",
+       "invalid"
+      ]
+     },
+     {
+      "key": "grau_qualificacao",
+      "scope": "persona",
+      "priority": 0.8,
+      "required": true,
+      "condition": null,
+      "depends_on": [
+       "purchase_profile"
+      ],
+      "validation": {
+       "mode": "enum",
+       "values": [
+        {
+         "value": "conhecendo",
+         "aliases": [
+          "só olhando",
+          "conhecendo",
+          "pesquisando",
+          "estou conhecendo as opções"
+         ]
+        },
+        {
+         "value": "comparando",
+         "aliases": [
+          "comparando",
+          "vendo opções",
+          "decidindo",
+          "estou comparando as opções"
+         ]
+        },
+        {
+         "value": "pronto_para_avancar",
+         "aliases": [
+          "quero comprar",
+          "quero fechar",
+          "pode avançar",
+          "já quero avançar com a compra"
+         ]
+        }
+       ],
+       "acknowledgement_requires_fact": true,
+       "extract_expected_answer_before_composing_reply": true
+      },
+      "confirmation": {
+       "capability": "common_fact",
+       "template_key": "fact",
+       "context_guidance": ""
+      },
+      "value_schema": {},
+      "normalization": null,
+      "owner_node_id": "persona:tock-fatal",
+      "overwrite_policy": "explicit_correction",
+      "question_node_id": "faq:tock-sales-readiness",
+      "accepted_statuses": [
+       "known",
+       "unknown"
+      ]
+     },
+     {
+      "key": "forma_recebimento",
+      "scope": "persona",
+      "priority": 0.7,
+      "required": true,
+      "condition": null,
+      "depends_on": [
+       "purchase_profile"
+      ],
+      "validation": {
+       "mode": "enum",
+       "values": [
+        {
+         "value": "envio",
+         "aliases": [
+          "envio",
+          "entrega",
+          "frete",
+          "receber em casa",
+          "prefiro receber por envio"
+         ]
+        },
+        {
+         "value": "visita_loja",
+         "aliases": [
+          "ir à loja",
+          "visitar",
+          "buscar",
+          "ver pessoalmente",
+          "prefiro visitar a loja física"
+         ]
+        },
+        {
+         "value": "a_definir",
+         "aliases": [
+          "não sei",
+          "vou decidir",
+          "tanto faz"
+         ]
+        }
+       ],
+       "acknowledgement_requires_fact": true,
+       "extract_expected_answer_before_composing_reply": true
+      },
+      "confirmation": {
+       "capability": "common_fact",
+       "template_key": "fact",
+       "context_guidance": ""
+      },
+      "value_schema": {},
+      "normalization": null,
+      "owner_node_id": "persona:tock-fatal",
+      "overwrite_policy": "explicit_correction",
+      "question_node_id": "faq:tock-fulfillment-preference",
+      "accepted_statuses": [
+       "known",
+       "unknown"
+      ]
+     },
+     {
+      "key": "retail_need",
+      "scope": "branch",
+      "priority": 0.5,
+      "required": true,
+      "condition": null,
+      "depends_on": [
+       "purchase_profile"
+      ],
+      "validation": {
+       "mode": "schema",
+       "acknowledgement_requires_fact": true,
+       "extraction_required_when_expected": true
+      },
+      "confirmation": {
+       "capability": "common_fact",
+       "template_key": "fact",
+       "context_guidance": ""
+      },
+      "value_schema": {
+       "type": "string",
+       "minLength": 2
+      },
+      "normalization": null,
+      "owner_node_id": "audience:tock-retail",
+      "overwrite_policy": "explicit_correction",
+      "question_node_id": "faq:tock-retail-need",
+      "accepted_statuses": [
+       "known"
+      ]
+     },
+     {
+      "key": "retail_style",
+      "scope": "branch",
+      "priority": 0.5,
+      "required": true,
+      "condition": null,
+      "depends_on": [
+       "retail_need"
+      ],
+      "validation": {
+       "mode": "schema",
+       "acknowledgement_requires_fact": true,
+       "extraction_required_when_expected": true
+      },
+      "confirmation": {
+       "capability": "common_fact",
+       "template_key": "fact",
+       "context_guidance": ""
+      },
+      "value_schema": {
+       "type": "string",
+       "minLength": 2
+      },
+      "normalization": null,
+      "owner_node_id": "audience:tock-retail",
+      "overwrite_policy": "explicit_correction",
+      "question_node_id": "faq:tock-retail-style",
+      "accepted_statuses": [
+       "known",
+       "unknown"
+      ]
+     }
+    ],
+    "field_labels": {
+     "retail_need": "o que você procura",
+     "nome_cliente": "seu nome",
+     "resale_stage": "momento da revenda",
+     "retail_style": "estilo ou ocasião",
+     "volume_interest": "quantidade que pretende avaliar",
+     "purchase_profile": "tipo de compra",
+     "forma_recebimento": "preferência de envio ou visita",
+     "grau_qualificacao": "momento da compra"
+    },
+    "questions": {
+     "faq:tock-retail-need": {
+      "text": "O que você está procurando para uso próprio?",
+      "condition": null,
+      "field_key": "retail_need",
+      "depends_on": [
+       "purchase_profile"
+      ],
+      "paraphrases": []
+     },
+     "faq:tock-retail-style": {
+      "text": "Você tem algum estilo ou ocasião em mente?",
+      "condition": null,
+      "field_key": "retail_style",
+      "depends_on": [
+       "retail_need"
+      ],
+      "paraphrases": []
+     },
+     "faq:tock-customer-name": {
+      "text": "Como você prefere que eu te chame?",
+      "condition": null,
+      "field_key": "nome_cliente",
+      "depends_on": [
+       "purchase_profile"
+      ],
+      "paraphrases": []
+     },
+     "faq:tock-sales-readiness": {
+      "text": "Você está conhecendo as opções, comparando ou já quer avançar com a compra?",
+      "condition": null,
+      "field_key": "grau_qualificacao",
+      "depends_on": [
+       "purchase_profile"
+      ],
+      "paraphrases": []
+     },
+     "faq:tock-purchase-profile": {
+      "text": "Você procura para uso próprio ou para revender?",
+      "condition": null,
+      "field_key": "purchase_profile",
+      "depends_on": [],
+      "paraphrases": []
+     },
+     "faq:tock-fulfillment-preference": {
+      "text": "Você prefere receber por envio ou visitar a loja física?",
+      "condition": null,
+      "field_key": "forma_recebimento",
+      "depends_on": [
+       "purchase_profile"
+      ],
+      "paraphrases": []
+     }
+    },
+    "handoff_rule_node_ids": [
+     "rule:tock-post-qualification-consultative-support",
+     "rule:tock-safe-handoff"
+    ],
+    "eligible_faq_node_ids": []
+   },
+   "audience:tock-reseller": {
+    "fields": [
+     {
+      "key": "purchase_profile",
+      "scope": "branch",
+      "priority": 0.5,
+      "required": true,
+      "condition": null,
+      "depends_on": [],
+      "validation": {
+       "mode": "enum",
+       "values": [
+        {
+         "value": "uso-proprio-varejo",
+         "aliases": [
+          "uso próprio",
+          "pra mim",
+          "varejo",
+          "comprar para mim"
+         ]
+        },
+        {
+         "value": "atacado-revenda",
+         "aliases": [
+          "revenda",
+          "revender",
+          "atacado",
+          "minha loja",
+          "empreender"
+         ]
+        }
+       ]
+      },
+      "confirmation": {
+       "capability": "branch_selector",
+       "template_key": "service_selection",
+       "context_guidance": ""
+      },
+      "value_schema": {
+       "type": "string",
+       "minLength": 2
+      },
+      "normalization": null,
+      "owner_node_id": "audience:tock-reseller",
+      "overwrite_policy": "explicit_correction",
+      "question_node_id": "faq:tock-purchase-profile",
+      "accepted_statuses": [
+       "known",
+       "needs_confirmation"
+      ],
+      "branch_selection_field": true
+     },
+     {
+      "key": "nome_cliente",
+      "scope": "persona",
+      "priority": 1.0,
+      "required": false,
+      "condition": null,
+      "depends_on": [
+       "purchase_profile"
+      ],
+      "validation": {
+       "mode": "semantic",
+       "max_tokens": 6,
+       "min_tokens": 1,
+       "description": "Primeiro nome ou nome informado pela pessoa, inclusive em frases como pode me chamar de X, meu nome é X, sou X ou em uma resposta curta contendo somente o nome.",
+       "semantic_type": "human_full_name",
+       "confirmation_policy": "last_resort",
+       "model_confidence_min": 0,
+       "acknowledgement_requires_fact": true,
+       "extraction_required_when_expected": true
+      },
+      "confirmation": {
+       "capability": "common_fact",
+       "template_key": "fact",
+       "context_guidance": ""
+      },
+      "value_schema": {
+       "type": "string",
+       "minLength": 1
+      },
+      "normalization": null,
+      "owner_node_id": "persona:tock-fatal",
+      "collection_mode": "ask_once_optional",
+      "overwrite_policy": "explicit_correction",
+      "question_node_id": "faq:tock-customer-name",
+      "accepted_statuses": [
+       "known",
+       "needs_confirmation",
+       "invalid"
+      ]
+     },
+     {
+      "key": "grau_qualificacao",
+      "scope": "persona",
+      "priority": 0.8,
+      "required": true,
+      "condition": null,
+      "depends_on": [
+       "purchase_profile"
+      ],
+      "validation": {
+       "mode": "enum",
+       "values": [
+        {
+         "value": "conhecendo",
+         "aliases": [
+          "só olhando",
+          "conhecendo",
+          "pesquisando",
+          "estou conhecendo as opções"
+         ]
+        },
+        {
+         "value": "comparando",
+         "aliases": [
+          "comparando",
+          "vendo opções",
+          "decidindo",
+          "estou comparando as opções"
+         ]
+        },
+        {
+         "value": "pronto_para_avancar",
+         "aliases": [
+          "quero comprar",
+          "quero fechar",
+          "pode avançar",
+          "já quero avançar com a compra"
+         ]
+        }
+       ],
+       "acknowledgement_requires_fact": true,
+       "extract_expected_answer_before_composing_reply": true
+      },
+      "confirmation": {
+       "capability": "common_fact",
+       "template_key": "fact",
+       "context_guidance": ""
+      },
+      "value_schema": {},
+      "normalization": null,
+      "owner_node_id": "persona:tock-fatal",
+      "overwrite_policy": "explicit_correction",
+      "question_node_id": "faq:tock-sales-readiness",
+      "accepted_statuses": [
+       "known",
+       "unknown"
+      ]
+     },
+     {
+      "key": "forma_recebimento",
+      "scope": "persona",
+      "priority": 0.7,
+      "required": true,
+      "condition": null,
+      "depends_on": [
+       "purchase_profile"
+      ],
+      "validation": {
+       "mode": "enum",
+       "values": [
+        {
+         "value": "envio",
+         "aliases": [
+          "envio",
+          "entrega",
+          "frete",
+          "receber em casa",
+          "prefiro receber por envio"
+         ]
+        },
+        {
+         "value": "visita_loja",
+         "aliases": [
+          "ir à loja",
+          "visitar",
+          "buscar",
+          "ver pessoalmente",
+          "prefiro visitar a loja física"
+         ]
+        },
+        {
+         "value": "a_definir",
+         "aliases": [
+          "não sei",
+          "vou decidir",
+          "tanto faz"
+         ]
+        }
+       ],
+       "acknowledgement_requires_fact": true,
+       "extract_expected_answer_before_composing_reply": true
+      },
+      "confirmation": {
+       "capability": "common_fact",
+       "template_key": "fact",
+       "context_guidance": ""
+      },
+      "value_schema": {},
+      "normalization": null,
+      "owner_node_id": "persona:tock-fatal",
+      "overwrite_policy": "explicit_correction",
+      "question_node_id": "faq:tock-fulfillment-preference",
+      "accepted_statuses": [
+       "known",
+       "unknown"
+      ]
+     },
+     {
+      "key": "resale_stage",
+      "scope": "branch",
+      "priority": 0.5,
+      "required": true,
+      "condition": null,
+      "depends_on": [
+       "purchase_profile"
+      ],
+      "validation": {
+       "mode": "schema"
+      },
+      "confirmation": {
+       "capability": "common_fact",
+       "template_key": "fact",
+       "context_guidance": ""
+      },
+      "value_schema": {
+       "type": "string",
+       "minLength": 2
+      },
+      "normalization": null,
+      "owner_node_id": "audience:tock-reseller",
+      "overwrite_policy": "explicit_correction",
+      "question_node_id": "faq:tock-reseller-stage",
+      "accepted_statuses": [
+       "known"
+      ]
+     },
+     {
+      "key": "volume_interest",
+      "scope": "branch",
+      "priority": 0.5,
+      "required": true,
+      "condition": null,
+      "depends_on": [
+       "resale_stage"
+      ],
+      "validation": {
+       "mode": "schema"
+      },
+      "confirmation": {
+       "capability": "common_fact",
+       "template_key": "fact",
+       "context_guidance": ""
+      },
+      "value_schema": {
+       "type": "string",
+       "minLength": 2
+      },
+      "normalization": null,
+      "owner_node_id": "audience:tock-reseller",
+      "overwrite_policy": "explicit_correction",
+      "question_node_id": "faq:tock-reseller-volume",
+      "accepted_statuses": [
+       "known",
+       "unknown"
+      ]
+     }
+    ],
+    "field_labels": {
+     "retail_need": "o que você procura",
+     "nome_cliente": "seu nome",
+     "resale_stage": "momento da revenda",
+     "retail_style": "estilo ou ocasião",
+     "volume_interest": "quantidade que pretende avaliar",
+     "purchase_profile": "tipo de compra",
+     "forma_recebimento": "preferência de envio ou visita",
+     "grau_qualificacao": "momento da compra"
+    },
+    "questions": {
+     "faq:tock-customer-name": {
+      "text": "Como você prefere que eu te chame?",
+      "condition": null,
+      "field_key": "nome_cliente",
+      "depends_on": [
+       "purchase_profile"
+      ],
+      "paraphrases": []
+     },
+     "faq:tock-reseller-stage": {
+      "text": "Você já revende ou está começando agora?",
+      "condition": null,
+      "field_key": "resale_stage",
+      "depends_on": [
+       "purchase_profile"
+      ],
+      "paraphrases": []
+     },
+     "faq:tock-reseller-volume": {
+      "text": "Que tipo de volume você pretende avaliar para revenda?",
+      "condition": null,
+      "field_key": "volume_interest",
+      "depends_on": [
+       "resale_stage"
+      ],
+      "paraphrases": []
+     },
+     "faq:tock-sales-readiness": {
+      "text": "Você está conhecendo as opções, comparando ou já quer avançar com a compra?",
+      "condition": null,
+      "field_key": "grau_qualificacao",
+      "depends_on": [
+       "purchase_profile"
+      ],
+      "paraphrases": []
+     },
+     "faq:tock-purchase-profile": {
+      "text": "Você procura para uso próprio ou para revender?",
+      "condition": null,
+      "field_key": "purchase_profile",
+      "depends_on": [],
+      "paraphrases": []
+     },
+     "faq:tock-fulfillment-preference": {
+      "text": "Você prefere receber por envio ou visitar a loja física?",
+      "condition": null,
+      "field_key": "forma_recebimento",
+      "depends_on": [
+       "purchase_profile"
+      ],
+      "paraphrases": []
+     }
+    },
+    "handoff_rule_node_ids": [
+     "rule:tock-post-qualification-consultative-support",
+     "rule:tock-safe-handoff"
+    ],
+    "eligible_faq_node_ids": []
+   }
+  },
+  "common_contract": {
+   "fields": [
+    {
+     "key": "purchase_profile",
+     "scope": "persona",
+     "priority": 0.5,
+     "required": true,
+     "condition": null,
+     "depends_on": [],
+     "validation": {
+      "mode": "enum",
+      "values": [
+       {
+        "value": "uso-proprio-varejo",
+        "aliases": [
+         "uso próprio",
+         "pra mim",
+         "varejo",
+         "comprar para mim"
+        ]
+       },
+       {
+        "value": "atacado-revenda",
+        "aliases": [
+         "revenda",
+         "revender",
+         "atacado",
+         "minha loja",
+         "empreender"
+        ]
+       }
+      ]
+     },
+     "confirmation": {
+      "capability": "branch_selector",
+      "template_key": "service_selection",
+      "context_guidance": ""
+     },
+     "value_schema": {
+      "type": "string",
+      "minLength": 2
+     },
+     "normalization": null,
+     "owner_node_id": "persona:tock-fatal",
+     "overwrite_policy": "never",
+     "question_node_id": "faq:tock-purchase-profile",
+     "accepted_statuses": [
+      "known",
+      "needs_confirmation"
+     ],
+     "branch_selection_field": true
+    },
+    {
+     "key": "nome_cliente",
+     "scope": "persona",
+     "priority": 1.0,
+     "required": false,
+     "condition": null,
+     "depends_on": [
+      "purchase_profile"
+     ],
+     "validation": {
+      "mode": "semantic",
+      "max_tokens": 6,
+      "min_tokens": 1,
+      "description": "Primeiro nome ou nome informado pela pessoa, inclusive em frases como pode me chamar de X, meu nome é X, sou X ou em uma resposta curta contendo somente o nome.",
+      "semantic_type": "human_full_name",
+      "confirmation_policy": "last_resort",
+      "model_confidence_min": 0,
+      "acknowledgement_requires_fact": true,
+      "extraction_required_when_expected": true
+     },
+     "confirmation": {
+      "capability": "common_fact",
+      "template_key": "fact",
+      "context_guidance": ""
+     },
+     "value_schema": {
+      "type": "string",
+      "minLength": 1
+     },
+     "normalization": null,
+     "owner_node_id": "persona:tock-fatal",
+     "collection_mode": "ask_once_optional",
+     "overwrite_policy": "explicit_correction",
+     "question_node_id": "faq:tock-customer-name",
+     "accepted_statuses": [
+      "known",
+      "needs_confirmation",
+      "invalid"
+     ]
+    },
+    {
+     "key": "grau_qualificacao",
+     "scope": "persona",
+     "priority": 0.8,
+     "required": true,
+     "condition": null,
+     "depends_on": [
+      "purchase_profile"
+     ],
+     "validation": {
+      "mode": "enum",
+      "values": [
+       {
+        "value": "conhecendo",
+        "aliases": [
+         "só olhando",
+         "conhecendo",
+         "pesquisando",
+         "estou conhecendo as opções"
+        ]
+       },
+       {
+        "value": "comparando",
+        "aliases": [
+         "comparando",
+         "vendo opções",
+         "decidindo",
+         "estou comparando as opções"
+        ]
+       },
+       {
+        "value": "pronto_para_avancar",
+        "aliases": [
+         "quero comprar",
+         "quero fechar",
+         "pode avançar",
+         "já quero avançar com a compra"
+        ]
+       }
+      ],
+      "acknowledgement_requires_fact": true,
+      "extract_expected_answer_before_composing_reply": true
+     },
+     "confirmation": {
+      "capability": "common_fact",
+      "template_key": "fact",
+      "context_guidance": ""
+     },
+     "value_schema": {},
+     "normalization": null,
+     "owner_node_id": "persona:tock-fatal",
+     "overwrite_policy": "explicit_correction",
+     "question_node_id": "faq:tock-sales-readiness",
+     "accepted_statuses": [
+      "known",
+      "unknown"
+     ]
+    },
+    {
+     "key": "forma_recebimento",
+     "scope": "persona",
+     "priority": 0.7,
+     "required": true,
+     "condition": null,
+     "depends_on": [
+      "purchase_profile"
+     ],
+     "validation": {
+      "mode": "enum",
+      "values": [
+       {
+        "value": "envio",
+        "aliases": [
+         "envio",
+         "entrega",
+         "frete",
+         "receber em casa",
+         "prefiro receber por envio"
+        ]
+       },
+       {
+        "value": "visita_loja",
+        "aliases": [
+         "ir à loja",
+         "visitar",
+         "buscar",
+         "ver pessoalmente",
+         "prefiro visitar a loja física"
+        ]
+       },
+       {
+        "value": "a_definir",
+        "aliases": [
+         "não sei",
+         "vou decidir",
+         "tanto faz"
+        ]
+       }
+      ],
+      "acknowledgement_requires_fact": true,
+      "extract_expected_answer_before_composing_reply": true
+     },
+     "confirmation": {
+      "capability": "common_fact",
+      "template_key": "fact",
+      "context_guidance": ""
+     },
+     "value_schema": {},
+     "normalization": null,
+     "owner_node_id": "persona:tock-fatal",
+     "overwrite_policy": "explicit_correction",
+     "question_node_id": "faq:tock-fulfillment-preference",
+     "accepted_statuses": [
+      "known",
+      "unknown"
+     ]
+    }
+   ],
+   "field_labels": {
+    "retail_need": "o que você procura",
+    "nome_cliente": "seu nome",
+    "resale_stage": "momento da revenda",
+    "retail_style": "estilo ou ocasião",
+    "volume_interest": "quantidade que pretende avaliar",
+    "purchase_profile": "tipo de compra",
+    "forma_recebimento": "preferência de envio ou visita",
+    "grau_qualificacao": "momento da compra"
+   },
+   "questions": {
+    "faq:tock-customer-name": {
+     "text": "Como você prefere que eu te chame?",
+     "condition": null,
+     "field_key": "nome_cliente",
+     "depends_on": [
+      "purchase_profile"
+     ],
+     "paraphrases": []
+    },
+    "faq:tock-sales-readiness": {
+     "text": "Você está conhecendo as opções, comparando ou já quer avançar com a compra?",
+     "condition": null,
+     "field_key": "grau_qualificacao",
+     "depends_on": [
+      "purchase_profile"
+     ],
+     "paraphrases": []
+    },
+    "faq:tock-purchase-profile": {
+     "text": "Você procura para uso próprio ou para revender?",
+     "condition": null,
+     "field_key": "purchase_profile",
+     "depends_on": [],
+     "paraphrases": []
+    },
+    "faq:tock-fulfillment-preference": {
+     "text": "Você prefere receber por envio ou visitar a loja física?",
+     "condition": null,
+     "field_key": "forma_recebimento",
+     "depends_on": [
+      "purchase_profile"
+     ],
+     "paraphrases": []
+    }
+   }
+  }
+ },
+ "journey": {
+  "model": "venda",
+  "branch_count": 2,
+  "stages": [
+   {
+    "key": "opening",
+    "label": "Abertura",
+    "rule_node_id": null,
+    "texts": []
+   },
+   {
+    "key": "identification",
+    "label": "Identificação",
+    "rule_node_id": null,
+    "questions": [
+     {
+      "key": "nome_cliente",
+      "label": "seu nome",
+      "text": "Como você prefere que eu te chame?",
+      "question_node_id": "faq:tock-customer-name",
+      "active": true,
+      "essential": false,
+      "scope": "all",
+      "tracking": false,
+      "validation_mode": "semantic",
+      "owner_node_ids": [
+       "persona:tock-fatal"
+      ],
+      "knowledge_count": 1
+     },
+     {
+      "key": "grau_qualificacao",
+      "label": "momento da compra",
+      "text": "Você está conhecendo as opções, comparando ou já quer avançar com a compra?",
+      "question_node_id": "faq:tock-sales-readiness",
+      "active": true,
+      "essential": true,
+      "scope": "all",
+      "tracking": false,
+      "validation_mode": "enum",
+      "owner_node_ids": [
+       "persona:tock-fatal"
+      ],
+      "knowledge_count": 1
+     },
+     {
+      "key": "forma_recebimento",
+      "label": "preferência de envio ou visita",
+      "text": "Você prefere receber por envio ou visitar a loja física?",
+      "question_node_id": "faq:tock-fulfillment-preference",
+      "active": true,
+      "essential": true,
+      "scope": "all",
+      "tracking": false,
+      "validation_mode": "enum",
+      "owner_node_ids": [
+       "persona:tock-fatal"
+      ],
+      "knowledge_count": 1
+     }
+    ]
+   },
+   {
+    "key": "classification",
+    "label": "Classificação",
+    "rule_node_id": null,
+    "questions": [],
+    "selector": {
+     "field_key": "purchase_profile",
+     "question": {
+      "key": "purchase_profile",
+      "label": "tipo de compra",
+      "text": "Você procura para uso próprio ou para revender?",
+      "question_node_id": "faq:tock-purchase-profile",
+      "active": true,
+      "essential": true,
+      "scope": "all",
+      "tracking": false,
+      "validation_mode": "enum",
+      "owner_node_ids": [
+       "audience:tock-reseller",
+       "audience:tock-retail"
+      ],
+      "knowledge_count": 1
+     },
+     "options": [
+      {
+       "branch_node_id": "audience:tock-reseller",
+       "label": "Atacado / revenda",
+       "path": [
+        "Qualificação WhatsApp",
+        "Atacado / revenda"
+       ]
+      },
+      {
+       "branch_node_id": "audience:tock-retail",
+       "label": "Uso próprio / varejo",
+       "path": [
+        "Qualificação WhatsApp",
+        "Uso próprio / varejo"
+       ]
+      }
+     ]
+    }
+   },
+   {
+    "key": "service",
+    "label": "Perguntas do serviço",
+    "rule_node_id": null,
+    "questions": [
+     {
+      "key": "retail_style",
+      "label": "estilo ou ocasião",
+      "text": "Você tem algum estilo ou ocasião em mente?",
+      "question_node_id": "faq:tock-retail-style",
+      "active": true,
+      "essential": true,
+      "scope": "branches",
+      "tracking": false,
+      "validation_mode": "schema",
+      "owner_node_ids": [
+       "audience:tock-retail"
+      ],
+      "knowledge_count": 1,
+      "branches": [
+       "audience:tock-retail"
+      ],
+      "per_branch": {
+       "audience:tock-retail": {
+        "essential": true
+       }
+      }
+     },
+     {
+      "key": "resale_stage",
+      "label": "momento da revenda",
+      "text": "Você já revende ou está começando agora?",
+      "question_node_id": "faq:tock-reseller-stage",
+      "active": true,
+      "essential": true,
+      "scope": "branches",
+      "tracking": false,
+      "validation_mode": "schema",
+      "owner_node_ids": [
+       "audience:tock-reseller"
+      ],
+      "knowledge_count": 1,
+      "branches": [
+       "audience:tock-reseller"
+      ],
+      "per_branch": {
+       "audience:tock-reseller": {
+        "essential": true
+       }
+      }
+     },
+     {
+      "key": "retail_need",
+      "label": "o que você procura",
+      "text": "O que você está procurando para uso próprio?",
+      "question_node_id": "faq:tock-retail-need",
+      "active": true,
+      "essential": true,
+      "scope": "branches",
+      "tracking": false,
+      "validation_mode": "schema",
+      "owner_node_ids": [
+       "audience:tock-retail"
+      ],
+      "knowledge_count": 1,
+      "branches": [
+       "audience:tock-retail"
+      ],
+      "per_branch": {
+       "audience:tock-retail": {
+        "essential": true
+       }
+      }
+     },
+     {
+      "key": "volume_interest",
+      "label": "quantidade que pretende avaliar",
+      "text": "Que tipo de volume você pretende avaliar para revenda?",
+      "question_node_id": "faq:tock-reseller-volume",
+      "active": true,
+      "essential": true,
+      "scope": "branches",
+      "tracking": false,
+      "validation_mode": "schema",
+      "owner_node_ids": [
+       "audience:tock-reseller"
+      ],
+      "knowledge_count": 1,
+      "branches": [
+       "audience:tock-reseller"
+      ],
+      "per_branch": {
+       "audience:tock-reseller": {
+        "essential": true
+       }
+      }
+     }
+    ],
+    "branches": [
+     {
+      "branch_node_id": "audience:tock-reseller",
+      "label": "Atacado / revenda",
+      "path": [
+       "Qualificação WhatsApp",
+       "Atacado / revenda"
+      ]
+     },
+     {
+      "branch_node_id": "audience:tock-retail",
+      "label": "Uso próprio / varejo",
+      "path": [
+       "Qualificação WhatsApp",
+       "Uso próprio / varejo"
+      ]
+     }
+    ]
+   },
+   {
+    "key": "confirmation",
+    "label": "Confirmação",
+    "rule_node_id": null,
+    "description": "O agente escreve o resumo com as respostas da lead e pede confirmação antes de encaminhar."
+   },
+   {
+    "key": "handoff",
+    "label": "Encaminhamento",
+    "rule_node_id": null,
+    "texts": [
+     {
+      "key": "closing",
+      "label": "Encerramento",
+      "value": "Remain consultative after all qualification fields are resolved. Answer customer questions from approved evidence in the active branch, do not restart qualification, and hand off only after an explicit readiness signal from the customer or another published handoff rule.",
+      "editable": true
+     }
+    ],
+    "rules": [
+     {
+      "node_id": "rule:tock-post-qualification-consultative-support",
+      "title": "Atendimento consultivo apos a qualificacao",
+      "text": "Apos concluir a qualificacao, Vitoria permanece temporariamente consultiva, responde duvidas com evidencia aprovada e so encaminha diante de prontidao explicita ou outra regra publicada."
+     },
+     {
+      "node_id": "rule:tock-safe-handoff",
+      "title": "Encaminhamento comercial seguro",
+      "text": "Vitória avisa antes de encaminhar e preserva o que a pessoa já informou. A equipe confirma frete, estoque, pagamento, prazo e fotos não disponíveis no atendimento automático."
+     }
+    ]
+   }
+  ]
+ }
+}
