@@ -224,7 +224,7 @@ def apply_operations(bundle: dict[str, Any], operations: list[dict[str, Any]]) -
             })
         else:
             raise GraphEditorError(f"operation_not_supported:{op}")
-    return normalize_disabled_questions(result)
+    return normalize_required_lists(result)
 
 
 def _question_modes(bundle: dict[str, Any]) -> dict[str, str]:
@@ -234,17 +234,34 @@ def _question_modes(bundle: dict[str, Any]) -> dict[str, str]:
     return {**appointment, **qualification}
 
 
-def normalize_disabled_questions(bundle: dict[str, Any]) -> dict[str, Any]:
-    """Drop disabled keys from explicit completion/booking lists (order kept)."""
+def _declared_field_keys(bundle: dict[str, Any]) -> set[str]:
+    # Same declaration sources as graph_compiler_v3 (data.fields and
+    # data.qualification.fields on any node).
+    keys: set[str] = set()
+    for node in bundle["nodes"]:
+        data = node.get("data") or {}
+        sources = list(data.get("fields") or []) + list((data.get("qualification") or {}).get("fields") or [])
+        keys.update(str(field["key"]) for field in sources if isinstance(field, dict) and field.get("key"))
+    return keys
+
+
+def normalize_required_lists(bundle: dict[str, Any]) -> dict[str, Any]:
+    """Explicit completion/booking lists only name questions that exist and are on.
+
+    These lists reach the model's turn context; a disabled key, or a key with
+    no declared question anywhere, would still read as something to collect.
+    Order is kept.
+    """
     disabled = {key for key, mode in _question_modes(bundle).items() if mode == "disabled"}
-    if not disabled:
-        return bundle
+    declared = _declared_field_keys(bundle)
     for node in bundle["nodes"]:
         data = node.get("data") or {}
         for section in ("completion", "booking"):
-            declared = data.get(section)
-            if isinstance(declared, dict) and isinstance(declared.get("required_fields"), list):
-                declared["required_fields"] = [key for key in declared["required_fields"] if key not in disabled]
+            listed = data.get(section)
+            if isinstance(listed, dict) and isinstance(listed.get("required_fields"), list):
+                listed["required_fields"] = [
+                    key for key in listed["required_fields"] if key in declared and key not in disabled
+                ]
     return bundle
 
 

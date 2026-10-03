@@ -8,7 +8,7 @@ Branch `feat/graph-editor`, a partir de `feat/utzig-commercial-v15` (linhagem de
 
 - `apps/control-plane/api/services/graph_editor.py`: reconstrói o bundle da publicação ativa
   (`document_json`; arestas sem `primary`), aplica operações da fase 1 (perguntas do SDR),
-  normaliza `completion`/`booking` sem as perguntas desligadas, `plan` sem gravar, `publish`
+  normaliza `completion`/`booking` (só perguntas declaradas e ligadas; `objective` sem campo sai), `plan` sem gravar, `publish`
   (base = ativa, checksums revisados, stage + activate, reativa a anterior se falhar, evento
   `graph_editor_published`) e `revert` (só para a anterior, evento `graph_editor_reverted`).
 - `routes/graph_bundles.py`: `GET /graph-bundles/editor`, `POST /graph-bundles/editor/{plan,publish,revert}`.
