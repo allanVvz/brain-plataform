@@ -75,11 +75,14 @@ elif unit=='akia-gateway' and old:
 elif unit=='operations-api':
  assert desired.get('OPERATIONS_NORTH_DELEGATION_ENABLED')=='true'
  assert desired.get('NORTH_SHARED_TRILHAS_APPROVED')=='true'
- assert all(desired.get(k)=='false' for k in flags), 'stage Ops before planned activation'
  if old:
   # Compatible image changes preserve actions already activated in production.
   for key in flags+['NORTH_RUNTIME_DRIVE_ENABLED','NORTH_RUNTIME_CLIENT_CREATE_ENABLED']:
-   if previous.get(key) in ('true','false'): desired[key]=previous[key]
+   value=previous.get(key,'false')
+   assert value in ('true','false'), 'invalid active capability flag'
+   desired[key]=value
+ else:
+  assert all(desired.get(k)=='false' for k in flags), 'stage Ops before planned activation'
 assert desired.get('OPERATIONS_CRON_ENABLED')!='true'
 assert desired.get('NORTH_CANONICAL_EXECUTION_ENABLED')!='true'
 def save(name,image,env):

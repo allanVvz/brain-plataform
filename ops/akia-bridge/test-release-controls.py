@@ -41,11 +41,17 @@ class Controls(unittest.TestCase):
   old={**desired,**dict.fromkeys(FLAGS,'true'),'SECRET':'private'}
   candidate,rollback=self.render('operations-api',old,desired,False)
   for key in FLAGS:self.assertEqual(candidate['environment'][key],'true')
-  self.assertEqual(rollback['environment'],{**old})
+  self.assertEqual(rollback['environment'],{**old,'NORTH_RUNTIME_DRIVE_ENABLED':None,'NORTH_RUNTIME_CLIENT_CREATE_ENABLED':None})
  def test_new_keys_removed_by_rollback(self):
   desired={**dict.fromkeys(FLAGS,'false'),'OPERATIONS_NORTH_DELEGATION_ENABLED':'true','NORTH_SHARED_TRILHAS_APPROVED':'true','NEW':'value'}
   c,r=self.render('operations-api',{'OLD':'value'},desired,False)
   self.assertIsNone(r['environment']['NEW']);self.assertEqual(r['environment']['OLD'],'value')
+ def test_active_compose_rollout_preserves_mixed_flags(self):
+  desired={**dict.fromkeys(FLAGS,'true'),'OPERATIONS_NORTH_DELEGATION_ENABLED':'true','NORTH_SHARED_TRILHAS_APPROVED':'true'}
+  old={**desired,FLAGS[1]:'false'}
+  c,r=self.render('operations-api',old,desired,False)
+  for key in FLAGS:self.assertEqual(c['environment'][key],old[key])
+  self.assertEqual(r['environment'][FLAGS[1]],'false')
 class NativeGateDiagnostics(unittest.TestCase):
  def smoke(self, failure):
   fixture={'approved':True,'isolated':True,'agency_slug':'north',
