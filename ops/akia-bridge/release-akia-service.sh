@@ -76,6 +76,10 @@ elif unit=='operations-api':
  assert desired.get('OPERATIONS_NORTH_DELEGATION_ENABLED')=='true'
  assert desired.get('NORTH_SHARED_TRILHAS_APPROVED')=='true'
  assert all(desired.get(k)=='false' for k in flags), 'stage Ops before planned activation'
+ if old:
+  # Compatible image changes preserve actions already activated in production.
+  for key in flags+['NORTH_RUNTIME_DRIVE_ENABLED','NORTH_RUNTIME_CLIENT_CREATE_ENABLED']:
+   if previous.get(key) in ('true','false'): desired[key]=previous[key]
 assert desired.get('OPERATIONS_CRON_ENABLED')!='true'
 assert desired.get('NORTH_CANONICAL_EXECUTION_ENABLED')!='true'
 def save(name,image,env):
@@ -94,10 +98,9 @@ check_disk
 verify(){
  wait_ready "$1" || return 1
  if [[ "$service" == operations-api ]]; then
-  if [[ "$activating" == true ]]; then
+  docker exec "$1" node /app/verification/north-read-contract-smoke.mjs
+  if [[ "$activating" == true ]] || docker exec "$1" env | grep -qx 'NORTH_RUNTIME_COMMENTS_ENABLED=true'; then
    docker exec -i "$1" node --input-type=module -e "$(cat ops/akia-bridge/north-activation-smoke.mjs)" < "$AKIA_NORTH_RUNTIME_FIXTURE_FILE"
-  else
-   docker exec "$1" node /app/verification/north-read-contract-smoke.mjs
   fi
  elif [[ "$service" == gateway ]]; then
   if docker exec "$1" env | grep -qx 'AKIA_CRM_ENABLED=true'; then

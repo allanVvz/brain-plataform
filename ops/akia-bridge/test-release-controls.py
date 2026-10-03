@@ -36,6 +36,12 @@ class Controls(unittest.TestCase):
   self.assertEqual(r['environment'],old)
  def test_invalid_stage_rejected(self):
   self.assertIsNone(self.render('operations-api',{},{}))
+ def test_operations_rollout_preserves_enabled_actions_and_rollback(self):
+  desired={**dict.fromkeys(FLAGS,'false'),'OPERATIONS_NORTH_DELEGATION_ENABLED':'true','NORTH_SHARED_TRILHAS_APPROVED':'true'}
+  old={**desired,**dict.fromkeys(FLAGS,'true'),'SECRET':'private'}
+  candidate,rollback=self.render('operations-api',old,desired,False)
+  for key in FLAGS:self.assertEqual(candidate['environment'][key],'true')
+  self.assertEqual(rollback['environment'],{**old})
  def test_new_keys_removed_by_rollback(self):
   desired={**dict.fromkeys(FLAGS,'false'),'OPERATIONS_NORTH_DELEGATION_ENABLED':'true','NORTH_SHARED_TRILHAS_APPROVED':'true','NEW':'value'}
   c,r=self.render('operations-api',{'OLD':'value'},desired,False)
@@ -48,6 +54,7 @@ class NativeGateDiagnostics(unittest.TestCase):
    'clientId':'33333333-3333-4333-8333-333333333333',
    'fixtureTaskId':'44444444-4444-4444-8444-444444444444',
    'foreignTaskId':'55555555-5555-4555-8555-555555555555',
+   'foreignClientId':'77777777-7777-4777-8777-777777777777',
    'email':'private-fixture@example.invalid','password':'PRIVATE_PASSWORD_SENTINEL'}
   source=pathlib.Path(__file__).with_name('deploy-akia-north-runtime.sh').read_text().split("<<'JS'\n",1)[1].split('\nJS',1)[0]
   stub=r'''
@@ -70,6 +77,7 @@ globalThis.fetch=async(url)=>{
   return new Response('{}',{headers:{'Set-Cookie':'ai_brain_session='+token+'; HttpOnly'}});
  }
  if(path.endsWith('/auth/me'))return Response.json({user:{id:testFixture.brainId,role:'user',account_type:'agency'},personas:[],navigation:{allowed_portals:['north']}});
+ if(path.endsWith('/context'))return Response.json({brainUserId:testFixture.brainId,northProfileId:testFixture.northId,allowedClientIds:[testFixture.clientId]});
  if(path.endsWith('/revoke')){testRevoked=true;console.log('TEST_REVOCATION=called');return Response.json({revoked:true});}
  throw Error('PRIVATE_UNEXPECTED_URL_SENTINEL');
 };

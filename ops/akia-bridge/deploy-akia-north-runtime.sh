@@ -63,7 +63,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 "${compose[@]}" pull north-runtime
 check_disk
-"${compose[@]}" run --no-deps -d --name "$candidate" north-runtime >/dev/null
+"${compose[@]}" run --no-deps -d -e NORTH_RUNTIME_COMMENT_EFFECTS_WORKER_ENABLED=false --name "$candidate" north-runtime >/dev/null
 wait_ready(){
   local container="$1" status
   for _ in $(seq 1 18); do
@@ -85,7 +85,7 @@ let adapter,context,principal,stage='fixture';
 try {
  const f=JSON.parse(fs.readFileSync(0,'utf8'));
  const uuid=v=>typeof v==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
- check(f.approved===true&&f.isolated===true&&f.agency_slug==='north'&&[f.brainId,f.northId,f.clientId,f.fixtureTaskId,f.foreignTaskId].every(uuid)&&f.fixtureTaskId!==f.foreignTaskId&&typeof f.email==='string'&&typeof f.password==='string');
+ check(f.approved===true&&f.isolated===true&&f.agency_slug==='north'&&[f.brainId,f.northId,f.clientId,f.fixtureTaskId,f.foreignTaskId,f.foreignClientId].every(uuid)&&f.fixtureTaskId!==f.foreignTaskId&&typeof f.email==='string'&&typeof f.password==='string');
  const control='http://caddy:8090/control-plane';
  stage='brain_login';
  const login=await fetch(control+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({identifier:f.email,password:f.password}),redirect:'error',signal:AbortSignal.timeout(15000)});
@@ -100,7 +100,13 @@ try {
  stage='adapter_readiness';check(await adapter.ready());
  stage='delegation_context';context=await adapter.resolve(principal);
  stage='delegation_scope';
- check(context.northProfileId===f.northId&&context.agency==='north'&&context.northRole==='admin'&&context.allowedClientIds.size===1&&context.allowedClientIds.has(f.clientId)&&await adapter.revalidate(context));
+ const now=Math.floor(Date.now()/1000),attestation={iss:'brain-gateway',aud:'operations-api',sub:principal.userId,portal_scope:'north',iat:now,exp:Math.min(now+60,claims.exp),north_delegation:{token_fingerprint:principal.tokenFingerprint,brain_expires_at:claims.exp}};
+ const encoded=Buffer.from(JSON.stringify(attestation)).toString('base64url');
+ const operationsResponse=await fetch(new URL('/internal/v1/north-delegations/context',process.env.NORTH_OPERATIONS_PRIVATE_URL),{method:'POST',headers:{'Content-Type':'application/json','x-brain-principal':encoded,'x-brain-principal-signature':createHmac('sha256',process.env.BRAIN_INTERNAL_AUTH_SECRET).update(encoded,'ascii').digest('hex')},body:'{}',redirect:'error',signal:AbortSignal.timeout(10000)});
+ const authorized=await operationsResponse.json(),expected=authorized.allowedClientIds;
+ check(operationsResponse.ok&&authorized.brainUserId===f.brainId&&authorized.northProfileId===f.northId&&Array.isArray(expected)&&expected.length>0&&expected.every(uuid)&&new Set(expected).size===expected.length);
+ check(context.northProfileId===f.northId&&context.agency==='north'&&context.northRole==='admin'&&context.allowedClientIds.has(f.clientId)&&!context.allowedClientIds.has(f.foreignClientId)&&JSON.stringify([...context.allowedClientIds].sort())===JSON.stringify([...expected].sort())&&await adapter.revalidate(context));
+ if(process.env.NORTH_RUNTIME_COMMENTS_ENABLED==='true'){stage='comment_rpc_readiness';check(await adapter.ready('comments'));}
  stage='native_session';const delegated=await adapter.sessions.get(context);check(delegated.northProfileId===f.northId);
  stage='native_scope';const north=await adapter.scoped(context,delegated);
  stage='fixture_task';const task=await north.taskDto(f.fixtureTaskId);
@@ -125,7 +131,7 @@ try {
   }catch{console.error('NORTH_NATIVE_CONTRACT=revocation_failed stage='+stage);process.exitCode=1;}
  }
 }
-if(!process.exitCode)console.log('NORTH_NATIVE_CONTRACT=passed fixture_scope=one_client business_mutations=0 revocation=verified');
+if(!process.exitCode)console.log('NORTH_NATIVE_CONTRACT=passed fixture_scope=agency business_mutations=0 revocation=verified');
 JS
 )"
 verify(){ wait_ready "$1" && docker exec -i "$1" node --input-type=module -e "$smoke" < "$AKIA_NORTH_RUNTIME_FIXTURE_FILE"; }
