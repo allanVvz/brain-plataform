@@ -14,41 +14,43 @@ concurrency:
 jobs:
   read:
     runs-on: ubuntu-latest
+    environment: production
     steps:
-      - name: Read canonical graph publications and scoped test leads
+      - name: Read canonical publications and exact restart candidates
         uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        env:
+          PERSONA_SLUG: ${{ inputs.persona_slug }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          fingerprint: SHA256:bB5eg8WRYnDC4DgAsZbINfvwW7CmhIo9Jze22YhWHRY
           port: ${{ secrets.VPS_PORT || 22 }}
-          command_timeout: 5m
+          envs: PERSONA_SLUG
+          command_timeout: 2m
           script: |
             set -Eeuo pipefail
-            docker exec -i brain-ai-control-plane-green-1 python - <<'PYTHON'
-            """Run inside the active CP container; reads only, emits no full phone or secrets."""
-            import json
-            from services import graph_editor, supabase_client
-            
-            client = supabase_client.get_client()
-            result = {"personas": {}, "lead_candidates": []}
-            for slug in ("utzig-garage", "tock-fatal"):
-                base = graph_editor.active_publication(slug)
-                result["personas"][slug] = {"base": base, "view": graph_editor.editor_view(base)}
-                print("SDR_GRAPH_BASE=" + json.dumps({"slug": slug, **result["personas"][slug]}, ensure_ascii=False))
-                leads = client.table("leads").select("id,nome,persona_id,channel_binding_id,telefone,updated_at,created_at").eq("persona_id", base["persona_id"]).ilike("telefone", "%8510").execute().data or []
-                for lead in leads:
-                    lead["phone_last4"] = str(lead.pop("telefone", ""))[-4:]
-                    lead["persona_slug"] = slug
-                    binding_id = lead.get("channel_binding_id")
-                    lead["binding"] = (client.table("workflow_bindings").select("id,persona_id,provider,active").eq("id", binding_id).execute().data or []) if binding_id else []
-                    counts = {}
-                    for table, field in (("messages", "lead_id"), ("contact_consents", "lead_id"), ("lead_buffer", "lead_ref"), ("conversation_ledgers", "lead_ref"), ("conversation_journeys", "lead_ref"), ("sales_conversions", "lead_ref")):
-                        response = client.table(table).select("id", count="exact").eq(field, lead["id"]).limit(1).execute()
-                        counts[table] = response.count
-                    lead["counts"] = counts
-                    lead["active_buffers"] = client.table("lead_buffer").select("id,status,channel_binding_id,created_at").eq("lead_ref", lead["id"]).in_("status", ["processing", "awaiting_proof"]).execute().data or []
-                    lead["recent_message_metadata"] = client.table("messages").select("id,direction,created_at,channel_binding_id").eq("lead_id", lead["id"]).order("created_at", desc=True).limit(4).execute().data or []
-                    result["lead_candidates"].append(lead)
-            print("SDR_OPS_AUDIT=" + json.dumps(result, ensure_ascii=False))
-            PYTHON
+            [[ "$PERSONA_SLUG" =~ ^(utzig-garage|tock-fatal)$ ]]
+            docker exec -i -e PGOPTIONS='-c default_transaction_read_only=on -c statement_timeout=30000' -e PERSONA_SLUG="$PERSONA_SLUG" brain-ai-db-1 sh -c 'exec psql -X -Atq -v ON_ERROR_STOP=1 -v slug="$PERSONA_SLUG" -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
+            WITH snapshot AS (
+              SELECT public.read_graph_editor_publication_v1(id) AS value FROM public.personas WHERE slug=:'slug'
+            ), document AS (
+              SELECT value->'publication' AS publication,(value->>'document_text')::jsonb AS doc FROM snapshot
+            )
+            SELECT 'SDR_GRAPH_AUDIT=' || regexp_replace(jsonb_build_object(
+              'slug',:'slug','publication',publication,'common_contract',doc->'common_contract',
+              'branch_contracts',doc->'branch_contracts',
+              'behavior_nodes',(SELECT jsonb_agg(n) FROM jsonb_array_elements(doc->'nodes') n WHERE n->>'node_type' IN ('persona','tone','tone_of_voice','rule','brand')),
+              'question_nodes',(SELECT jsonb_agg(n) FROM jsonb_array_elements(doc->'nodes') n WHERE n->>'node_type'='faq')
+            )::text,'[0-9]{9,}','[masked]','g') FROM document;
+            SELECT 'SDR_LEAD_AUDIT=' || jsonb_build_object(
+              'id',l.id,'name',l.nome,'persona_id',l.persona_id,'persona_slug',p.slug,
+              'phone_last4',right(l.telefone,4),'created_at',l.created_at,'updated_at',l.updated_at,
+              'buffer_bindings',(SELECT jsonb_agg(DISTINCT b.channel_binding_id) FROM public.lead_buffer b WHERE b.lead_ref=l.id AND b.persona_id=l.persona_id),
+              'active_buffers',(SELECT count(*) FROM public.lead_buffer b WHERE b.lead_ref=l.id AND b.status IN ('processing','awaiting_proof')),
+              'buffers',(SELECT count(*) FROM public.lead_buffer b WHERE b.lead_ref=l.id),
+              'messages',(SELECT count(*) FROM public.messages m WHERE m.lead_id=l.id),
+              'last_message_at',(SELECT max(m.created_at) FROM public.messages m WHERE m.lead_id=l.id)
+            )::text FROM public.leads l JOIN public.personas p ON p.id=l.persona_id
+             WHERE p.slug=:'slug' AND right(l.telefone,4)='8510';
+            SQL
