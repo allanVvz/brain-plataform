@@ -1,0 +1,63 @@
+name: VPS memory reserve
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha: {description: Full reviewed commit SHA containing the reserve script, required: true}
+      action: {description: Separately authorized host operation, type: choice, options: [audit, dry-run, apply, rollback], default: audit}
+permissions:
+  contents: read
+concurrency:
+  group: vps-memory-reserve
+  cancel-in-progress: false
+jobs:
+  reserve:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Validate immutable source input
+        env: {SOURCE_SHA: "${{ inputs.source_sha }}"}
+        run: '[[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]'
+      - uses: actions/checkout@v4
+        with: {ref: "${{ inputs.source_sha }}"}
+      - name: Validate reviewed script bytes
+        id: script
+        env: {SOURCE_SHA: "${{ inputs.source_sha }}"}
+        run: |
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_SHA" ]]
+          bash -n ops/vps/configure-memory-reserve.sh
+          printf 'checksum=%s\n' "$(sha256sum ops/vps/configure-memory-reserve.sh | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Copy only immutable host operation
+        uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          fingerprint: SHA256:bB5eg8WRYnDC4DgAsZbINfvwW7CmhIo9Jze22YhWHRY
+          source: ops/vps/configure-memory-reserve.sh
+          target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}/.deploy/memory-reserve/${{ inputs.source_sha }}
+      - name: Audit, plan and execute selected operation
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RESERVE_ACTION: ${{ inputs.action }}
+          SCRIPT_CHECKSUM: ${{ steps.script.outputs.checksum }}
+          APP_DIR: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          fingerprint: SHA256:bB5eg8WRYnDC4DgAsZbINfvwW7CmhIo9Jze22YhWHRY
+          envs: SOURCE_SHA,RESERVE_ACTION,SCRIPT_CHECKSUM,APP_DIR
+          command_timeout: 10m
+          script: |
+            set -Eeuo pipefail
+            [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ && "$SCRIPT_CHECKSUM" =~ ^[0-9a-f]{64}$ ]]
+            case "$RESERVE_ACTION" in audit|dry-run|apply|rollback) ;; *) exit 2;; esac
+            operation="$APP_DIR/.deploy/memory-reserve/$SOURCE_SHA/ops/vps/configure-memory-reserve.sh"
+            [[ -f "$operation" && ! -L "$operation" ]]
+            printf '%s  %s\n' "$SCRIPT_CHECKSUM" "$operation" | sha256sum -c -
+            bash "$operation" audit
+            if [[ "$RESERVE_ACTION" == dry-run || "$RESERVE_ACTION" == apply ]]; then bash "$operation" dry-run; fi
+            if [[ "$RESERVE_ACTION" == apply || "$RESERVE_ACTION" == rollback ]]; then bash "$operation" "$RESERVE_ACTION"; fi
