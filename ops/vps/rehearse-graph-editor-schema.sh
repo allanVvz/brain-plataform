@@ -8,6 +8,8 @@ COMPOSE=(docker compose --env-file .env.compose -f docker-compose.yml -f infra/m
 psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'exec psql -X -U "$POSTGRES_USER" -d "$1" -Atq -v ON_ERROR_STOP=1' sh "$restore_db"; }
 work_dir="$(mktemp -d)"
 trap 'rm -rf "$work_dir"' EXIT
+phase() { printf 'schema163 rehearsal: %s\n' "$1" >&2; }
+phase canonical-active-read
 # Exercise the actual CP RPC transport contract against an untouched baseline.
 psql_db <<'SQL' > "$work_dir/canonical-active.json"
 SET ROLE brain_control_plane;
@@ -43,6 +45,7 @@ SQL
 )
 # Clone a restored active snapshot into an isolated candidate, including its
 # existing ready projections. Fixtures exist only in this disposable restore.
+phase candidate-clone-and-external-parent-proof
 psql_db <<SQL > "$work_dir/fixture"
 $clone_sql
 CREATE TEMP TABLE clone_generated_fixture (
@@ -50,57 +53,76 @@ CREATE TEMP TABLE clone_generated_fixture (
  payload jsonb NOT NULL,
  search_document text GENERATED ALWAYS AS (payload->>'text') STORED
 );
+DO \$phase\$ BEGIN RAISE NOTICE 'schema163 rehearsal: gset-01'; END \$phase\$;
 SELECT pg_temp.insert_graph_editor_records('pg_temp.clone_generated_fixture',
  '[{"id":999,"payload":{"text":"generated-proof"},"search_document":"must-not-copy"}]') AS fixture_cloned \gset
+DO \$phase\$ BEGIN RAISE NOTICE 'schema163 rehearsal: gset-02'; END \$phase\$;
 SELECT count(*)=1 AND bool_and(id<>999 AND search_document='generated-proof') AS generated_clone_valid FROM clone_generated_fixture \gset
 \if :generated_clone_valid
 \else
 \quit 1
 \endif
+DO \$phase\$ BEGIN RAISE NOTICE 'schema163 rehearsal: gset-03'; END \$phase\$;
 SELECT id AS base_id,persona_id FROM public.graph_publications
 WHERE status='active' AND document_json->>'faq_projection_contract'='v1' ORDER BY version DESC LIMIT 1 \gset
+DO \$phase\$ BEGIN RAISE NOTICE 'schema163 rehearsal: gset-04'; END \$phase\$;
 SELECT gen_random_uuid() AS candidate_id \gset
 INSERT INTO public.graph_publications(id,persona_id,version,checksum,document_json,status,compiler_version,editor_lease_token,editor_lease_until)
 SELECT :'candidate_id',persona_id,(SELECT max(version)+1 FROM public.graph_publications WHERE persona_id=:'persona_id'),
  'sha256:'||encode(digest(:'candidate_id','sha256'),'hex'),
  jsonb_set(document_json,'{checksum}',to_jsonb('sha256:'||encode(digest(:'candidate_id','sha256'),'hex'))),
  'building',compiler_version,:'candidate_id'::uuid,now()+interval '15 minutes' FROM public.graph_publications WHERE id=:'base_id';
+DO \$phase\$ BEGIN RAISE NOTICE 'schema163 rehearsal: gset-05'; END \$phase\$;
 SELECT pg_temp.insert_graph_editor_records('public.graph_node_coordinates',coalesce(jsonb_agg(
  to_jsonb(t)||jsonb_build_object('publication_id',:'candidate_id','editor_lease_token',:'candidate_id')),'[]'::jsonb)) AS cloned
  FROM public.graph_node_coordinates t WHERE publication_id=:'base_id' \gset
+DO \$phase\$ BEGIN RAISE NOTICE 'schema163 rehearsal: gset-06'; END \$phase\$;
 SELECT pg_temp.insert_graph_editor_records('public.graph_branch_memberships',coalesce(jsonb_agg(
  to_jsonb(t)||jsonb_build_object('publication_id',:'candidate_id','editor_lease_token',:'candidate_id')),'[]'::jsonb)) AS cloned
  FROM public.graph_branch_memberships t WHERE publication_id=:'base_id' \gset
+DO \$phase\$ BEGIN RAISE NOTICE 'schema163 rehearsal: gset-07'; END \$phase\$;
 SELECT pg_temp.insert_graph_editor_records('public.graph_branch_contracts',coalesce(jsonb_agg(
  to_jsonb(t)||jsonb_build_object('publication_id',:'candidate_id','editor_lease_token',:'candidate_id')),'[]'::jsonb)) AS cloned
  FROM public.graph_branch_contracts t WHERE publication_id=:'base_id' \gset
 CREATE TEMP TABLE entry_map AS SELECT id AS old_id,gen_random_uuid() AS new_id FROM public.knowledge_rag_entries WHERE publication_id=:'base_id';
+DO \$phase\$ BEGIN RAISE NOTICE 'schema163 rehearsal: gset-08'; END \$phase\$;
 SELECT pg_temp.insert_graph_editor_records('public.knowledge_rag_entries',coalesce(jsonb_agg(
  to_jsonb(t)||jsonb_build_object('id',m.new_id,'publication_id',:'candidate_id',
  'canonical_key','rehearsal:'||m.new_id,'metadata',(t.metadata-'editor_lease_token')||jsonb_build_object('editor_lease_token',:'candidate_id'),'graph_checksum','sha256:'||encode(digest(:'candidate_id','sha256'),'hex'))),'[]'::jsonb)) AS cloned
  FROM public.knowledge_rag_entries t JOIN entry_map m ON m.old_id=t.id \gset
+DO \$phase\$ BEGIN RAISE NOTICE 'schema163 rehearsal: gset-09'; END \$phase\$;
 SELECT pg_temp.insert_graph_editor_records('public.knowledge_rag_chunks',coalesce(jsonb_agg(
  to_jsonb(t)||jsonb_build_object('id',gen_random_uuid(),'publication_id',:'candidate_id','rag_entry_id',m.new_id,
  'metadata',(t.metadata-'editor_lease_token')||jsonb_build_object('editor_lease_token',:'candidate_id'),'graph_checksum','sha256:'||encode(digest(:'candidate_id','sha256'),'hex'))),'[]'::jsonb)) AS cloned
  FROM public.knowledge_rag_chunks t JOIN entry_map m ON m.old_id=t.rag_entry_id \gset
+DO \$phase\$ BEGIN RAISE NOTICE 'schema163 rehearsal: gset-10'; END \$phase\$;
 SELECT public.finish_graph_publication_build_v1(:'candidate_id',:'candidate_id',false) AS built \gset
 -- Keep a live external parent outside the snapshot inventory. CAS must reject
 -- it rather than silently retire it, and its activation/receipt must roll back.
+DO \$phase\$ BEGIN RAISE NOTICE 'schema163 rehearsal: gset-11'; END \$phase\$;
 SELECT live.id AS conflict_edge,live.source_node_id AS original_source,
- src.node_type AS source_type,gen_random_uuid() AS external_source
+ coalesce(live.edge_type,'') AS original_edge_type,src.node_type AS source_type,gen_random_uuid() AS external_source
 FROM public.graph_publications p
 CROSS JOIN LATERAL jsonb_array_elements(p.document_json->'edges') e
 JOIN public.knowledge_edges live ON live.source_node_id=(p.document_json->'node_by_id'->(e->>'source')->>'projection_node_id')::uuid
  AND live.target_node_id=(p.document_json->'node_by_id'->(e->>'target')->>'projection_node_id')::uuid
- AND live.relation_type=e->>'relation_type' AND live.edge_type='main'
+ AND live.relation_type=e->>'relation_type'
 JOIN public.knowledge_nodes src ON src.id=live.source_node_id
 JOIN public.knowledge_nodes tgt ON tgt.id=live.target_node_id
 JOIN public.knowledge_allowed_edges permitted ON permitted.source_type=src.node_type AND permitted.target_type=tgt.node_type AND permitted.edge_type='main' AND permitted.active
+JOIN public.knowledge_node_type_registry src_registry ON src_registry.node_type=src.node_type
+JOIN public.knowledge_node_type_registry tgt_registry ON tgt_registry.node_type=tgt.node_type
 WHERE p.id=:'base_id' AND (e->>'primary')::boolean AND coalesce((live.metadata->>'active')::boolean,true)
+ AND tgt.node_type<>'embed' AND src_registry.sort_order<tgt_registry.sort_order
+ AND NOT EXISTS(SELECT 1 FROM public.knowledge_edges parent WHERE parent.target_node_id=live.target_node_id
+   AND parent.edge_type='main' AND coalesce((parent.metadata->>'active')::boolean,true) AND parent.id<>live.id)
 LIMIT 1 \gset
 INSERT INTO public.knowledge_nodes(id,persona_id,node_type,slug,title,status,source_table,metadata)
 VALUES (:'external_source',:'persona_id',:'source_type','restore-external-parent-'||:'external_source','Restore-only external parent','approved','graph_bundle','{"graph_json_node_id":"restore-external-parent"}');
-UPDATE public.knowledge_edges SET source_node_id=:'external_source' WHERE id=:'conflict_edge';
+-- Legacy publications may store primary edges as reference or NULL. Install
+-- the external main parent explicitly; retain its original classification.
+UPDATE public.knowledge_edges SET source_node_id=:'external_source',edge_type='main' WHERE id=:'conflict_edge';
+DO \$phase\$ BEGIN RAISE NOTICE 'schema163 rehearsal: gset-12'; END \$phase\$;
 SELECT set_config('rehearsal.persona',:'persona_id',false) AS scope_persona,set_config('rehearsal.base',:'base_id',false) AS scope_base,set_config('rehearsal.candidate',:'candidate_id',false) AS configured \gset
 SET ROLE brain_control_plane;
 DO \$parent_proof\$
@@ -119,15 +141,16 @@ BEGIN
  THEN RAISE EXCEPTION 'Rejected main-parent conflict left a committed receipt'; END IF;
 END \$parent_proof\$;
 RESET ROLE;
-UPDATE public.knowledge_edges SET source_node_id=:'original_source' WHERE id=:'conflict_edge';
+UPDATE public.knowledge_edges SET source_node_id=:'original_source',edge_type=nullif(:'original_edge_type','') WHERE id=:'conflict_edge';
 
 UPDATE public.knowledge_nodes SET metadata=metadata||'{"graph_position":{"x":10,"y":20}}'::jsonb
-WHERE id=(SELECT (n->>'projection_node_id')::uuid FROM public.graph_publications p,LATERAL jsonb_array_elements(p.document_json->'nodes') n WHERE p.id=:'base_id' LIMIT 1);
+WHERE id=(SELECT (n->>'projection_node_id')::uuid FROM public.graph_publications p,LATERAL jsonb_array_elements(p.document_json->'nodes') n WHERE p.id=:'base_id' AND n->>'node_type'<>'embed' LIMIT 1);
 SELECT :'persona_id'||'|'||:'base_id'||'|'||:'candidate_id'||'|sha256:'||encode(digest(:'candidate_id','sha256'),'hex');
 SQL
 IFS='|' read -r persona_id base_id candidate_id checksum < "$work_dir/fixture"
 [[ "$persona_id" =~ ^[a-f0-9-]{36}$ && "$base_id" =~ ^[a-f0-9-]{36}$ && "$candidate_id" =~ ^[a-f0-9-]{36}$ ]] || { echo 'Invalid rehearsal fixture'; exit 1; }
 request_hash="sha256:$(printf 'rehearsal' | sha256sum | cut -d' ' -f1)"
+phase two-writer-cas-race
 # Two independent psql connections must have exactly one CAS winner.
 for sequence in 1 2; do
   (psql_db <<SQL
@@ -142,6 +165,7 @@ successes=0
 wait "$pid_1" && successes=$((successes+1)) || true
 wait "$pid_2" && successes=$((successes+1)) || true
 [[ "$successes" == 1 ]] || { echo 'CAS must have exactly one winner'; cat "$work_dir"/race-*.log; exit 1; }
+phase replay-revert-lease-and-raw-proofs
 psql_db <<SQL
 $clone_sql
 SET ROLE brain_control_plane;
@@ -190,7 +214,7 @@ BEGIN
    v_coordinate||jsonb_build_object('publication_id',v_second->'publication'->>'id','editor_lease_token',v_second->>'lease_token')));
  PERFORM public.finish_graph_publication_build_v1((v_second->'publication'->>'id')::uuid,(v_second->>'lease_token')::uuid,true);
  IF (SELECT id FROM public.graph_publications WHERE persona_id='$persona_id' AND status='active') <> '$base_id' THEN RAISE EXCEPTION 'recovery changed active publication'; END IF;
- SELECT (n->>'projection_node_id')::uuid INTO v_node_id FROM jsonb_array_elements(v_document->'nodes') n LIMIT 1;
+ SELECT (n->>'projection_node_id')::uuid INTO v_node_id FROM jsonb_array_elements(v_document->'nodes') n WHERE n->>'node_type'<>'embed' LIMIT 1;
  IF (SELECT metadata->'graph_position' FROM public.knowledge_nodes WHERE id=v_node_id) IS DISTINCT FROM '{"x":10,"y":20}'::jsonb THEN RAISE EXCEPTION 'visual position lost during CAS/revert'; END IF;
  BEGIN
   UPDATE public.knowledge_nodes SET title=title||' forbidden' WHERE id=v_node_id;
@@ -249,6 +273,7 @@ END \$proof\$;
 SQL
 
 # A separate raw writer cannot cross an in-flight persona publication lock.
+phase raw-writer-lock-race
 (psql_db <<SQL
 BEGIN;
 SELECT pg_advisory_xact_lock(hashtext('$persona_id'));
@@ -266,15 +291,17 @@ done
 if psql_db <<SQL > "$work_dir/raw-race.log" 2>&1
 SET ROLE brain_control_plane;
 UPDATE public.knowledge_nodes SET metadata=metadata||'{"graph_position":{"x":30,"y":40}}'::jsonb
-WHERE id=(SELECT (n->>'projection_node_id')::uuid FROM public.graph_publications p,LATERAL jsonb_array_elements(p.document_json->'nodes') n WHERE p.id='$base_id' LIMIT 1);
+WHERE id=(SELECT (n->>'projection_node_id')::uuid FROM public.graph_publications p,LATERAL jsonb_array_elements(p.document_json->'nodes') n WHERE p.id='$base_id' AND n->>'node_type'<>'embed' LIMIT 1);
 SQL
 then echo 'Raw writer crossed publication lock'; wait "$raw_holder"; exit 1; fi
 grep -q 'raw_published_graph_write_requires_editor' "$work_dir/raw-race.log" || { cat "$work_dir/raw-race.log"; wait "$raw_holder"; exit 1; }
 wait "$raw_holder"
 
 # NULL bootstrap is exercised against a new persona only in the restored DB.
+phase null-bootstrap
 psql_db <<SQL
 $clone_sql
+DO \$phase\$ BEGIN RAISE NOTICE 'schema163 rehearsal: gset-13'; END \$phase\$;
 SELECT '$base_id' AS base_id,gen_random_uuid() AS bootstrap_persona \gset
 INSERT INTO public.personas(id,slug,name) VALUES (:'bootstrap_persona','schema-rehearsal-'||:'bootstrap_persona','Disposable schema rehearsal');
 CREATE TEMP TABLE bootstrap_node_map AS SELECT (n->>'projection_node_id')::uuid AS old_id,gen_random_uuid() AS new_id
@@ -284,32 +311,43 @@ CREATE TEMP TABLE bootstrap_doc AS SELECT jsonb_set(jsonb_set(document_json,'{pe
 UPDATE bootstrap_doc SET doc=jsonb_set(doc,'{nodes}',(SELECT jsonb_agg(jsonb_set(n,'{projection_node_id}',to_jsonb(m.new_id::text)))
  FROM jsonb_array_elements(doc->'nodes') n JOIN bootstrap_node_map m ON m.old_id=(n->>'projection_node_id')::uuid));
 UPDATE bootstrap_doc SET doc=jsonb_set(doc,'{node_by_id}',(SELECT jsonb_object_agg(n->>'id',n) FROM jsonb_array_elements(doc->'nodes') n));
+DO \$phase\$ BEGIN RAISE NOTICE 'schema163 rehearsal: gset-14'; END \$phase\$;
 SELECT public.reserve_graph_publication_v1(:'bootstrap_persona',doc) AS reservation FROM bootstrap_doc \gset
+DO \$phase\$ BEGIN RAISE NOTICE 'schema163 rehearsal: gset-15'; END \$phase\$;
 SELECT :'reservation'::jsonb->'publication'->>'id' AS bootstrap_id,:'reservation'::jsonb->>'lease_token' AS bootstrap_token \gset
+DO \$phase\$ BEGIN RAISE NOTICE 'schema163 rehearsal: gset-16'; END \$phase\$;
 SELECT pg_temp.insert_graph_editor_records('public.graph_node_coordinates',coalesce(jsonb_agg(
  to_jsonb(t)||jsonb_build_object('publication_id',:'bootstrap_id','editor_lease_token',:'bootstrap_token')),'[]'::jsonb)) AS cloned
  FROM public.graph_node_coordinates t WHERE publication_id=:'base_id' \gset
+DO \$phase\$ BEGIN RAISE NOTICE 'schema163 rehearsal: gset-17'; END \$phase\$;
 SELECT pg_temp.insert_graph_editor_records('public.graph_branch_memberships',coalesce(jsonb_agg(
  to_jsonb(t)||jsonb_build_object('publication_id',:'bootstrap_id','editor_lease_token',:'bootstrap_token')),'[]'::jsonb)) AS cloned
  FROM public.graph_branch_memberships t WHERE publication_id=:'base_id' \gset
+DO \$phase\$ BEGIN RAISE NOTICE 'schema163 rehearsal: gset-18'; END \$phase\$;
 SELECT pg_temp.insert_graph_editor_records('public.graph_branch_contracts',coalesce(jsonb_agg(
  to_jsonb(t)||jsonb_build_object('publication_id',:'bootstrap_id','editor_lease_token',:'bootstrap_token')),'[]'::jsonb)) AS cloned
  FROM public.graph_branch_contracts t WHERE publication_id=:'base_id' \gset
 CREATE TEMP TABLE bootstrap_entry_map AS SELECT id AS old_id,gen_random_uuid() AS new_id FROM public.knowledge_rag_entries WHERE publication_id=:'base_id';
+DO \$phase\$ BEGIN RAISE NOTICE 'schema163 rehearsal: gset-19'; END \$phase\$;
 SELECT pg_temp.insert_graph_editor_records('public.knowledge_rag_entries',coalesce(jsonb_agg(
  to_jsonb(t)||jsonb_build_object('persona_id',:'bootstrap_persona','source_node_id',(SELECT new_id FROM bootstrap_node_map WHERE old_id=t.source_node_id),'id',m.new_id,'publication_id',:'bootstrap_id',
  'canonical_key','rehearsal:'||m.new_id,'metadata',(t.metadata-'editor_lease_token')||jsonb_build_object('editor_lease_token',:'bootstrap_token'),'graph_checksum','sha256:'||encode(digest(:'bootstrap_persona','sha256'),'hex'))),'[]'::jsonb)) AS cloned
  FROM public.knowledge_rag_entries t JOIN bootstrap_entry_map m ON m.old_id=t.id \gset
+DO \$phase\$ BEGIN RAISE NOTICE 'schema163 rehearsal: gset-20'; END \$phase\$;
 SELECT pg_temp.insert_graph_editor_records('public.knowledge_rag_chunks',coalesce(jsonb_agg(
  to_jsonb(t)||jsonb_build_object('persona_id',:'bootstrap_persona','source_node_id',(SELECT new_id FROM bootstrap_node_map WHERE old_id=t.source_node_id),'id',gen_random_uuid(),'publication_id',:'bootstrap_id','rag_entry_id',m.new_id,
  'metadata',(t.metadata-'editor_lease_token')||jsonb_build_object('editor_lease_token',:'bootstrap_token'),'graph_checksum','sha256:'||encode(digest(:'bootstrap_persona','sha256'),'hex'))),'[]'::jsonb)) AS cloned
  FROM public.knowledge_rag_chunks t JOIN bootstrap_entry_map m ON m.old_id=t.rag_entry_id \gset
 
+DO \$phase\$ BEGIN RAISE NOTICE 'schema163 rehearsal: gset-21'; END \$phase\$;
 SELECT public.finish_graph_publication_build_v1(:'bootstrap_id',:'bootstrap_token',false) AS built \gset
+DO \$phase\$ BEGIN RAISE NOTICE 'schema163 rehearsal: gset-22'; END \$phase\$;
 SELECT :'bootstrap_persona' AS bootstrap_persona,:'bootstrap_id' AS bootstrap_id,
  'sha256:'||encode(digest(:'bootstrap_persona','sha256'),'hex') AS bootstrap_checksum \gset
 SET ROLE brain_control_plane;
+DO \$phase\$ BEGIN RAISE NOTICE 'schema163 rehearsal: gset-23'; END \$phase\$;
 SELECT public.commit_graph_editor_v1(:'bootstrap_persona',:'bootstrap_id',NULL,'schema-rehearsal','bootstrap-null','$request_hash','publish',:'bootstrap_checksum','{}') AS bootstrap_result \gset
+DO \$phase\$ BEGIN RAISE NOTICE 'schema163 rehearsal: gset-24'; END \$phase\$;
 SELECT public.graph_editor_receipt_v1(:'bootstrap_persona','schema-rehearsal','bootstrap-null','publish',NULL,'$request_hash') = :'bootstrap_result'::jsonb AS bootstrap_replay \gset
 \if :bootstrap_replay
 \else
