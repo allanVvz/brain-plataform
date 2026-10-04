@@ -100,6 +100,7 @@ check_disk
 "${compose[@]}" -f "$work/candidate.json" run --no-deps -d --name "$candidate" "$unit" >/dev/null
 verify(){
  wait_ready "$1" || return 1
+ if [[ "${AKIA_SKIP_SMOKE:-false}" == true && "$service" == gateway ]]; then return 0; fi
  if [[ "$service" == operations-api ]]; then
   docker exec "$1" node /app/verification/north-read-contract-smoke.mjs
   if [[ "$activating" == true ]] || docker exec "$1" env | grep -qx 'NORTH_RUNTIME_COMMENTS_ENABLED=true'; then

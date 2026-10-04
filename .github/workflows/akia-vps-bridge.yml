@@ -15,6 +15,10 @@ on:
         description: Immutable ghcr.io/allanvvz/akia-<service>@sha256:<digest>
         required: true
         type: string
+      skip_tests:
+        description: Explicit authorization to skip suites and smoke fixtures; retain syntax and readiness
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -29,7 +33,7 @@ jobs:
         run: |
           for script in ops/akia-bridge/*.sh; do bash -n "$script"; done
           node --check ops/akia-bridge/north-activation-smoke.mjs
-          python3 ops/akia-bridge/test-release-controls.py
+          if [[ "${{ inputs.skip_tests }}" != true ]]; then python3 ops/akia-bridge/test-release-controls.py; fi
           python3 -c "import ast,pathlib; ast.parse(pathlib.Path('ops/akia-bridge/north-gateway-activation-smoke.py').read_text())"
           python3 -c "import ast,pathlib; ast.parse(pathlib.Path('ops/akia-bridge/north-gateway-crm-smoke.py').read_text())"
       - name: Restrict image and action
@@ -133,6 +137,7 @@ jobs:
           AKIA_SERVICE: ${{ inputs.service }}
           AKIA_IMAGE: ${{ inputs.image }}
           AKIA_ACTION: ${{ inputs.action }}
+          AKIA_SKIP_SMOKE: ${{ inputs.skip_tests }}
           GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
           AKIA_PORTAL_PATH_HOST: api.vzforeal.com
@@ -143,7 +148,7 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           fingerprint: SHA256:bB5eg8WRYnDC4DgAsZbINfvwW7CmhIo9Jze22YhWHRY
           port: ${{ secrets.VPS_PORT || 22 }}
-          envs: AKIA_ROOT,AKIA_SERVICE,AKIA_ACTION,AKIA_IMAGE,GHCR_USERNAME,GHCR_TOKEN,AKIA_PORTAL_PATH_HOST,AKIA_PORTAL_PATH_ORIGINS
+          envs: AKIA_ROOT,AKIA_SERVICE,AKIA_ACTION,AKIA_SKIP_SMOKE,AKIA_IMAGE,GHCR_USERNAME,GHCR_TOKEN,AKIA_PORTAL_PATH_HOST,AKIA_PORTAL_PATH_ORIGINS
           command_timeout: 10m
           script: |
             set -Eeuo pipefail

@@ -12,6 +12,7 @@ services:
       AKIA_PORTAL_PATH_HOST: ${AKIA_PORTAL_PATH_HOST:?set the existing public API hostname}
       AKIA_PORTAL_PATH_ORIGINS: ${AKIA_PORTAL_PATH_ORIGINS:?set exact three Pages origins as JSON}
       AKIA_CRM_ENABLED: "true"
+      AKIA_OPERATIONS_CRM_ENABLED: "true"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health/ready', timeout=4)"]
       interval: 10s
