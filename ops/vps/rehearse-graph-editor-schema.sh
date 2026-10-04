@@ -23,9 +23,40 @@ checksum=doc.pop("checksum")
 actual="sha256:"+hashlib.sha256(json.dumps(doc,ensure_ascii=False,sort_keys=True,separators=(",",":")).encode()).hexdigest()
 assert actual==checksum==payload["publication"]["checksum"], "canonical active RPC checksum mismatch"
 PYCODE
+# This helper is temporary to each restore-only psql connection. PostgreSQL
+# generated/identity columns are recomputed instead of copied into INSERT.
+clone_sql=$(cat <<'SQL'
+CREATE FUNCTION pg_temp.insert_graph_editor_records(p_table regclass,p_records jsonb)
+RETURNS bigint LANGUAGE plpgsql SECURITY INVOKER AS $$
+DECLARE v_columns text; v_count bigint;
+BEGIN
+ SELECT string_agg(quote_ident(attname),', ' ORDER BY attnum) INTO v_columns
+ FROM pg_attribute WHERE attrelid=p_table AND attnum>0 AND NOT attisdropped
+   AND attgenerated='' AND attidentity='';
+ IF v_columns IS NULL THEN RAISE EXCEPTION 'Clone table has no writable columns'; END IF;
+ EXECUTE format('INSERT INTO %s (%s) SELECT %s FROM jsonb_populate_recordset(NULL::%s,$1)',
+   p_table,v_columns,v_columns,p_table) USING p_records;
+ GET DIAGNOSTICS v_count=ROW_COUNT;
+ RETURN v_count;
+END $$;
+SQL
+)
 # Clone a restored active snapshot into an isolated candidate, including its
 # existing ready projections. Fixtures exist only in this disposable restore.
-psql_db <<'SQL' > "$work_dir/fixture"
+psql_db <<SQL > "$work_dir/fixture"
+$clone_sql
+CREATE TEMP TABLE clone_generated_fixture (
+ id bigint GENERATED ALWAYS AS IDENTITY,
+ payload jsonb NOT NULL,
+ search_document text GENERATED ALWAYS AS (payload->>'text') STORED
+);
+SELECT pg_temp.insert_graph_editor_records('pg_temp.clone_generated_fixture',
+ '[{"id":999,"payload":{"text":"generated-proof"},"search_document":"must-not-copy"}]') AS fixture_cloned \gset
+SELECT count(*)=1 AND bool_and(id<>999 AND search_document='generated-proof') AS generated_clone_valid FROM clone_generated_fixture \gset
+\if :generated_clone_valid
+\else
+\quit 1
+\endif
 SELECT id AS base_id,persona_id FROM public.graph_publications
 WHERE status='active' AND document_json->>'faq_projection_contract'='v1' ORDER BY version DESC LIMIT 1 \gset
 SELECT gen_random_uuid() AS candidate_id \gset
@@ -34,24 +65,24 @@ SELECT :'candidate_id',persona_id,(SELECT max(version)+1 FROM public.graph_publi
  'sha256:'||encode(digest(:'candidate_id','sha256'),'hex'),
  jsonb_set(document_json,'{checksum}',to_jsonb('sha256:'||encode(digest(:'candidate_id','sha256'),'hex'))),
  'building',compiler_version,:'candidate_id'::uuid,now()+interval '15 minutes' FROM public.graph_publications WHERE id=:'base_id';
-INSERT INTO public.graph_node_coordinates SELECT (jsonb_populate_record(NULL::public.graph_node_coordinates,
- to_jsonb(t)||jsonb_build_object('publication_id',:'candidate_id','editor_lease_token',:'candidate_id'))).*
- FROM public.graph_node_coordinates t WHERE publication_id=:'base_id';
-INSERT INTO public.graph_branch_memberships SELECT (jsonb_populate_record(NULL::public.graph_branch_memberships,
- to_jsonb(t)||jsonb_build_object('publication_id',:'candidate_id','editor_lease_token',:'candidate_id'))).*
- FROM public.graph_branch_memberships t WHERE publication_id=:'base_id';
-INSERT INTO public.graph_branch_contracts SELECT (jsonb_populate_record(NULL::public.graph_branch_contracts,
- to_jsonb(t)||jsonb_build_object('publication_id',:'candidate_id','editor_lease_token',:'candidate_id'))).*
- FROM public.graph_branch_contracts t WHERE publication_id=:'base_id';
+SELECT pg_temp.insert_graph_editor_records('public.graph_node_coordinates',coalesce(jsonb_agg(
+ to_jsonb(t)||jsonb_build_object('publication_id',:'candidate_id','editor_lease_token',:'candidate_id')),'[]'::jsonb)) AS cloned
+ FROM public.graph_node_coordinates t WHERE publication_id=:'base_id' \gset
+SELECT pg_temp.insert_graph_editor_records('public.graph_branch_memberships',coalesce(jsonb_agg(
+ to_jsonb(t)||jsonb_build_object('publication_id',:'candidate_id','editor_lease_token',:'candidate_id')),'[]'::jsonb)) AS cloned
+ FROM public.graph_branch_memberships t WHERE publication_id=:'base_id' \gset
+SELECT pg_temp.insert_graph_editor_records('public.graph_branch_contracts',coalesce(jsonb_agg(
+ to_jsonb(t)||jsonb_build_object('publication_id',:'candidate_id','editor_lease_token',:'candidate_id')),'[]'::jsonb)) AS cloned
+ FROM public.graph_branch_contracts t WHERE publication_id=:'base_id' \gset
 CREATE TEMP TABLE entry_map AS SELECT id AS old_id,gen_random_uuid() AS new_id FROM public.knowledge_rag_entries WHERE publication_id=:'base_id';
-INSERT INTO public.knowledge_rag_entries SELECT (jsonb_populate_record(NULL::public.knowledge_rag_entries,
+SELECT pg_temp.insert_graph_editor_records('public.knowledge_rag_entries',coalesce(jsonb_agg(
  to_jsonb(t)||jsonb_build_object('id',m.new_id,'publication_id',:'candidate_id',
- 'canonical_key','rehearsal:'||m.new_id,'metadata',(t.metadata-'editor_lease_token')||jsonb_build_object('editor_lease_token',:'candidate_id'),'graph_checksum','sha256:'||encode(digest(:'candidate_id','sha256'),'hex')))).*
- FROM public.knowledge_rag_entries t JOIN entry_map m ON m.old_id=t.id;
-INSERT INTO public.knowledge_rag_chunks SELECT (jsonb_populate_record(NULL::public.knowledge_rag_chunks,
+ 'canonical_key','rehearsal:'||m.new_id,'metadata',(t.metadata-'editor_lease_token')||jsonb_build_object('editor_lease_token',:'candidate_id'),'graph_checksum','sha256:'||encode(digest(:'candidate_id','sha256'),'hex'))),'[]'::jsonb)) AS cloned
+ FROM public.knowledge_rag_entries t JOIN entry_map m ON m.old_id=t.id \gset
+SELECT pg_temp.insert_graph_editor_records('public.knowledge_rag_chunks',coalesce(jsonb_agg(
  to_jsonb(t)||jsonb_build_object('id',gen_random_uuid(),'publication_id',:'candidate_id','rag_entry_id',m.new_id,
- 'metadata',(t.metadata-'editor_lease_token')||jsonb_build_object('editor_lease_token',:'candidate_id'),'graph_checksum','sha256:'||encode(digest(:'candidate_id','sha256'),'hex')))).*
- FROM public.knowledge_rag_chunks t JOIN entry_map m ON m.old_id=t.rag_entry_id;
+ 'metadata',(t.metadata-'editor_lease_token')||jsonb_build_object('editor_lease_token',:'candidate_id'),'graph_checksum','sha256:'||encode(digest(:'candidate_id','sha256'),'hex'))),'[]'::jsonb)) AS cloned
+ FROM public.knowledge_rag_chunks t JOIN entry_map m ON m.old_id=t.rag_entry_id \gset
 SELECT public.finish_graph_publication_build_v1(:'candidate_id',:'candidate_id',false) AS built \gset
 UPDATE public.knowledge_nodes SET metadata=metadata||'{"graph_position":{"x":10,"y":20}}'::jsonb
 WHERE id=(SELECT (n->>'projection_node_id')::uuid FROM public.graph_publications p,LATERAL jsonb_array_elements(p.document_json->'nodes') n WHERE p.id=:'base_id' LIMIT 1);
@@ -75,6 +106,7 @@ wait "$pid_1" && successes=$((successes+1)) || true
 wait "$pid_2" && successes=$((successes+1)) || true
 [[ "$successes" == 1 ]] || { echo 'CAS must have exactly one winner'; cat "$work_dir"/race-*.log; exit 1; }
 psql_db <<SQL
+$clone_sql
 SET ROLE brain_control_plane;
 DO \$proof\$
 DECLARE v_result jsonb; v_key text; v_document jsonb; v_first jsonb; v_second jsonb; v_coordinate jsonb; v_node_id uuid; v_unpublished uuid; v_edge public.knowledge_edges%ROWTYPE;
@@ -108,17 +140,17 @@ BEGIN
  IF v_first->>'lease_token'=v_second->>'lease_token' THEN RAISE EXCEPTION 'expired lease not replaced'; END IF;
  SELECT to_jsonb(c) INTO v_coordinate FROM public.graph_node_coordinates c WHERE publication_id='$base_id' LIMIT 1;
  BEGIN
-  INSERT INTO public.graph_node_coordinates SELECT (jsonb_populate_record(NULL::public.graph_node_coordinates,
-   v_coordinate||jsonb_build_object('publication_id',v_second->'publication'->>'id','editor_lease_token',NULL))).*;
+  PERFORM pg_temp.insert_graph_editor_records('public.graph_node_coordinates',jsonb_build_array(
+   v_coordinate||jsonb_build_object('publication_id',v_second->'publication'->>'id','editor_lease_token',NULL)));
   RAISE EXCEPTION 'unleased projection write accepted';
  EXCEPTION WHEN serialization_failure THEN NULL; END;
  BEGIN
-  INSERT INTO public.graph_node_coordinates SELECT (jsonb_populate_record(NULL::public.graph_node_coordinates,
-   v_coordinate||jsonb_build_object('publication_id',v_second->'publication'->>'id','editor_lease_token',v_first->>'lease_token'))).*;
+  PERFORM pg_temp.insert_graph_editor_records('public.graph_node_coordinates',jsonb_build_array(
+   v_coordinate||jsonb_build_object('publication_id',v_second->'publication'->>'id','editor_lease_token',v_first->>'lease_token')));
   RAISE EXCEPTION 'stale projection write accepted';
  EXCEPTION WHEN serialization_failure THEN NULL; END;
- INSERT INTO public.graph_node_coordinates SELECT (jsonb_populate_record(NULL::public.graph_node_coordinates,
-   v_coordinate||jsonb_build_object('publication_id',v_second->'publication'->>'id','editor_lease_token',v_second->>'lease_token'))).*;
+ PERFORM pg_temp.insert_graph_editor_records('public.graph_node_coordinates',jsonb_build_array(
+   v_coordinate||jsonb_build_object('publication_id',v_second->'publication'->>'id','editor_lease_token',v_second->>'lease_token')));
  PERFORM public.finish_graph_publication_build_v1((v_second->'publication'->>'id')::uuid,(v_second->>'lease_token')::uuid,true);
  IF (SELECT id FROM public.graph_publications WHERE persona_id='$persona_id' AND status='active') <> '$base_id' THEN RAISE EXCEPTION 'recovery changed active publication'; END IF;
  SELECT (n->>'projection_node_id')::uuid INTO v_node_id FROM jsonb_array_elements(v_document->'nodes') n LIMIT 1;
@@ -175,6 +207,7 @@ wait "$raw_holder"
 
 # NULL bootstrap is exercised against a new persona only in the restored DB.
 psql_db <<SQL
+$clone_sql
 SELECT '$base_id' AS base_id,gen_random_uuid() AS bootstrap_persona \gset
 INSERT INTO public.personas(id,slug,name) VALUES (:'bootstrap_persona','schema-rehearsal-'||:'bootstrap_persona','Disposable schema rehearsal');
 CREATE TEMP TABLE bootstrap_node_map AS SELECT (n->>'projection_node_id')::uuid AS old_id,gen_random_uuid() AS new_id
@@ -186,24 +219,24 @@ UPDATE bootstrap_doc SET doc=jsonb_set(doc,'{nodes}',(SELECT jsonb_agg(jsonb_set
 UPDATE bootstrap_doc SET doc=jsonb_set(doc,'{node_by_id}',(SELECT jsonb_object_agg(n->>'id',n) FROM jsonb_array_elements(doc->'nodes') n));
 SELECT public.reserve_graph_publication_v1(:'bootstrap_persona',doc) AS reservation FROM bootstrap_doc \gset
 SELECT :'reservation'::jsonb->'publication'->>'id' AS bootstrap_id,:'reservation'::jsonb->>'lease_token' AS bootstrap_token \gset
-INSERT INTO public.graph_node_coordinates SELECT (jsonb_populate_record(NULL::public.graph_node_coordinates,
- to_jsonb(t)||jsonb_build_object('publication_id',:'bootstrap_id','editor_lease_token',:'bootstrap_token'))).*
- FROM public.graph_node_coordinates t WHERE publication_id=:'base_id';
-INSERT INTO public.graph_branch_memberships SELECT (jsonb_populate_record(NULL::public.graph_branch_memberships,
- to_jsonb(t)||jsonb_build_object('publication_id',:'bootstrap_id','editor_lease_token',:'bootstrap_token'))).*
- FROM public.graph_branch_memberships t WHERE publication_id=:'base_id';
-INSERT INTO public.graph_branch_contracts SELECT (jsonb_populate_record(NULL::public.graph_branch_contracts,
- to_jsonb(t)||jsonb_build_object('publication_id',:'bootstrap_id','editor_lease_token',:'bootstrap_token'))).*
- FROM public.graph_branch_contracts t WHERE publication_id=:'base_id';
+SELECT pg_temp.insert_graph_editor_records('public.graph_node_coordinates',coalesce(jsonb_agg(
+ to_jsonb(t)||jsonb_build_object('publication_id',:'bootstrap_id','editor_lease_token',:'bootstrap_token')),'[]'::jsonb)) AS cloned
+ FROM public.graph_node_coordinates t WHERE publication_id=:'base_id' \gset
+SELECT pg_temp.insert_graph_editor_records('public.graph_branch_memberships',coalesce(jsonb_agg(
+ to_jsonb(t)||jsonb_build_object('publication_id',:'bootstrap_id','editor_lease_token',:'bootstrap_token')),'[]'::jsonb)) AS cloned
+ FROM public.graph_branch_memberships t WHERE publication_id=:'base_id' \gset
+SELECT pg_temp.insert_graph_editor_records('public.graph_branch_contracts',coalesce(jsonb_agg(
+ to_jsonb(t)||jsonb_build_object('publication_id',:'bootstrap_id','editor_lease_token',:'bootstrap_token')),'[]'::jsonb)) AS cloned
+ FROM public.graph_branch_contracts t WHERE publication_id=:'base_id' \gset
 CREATE TEMP TABLE bootstrap_entry_map AS SELECT id AS old_id,gen_random_uuid() AS new_id FROM public.knowledge_rag_entries WHERE publication_id=:'base_id';
-INSERT INTO public.knowledge_rag_entries SELECT (jsonb_populate_record(NULL::public.knowledge_rag_entries,
+SELECT pg_temp.insert_graph_editor_records('public.knowledge_rag_entries',coalesce(jsonb_agg(
  to_jsonb(t)||jsonb_build_object('persona_id',:'bootstrap_persona','source_node_id',(SELECT new_id FROM bootstrap_node_map WHERE old_id=t.source_node_id),'id',m.new_id,'publication_id',:'bootstrap_id',
- 'canonical_key','rehearsal:'||m.new_id,'metadata',(t.metadata-'editor_lease_token')||jsonb_build_object('editor_lease_token',:'bootstrap_token'),'graph_checksum','sha256:'||encode(digest(:'bootstrap_persona','sha256'),'hex')))).*
- FROM public.knowledge_rag_entries t JOIN bootstrap_entry_map m ON m.old_id=t.id;
-INSERT INTO public.knowledge_rag_chunks SELECT (jsonb_populate_record(NULL::public.knowledge_rag_chunks,
+ 'canonical_key','rehearsal:'||m.new_id,'metadata',(t.metadata-'editor_lease_token')||jsonb_build_object('editor_lease_token',:'bootstrap_token'),'graph_checksum','sha256:'||encode(digest(:'bootstrap_persona','sha256'),'hex'))),'[]'::jsonb)) AS cloned
+ FROM public.knowledge_rag_entries t JOIN bootstrap_entry_map m ON m.old_id=t.id \gset
+SELECT pg_temp.insert_graph_editor_records('public.knowledge_rag_chunks',coalesce(jsonb_agg(
  to_jsonb(t)||jsonb_build_object('persona_id',:'bootstrap_persona','source_node_id',(SELECT new_id FROM bootstrap_node_map WHERE old_id=t.source_node_id),'id',gen_random_uuid(),'publication_id',:'bootstrap_id','rag_entry_id',m.new_id,
- 'metadata',(t.metadata-'editor_lease_token')||jsonb_build_object('editor_lease_token',:'bootstrap_token'),'graph_checksum','sha256:'||encode(digest(:'bootstrap_persona','sha256'),'hex')))).*
- FROM public.knowledge_rag_chunks t JOIN bootstrap_entry_map m ON m.old_id=t.rag_entry_id;
+ 'metadata',(t.metadata-'editor_lease_token')||jsonb_build_object('editor_lease_token',:'bootstrap_token'),'graph_checksum','sha256:'||encode(digest(:'bootstrap_persona','sha256'),'hex'))),'[]'::jsonb)) AS cloned
+ FROM public.knowledge_rag_chunks t JOIN bootstrap_entry_map m ON m.old_id=t.rag_entry_id \gset
 
 SELECT public.finish_graph_publication_build_v1(:'bootstrap_id',:'bootstrap_token',false) AS built \gset
 SELECT :'bootstrap_persona' AS bootstrap_persona,:'bootstrap_id' AS bootstrap_id,
