@@ -321,11 +321,44 @@ def filter_personas_for_user(user: dict[str, Any], personas: list[dict[str, Any]
     return [p for p in personas if p.get("id") in allowed or p.get("slug") in allowed_slugs]
 
 
+def _akia_portal_grants(user_id: str) -> list[str]:
+    try:
+        response = supabase_client.get_client().rpc("akia_portal_grants", {"p_user_id": user_id}).execute()
+        modes = response.data
+        if not isinstance(modes, list) or any(mode not in {"akia", "north", "south"} for mode in modes):
+            raise ValueError("Invalid portal grants response")
+        return sorted(set(modes))
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Portal authorization unavailable.") from exc
+
+
 def build_session_response(user: dict[str, Any]) -> dict[str, Any]:
+    portal_auth_enabled = os.getenv("AKIA_PORTAL_AUTH_ENABLED", "false").lower() == "true"
+    account_type = user.get("account_type") or "internal"
     personas = get_auth_personas()
     access = [] if is_admin(user) else get_user_access(user["id"])
     visible_personas = filter_personas_for_user(user, personas, access)
-    if not is_admin(user) and not visible_personas:
+    allowed_portals = []
+    # North staff can be authorized by an explicit operations grant without a
+    # Brain persona. Resolve that grant even while the optional Brain-wide
+    # portal projection is disabled; otherwise login rejects the account before
+    # the North gateway can route it to /north/admin. Agency accounts still
+    # require the same explicit grant, so this does not create access by role.
+    operations_only_staff = (
+        account_type in {"internal", "agency"}
+        and not is_admin(user)
+        and not visible_personas
+    )
+    if portal_auth_enabled or operations_only_staff:
+        try:
+            allowed_portals = _akia_portal_grants(user["id"])
+        except HTTPException:
+            # A broken operations grant lookup must not deny an existing Brain
+            # user their already authorized persona. Operations-only users
+            # still fail closed because they have no independent Brain grant.
+            if not visible_personas and not is_admin(user):
+                raise
+    if not is_admin(user) and not visible_personas and not allowed_portals:
         raise HTTPException(status_code=403, detail="Nenhuma persona foi atribuida a este usuario.")
     projected_personas = []
     strongest = 3 if is_admin(user) else 0
@@ -351,7 +384,6 @@ def build_session_response(user: dict[str, Any]) -> dict[str, Any]:
             strongest = max(strongest, 1)
         projected_personas.append({**persona, "capabilities": capabilities})
 
-    account_type = user.get("account_type") or "internal"
     if is_admin(user):
         access_profile = "brain_admin"
     else:
@@ -380,6 +412,15 @@ def build_session_response(user: dict[str, Any]) -> dict[str, Any]:
         surface = "internal"
         home_url = "/"
 
+    if not visible_personas and allowed_portals:
+        surface = "operations"
+        first_portal = allowed_portals[0]
+        home_url = (
+            "/south" if first_portal == "south" else
+            "/north/client" if first_portal == "north" and account_type == "client" else
+            f"/{first_portal}/admin"
+        )
+
     return {
         "user": user,
         "account_type": account_type,
@@ -387,6 +428,7 @@ def build_session_response(user: dict[str, Any]) -> dict[str, Any]:
         "navigation": {
             "surface": surface,
             "home_url": home_url,
+            **({"allowed_portals": allowed_portals} if portal_auth_enabled else {}),
         },
         "personas": projected_personas,
         "permissions": {

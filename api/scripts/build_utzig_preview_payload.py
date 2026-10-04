@@ -15,6 +15,59 @@ sys.path.insert(0, str(CONTROL_API))
 from services.graph_bundle import compile_bundle, normalize_bundle  # noqa: E402
 
 
+def _project_faq_items(blocks: list[dict], nodes: dict) -> None:
+    """FAQ items come from the candidate, so rewritten answers show in preview."""
+    for block in blocks:
+        if block.get("kind") != "faq":
+            continue
+        block["items"] = [
+            {
+                "node_id": node_id, "node_type": "faq", "title": nodes[node_id]["title"],
+                "summary": nodes[node_id].get("summary"),
+                "question": (nodes[node_id].get("data") or {}).get("question"),
+                "answer": (nodes[node_id].get("data") or {}).get("answer"),
+            }
+            for node_id in block.get("node_ids") or [] if node_id in nodes
+        ]
+
+
+def _project_catalog(result: dict, document: dict, nodes: dict) -> None:
+    """Sector/service titles, retired services and offers from the candidate."""
+    offers: dict[str, dict] = {}
+    for edge in document["edges"]:
+        if edge["relation_type"] != "about_product" or edge["source"] not in nodes:
+            continue
+        offer = nodes[edge["source"]]
+        if offer.get("node_type") != "offer":
+            continue
+        current = offers.get(edge["target"])
+        if current is None or (offer.get("data") or {}).get("channel") == "varejo":
+            offers[edge["target"]] = offer
+    for collection in result["persona"]["collections"]:
+        categories = []
+        for category in collection["categories"]:
+            if category["id"] not in nodes:
+                continue
+            category["title"] = nodes[category["id"]]["title"]
+            products = []
+            for product in category["products"]:
+                if product["id"] not in nodes:
+                    continue
+                product["name"] = nodes[product["id"]]["title"]
+                offer = offers.get(product["id"])
+                if offer:
+                    data = offer.get("data") or {}
+                    qualifier = str(data.get("price_qualifier") or "")
+                    product["offer"] = {
+                        "amount": float((data.get("offer") or {}).get("amount")),
+                        "currency": "BRL", **({"qualifier": qualifier} if qualifier else {}),
+                    }
+                products.append(product)
+            category["products"] = products
+            categories.append(category)
+        collection["categories"] = categories
+
+
 def build_payload(active_menu: dict, candidate_bundle: dict) -> dict:
     baseline = candidate_bundle["metadata"]["baseline_publication"]
     if (active_menu["publication_id"] != baseline["publication_id"]
@@ -69,6 +122,8 @@ def build_payload(active_menu: dict, candidate_bundle: dict) -> dict:
             block["campaigns"] = campaigns
         blocks.append(block)
     landing["blocks"] = blocks
+    _project_faq_items(landing["blocks"], nodes)
+    _project_catalog(result, document, nodes)
     result["site"]["audiences"] = [
         {
             "node_id": node_id,
@@ -98,8 +153,8 @@ def main() -> None:
     print(json.dumps({"candidate_checksum": result["graph_checksum"],
                       "catalog_groups": len(result["persona"]["collections"][0]["categories"]),
                       "catalog_products": sum(len(group["products"]) for group in result["persona"]["collections"][0]["categories"]),
-                      "editorial_campaigns": len(next(block for block in result["site"]["pages"][1]["blocks"]
-                                                       if block["kind"] == "campaign_showcase")["campaigns"])}))
+                      "editorial_campaigns": len(next((block["campaigns"] for block in result["site"]["pages"][1]["blocks"]
+                                                       if block["kind"] == "campaign_showcase"), []))}))
 
 
 if __name__ == "__main__":

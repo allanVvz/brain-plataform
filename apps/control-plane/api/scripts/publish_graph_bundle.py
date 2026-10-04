@@ -52,6 +52,7 @@ def main() -> int:
             approved_draft_checksum=args.approved_draft_checksum,
             approved_runtime_checksum=args.approved_runtime_checksum,
             actor=args.actor,
+            expected_base_publication_id=staged["base_publication_id"],
         )
         result["activated"] = True
         result["activation"] = activation.get("activation")

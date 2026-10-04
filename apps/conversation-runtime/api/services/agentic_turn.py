@@ -865,6 +865,9 @@ def execute(
             "reply_proof",
             str(exc),
             diagnostic={
+                "candidate_reply": reply.reply,
+                "candidate_status": "technical_proof_failed",
+                "metadata_correction_attempted": True,
                 "asked_field_key": reply.asked_field_key,
                 "claim_types": [claim.claim_type for claim in reply.claims],
                 "cited_node_ids": reply.cited_node_ids,
