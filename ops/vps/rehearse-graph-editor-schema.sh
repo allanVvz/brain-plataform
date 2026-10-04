@@ -150,6 +150,9 @@ SQL
 IFS='|' read -r persona_id base_id candidate_id checksum < "$work_dir/fixture"
 [[ "$persona_id" =~ ^[a-f0-9-]{36}$ && "$base_id" =~ ^[a-f0-9-]{36}$ && "$candidate_id" =~ ^[a-f0-9-]{36}$ ]] || { echo 'Invalid rehearsal fixture'; exit 1; }
 request_hash="sha256:$(printf 'rehearsal' | sha256sum | cut -d' ' -f1)"
+# Fixture hashes are computed outside the CP role, which intentionally cannot
+# execute pgcrypto digest directly. Recovery uses a distinct fixture checksum.
+recovery_checksum="sha256:$(printf 'lease-recovery:%s' "$candidate_id" | sha256sum | cut -d' ' -f1)"
 phase two-writer-cas-race
 # Two independent psql connections must have exactly one CAS winner.
 for sequence in 1 2; do
@@ -170,7 +173,7 @@ psql_db <<SQL
 $clone_sql
 SET ROLE brain_control_plane;
 DO \$proof\$
-DECLARE v_result jsonb; v_key text; v_document jsonb; v_first jsonb; v_second jsonb; v_coordinate jsonb; v_node_id uuid; v_unpublished uuid; v_raw_service uuid; v_raw_rule uuid; v_edge public.knowledge_edges%ROWTYPE;
+DECLARE v_result jsonb; v_key text; v_document jsonb; v_first jsonb; v_second jsonb; v_coordinate jsonb; v_node_id uuid; v_unpublished uuid; v_edge public.knowledge_edges%ROWTYPE;
 BEGIN
  SELECT payload->>'idempotency_key' INTO v_key FROM public.system_events
  WHERE persona_id='$persona_id' AND event_type='graph_editor_committed' AND payload->>'actor'='schema-rehearsal';
@@ -190,7 +193,7 @@ BEGIN
  v_result:=public.graph_editor_receipt_v1('$persona_id','schema-rehearsal',v_key,'publish','$base_id','$request_hash');
  IF v_result->>'publication_id' <> '$candidate_id' THEN RAISE EXCEPTION 'receipt not durable after revert'; END IF;
  v_document:=(SELECT document_json FROM public.graph_publications WHERE id='$base_id');
- v_document:=jsonb_set(v_document,'{checksum}',to_jsonb('sha256:'||encode(digest(gen_random_uuid()::text,'sha256'),'hex')));
+ v_document:=jsonb_set(v_document,'{checksum}',to_jsonb('$recovery_checksum'::text));
  v_first:=public.reserve_graph_publication_v1('$persona_id',v_document);
  BEGIN
   PERFORM public.reserve_graph_publication_v1('$persona_id',v_document);
@@ -232,7 +235,7 @@ BEGIN
   UPDATE public.knowledge_edges SET weight=weight+1 WHERE id=v_edge.id;
   RAISE EXCEPTION 'raw published topology update accepted';
  EXCEPTION WHEN serialization_failure THEN NULL; END;
- v_unpublished:=gen_random_uuid();
+ v_unpublished:=pg_catalog.gen_random_uuid();
  INSERT INTO public.knowledge_nodes(id,persona_id,node_type,slug,title,status) VALUES
  (v_unpublished,'$persona_id','asset','restore-asset-'||v_unpublished,'Restore-only asset','pending_validation');
  INSERT INTO public.knowledge_edges(persona_id,source_node_id,target_node_id,relation_type)
@@ -256,6 +259,16 @@ BEGIN
    AND live.metadata->>'graph_json_edge_id'=e->>'id'
    AND coalesce((live.metadata->>'active')::boolean,true)
  ) THEN RAISE EXCEPTION 'Canonical SERVICE to RULE edge not exercised'; END IF;
+ IF has_function_privilege('brain_control_plane','public.activate_graph_publication_v3(uuid)','EXECUTE') THEN RAISE EXCEPTION 'direct activation privilege survived'; END IF;
+ IF NOT has_function_privilege('brain_control_plane','public.commit_graph_editor_v1(uuid,uuid,uuid,text,text,text,text,text,jsonb)','EXECUTE') THEN RAISE EXCEPTION 'CAS writer grant missing'; END IF;
+END \$proof\$;
+RESET ROLE;
+-- The restore owner exercises legacy grammar with unpublished endpoints and
+-- a forged edge ID. The exact-active-snapshot exception must remain false.
+-- CP lacks the legacy matrix/event grants; its RAW fence proofs ran above.
+DO \$legacy_raw_proof\$
+DECLARE v_raw_service uuid; v_raw_rule uuid;
+BEGIN
  v_raw_service:=gen_random_uuid();v_raw_rule:=gen_random_uuid();
  INSERT INTO public.knowledge_nodes(id,persona_id,node_type,slug,title,status,source_table,metadata) VALUES
  (v_raw_service,'$persona_id','service','restore-service-'||v_raw_service,'Restore-only service','approved','graph_bundle','{"graph_json_node_id":"restore-unpublished-service"}'),
@@ -267,9 +280,7 @@ BEGIN
  EXCEPTION WHEN raise_exception THEN
   IF SQLERRM NOT LIKE 'Invalid edge: SERVICE cannot connect directly to RULE.%' THEN RAISE; END IF;
  END;
- IF has_function_privilege('brain_control_plane','public.activate_graph_publication_v3(uuid)','EXECUTE') THEN RAISE EXCEPTION 'direct activation privilege survived'; END IF;
- IF NOT has_function_privilege('brain_control_plane','public.commit_graph_editor_v1(uuid,uuid,uuid,text,text,text,text,text,jsonb)','EXECUTE') THEN RAISE EXCEPTION 'CAS writer grant missing'; END IF;
-END \$proof\$;
+END \$legacy_raw_proof\$;
 SQL
 
 # A separate raw writer cannot cross an in-flight persona publication lock.
