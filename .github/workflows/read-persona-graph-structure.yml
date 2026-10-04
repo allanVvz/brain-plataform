@@ -1,0 +1,54 @@
+name: Read persona graph structure (read-only)
+on:
+  workflow_dispatch:
+    inputs:
+      persona_slug:
+        type: choice
+        options: [utzig-garage, tock-fatal]
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: brain-ai-production-read-only
+  cancel-in-progress: false
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read canonical graph publications and scoped test leads
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          command_timeout: 5m
+          script: |
+            set -Eeuo pipefail
+            docker exec -i brain-ai-control-plane-green-1 python - <<'PYTHON'
+            """Run inside the active CP container; reads only, emits no full phone or secrets."""
+            import json
+            from services import graph_editor, supabase_client
+            
+            client = supabase_client.get_client()
+            result = {"personas": {}, "lead_candidates": []}
+            for slug in ("utzig-garage", "tock-fatal"):
+                base = graph_editor.active_publication(slug)
+                result["personas"][slug] = {"base": base, "view": graph_editor.editor_view(base)}
+                print("SDR_GRAPH_BASE=" + json.dumps({"slug": slug, **result["personas"][slug]}, ensure_ascii=False))
+                leads = client.table("leads").select("id,nome,persona_id,channel_binding_id,telefone,updated_at,created_at").eq("persona_id", base["persona_id"]).ilike("telefone", "%8510").execute().data or []
+                for lead in leads:
+                    lead["phone_last4"] = str(lead.pop("telefone", ""))[-4:]
+                    lead["persona_slug"] = slug
+                    binding_id = lead.get("channel_binding_id")
+                    lead["binding"] = (client.table("workflow_bindings").select("id,persona_id,provider,active").eq("id", binding_id).execute().data or []) if binding_id else []
+                    counts = {}
+                    for table, field in (("messages", "lead_id"), ("contact_consents", "lead_id"), ("lead_buffer", "lead_ref"), ("conversation_ledgers", "lead_ref"), ("conversation_journeys", "lead_ref"), ("sales_conversions", "lead_ref")):
+                        response = client.table(table).select("id", count="exact").eq(field, lead["id"]).limit(1).execute()
+                        counts[table] = response.count
+                    lead["counts"] = counts
+                    lead["active_buffers"] = client.table("lead_buffer").select("id,status,channel_binding_id,created_at").eq("lead_ref", lead["id"]).in_("status", ["processing", "awaiting_proof"]).execute().data or []
+                    lead["recent_message_metadata"] = client.table("messages").select("id,direction,created_at,channel_binding_id").eq("lead_id", lead["id"]).order("created_at", desc=True).limit(4).execute().data or []
+                    result["lead_candidates"].append(lead)
+            print("SDR_OPS_AUDIT=" + json.dumps(result, ensure_ascii=False))
+            PYTHON
