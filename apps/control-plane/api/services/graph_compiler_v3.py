@@ -19,7 +19,7 @@ from typing import Any, Callable, Iterable
 from services import graph_conversation_contract, supabase_client
 
 
-COMPILER_VERSION = "graph-compiler-v3.6.6"
+COMPILER_VERSION = "graph-compiler-v3.6.7"
 FAQ_PROJECTION_CONTRACT = "v1"
 LOCAL_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 EMBEDDING_DIMENSION = 1536
@@ -68,6 +68,7 @@ def turn_context_node_ids(
     path_node_ids: Iterable[str],
     fields: Iterable[dict[str, Any]],
     handoff_rule_node_ids: Iterable[str],
+    journey_rule_node_ids: Iterable[str] = (),
 ) -> list[str]:
     """Graph-owned closure required to safely execute one qualification turn.
 
@@ -82,6 +83,7 @@ def turn_context_node_ids(
         *(field.get("owner_node_id") for field in fields),
         *(field.get("question_node_id") for field in fields),
         *handoff_rule_node_ids,
+        *journey_rule_node_ids,
     ] if value))
 
 
@@ -90,6 +92,7 @@ def turn_context_chunk_node_ids(
     branch_anchor_node_id: str | None,
     path_node_ids: Iterable[str],
     handoff_rule_node_ids: Iterable[str],
+    journey_rule_node_ids: Iterable[str] = (),
 ) -> list[str]:
     """Subset whose semantic chunks must fit the retrieval budget.
 
@@ -101,6 +104,7 @@ def turn_context_chunk_node_ids(
         branch_anchor_node_id,
         *path_node_ids,
         *handoff_rule_node_ids,
+        *journey_rule_node_ids,
     ] if value))
 
 
@@ -637,16 +641,20 @@ def _common_persona_contract(
         str(field.get("key") or "")
         for field in shared if field.get("required", True)
     ]
+    journey_rules = sorted(set.intersection(*(set(c.get("journey_rule_node_ids") or []) for c in contracts.values()))) if contracts else []
+    closure = list(dict.fromkeys([*closure, *journey_rules]))
     turn_context = turn_context_node_ids(
         branch_anchor_node_id=None,
         path_node_ids=[],
         fields=shared,
         handoff_rule_node_ids=[],
+        journey_rule_node_ids=journey_rules,
     )
     chunk_context = turn_context_chunk_node_ids(
         branch_anchor_node_id=None,
         path_node_ids=[],
         handoff_rule_node_ids=[],
+        journey_rule_node_ids=journey_rules,
     )
     if len(turn_context) > TURN_CONTEXT_NODE_LIMIT:
         raise GraphCompilationError([
@@ -1095,6 +1103,8 @@ def compile_graph(
                 if evidence != [node_id]:
                     errors.append(f"factual_faq_claim_without_self_evidence:{anchor}:{node_id}")
 
+        journey_rules = [node_id for node_id in closure if node_by_id[node_id]["node_type"] == "rule"
+            and (node_by_id[node_id]["data"].get("capabilities") or {}).get("journey_stage") in {"opening", "confirmation", "handoff"}]
         completion = raw_completion or {"required_fields": [
             field["key"] for field in ordered_fields if field["required"]
         ]}
@@ -1104,6 +1114,7 @@ def compile_graph(
             path_node_ids=coordinates[anchor]["path_node_ids"],
             fields=ordered_fields,
             handoff_rule_node_ids=handoff_rules,
+            journey_rule_node_ids=journey_rules,
         )
         if len(turn_context) > TURN_CONTEXT_NODE_LIMIT:
             errors.append(
@@ -1113,6 +1124,7 @@ def compile_graph(
             branch_anchor_node_id=anchor,
             path_node_ids=coordinates[anchor]["path_node_ids"],
             handoff_rule_node_ids=handoff_rules,
+            journey_rule_node_ids=journey_rules,
         )
         if len(chunk_context) > TURN_CONTEXT_CHUNK_NODE_LIMIT:
             errors.append(
@@ -1123,6 +1135,7 @@ def compile_graph(
             "branch_path_checksum": coordinates[anchor]["path_checksum"],
             "closure_checksum": closure_checksum,
             "closure_node_ids": closure,
+            **({"journey_rule_node_ids": journey_rules} if journey_rules else {}),
             "turn_context_node_ids": turn_context,
             "turn_context_chunk_node_ids": chunk_context,
             "fields": ordered_fields,
@@ -1542,6 +1555,15 @@ def compile_persona_publication(
     persona = supabase_client.get_persona(persona_slug)
     if not persona:
         raise LookupError(f"persona not found: {persona_slug}")
+    base_publication = None
+    if activate:
+        from services import graph_editor
+        try:
+            base_publication = graph_editor.active_publication(persona_slug)
+        except graph_editor.GraphEditorError as exc:
+            if str(exc) != "active_publication_not_found":
+                raise
+    base_publication_id = str(base_publication["id"]) if base_publication else None
     if source_rows is None:
         node_rows, edge_rows = supabase_client.list_all_knowledge_graph(
             persona_id=str(persona["id"]), limit_nodes=10000
@@ -1555,47 +1577,51 @@ def compile_persona_publication(
         embedding_profile=embedding_profile,
     )
     client = supabase_client.get_client()
-    existing_response = (
-        client.table("graph_publications").select("*")
-        .eq("persona_id", persona["id"]).eq("checksum", document["checksum"])
-        .maybe_single().execute()
-    )
-    existing = existing_response.data if existing_response is not None else None
-    if existing:
-        publication = existing
+    # Every control-plane compiler uses the durable reservation path. This
+    # allocates versions under the persona lock and resumes failed/expired builds.
+    reserved = client.rpc("reserve_graph_publication_v1", {
+        "p_persona_id": str(persona["id"]), "p_document": document,
+    }).execute().data
+    publication = reserved["publication"]
+    lease_token = reserved.get("lease_token")
+    version = int(publication["version"])
+    if not reserved["owned"]:
+        if publication.get("status") not in {"compiled", "active", "rolled_back"}:
+            raise RuntimeError(f"graph_candidate_not_ready:{publication.get('status')}")
+        activation = None
         if activate and publication.get("status") != "active":
-            activation = client.rpc("activate_graph_publication_v3", {"p_publication_id": publication["id"]}).execute().data
-            return {"publication": publication, "activation": activation, "cached": True}
-        return {"publication": publication, "activation": None, "cached": True}
-    latest = (
-        client.table("graph_publications").select("version")
-        .eq("persona_id", persona["id"]).order("version", desc=True).limit(1).execute().data or []
-    )
-    version = int(latest[0]["version"] if latest else 0) + 1
-    publication = (client.table("graph_publications").insert({
-        "persona_id": persona["id"], "version": version,
-        "checksum": document["checksum"], "document_json": document,
-        "status": "building", "compiler_version": COMPILER_VERSION,
-    }).execute().data or [None])[0]
-    if not publication:
-        raise RuntimeError("graph publication insert returned no row")
+            from services import graph_editor
+            params = graph_editor._request_params(
+                str(persona["id"]), "graph_compiler_v3",
+                "publish:" + hashlib.sha256(f"{base_publication_id or 'bootstrap'}:{document['checksum']}".encode()).hexdigest(),
+                "publish", base_publication_id, {"checksum": document["checksum"]})
+            activation = client.rpc("commit_graph_editor_v1", {
+                **params, "p_publication_id": str(publication["id"]),
+                "p_runtime_checksum": document["checksum"], "p_audit": {"writer": "graph_compiler_v3"},
+            }).execute().data
+        return {"publication": publication, "activation": activation, "cached": True}
     publication_id = publication["id"]
     try:
-        coordinates = [{**coordinate, "publication_id": publication_id}
+        coordinates = [{**coordinate, "publication_id": publication_id,
+                        "editor_lease_token": lease_token}
                        for coordinate in document["coordinates"].values()]
-        client.table("graph_node_coordinates").insert(coordinates).execute()
+        client.table("graph_node_coordinates").upsert(
+            coordinates, on_conflict="publication_id,node_id").execute()
         memberships = [
-            {**member, "publication_id": publication_id}
+            {**member, "publication_id": publication_id, "editor_lease_token": lease_token}
             for values in document["branch_memberships"].values() for member in values.values()
         ]
-        client.table("graph_branch_memberships").insert(memberships).execute()
+        client.table("graph_branch_memberships").upsert(
+            memberships, on_conflict="publication_id,branch_node_id,node_id").execute()
         contracts = [{
             "publication_id": publication_id, "branch_node_id": branch,
             "path_checksum": contract["branch_path_checksum"],
             "closure_checksum": contract["closure_checksum"],
             "contract_json": contract, "compiler_version": COMPILER_VERSION,
+            "editor_lease_token": lease_token,
         } for branch, contract in document["branch_contracts"].items()]
-        client.table("graph_branch_contracts").insert(contracts).execute()
+        client.table("graph_branch_contracts").upsert(
+            contracts, on_conflict="publication_id,branch_node_id").execute()
 
         embedding_model = str(
             document["projection_manifest"].get("embedding_model")
@@ -1621,7 +1647,7 @@ def compile_persona_publication(
             vectors = batch_embed([chunk["text"] for chunk in chunks])
             if len(vectors) != len(chunks):
                 raise RuntimeError(f"embedding count mismatch for {node_id}")
-            entry = (client.table("knowledge_rag_entries").insert({
+            entry = (client.table("knowledge_rag_entries").upsert({
                 "persona_id": persona["id"], "publication_id": publication_id,
                 "source_graph_node_id": node_id, "source_node_id": node["projection_node_id"],
                 "content_type": (
@@ -1635,11 +1661,12 @@ def compile_persona_publication(
                 "products": [], "campaigns": [], "metadata": {
                     "compiler_version": COMPILER_VERSION, "publication_id": publication_id,
                     "source_node_id": node_id, "graph_checksum": document["checksum"],
+                    "editor_lease_token": str(lease_token),
                 }, "embedding_model": embedding_model, "confidence": 1, "importance": 1,
                 "validated_at": datetime.now(timezone.utc).isoformat(),
                 "projection_status": "ready", "graph_version": version,
                 "graph_checksum": document["checksum"],
-            }).execute().data or [None])[0]
+            }, on_conflict="persona_id,canonical_key").execute().data or [None])[0]
             if not entry:
                 raise RuntimeError(f"RAG entry insert returned no row for {node_id}")
             rows: list[dict[str, Any]] = []
@@ -1681,17 +1708,39 @@ def compile_persona_publication(
                                 )),
                                 "faq_projection_contract": FAQ_PROJECTION_CONTRACT,
                             } if chunk["kind"] == "faq" else {}),
+                            "editor_lease_token": str(lease_token),
                         },
                     })
                     index += 1
             if rows:
-                client.table("knowledge_rag_chunks").insert(rows).execute()
-        client.table("graph_publications").update({"status": "compiled"}).eq("id", publication_id).execute()
+                client.table("knowledge_rag_chunks").upsert(
+                    rows, on_conflict="rag_entry_id,chunk_index").execute()
+        if reserved.get("owned"):
+            client.rpc("finish_graph_publication_build_v1", {
+                "p_publication_id": publication_id, "p_lease_token": str(lease_token),
+                "p_failed": False,
+            }).execute()
         activation = None
         if activate:
-            activation = client.rpc("activate_graph_publication_v3", {"p_publication_id": publication_id}).execute().data
+            from services import graph_editor
+            params = graph_editor._request_params(
+                str(persona["id"]), "graph_compiler_v3", "publish:" + hashlib.sha256(f"{base_publication_id or 'bootstrap'}:{document['checksum']}".encode()).hexdigest(),
+                "publish", base_publication_id, {"checksum": document["checksum"]})
+            activation = client.rpc("commit_graph_editor_v1", {
+                **params, "p_publication_id": str(publication_id),
+                "p_runtime_checksum": document["checksum"], "p_audit": {"writer": "graph_compiler_v3"},
+            }).execute().data
         return {"publication": {**publication, "status": "active" if activate else "compiled"},
                 "activation": activation, "cached": False}
     except Exception:
-        client.table("graph_publications").update({"status": "failed"}).eq("id", publication_id).execute()
+        # A lost activation response can follow a successful commit. Never
+        # invalidate an active publication on an ambiguous transport failure.
+        if reserved.get("owned") and lease_token:
+            try:
+                client.rpc("finish_graph_publication_build_v1", {
+                    "p_publication_id": publication_id, "p_lease_token": str(lease_token),
+                    "p_failed": True,
+                }).execute()
+            except Exception:
+                pass
         raise

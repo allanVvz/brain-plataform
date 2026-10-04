@@ -18,14 +18,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from active_graph_bundle import load_active_bundle
+
 HERE = Path(__file__).resolve().parent
-BASE_FILE = HERE / "utzig-owner-naming-v16.json"
 BUNDLE_FILE = HERE / "utzig-concise-closing-v17.json"
-ACTIVE = {
-    "publication_id": "309a93e0-f803-44f6-ba72-3f79d9f0eec4",
-    "version": 15,
-    "checksum": "sha256:6488e5488d4dc4bc17d1f9af75bb123c0d164680dbc5c39d8bd723bb7401d679",
-}
 SOURCE = "user_request_2026_10_02_concise_closing"
 EMBEDDED = "embedded:utzig"
 GLOBAL_PARENT = "rule:human-handoff"
@@ -88,7 +84,8 @@ def _edge(eid, source, target, relation, primary=False):
 
 
 def build() -> dict:
-    bundle = json.loads(BASE_FILE.read_text(encoding="utf-8"))
+    bundle = load_active_bundle("utzig-garage")
+    active = dict(bundle["metadata"]["baseline_publication"])
     nodes = {node["id"]: node for node in bundle["nodes"]}
 
     # Tone and persona: read by the reply model on every turn.
@@ -148,7 +145,7 @@ def build() -> dict:
     metadata = bundle["metadata"]
     metadata["purpose"] = "Utzig v17: shorter human messages, light closing with photo tip"
     metadata["source"] = SOURCE
-    metadata["baseline_publication"] = dict(ACTIVE)
+    metadata["baseline_publication"] = dict(active)
     metadata["publication_allowed"] = True
     return bundle
 

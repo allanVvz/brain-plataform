@@ -20,6 +20,15 @@ FUNCTION_RE = re.compile(
 )
 
 
+# Trigger implementations and activation primitives are internal to the CAS
+# SECURITY DEFINER owner. Granting them to writers would bypass its base check.
+INTERNAL_FUNCTIONS = {
+    "activate_graph_publication_v3", "rollback_graph_publication_v3",
+    "ensure_knowledge_node_primary_edge", "prevent_canonical_graph_event_mutation",
+    "guard_graph_publication_lease_v1", "guard_published_graph_source_v1",
+}
+
+
 def validate(root: Path, minimum_version: int = 138) -> list[str]:
     sql_parts: list[str] = []
     functions: set[str] = set()
@@ -34,6 +43,14 @@ def validate(root: Path, minimum_version: int = 138) -> list[str]:
     combined = "\n".join(sql_parts)
     errors: list[str] = []
     for name in sorted(functions):
+        if name in INTERNAL_FUNCTIONS:
+            denial = re.compile(
+                rf"revoke\s+all\s+on\s+function\s+public\.{re.escape(name)}\s*\([^;]*?\)\s+from\s+PUBLIC,\s*anon,\s*authenticated,\s*service_role,\s*brain_control_plane,\s*brain_runtime,\s*brain_transport,\s*brain_gateway\s*;",
+                re.IGNORECASE | re.DOTALL,
+            )
+            if not denial.search(combined):
+                errors.append(f"internal function {name} lacks explicit denial to external roles")
+            continue
         grant = re.compile(
             rf"grant\s+execute\s+on\s+function\s+public\.{re.escape(name)}\s*\(.*?\)\s+to\s+brain_(?:control_plane|runtime|transport|gateway)",
             re.IGNORECASE | re.DOTALL,

@@ -1,8 +1,7 @@
 """Build the Utzig commercial-alignment v15 overlay and candidate bundle.
 
 Source of truth for the commercial data: Luiza Camargo (Utzig), WhatsApp,
-2026-09-28. Base: the active v13 publication (draft checksum
-sha256:b23cea31...). The SDR never states prices: price facts live only in
+2026-09-28. Base: the current, verified active publication. The SDR never states prices: price facts live only in
 offer nodes (used by the public site) and price-only FAQs are rewritten to
 duration + "o atendente confirma o valor".
 
@@ -19,21 +18,17 @@ from copy import deepcopy
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
+from active_graph_bundle import load_active_bundle
+
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(ROOT / "api"))
+
 sys.path.insert(0, str(ROOT / "api" / "scripts"))
 
 from prepare_graph_bundle_candidate import apply_overlay  # noqa: E402
 
-BASE_FILE = HERE / "utzig-optional-identity-v13.json"
 OVERLAY_FILE = HERE / "utzig-commercial-alignment-v15.overlay.json"
 BUNDLE_FILE = HERE / "utzig-commercial-alignment-v15.json"
 PENDING_FILE = HERE / "utzig-commercial-alignment-v15.pending-faqs.json"
-ACTIVE = {
-    "publication_id": "6b85bf7a-ab87-4f3b-a1d1-4a6b4ae4c05f",
-    "version": 13,
-    "checksum": "sha256:961c06d8fe7e707b3e71c74c2aa1b8c50d6b828436b0b15f2005381dc00a5f32",
-}
 SOURCE = "luiza_camargo_whatsapp_2026_09_28"
 EMBEDDED = "embedded:utzig"
 GLOBAL_PARENT = "rule:human-handoff"
@@ -222,7 +217,8 @@ def _edge(eid, source, target, relation, primary=False):
 
 
 def build() -> tuple[dict, dict]:
-    base = json.loads(BASE_FILE.read_text(encoding="utf-8"))
+    base = load_active_bundle("utzig-garage")
+    active = dict(base["metadata"]["baseline_publication"])
     nodes = {node["id"]: node for node in base["nodes"]}
     edges = base["edges"]
 
@@ -406,7 +402,7 @@ def build() -> tuple[dict, dict]:
 
     overlay = {
         "overlay_version": "1.0",
-        "base_publication": ACTIVE,
+        "base_publication": active,
         "metadata": {
             "purpose": "Utzig commercial alignment: three sectors, Luiza prices on offers only, "
                        "services discontinued, retrievable FAQs, lead-scoped vehicle and name",
@@ -431,13 +427,12 @@ def build() -> tuple[dict, dict]:
         "patch_nodes": patch_nodes,
         "upsert_edges": upsert_edges,
     }
-    publication = {"id": ACTIVE["publication_id"], "version": ACTIVE["version"],
-                   "checksum": ACTIVE["checksum"]}
+    publication = {"id": active["publication_id"], "version": active["version"],
+                   "checksum": active["checksum"]}
     bundle = apply_overlay(base, overlay, publication)
     bundle["metadata"]["publication_allowed"] = True
-    # The real baseline is the active v13 publication, not the v12 pointer the
-    # v13 source file still carries.
-    bundle["metadata"]["baseline_publication"] = dict(ACTIVE)
+    # The baseline comes from the active publication verified before this overlay.
+    bundle["metadata"]["baseline_publication"] = dict(active)
     return overlay, bundle, pending
 
 

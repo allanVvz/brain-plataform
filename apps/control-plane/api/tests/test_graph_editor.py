@@ -49,6 +49,23 @@ def _base() -> dict:
     return graph_editor.bundle_from_publication(_publication())
 
 
+def _declarations_for_bundle(bundle):
+    return {n["id"]: (n.get("data", {}).get("fields"), n.get("data", {}).get("qualification")) for n in bundle["nodes"] if n["id"] != "rule:journey:confirmation"}
+
+
+def _legacy_journey(journey):
+    journey = copy.deepcopy(journey)
+    for stage in journey["stages"]:
+        if stage["key"] == "confirmation":
+            stage.pop("texts", None)
+        for question in stage.get("questions", []):
+            for settings in question.get("per_branch", {}).values():
+                settings.pop("editable", None)
+        for rule in stage.get("rules", []):
+            rule.pop("editable", None)
+    return journey
+
+
 def _redact(value):
     # Same redaction as the fixtures: money values never reach the repository.
     return json.loads(re.sub(r"R\$ ?[\d.,]*\d", "R$ (removido)", json.dumps(value, ensure_ascii=False)))
@@ -102,9 +119,9 @@ def test_active_publication_rebuilds_to_the_same_runtime_checksum():
 def test_journey_reproduces_the_frozen_utzig_fixture():
     view = graph_editor.journey_view(_publication()["document_json"])
     fixture = json.loads((FIXTURES / "editor-journey-utzig.json").read_text(encoding="utf-8"))
-    assert _redact(view["journey"]) == fixture["journey"]
+    assert _legacy_journey(_redact(view["journey"])) == fixture["journey"]
     # Knowledge: same nodes and indexes; node text is redacted in the fixture.
-    without_text = lambda nodes: [{key: value for key, value in node.items() if key != "text"} for node in nodes]  # noqa: E731
+    without_text = lambda nodes: [{key: value for key, value in node.items() if key not in {"text", "editable"}} for node in nodes]  # noqa: E731
     assert without_text(view["knowledge"]["nodes"]) == without_text(fixture["knowledge"]["nodes"])
     for index in ("by_branch", "by_question", "by_stage"):
         assert view["knowledge"][index] == fixture["knowledge"][index]
@@ -124,7 +141,7 @@ def test_tock_journey_selects_the_path_by_purchase_profile():
     # Trimmed copy of the exported production publication (see "_source").
     fixture = json.loads((FIXTURES / "editor-document-tock.json").read_text(encoding="utf-8"))
     journey = graph_editor.journey_view(fixture["document"])["journey"]
-    assert journey == fixture["journey"]
+    assert _legacy_journey(journey) == fixture["journey"]
     assert journey["model"] == "venda" and journey["branch_count"] == 2
     selector = _stage(journey, "classification")["selector"]
     assert selector["field_key"] == "purchase_profile"
@@ -168,7 +185,7 @@ def test_essential_on_every_path_changes_every_declaration_and_keeps_owners():
     assert {node_id: field["owner_node_id"] for node_id, field in after.items()} == owners
     assert len(after) == 10 and all(field["required"] is False for field in after.values())
     per_branch = _question(journey, "condicao")["per_branch"]
-    assert len(per_branch) == 7 and all(value == {"essential": False} for value in per_branch.values())
+    assert len(per_branch) == 7 and all(value["essential"] is False for value in per_branch.values())
 
 
 def test_essential_on_one_path_changes_only_that_declaration():
@@ -177,8 +194,8 @@ def test_essential_on_one_path_changes_only_that_declaration():
     assert [operation["node_id"] for operation in operations] == ["product:ppf"]
     assert _declarations(edited, "condicao")["product:ppf"]["owner_node_id"] == "product:ppf"
     per_branch = _question(journey, "condicao")["per_branch"]
-    assert per_branch.pop("product:ppf") == {"essential": False}
-    assert all(value == {"essential": True} for value in per_branch.values())
+    assert per_branch.pop("product:ppf")["essential"] is False
+    assert all(value["essential"] is True for value in per_branch.values())
 
 
 def test_essential_folds_an_explicit_question_mode_into_the_declarations():
@@ -189,8 +206,8 @@ def test_essential_folds_an_explicit_question_mode_into_the_declarations():
     assert operations[0] == {"op": "update_node", "node_id": PERSONA, "patch": {MODES: {}}}
     assert _declarations(edited, "condicao")["product:ppf"]["required"] is True
     per_branch = _question(journey, "condicao")["per_branch"]
-    assert per_branch.pop("product:ppf") == {"essential": True}
-    assert all(value == {"essential": False} for value in per_branch.values())  # "optional" kept elsewhere
+    assert per_branch.pop("product:ppf")["essential"] is True
+    assert all(value["essential"] is False for value in per_branch.values())  # "optional" kept elsewhere
 
 
 def test_essential_on_one_path_refuses_a_question_every_path_shares():
@@ -262,7 +279,7 @@ def test_add_question_for_service_declares_on_each_chosen_path():
         "product:ppf": ("branch", "product:ppf"), "product:vitrification": ("branch", "product:vitrification")}
     question = _question(journey, "cor_do_veiculo")
     assert sorted(question["branches"]) == ["product:ppf", "product:vitrification"]
-    assert question["per_branch"] == {"product:ppf": {"essential": True}, "product:vitrification": {"essential": True}}
+    assert question["per_branch"] == {"product:ppf": {"essential": True, "editable": True}, "product:vitrification": {"essential": True, "editable": True}}
     _refused([{**change, "branch_node_ids": []}], "add_question_branches_required")
     _refused([{**change, "branch_node_ids": ["product:nope"]}], "add_question_branch_unknown")
 
@@ -403,35 +420,69 @@ def test_utzig_acceptance_keeps_only_service_vehicle_name_and_address_active():
 
 # ── Save, revert and routes ────────────────────────────────────────────────
 
+class _RpcFailure(Exception):
+    code = "40001"
+    def __init__(self, message):
+        self.message = message
+
+
 class _Rpc:
-    def __init__(self, calls):
-        self.calls = calls
+    """Shared persisted-state double, independent of Python editor instances."""
+    def __init__(self, state, *, fail_activation=False):
+        self.state, self.fail_activation = state, fail_activation
 
     def rpc(self, name, params):
-        self.calls.append((name, params))
-        return SimpleNamespace(execute=lambda: SimpleNamespace(data={"ok": True}))
+        self.state["rpc"].append((name, params))
+        return SimpleNamespace(execute=lambda: SimpleNamespace(data=self.execute(name, params)))
+
+    def execute(self, name, p):
+        with self.state["db_lock"]:
+            key = (p["p_persona_id"], p.get("p_idempotency_key"))
+            receipt = self.state["receipts"].get(key)
+            fingerprint = tuple(p.get(field) for field in
+                                ("p_actor", "p_operation", "p_base_publication_id", "p_request_hash"))
+            if name in {"graph_editor_receipt_v1", "commit_graph_editor_v1"} and receipt:
+                if receipt[0] != fingerprint:
+                    raise _RpcFailure("graph_editor_idempotency_conflict")
+                return copy.deepcopy(receipt[1])
+            if name == "graph_editor_receipt_v1":
+                return None
+            if name == "commit_graph_editor_v1":
+                if p["p_base_publication_id"] != self.state["active"]["id"]:
+                    raise _RpcFailure("graph_editor_base_not_active")
+                if self.fail_activation:
+                    raise RuntimeError("FAQ projection gate refused activation")
+                base = self.state["active"]["id"]
+                self.state["active"] = {**self.state["active"], "id": p["p_publication_id"],
+                                        "checksum": p["p_runtime_checksum"]}
+                self.state["activated"].append(p["p_runtime_checksum"])
+                result = {"version": 17, "publication_id": p["p_publication_id"],
+                          ("previous_publication_id" if p["p_operation"] == "save"
+                           else "reverted_from_publication_id"): base}
+                self.state["receipts"][key] = (fingerprint, copy.deepcopy(result))
+                self.state["events"].append({"event_type": "graph_editor_committed", "payload": {
+                    **p.get("p_audit", {}), "actor": p["p_actor"], "result": result}})
+                if self.state.get("lose_reply"):
+                    self.state["lose_reply"] = False
+                    raise TimeoutError("committed response lost")
+                return result
+            raise AssertionError(f"unexpected RPC {name}")
 
 
 def _save_env(monkeypatch, *, fail_activation=False):
+    import threading
     from services import graph_bundle_publisher, supabase_client
-    state = {"active": _publication(), "rpc": [], "events": [], "staged": [], "activated": []}
+    state = {"active": _publication(), "rpc": [], "events": [], "staged": [], "activated": [],
+             "receipts": {}, "db_lock": threading.Lock()}
     monkeypatch.setattr(graph_editor, "active_publication", lambda slug: state["active"])
-    monkeypatch.setattr(graph_editor, "_saved", {})
+    monkeypatch.setattr(supabase_client, "get_persona", lambda slug: {"id": _publication()["persona_id"]})
 
     def stage(bundle, *, approved_draft_checksum, actor):
         state["staged"].append(approved_draft_checksum)
         return {"publication": {"id": "pub-17", "version": 17}}
 
-    def activate(bundle, *, publication_id, approved_draft_checksum, approved_runtime_checksum, actor):
-        state["activated"].append(approved_runtime_checksum)
-        if fail_activation:
-            raise graph_bundle_publisher.GraphBundlePublishError("boom")
-        state["active"] = {**state["active"], "id": publication_id, "checksum": approved_runtime_checksum}
-
     monkeypatch.setattr(graph_bundle_publisher, "stage_bundle", stage)
-    monkeypatch.setattr(graph_bundle_publisher, "activate_staged_bundle", activate)
-    monkeypatch.setattr(supabase_client, "get_client", lambda: _Rpc(state["rpc"]))
-    monkeypatch.setattr(supabase_client, "insert_event", lambda event, source=None: state["events"].append(event))
+    monkeypatch.setattr(supabase_client, "get_client", lambda: _Rpc(state, fail_activation=fail_activation))
     return state
 
 
@@ -447,7 +498,7 @@ def test_save_publishes_on_the_active_base_with_server_checksums(monkeypatch):
     assert result == {"version": 17, "publication_id": "pub-17", "previous_publication_id": "pub-16"}
     assert state["staged"] == [reviewed["draft_checksum"]]
     assert state["activated"] == [reviewed["runtime_checksum"]]
-    assert [event["event_type"] for event in state["events"]] == ["graph_editor_saved"]
+    assert [event["event_type"] for event in state["events"]] == ["graph_editor_committed"]
     payload = state["events"][0]["payload"]
     assert payload["actor"] == "admin-1" and payload["changes"] == ACCEPTANCE
     # A double click replays the same answer instead of publishing again.
@@ -462,24 +513,98 @@ def test_save_refuses_a_base_that_is_no_longer_active(monkeypatch):
     assert state["staged"] == []
 
 
-def test_failed_activation_reactivates_the_previous_publication(monkeypatch):
-    from services.graph_bundle_publisher import GraphBundlePublishError
+def test_failed_activation_never_compensates_over_another_writers_publication(monkeypatch):
     state = _save_env(monkeypatch, fail_activation=True)
-    with pytest.raises(GraphBundlePublishError):
+    with pytest.raises(graph_editor.GraphEditorOutcomeUnknown):
         _save(idempotency_key="k-fail")
-    assert state["rpc"] == [("activate_graph_publication_v3", {"p_publication_id": "pub-16"})]
-    assert state["events"] == [] and graph_editor._saved == {}
+    assert state["active"]["id"] == "pub-16"
+    assert not any(name == "activate_graph_publication_v3" for name, _ in state["rpc"])
+    assert state["events"] == [] and state["receipts"] == {}
+
+
+@pytest.mark.parametrize("overrides", [
+    {"actor": "other-admin"}, {"base_publication_id": "pub-15"},
+    {"changes": [{"type": "set_question", "key": "condicao", "active": False}]},
+])
+def test_durable_key_cannot_be_reused_for_another_actor_base_or_body(monkeypatch, overrides):
+    state = _save_env(monkeypatch)
+    _save()
+    with pytest.raises(graph_editor.GraphEditorConflict, match="idempotency_conflict"):
+        _save(**overrides)
+    assert len(state["staged"]) == 1
+
+
+def test_receipt_replays_after_restart_and_after_a_later_publication(monkeypatch):
+    state = _save_env(monkeypatch)
+    original = _save()
+    state["active"] = {**state["active"], "id": "pub-20"}
+    # A new service process has no cache to hydrate; only the DB receipt matters.
+    monkeypatch.setattr(graph_editor, "active_publication", lambda slug: pytest.fail("replay read active"))
+    assert _save() == original
+    assert len(state["staged"]) == 1
+
+
+def test_lost_committed_reply_is_reconciled_by_same_request_key(monkeypatch):
+    state = _save_env(monkeypatch)
+    state["lose_reply"] = True
+    with pytest.raises(graph_editor.GraphEditorOutcomeUnknown):
+        _save()
+    assert state["active"]["id"] == "pub-17"
+    assert _save()["publication_id"] == "pub-17"
+    assert len(state["activated"]) == 1
+
+
+def test_distinct_keys_racing_from_same_base_have_only_one_cas_winner(monkeypatch):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from services import graph_bundle_publisher
+    state = _save_env(monkeypatch)
+    original_stage = graph_bundle_publisher.stage_bundle
+    barrier = threading.Barrier(2)
+    def stage(*args, **kwargs):
+        result = original_stage(*args, **kwargs)
+        barrier.wait(timeout=10)
+        return result
+    monkeypatch.setattr(graph_bundle_publisher, "stage_bundle", stage)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        calls = [pool.submit(_save, idempotency_key=key) for key in ("writer-a", "writer-b")]
+        outcomes = []
+        for call in calls:
+            try: outcomes.append(call.result(timeout=20))
+            except graph_editor.GraphEditorConflict: outcomes.append("conflict")
+    assert outcomes.count("conflict") == 1
+    assert len(state["receipts"]) == len(state["activated"]) == 1
+
+
+def test_same_key_racing_from_same_base_replays_one_result(monkeypatch):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from services import graph_bundle_publisher
+    state = _save_env(monkeypatch)
+    original_stage = graph_bundle_publisher.stage_bundle
+    barrier = threading.Barrier(2)
+    def stage(*args, **kwargs):
+        result = original_stage(*args, **kwargs)
+        barrier.wait(timeout=10)
+        return result
+    monkeypatch.setattr(graph_bundle_publisher, "stage_bundle", stage)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        calls = [pool.submit(_save) for _ in range(2)]
+        results = [call.result(timeout=20) for call in calls]
+    assert results[0] == results[1]
+    assert len(state["receipts"]) == len(state["activated"]) == 1
 
 
 def test_revert_only_to_the_previous_publication(monkeypatch):
     state = _save_env(monkeypatch)
-    monkeypatch.setattr(graph_editor, "previous_publication", lambda slug, active: {"id": "pub-15", "version": 15})
+    monkeypatch.setattr(graph_editor, "previous_publication", lambda slug, active: {"id": "pub-15", "version": 15, "checksum": "sha256:previous"})
     with pytest.raises(graph_editor.GraphEditorConflict, match="revert_target_not_previous"):
-        graph_editor.revert(persona_slug="utzig-garage", to_publication_id="pub-3", actor="admin-1")
-    result = graph_editor.revert(persona_slug="utzig-garage", to_publication_id="pub-15", actor="admin-1")
+        graph_editor.revert(persona_slug="utzig-garage", to_publication_id="pub-3", actor="admin-1", base_publication_id="pub-16", idempotency_key="revert-1")
+    result = graph_editor.revert(persona_slug="utzig-garage", to_publication_id="pub-15", actor="admin-1", base_publication_id="pub-16", idempotency_key="revert-1")
     assert result["publication_id"] == "pub-15" and result["reverted_from_publication_id"] == "pub-16"
-    assert state["rpc"] == [("activate_graph_publication_v3", {"p_publication_id": "pub-15"})]
-    assert state["events"][-1]["event_type"] == "graph_editor_reverted"
+    assert state["rpc"][-1][0] == "commit_graph_editor_v1"
+    assert state["rpc"][-1][1]["p_base_publication_id"] == "pub-16"
+    assert state["events"][-1]["event_type"] == "graph_editor_committed"
 
 
 def _request(role: str, *, can_edit: bool):
@@ -540,7 +665,7 @@ def test_routes_require_admin_to_save_and_scope_every_persona(monkeypatch):
     assert _route_error(lambda: graph_bundles.graph_editor_get(
         operator, persona_slug="tock-fatal")).status_code == 403
     assert _route_error(lambda: graph_bundles.graph_editor_revert(graph_bundles.EditorRevertBody(
-        persona_slug="utzig-garage", to_publication_id="pub-15"), operator)).status_code == 403
+        persona_slug="utzig-garage", to_publication_id="pub-15", base_publication_id="pub-16", idempotency_key="revert-1"), operator)).status_code == 403
     assert state["staged"] == []
     assert not any(route.path in {"/graph-bundles/editor/plan", "/graph-bundles/editor/publish"}
                    for route in graph_bundles.router.routes)
@@ -549,8 +674,107 @@ def test_routes_require_admin_to_save_and_scope_every_persona(monkeypatch):
 def test_get_route_returns_the_frozen_view_shape(monkeypatch):
     from routes import graph_bundles
     _save_env(monkeypatch)
-    monkeypatch.setattr(graph_editor, "previous_publication", lambda slug, active: {"id": "pub-15", "version": 15})
+    monkeypatch.setattr(graph_editor, "previous_publication", lambda slug, active: {"id": "pub-15", "version": 15, "checksum": "sha256:previous"})
     view = graph_bundles.graph_editor_get(_request("operator", can_edit=False), persona_slug="utzig-garage")
     assert list(view) == ["publication", "previous_publication", "editable", "blocked_reasons",
                           "compiler_upgrade", "persona_node_id", "journey", "knowledge"]
     assert view["previous_publication"]["id"] == "pub-15" and view["publication"]["id"] == "pub-16"
+
+
+def test_confirmation_rule_is_in_runtime_context_before_and_after_branch_choice():
+    _, edited, journey = _expand([{"type": "set_text", "key": "confirmation", "value": "Peça bairro e cidade uma vez, sem insistir; confirme o resumo."}])
+    stage = _stage(journey, "confirmation")
+    rule_id = stage["rule_node_id"]
+    assert rule_id == "rule:journey:confirmation"
+    compiled = graph_bundle.compile_bundle(edited)
+    for contract in [compiled["common_contract"], *compiled["branch_contracts"].values()]:
+        assert rule_id in contract["turn_context_node_ids"]
+        assert rule_id in contract["turn_context_chunk_node_ids"]
+    assert _declarations_for_bundle(edited) == _declarations_for_bundle(_base())
+
+
+def test_knowledge_edit_keeps_node_identity_fields_and_claims():
+    base = _base()
+    faq = next(n for n in base["nodes"] if n["node_type"] == "faq" and (n.get("data") or {}).get("answer"))
+    text = faq["data"]["question"] + "\nResposta editada pelo administrador."
+    _, edited, _ = _expand([{"type": "set_knowledge", "node_id": faq["id"], "text": text}], base)
+    changed = next(n for n in edited["nodes"] if n["id"] == faq["id"])
+    assert changed["data"]["answer"] == "Resposta editada pelo administrador."
+    assert changed["projection_node_id"] == faq["projection_node_id"]
+    assert changed["data"].get("claims") == faq["data"].get("claims")
+    assert edited["edges"] == base["edges"]
+    _refused([{"type": "set_knowledge", "node_id": faq["id"], "text": "Sem resposta"}], "knowledge_faq_format_invalid", base)
+    _refused([{"type": "set_knowledge", "node_id": PERSONA, "text": "Tentar mudar persona"}], "knowledge_not_editable", base)
+
+
+def test_active_publication_decodes_stored_text_without_losing_numeric_spelling(monkeypatch):
+    from services import supabase_client
+    publication = _publication()
+    document = publication["document_json"]
+    document["nodes"][0]["data"]["numeric_fixture"] = 1.0
+    monkeypatch.setattr(supabase_client, "get_persona", lambda slug: {"id": publication["persona_id"]})
+    class Client:
+        def rpc(self, name, params):
+            assert name == "read_graph_editor_publication_v1"
+            assert params == {"p_persona_id": publication["persona_id"]}
+            return SimpleNamespace(execute=lambda: SimpleNamespace(data={
+                "publication": {k:v for k,v in publication.items() if k != "document_json"},
+                "document_text": json.dumps(document),
+            }))
+    monkeypatch.setattr(supabase_client, "get_client", lambda: Client())
+    value = graph_editor.active_publication("utzig-garage")
+    assert type(value["document_json"]["nodes"][0]["data"]["numeric_fixture"]) is float
+
+
+def test_compiler_upgrade_requires_valid_baseline_and_unchanged_content():
+    publication = _publication()
+    def older(value):
+        if isinstance(value, dict):
+            return {k: ("graph-compiler-v3.6.6" if k == "compiler_version" else older(v)) for k,v in value.items()}
+        if isinstance(value, list): return [older(v) for v in value]
+        return value
+    document = older(publication["document_json"])
+    document.pop("checksum")
+    document["checksum"] = graph_editor.graph_compiler_v3.canonical_checksum(document)
+    publication = {**publication, "compiler_version": "graph-compiler-v3.6.6", "checksum": document["checksum"], "document_json": document}
+    checked = graph_editor.verify_round_trip(publication)
+    assert checked["editable"] is True and checked["same_checksum"] is False
+    assert checked["compiler_upgrade"] == {"from": "graph-compiler-v3.6.6", "to": "graph-compiler-v3.6.7"}
+    bad = copy.deepcopy(publication)
+    bad["document_json"]["nodes"][0]["title"] += " corrupted"
+    assert graph_editor.verify_round_trip(bad)["editable"] is False
+    current = _publication()
+    document = current["document_json"]
+    document["unknown_top_level_extension"] = True
+    document.pop("checksum")
+    document["checksum"] = graph_editor.graph_compiler_v3.canonical_checksum(document)
+    current["checksum"] = document["checksum"]
+    checked = graph_editor.verify_round_trip(current)
+    assert checked["editable"] is False
+    assert "base_recompile_checksum_mismatch" in checked["validation_errors"]
+
+
+@pytest.mark.parametrize("getter,args", [("get_knowledge_node_for_source", ("graph_bundle", "source-id")), ("get_knowledge_node_by_slug", ("some-slug",))])
+def test_staging_nodes_never_escape_lookup_fallback(monkeypatch, getter, args):
+    from repositories import control_plane as repository
+    class Query:
+        def __getattr__(self, name):
+            return lambda *args, **kwargs: self
+    monkeypatch.setattr(repository, "_KG_TABLES_MISSING", False)
+    monkeypatch.setattr(repository, "get_client", lambda: Query())
+    monkeypatch.setattr(repository, "_q", lambda query: [{"id": "placeholder", "metadata": {"editor_staging": True}}])
+    assert getattr(repository, getter)(*args) is None
+
+
+def test_raw_publication_conflict_reaches_http409(monkeypatch):
+    from repositories import control_plane as repository
+    class Conflict(Exception):
+        code = "40001"
+    class Query:
+        def execute(self):
+            raise Conflict("raw_published_graph_write_requires_editor")
+    with pytest.raises(HTTPException) as failure:
+        repository._q(Query())
+    assert failure.value.status_code == 409
+    assert failure.value.detail["errors"][0]["code"] == "published_graph_requires_editor"
+    assert "raw_published" not in failure.value.detail["errors"][0]["message"]

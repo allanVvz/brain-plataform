@@ -1,7 +1,6 @@
 """Build Utzig v16: refer to the owner as Wilian, never by a nickname.
 
-Base: the active v15 publication (bundle utzig-commercial-alignment-v15.json,
-publication version 14). The business is "Utzig Garage do Wilian", alternating
+Base: the current, verified active publication. The business is "Utzig Garage do Wilian", alternating
 with "Utzig" and "Wilian". Internal ids and asset file names are unchanged.
 
 Run from the repository root:
@@ -14,14 +13,10 @@ import re
 from copy import deepcopy
 from pathlib import Path
 
+from active_graph_bundle import load_active_bundle
+
 HERE = Path(__file__).resolve().parent
-BASE_FILE = HERE / "utzig-commercial-alignment-v15.json"
 BUNDLE_FILE = HERE / "utzig-owner-naming-v16.json"
-ACTIVE = {
-    "publication_id": "e10f7558-2232-47f2-9a0b-efdcae7c1c3e",
-    "version": 14,
-    "checksum": "sha256:217d45637011f85e8a6be888e033d37430acfe815c8f4085336251f21f019ddf",
-}
 SOURCE = "user_request_2026_10_02_owner_naming"
 NAMING_RULE = (
     "Refira-se ao negócio como Utzig Garage do Wilian, alternando com Utzig e "
@@ -67,7 +62,8 @@ def _walk(value, key=""):
 
 
 def build() -> dict:
-    bundle = json.loads(BASE_FILE.read_text(encoding="utf-8"))
+    bundle = load_active_bundle("utzig-garage")
+    active = dict(bundle["metadata"]["baseline_publication"])
     faq_index = 0
     for node in bundle["nodes"]:
         # Alternate the service FAQ closing between Utzig and Wilian.
@@ -103,7 +99,7 @@ def build() -> dict:
     metadata = bundle["metadata"]
     metadata["purpose"] = "Utzig v16: owner referred to as Wilian; no nickname in any text"
     metadata["source"] = SOURCE
-    metadata["baseline_publication"] = dict(ACTIVE)
+    metadata["baseline_publication"] = dict(active)
     metadata["publication_allowed"] = True
     # v15 already archived its retired nodes and edges; nothing to retire now.
     metadata.pop("retired_nodes", None)
