@@ -602,12 +602,13 @@ BEGIN
     END IF;
   ELSE
     -- Connections to unpublished conversations/assets remain ordinary writes.
-    -- Either OLD or NEW published-to-published topology is protected.
+    -- Protect both OLD/NEW published-to-published topology and main ownership
+    -- of any published target, even when its parent is outside the snapshot.
     SELECT EXISTS(SELECT 1 FROM public.graph_publications p
       WHERE p.status='active' AND EXISTS(SELECT 1 FROM (VALUES
-        (v_old->>'source_node_id',v_old->>'target_node_id'),
-        (v_new->>'source_node_id',v_new->>'target_node_id')) endpoints(source_id,target_id)
-        WHERE EXISTS(SELECT 1 FROM jsonb_array_elements(p.document_json->'nodes') n WHERE n->>'projection_node_id'=endpoints.source_id)
+        (v_old->>'source_node_id',v_old->>'target_node_id',v_old->>'edge_type'),
+        (v_new->>'source_node_id',v_new->>'target_node_id',v_new->>'edge_type')) endpoints(source_id,target_id,edge_type)
+        WHERE (endpoints.edge_type='main' OR EXISTS(SELECT 1 FROM jsonb_array_elements(p.document_json->'nodes') n WHERE n->>'projection_node_id'=endpoints.source_id))
           AND EXISTS(SELECT 1 FROM jsonb_array_elements(p.document_json->'nodes') n WHERE n->>'projection_node_id'=endpoints.target_id))) INTO v_protected;
   END IF;
   IF v_protected THEN
@@ -622,5 +623,60 @@ DROP TRIGGER IF EXISTS guard_published_graph_source ON public.knowledge_edges;
 CREATE TRIGGER guard_published_graph_source BEFORE INSERT OR UPDATE OR DELETE ON public.knowledge_edges
 FOR EACH ROW EXECUTE FUNCTION public.guard_published_graph_source_v1();
 REVOKE ALL ON FUNCTION public.guard_published_graph_source_v1() FROM PUBLIC, anon, authenticated, service_role, brain_control_plane, brain_runtime, brain_transport, brain_gateway;
+
+-- The compiler snapshot grammar differs from manual dashboard edges. Only
+-- registry/type-direction and Embed classification get an exact-snapshot
+-- exception. Live main-parent uniqueness and cycle validation remain intact.
+ALTER FUNCTION public.validate_knowledge_edge_contract() SECURITY INVOKER;
+DO $canonical_edge_contract$
+DECLARE
+  v_definition text;
+  v_declaration constant text := '  src_type TEXT;';
+  v_begin constant text := E'BEGIN\n  SELECT n.node_type';
+  v_parent constant text := E'      AND (TG_OP <> ''UPDATE'' OR e.id <> NEW.id)\n    LIMIT 1;';
+  v_types constant text := '    SELECT * INTO allowed_row';
+  v_cycle constant text := '    IF COALESCE((NEW.metadata->>''active'')::boolean, true) = true THEN';
+  v_embed_grant constant text := E'  IF tgt_type = ''embed''\n     AND NEW.relation_type = ''publishes_to''';
+  v_embed constant text := 'IF tgt_type = ''embed'' AND src_type NOT IN (''copy'', ''rule'') THEN';
+  v_guard constant text := $edge_guard$
+  -- graph_editor_exact_active_edge_v1: not a caller-controlled metadata bypass.
+  v_graph_editor_exact_active_edge := (SELECT proowner FROM pg_proc WHERE oid='public.commit_graph_editor_v1(uuid,uuid,uuid,text,text,text,text,text,jsonb)'::regprocedure)
+      = current_user::regrole::oid
+    AND EXISTS (
+      SELECT 1 FROM public.graph_publications p,
+        LATERAL jsonb_array_elements(p.document_json->'edges') e
+      WHERE p.status='active' AND p.persona_id=NEW.persona_id
+        AND (p.document_json->'persona'->>'id')::uuid=NEW.persona_id
+        AND (p.document_json->'node_by_id'->(e->>'source')->>'projection_node_id')::uuid=NEW.source_node_id
+        AND (p.document_json->'node_by_id'->(e->>'target')->>'projection_node_id')::uuid=NEW.target_node_id
+        AND e->>'relation_type'=NEW.relation_type
+        AND CASE WHEN (e->>'primary')::boolean THEN 'main' ELSE 'reference' END=NEW.edge_type
+        AND e->>'id'=NEW.metadata->>'graph_json_edge_id'
+        AND (e->>'weight')::numeric=NEW.weight
+        AND EXISTS (SELECT 1 FROM public.knowledge_nodes n WHERE n.id=NEW.source_node_id AND n.persona_id=NEW.persona_id)
+        AND EXISTS (SELECT 1 FROM public.knowledge_nodes n WHERE n.id=NEW.target_node_id AND n.persona_id=NEW.persona_id)
+    );
+$edge_guard$;
+BEGIN
+  SELECT pg_get_functiondef('public.validate_knowledge_edge_contract()'::regprocedure) INTO v_definition;
+  IF position('graph_editor_exact_active_edge_v1' IN v_definition)>0 THEN RETURN; END IF;
+  IF v_definition IS NULL OR position(v_declaration IN v_definition)=0
+    OR position(v_begin IN v_definition)=0 OR position(v_types IN v_definition)=0
+    OR position(v_cycle IN v_definition)=0 OR position(v_embed IN v_definition)=0
+    OR position(v_parent IN v_definition)=0 OR position(v_embed_grant IN v_definition)=0 THEN
+    RAISE EXCEPTION 'Canonical edge validator insertion point missing';
+  END IF;
+  v_definition:=replace(v_definition,v_declaration,E'  v_graph_editor_exact_active_edge boolean := false;\n'||v_declaration);
+  v_definition:=replace(v_definition,v_begin,E'BEGIN\n'||v_guard||E'\n  SELECT n.node_type');
+  -- INSERT ON CONFLICT fires BEFORE INSERT before it becomes an UPDATE.
+  -- Its exact existing logical edge is itself, not a second main parent.
+  v_definition:=replace(v_definition,v_parent,E'      AND (TG_OP <> ''UPDATE'' OR e.id <> NEW.id)\n      AND (NOT v_graph_editor_exact_active_edge OR e.source_node_id<>NEW.source_node_id OR e.relation_type<>NEW.relation_type)\n    LIMIT 1;');
+  v_definition:=replace(v_definition,v_types,E'    IF NOT v_graph_editor_exact_active_edge THEN\n'||v_types);
+  v_definition:=replace(v_definition,v_cycle,E'    END IF; -- exact snapshot type/direction exception only\n\n'||v_cycle);
+  v_definition:=replace(v_definition,v_embed_grant,E'  IF NOT v_graph_editor_exact_active_edge AND tgt_type = ''embed''\n     AND NEW.relation_type = ''publishes_to''');
+  v_definition:=replace(v_definition,v_embed,'IF tgt_type = ''embed'' AND src_type NOT IN (''copy'', ''rule'') AND NOT v_graph_editor_exact_active_edge THEN');
+  EXECUTE v_definition;
+END $canonical_edge_contract$;
+REVOKE ALL ON FUNCTION public.validate_knowledge_edge_contract() FROM PUBLIC, anon, authenticated, service_role, brain_control_plane, brain_runtime, brain_transport, brain_gateway;
 
 NOTIFY pgrst, 'reload schema';

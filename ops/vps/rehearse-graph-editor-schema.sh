@@ -84,6 +84,43 @@ SELECT pg_temp.insert_graph_editor_records('public.knowledge_rag_chunks',coalesc
  'metadata',(t.metadata-'editor_lease_token')||jsonb_build_object('editor_lease_token',:'candidate_id'),'graph_checksum','sha256:'||encode(digest(:'candidate_id','sha256'),'hex'))),'[]'::jsonb)) AS cloned
  FROM public.knowledge_rag_chunks t JOIN entry_map m ON m.old_id=t.rag_entry_id \gset
 SELECT public.finish_graph_publication_build_v1(:'candidate_id',:'candidate_id',false) AS built \gset
+-- Keep a live external parent outside the snapshot inventory. CAS must reject
+-- it rather than silently retire it, and its activation/receipt must roll back.
+SELECT live.id AS conflict_edge,live.source_node_id AS original_source,
+ src.node_type AS source_type,gen_random_uuid() AS external_source
+FROM public.graph_publications p
+CROSS JOIN LATERAL jsonb_array_elements(p.document_json->'edges') e
+JOIN public.knowledge_edges live ON live.source_node_id=(p.document_json->'node_by_id'->(e->>'source')->>'projection_node_id')::uuid
+ AND live.target_node_id=(p.document_json->'node_by_id'->(e->>'target')->>'projection_node_id')::uuid
+ AND live.relation_type=e->>'relation_type' AND live.edge_type='main'
+JOIN public.knowledge_nodes src ON src.id=live.source_node_id
+JOIN public.knowledge_nodes tgt ON tgt.id=live.target_node_id
+JOIN public.knowledge_allowed_edges permitted ON permitted.source_type=src.node_type AND permitted.target_type=tgt.node_type AND permitted.edge_type='main' AND permitted.active
+WHERE p.id=:'base_id' AND (e->>'primary')::boolean AND coalesce((live.metadata->>'active')::boolean,true)
+LIMIT 1 \gset
+INSERT INTO public.knowledge_nodes(id,persona_id,node_type,slug,title,status,source_table,metadata)
+VALUES (:'external_source',:'persona_id',:'source_type','restore-external-parent-'||:'external_source','Restore-only external parent','approved','graph_bundle','{"graph_json_node_id":"restore-external-parent"}');
+UPDATE public.knowledge_edges SET source_node_id=:'external_source' WHERE id=:'conflict_edge';
+SELECT set_config('rehearsal.persona',:'persona_id',false) AS scope_persona,set_config('rehearsal.base',:'base_id',false) AS scope_base,set_config('rehearsal.candidate',:'candidate_id',false) AS configured \gset
+SET ROLE brain_control_plane;
+DO \$parent_proof\$
+BEGIN
+ BEGIN
+  PERFORM public.commit_graph_editor_v1(current_setting('rehearsal.persona')::uuid,current_setting('rehearsal.candidate')::uuid,current_setting('rehearsal.base')::uuid,
+    'schema-rehearsal','external-parent-conflict','sha256:'||repeat('0',64),'publish',
+    (SELECT checksum FROM public.graph_publications WHERE id=current_setting('rehearsal.candidate')::uuid),'{}');
+  RAISE EXCEPTION 'CAS accepted an external active main parent';
+ EXCEPTION WHEN raise_exception THEN
+  IF SQLERRM<>'Invalid main edge: child node already has an active main parent.' THEN RAISE; END IF;
+ END;
+ IF (SELECT id FROM public.graph_publications WHERE persona_id=current_setting('rehearsal.persona')::uuid AND status='active')<>current_setting('rehearsal.base')::uuid
+ THEN RAISE EXCEPTION 'Rejected main-parent conflict changed active publication'; END IF;
+ IF public.graph_editor_receipt_v1(current_setting('rehearsal.persona')::uuid,'schema-rehearsal','external-parent-conflict','publish',current_setting('rehearsal.base')::uuid,'sha256:'||repeat('0',64)) IS NOT NULL
+ THEN RAISE EXCEPTION 'Rejected main-parent conflict left a committed receipt'; END IF;
+END \$parent_proof\$;
+RESET ROLE;
+UPDATE public.knowledge_edges SET source_node_id=:'original_source' WHERE id=:'conflict_edge';
+
 UPDATE public.knowledge_nodes SET metadata=metadata||'{"graph_position":{"x":10,"y":20}}'::jsonb
 WHERE id=(SELECT (n->>'projection_node_id')::uuid FROM public.graph_publications p,LATERAL jsonb_array_elements(p.document_json->'nodes') n WHERE p.id=:'base_id' LIMIT 1);
 SELECT :'persona_id'||'|'||:'base_id'||'|'||:'candidate_id'||'|sha256:'||encode(digest(:'candidate_id','sha256'),'hex');
@@ -109,7 +146,7 @@ psql_db <<SQL
 $clone_sql
 SET ROLE brain_control_plane;
 DO \$proof\$
-DECLARE v_result jsonb; v_key text; v_document jsonb; v_first jsonb; v_second jsonb; v_coordinate jsonb; v_node_id uuid; v_unpublished uuid; v_edge public.knowledge_edges%ROWTYPE;
+DECLARE v_result jsonb; v_key text; v_document jsonb; v_first jsonb; v_second jsonb; v_coordinate jsonb; v_node_id uuid; v_unpublished uuid; v_raw_service uuid; v_raw_rule uuid; v_edge public.knowledge_edges%ROWTYPE;
 BEGIN
  SELECT payload->>'idempotency_key' INTO v_key FROM public.system_events
  WHERE persona_id='$persona_id' AND event_type='graph_editor_committed' AND payload->>'actor'='schema-rehearsal';
@@ -176,6 +213,36 @@ BEGIN
  (v_unpublished,'$persona_id','asset','restore-asset-'||v_unpublished,'Restore-only asset','pending_validation');
  INSERT INTO public.knowledge_edges(persona_id,source_node_id,target_node_id,relation_type)
  VALUES ('$persona_id',v_node_id,v_unpublished,'uses_asset');
+ BEGIN
+  INSERT INTO public.knowledge_edges(persona_id,source_node_id,target_node_id,relation_type,edge_type)
+  VALUES ('$persona_id',v_unpublished,v_node_id,'contains','main');
+  RAISE EXCEPTION 'RAW incoming main ownership of published target accepted';
+ EXCEPTION WHEN serialization_failure THEN NULL; END;
+ INSERT INTO public.knowledge_edges(persona_id,source_node_id,target_node_id,relation_type,edge_type)
+ VALUES ('$persona_id',v_unpublished,v_node_id,'derived_from','reference');
+ -- This fixture must exercise the compiler grammar that legacy RAW forbids.
+ IF NOT EXISTS (
+  SELECT 1 FROM public.graph_publications p CROSS JOIN LATERAL jsonb_array_elements(p.document_json->'edges') e
+  JOIN public.knowledge_edges live ON live.source_node_id=(p.document_json->'node_by_id'->(e->>'source')->>'projection_node_id')::uuid
+   AND live.target_node_id=(p.document_json->'node_by_id'->(e->>'target')->>'projection_node_id')::uuid
+   AND live.relation_type=e->>'relation_type' AND live.edge_type='main'
+  WHERE p.id='$base_id' AND (e->>'primary')::boolean
+   AND p.document_json->'node_by_id'->(e->>'source')->>'node_type'='service'
+   AND p.document_json->'node_by_id'->(e->>'target')->>'node_type'='rule'
+   AND live.metadata->>'graph_json_edge_id'=e->>'id'
+   AND coalesce((live.metadata->>'active')::boolean,true)
+ ) THEN RAISE EXCEPTION 'Canonical SERVICE to RULE edge not exercised'; END IF;
+ v_raw_service:=gen_random_uuid();v_raw_rule:=gen_random_uuid();
+ INSERT INTO public.knowledge_nodes(id,persona_id,node_type,slug,title,status,source_table,metadata) VALUES
+ (v_raw_service,'$persona_id','service','restore-service-'||v_raw_service,'Restore-only service','approved','graph_bundle','{"graph_json_node_id":"restore-unpublished-service"}'),
+ (v_raw_rule,'$persona_id','rule','restore-rule-'||v_raw_rule,'Restore-only rule','approved','graph_bundle','{"graph_json_node_id":"restore-unpublished-rule"}');
+ BEGIN
+  INSERT INTO public.knowledge_edges(persona_id,source_node_id,target_node_id,relation_type,edge_type,metadata)
+  VALUES ('$persona_id',v_raw_service,v_raw_rule,'contains','main','{"graph_json_edge_id":"forged-canonical-edge","active":true}');
+  RAISE EXCEPTION 'Unpublished RAW SERVICE to RULE edge accepted';
+ EXCEPTION WHEN raise_exception THEN
+  IF SQLERRM NOT LIKE 'Invalid edge: SERVICE cannot connect directly to RULE.%' THEN RAISE; END IF;
+ END;
  IF has_function_privilege('brain_control_plane','public.activate_graph_publication_v3(uuid)','EXECUTE') THEN RAISE EXCEPTION 'direct activation privilege survived'; END IF;
  IF NOT has_function_privilege('brain_control_plane','public.commit_graph_editor_v1(uuid,uuid,uuid,text,text,text,text,text,jsonb)','EXECUTE') THEN RAISE EXCEPTION 'CAS writer grant missing'; END IF;
 END \$proof\$;
