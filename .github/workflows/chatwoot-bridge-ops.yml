@@ -60,6 +60,14 @@ jobs:
                 print('bridge_source_enabled=' + str(values.get('CHATWOOT_BRIDGE_ENABLED', '').lower() in {'1','true','yes'}).lower())
                 print('required_settings_present=' + str(all(values.get(key) for key in required)).lower())
                 print('required_setting_count=' + str(sum(bool(values.get(key)) for key in required)) + '/' + str(len(required)))
+                transport_env = root / '.env.microservices/transport.env'
+                env_values = {}
+                if transport_env.is_file():
+                    for line in transport_env.read_text(encoding='utf-8').splitlines():
+                        if '=' in line:
+                            key, value = line.split('=', 1)
+                            env_values[key] = value.strip().strip('"\'')
+                print('transport_env_bridge_enabled=' + str(env_values.get('CHATWOOT_BRIDGE_ENABLED', '').lower() in {'1','true','yes'}).lower())
                 sys.exit(0)
             if mode == 'clean-apt-cache':
                 for candidate in (pathlib.Path('/var/cache/apt/pkgcache.bin'), pathlib.Path('/var/cache/apt/srcpkgcache.bin')):
@@ -173,6 +181,9 @@ jobs:
               exit 0
             fi
             if [[ "$CHATWOOT_OPS_MODE" == inspect ]]; then
+              active_transport_slot="$(python3 -c 'import json; print(json.load(open(".deploy/microservices/slots.json", encoding="utf-8"))["transport"]["active"])')"
+              docker exec "brain-ai-transport-$active_transport_slot-1" python -c \
+                'import os; print("transport_container_bridge_enabled=" + str((os.getenv("CHATWOOT_BRIDGE_ENABLED") or "").strip().lower() in {"1", "true", "yes"}).lower())'
               docker exec chatwoot-web-1 bundle exec rails runner -e production \
                 'inbox=Inbox.find_by!(name: "Tock Fatal WhatsApp"); channel=inbox.channel; puts "chatwoot_inbox_id=#{inbox.id}"; puts "chatwoot_account_id=#{inbox.account_id}"; puts "chatwoot_channel_type=#{channel.class.name}"; puts "chatwoot_callback_state=#{channel.webhook_url.blank? ? "blank" : channel.webhook_url == "https://lpapi.vzforeal.com/webhooks/chatwoot" ? "expected" : "other"}"'
             fi
