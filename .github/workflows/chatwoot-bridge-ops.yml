@@ -131,6 +131,30 @@ jobs:
             if [[ "$CHATWOOT_OPS_MODE" == refresh-transport-config ]]; then
               active_slot="$(python3 -c 'import json; print(json.load(open(".deploy/microservices/slots.json", encoding="utf-8"))["transport"]["active"])')"
               [[ "$active_slot" == blue || "$active_slot" == green ]]
+              backup_dir=/var/backups/brain-ai/chatwoot-bridge-config
+              install -d -m 700 "$backup_dir"
+              cp --preserve=mode .env.microservices/transport.env "$backup_dir/transport.env.$(date -u +%Y%m%dT%H%M%SZ).bak"
+              chmod 600 "$backup_dir"/transport.env.*.bak
+              python3 ops/microservices/bootstrap-service-envs.py
+              python3 - <<'PY'
+            from pathlib import Path
+            values = {}
+            for line in Path('.env.microservices/transport.env').read_text(encoding='utf-8').splitlines():
+                if '=' in line:
+                    key, value = line.split('=', 1)
+                    values[key] = value.strip().strip('"\'')
+            required = (
+                'CHATWOOT_BASE_URL', 'CHATWOOT_API_ACCESS_TOKEN', 'CHATWOOT_ACCOUNT_ID',
+                'CHATWOOT_INBOX_ID', 'CHATWOOT_INBOX_IDENTIFIER', 'CHATWOOT_BRIDGE_BINDING_ID',
+                'CHATWOOT_WEBHOOK_SECRET', 'CHATWOOT_AGENT_ID',
+            )
+            enabled = values.get('CHATWOOT_BRIDGE_ENABLED', '').lower() in {'1', 'true', 'yes'}
+            present = all(values.get(key) for key in required)
+            print(f'transport_env_bridge_enabled={str(enabled).lower()}')
+            print(f'transport_env_required_settings_present={str(present).lower()}')
+            if not enabled or not present:
+                raise SystemExit('protected Chatwoot transport environment is incomplete')
+            PY
               eval "$(python3 - <<'PY'
             import json, shlex
             from pathlib import Path
