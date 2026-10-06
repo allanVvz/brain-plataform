@@ -250,6 +250,31 @@ jobs:
               active_transport_slot="$(python3 -c 'import json; print(json.load(open(".deploy/microservices/slots.json", encoding="utf-8"))["transport"]["active"])')"
               docker exec "brain-ai-transport-$active_transport_slot-1" python -c \
                 'import os; print("transport_container_bridge_enabled=" + str((os.getenv("CHATWOOT_BRIDGE_ENABLED") or "").strip().lower() in {"1", "true", "yes"}).lower())'
+              docker exec "brain-ai-transport-$active_transport_slot-1" python - <<'PY'
+            from services import chatwoot_api, supabase_client
+            try:
+                config = chatwoot_api.configuration()
+                if config is None:
+                    raise RuntimeError('bridge disabled')
+                binding = supabase_client.get_workflow_binding_by_id(config.binding_id)
+                if not binding or not binding.get('active') or binding.get('provider') != 'meta_cloud' or not binding.get('whatsapp_phone_number_id'):
+                    raise RuntimeError('binding inactive')
+                client = chatwoot_api.ChatwootApi(config)
+                try:
+                    inboxes = client._request('GET', f'/api/v1/accounts/{config.account_id}/inboxes')
+                finally:
+                    client.close()
+                if isinstance(inboxes, dict):
+                    inboxes = inboxes.get('payload') or inboxes.get('inboxes') or []
+                if not any(int(inbox.get('id') or 0) == config.inbox_id for inbox in inboxes if isinstance(inbox, dict)):
+                    raise RuntimeError('inbox unavailable to API token')
+                print('meta_binding_active=true')
+                print('chatwoot_api_auth=ok')
+                print('chatwoot_api_inbox_access=ok')
+            except Exception as exc:
+                print('bridge_probe_failed=' + type(exc).__name__)
+                raise SystemExit(1)
+            PY
               docker exec chatwoot-web-1 bundle exec rails runner -e production \
                 'inbox=Inbox.find_by!(name: "Tock Fatal WhatsApp"); channel=inbox.channel; puts "chatwoot_inbox_id=#{inbox.id}"; puts "chatwoot_account_id=#{inbox.account_id}"; puts "chatwoot_channel_type=#{channel.class.name}"; puts "chatwoot_callback_state=#{channel.webhook_url.blank? ? "blank" : channel.webhook_url == "https://lpapi.vzforeal.com/webhooks/chatwoot" ? "expected" : "other"}"'
             fi
