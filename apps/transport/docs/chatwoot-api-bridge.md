@@ -24,20 +24,21 @@ transport outbox. Do not configure Meta to call Chatwoot directly.
 4. Add `/webhooks/chatwoot*` to the transport route map and gateway dispatch;
    deploy only `gateway,transport` through the selective blue/green workflow.
    The existing `/webhooks/whatsapp*` route remains unchanged. Apply migration
-   161 through the schema release workflow after its required
+   164 through the schema release workflow after its required
    fresh data-only backup and isolated restore verification. Deploy only the
    `transport` service through the compatible microservice release workflow.
    The dispatch worker runs both WhatsApp dispatch and the Chatwoot bridge;
    the bridge stays inert while its enable flag is false.
 5. Reconcile canonical history before considering the cutover complete. The
    read-only audit found 159 Tock Fatal leads and 819 canonical messages in
-   scope, from 2026-09-01 through 2026-10-05 UTC. The durable projection queue
+   scope, from 2026-09-14 through 2026-10-05 UTC. The durable projection queue
    imports eligible inbound messages and successfully sent outbound messages
    chronologically and skips messages already authored in Chatwoot.
-6. Use only the internal WA Validator for the release canary. Confirm the
-   inbound, Vitória outbound, Chatwoot human reply, handoff, explicit resume,
-   delivery status, and duplicate-event paths before treating production
-   webhook delivery as verified. Do not send a real WhatsApp test message.
+6. Use the internal WA Validator for the service canary. For the final live
+   WhatsApp check, use only a conversation started by the owner from their own
+   test number; confirm inbound, Vitória outbound, one human reply, handoff,
+   explicit resume, delivery status, and duplicate-event handling. Never send a
+   test message to an unrelated customer.
 
 ## Handoff controls
 
@@ -58,7 +59,7 @@ To disable the bridge, set `CHATWOOT_BRIDGE_ENABLED=false` in the protected
 server source environment and run the approved transport-only configuration
 rollout. This leaves Meta ingress and all Chatwoot data intact. If a rollout
 fails, the blue/green workflow restores the previous transport image and route.
-Do not remove migration 161 objects during rollback; they are additive and the
+Do not remove migration 164 objects during rollback; they are additive and the
 previous transport does not read them. Inspect `chatwoot_bridge_operations`
 for `retry` or `dead_letter` rows before re-enabling, using redacted IDs and
 status only.
