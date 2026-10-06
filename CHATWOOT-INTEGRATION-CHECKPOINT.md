@@ -24,9 +24,9 @@ isolado `/tmp/brain-chatwoot-bridge`; não contém tokens, senhas ou chaves.
 - A migration aditiva `supabase/migrations/164_chatwoot_api_bridge.sql` mantém
   mapeamentos e operações idempotentes; autorização para essa migration foi
   dada pelo usuário. Ela ainda não foi aplicada.
-- Os testes focados passaram: 23 testes em `test_chatwoot_bridge.py` e
-  `test_service_surface.py`; `py_compile`, `git diff --check`, validador de
-  grants e validador de atomicidade da migration também passaram. Não foi feito
+- Os testes focados passaram: 23 testes de transport e 3 do gateway; os
+  validadores de sintaxe, fronteiras, hardcodes, rota, manifest, grants e
+  atomicidade da migration pendente também passaram. Não foi feito
   E2E real com WhatsApp, por segurança e porque a ponte ainda não está ativa.
 
 ## Implementado no clone, ainda não publicado
@@ -57,11 +57,12 @@ isolado `/tmp/brain-chatwoot-bridge`; não contém tokens, senhas ou chaves.
   O status operacional informa serviços atualizados, sem rollout e sem pausa
   global. O ledger de produção está na versão 163; a migration aditiva do bridge
   foi renumerada para 164 e ainda não foi aplicada.
-- O PR 196 continua aberto. Os builds de gateway e transport passaram, mas o CI
-  falha em `Checar backend e anti-hardcode` por um URL literal em
-  `.github/workflows/akia-vps-bridge.yml`, arquivo inalterado neste PR e igual à
-  base. O check de Preview Vercel também está vermelho. Nenhuma release foi
-  iniciada.
+- O PR 196 continua aberto. A execução anterior do CI falhou por um URL público
+  usado somente pelo preflight manual AKIA; o scanner agora permite esse marcador
+  apenas naquele arquivo, sem alterar o workflow. A revalidação do CI está
+  pendente. O preview Vercel também falha. Builds de imagem do gateway/transport
+  e o dry-run de schema com preflight de produção concluíram com sucesso; nenhum
+  artefato foi publicado nem release iniciada.
 
 ## O que falta para uso efetivo no app do iPhone
 
