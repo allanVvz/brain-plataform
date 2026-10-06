@@ -35,7 +35,7 @@ jobs:
           envs: CHATWOOT_OPS_MODE
           script: |
             set -Eeuo pipefail
-            [[ "$CHATWOOT_OPS_MODE" == inspect || "$CHATWOOT_OPS_MODE" == enable ]]
+            [[ "$CHATWOOT_OPS_MODE" == inspect || "$CHATWOOT_OPS_MODE" == enable || "$CHATWOOT_OPS_MODE" == clean-apt-cache ]]
             cd "${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}"
             python3 - "$CHATWOOT_OPS_MODE" <<'PY'
             import os, pathlib, shutil, stat, sys, time
