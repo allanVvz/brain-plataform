@@ -259,6 +259,9 @@ jobs:
             rows = supabase_client._execute_with_retry(supabase_client.get_client().table('messages').select('id,lead_id,direction,content,created_at').eq('direction', 'inbound').ilike('content', '%Teste Chatwoot%').gte('created_at', (datetime.now(timezone.utc)-timedelta(minutes=45)).isoformat()).order('created_at', desc=True).limit(30)).data or []
             found = projected = mapping_found = False
             projection_status = 'missing'
+            projection_attempts = 0
+            projection_error_type = 'none'
+            queue_status_counts = {}
             api = chatwoot_api.ChatwootApi(config) if config else None
             try:
                 for row in rows:
@@ -266,8 +269,16 @@ jobs:
                     if not config or str(lead.get('channel_binding_id') or '') != config.binding_id:
                         continue
                     found = True
-                    operations = supabase_client._execute_with_retry(supabase_client.get_client().table('chatwoot_bridge_operations').select('status').eq('source_kind', 'brain_message').eq('source_id', str(row['id'])).limit(1)).data or []
-                    projection_status = str((operations[0] if operations else {}).get('status') or 'missing')
+                    operations = supabase_client._execute_with_retry(supabase_client.get_client().table('chatwoot_bridge_operations').select('status,attempt_count,last_error').eq('source_kind', 'brain_message').eq('source_id', str(row['id'])).limit(1)).data or []
+                    operation = operations[0] if operations else {}
+                    projection_status = str(operation.get('status') or 'missing')
+                    projection_attempts = int(operation.get('attempt_count') or 0)
+                    error_type = str(operation.get('last_error') or '').split(':', 1)[0]
+                    projection_error_type = error_type if error_type.replace('_', '').replace('.', '').isalnum() else ('other' if error_type else 'none')
+                    states = supabase_client._execute_with_retry(supabase_client.get_client().table('chatwoot_bridge_operations').select('status').eq('channel_binding_id', config.binding_id).eq('source_kind', 'brain_message').in_('status', ['pending', 'retry', 'processing', 'dead_letter']).limit(1000)).data or []
+                    for state in states:
+                        key = str(state.get('status') or 'unknown')
+                        queue_status_counts[key] = queue_status_counts.get(key, 0) + 1
                     mapping = chatwoot_bridge.get_conversation(config.binding_id, int(row['lead_id']))
                     mapping_found = bool(mapping and mapping.get('conversation_id'))
                     if mapping and mapping.get('conversation_id'):
@@ -278,6 +289,9 @@ jobs:
             print('test_message_in_tock_fatal_backend=' + str(found).lower())
             print('test_message_conversation_mapping=' + str(mapping_found).lower())
             print('test_message_projection_status=' + projection_status)
+            print('test_message_projection_attempts=' + str(projection_attempts))
+            print('test_message_projection_error_type=' + projection_error_type)
+            print('chatwoot_bridge_nonterminal_sample=' + ','.join(f'{key}:{queue_status_counts[key]}' for key in sorted(queue_status_counts)))
             print('test_message_in_chatwoot_inbox=' + str(projected).lower())
             if config: print('chatwoot_inbox_id=' + str(config.inbox_id))
             PY
