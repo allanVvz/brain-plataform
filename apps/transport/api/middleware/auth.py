@@ -15,6 +15,7 @@ PUBLIC_EXACT_PATHS = {
     "/webhooks/whatsapp",
     "/webhooks/whatsapp/inbound",
     "/webhooks/whatsapp/status",
+    "/webhooks/chatwoot",
     "/internal/v1/transport/whatsapp/outbound-result",
     "/internal/v1/transport/messages/send",
     "/internal/v1/transport/messages/campaign-outbound",

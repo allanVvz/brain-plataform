@@ -219,7 +219,7 @@ services:
 
   transport-dispatch-blue: &transport-dispatch
     <<: *transport
-    command: ["python", "-m", "workers.runner", "--worker", "whatsapp_dispatch"]
+    command: ["python", "-m", "workers.runner", "--worker", "whatsapp_dispatch", "--worker", "chatwoot_bridge"]
     healthcheck: {disable: true}
     labels: {brain.service: transport, brain.slot: blue, brain.worker-group: transport}
   transport-dispatch-green:

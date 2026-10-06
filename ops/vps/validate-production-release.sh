@@ -336,9 +336,10 @@ begin
       '157_operator_replay_blocked_inbound.sql',
       '158_recover_stale_operator_preview_claim.sql',
       '159_recover_stale_worker_claim.sql',
-      '160_fix_operator_preview_generated_column.sql')) <> 47 then
+      '160_fix_operator_preview_generated_column.sql',
+      '164_chatwoot_api_bridge.sql')) <> 48 then
     -- Compatibility marker for older audit fixtures: release migrations 112-140 are incomplete.
-    raise exception 'release migrations 112-160 are incomplete';
+    raise exception 'release migrations 112-164 are incomplete';
   end if;
   if (select count(*) from pg_roles
       where rolname in ('brain_gateway','brain_control_plane','brain_runtime','brain_transport')

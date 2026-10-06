@@ -5,6 +5,7 @@ import asyncio
 import signal
 
 from workers.health_check_worker import HealthCheckWorker
+from workers.chatwoot_bridge_worker import ChatwootBridgeWorker
 from workers.media_ingest_worker import MediaIngestWorker
 from workers.whatsapp_dispatch_worker import WhatsAppDispatchWorker
 
@@ -13,6 +14,7 @@ WORKERS = {
     "health_check": HealthCheckWorker,
     "whatsapp_dispatch": WhatsAppDispatchWorker,
     "media_ingest": MediaIngestWorker,
+    "chatwoot_bridge": ChatwootBridgeWorker,
 }
 
 

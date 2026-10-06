@@ -24,6 +24,13 @@ FORBIDDEN_MARKERS = {
     "Tock Vitoria Crm Low",
     "https://api.vzforeal.com",
 }
+ALLOWED_MARKER_LOCATIONS = {
+    # This public URL is only the read-only readiness target of the existing
+    # manual VPS preflight workflow; it is not an application API base URL.
+    "https://api.vzforeal.com": {
+        ROOT / ".github" / "workflows" / "akia-vps-bridge.yml",
+    },
+}
 
 RUNTIME_ROOTS = (
     ROOT / "api" / "routes",
@@ -84,7 +91,7 @@ def main() -> None:
     for path in source_files:
         text = path.read_text(encoding="utf-8")
         for marker in FORBIDDEN_MARKERS:
-            if marker in text:
+            if marker in text and path not in ALLOWED_MARKER_LOCATIONS.get(marker, set()):
                 errors.append(f"{path.relative_to(ROOT)} contains forbidden marker {marker!r}")
         for fact in commercial_facts:
             if fact in text:
