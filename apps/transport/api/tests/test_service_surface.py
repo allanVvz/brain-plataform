@@ -151,6 +151,7 @@ def test_runtime_technical_failure_is_terminalized_by_transport(monkeypatch):
 
 def test_worker_group_is_domain_scoped():
     assert set(WORKERS) == {
+        "chatwoot_bridge",
         "health_check",
         "media_ingest",
         "whatsapp_dispatch",

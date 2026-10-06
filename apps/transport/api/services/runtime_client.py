@@ -85,6 +85,38 @@ def authorize_catalog_response(response_buffer_id: str, persona_id: str) -> dict
     return response.json()
 
 
+def pause_ai(lead_ref: int) -> dict[str, Any]:
+    """Pause the canonical runtime before a Chatwoot human reply is queued."""
+    base_url, token = _configuration()
+    with httpx.Client(timeout=15, verify=get_ca_bundle_path()) as client:
+        response = client.post(
+            f"{base_url}/internal/v1/runtime/leads/{int(lead_ref)}/handoff",
+            headers={"X-Webhook-Token": token},
+        )
+    if response.status_code >= 400:
+        raise RuntimeError(f"conversation runtime rejected pause (HTTP {response.status_code})")
+    result = response.json()
+    if not isinstance(result, dict) or result.get("ai_paused") is not True:
+        raise RuntimeError("conversation runtime returned an invalid pause result")
+    return result
+
+
+def resume_ai(lead_ref: int) -> dict[str, Any]:
+    """Resume only after an explicit private Chatwoot command."""
+    base_url, token = _configuration()
+    with httpx.Client(timeout=15, verify=get_ca_bundle_path()) as client:
+        response = client.post(
+            f"{base_url}/internal/v1/runtime/leads/{int(lead_ref)}/resume",
+            headers={"X-Webhook-Token": token},
+        )
+    if response.status_code >= 400:
+        raise RuntimeError(f"conversation runtime rejected resume (HTTP {response.status_code})")
+    result = response.json()
+    if not isinstance(result, dict) or result.get("ai_paused") is not False:
+        raise RuntimeError("conversation runtime returned an invalid resume result")
+    return result
+
+
 def decorate_leads(
     leads: list[dict[str, Any]],
     *,

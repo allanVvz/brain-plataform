@@ -27,3 +27,9 @@ def test_gateway_routes_runtime_and_signs_short_lived_principal(monkeypatch) -> 
     claims = verify_principal(token, signature, secret=secret)
     assert claims["iss"] == "brain-gateway"
     assert claims["persona_ids"] == ["persona-1"]
+
+
+def test_chatwoot_webhook_routes_to_transport(monkeypatch) -> None:
+    monkeypatch.setenv("BRAIN_TRANSPORT_URL", "http://transport:8080")
+    assert main._upstream("/webhooks/chatwoot") == "http://transport:8080"
+    assert main._upstream("/webhooks/whatsapp") == "http://transport:8080"

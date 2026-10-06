@@ -1,5 +1,5 @@
 # Target route map. Activation is a separately authorized production cutover.
-@transport path /webhooks/evolution/* /webhooks/whatsapp* /messages*
+@transport path /webhooks/evolution/* /webhooks/whatsapp* /webhooks/chatwoot* /messages*
 handle @transport {
   reverse_proxy {$BRAIN_TRANSPORT_UPSTREAM}
 }
