@@ -1,0 +1,68 @@
+name: Verify Chatwoot inbox test message
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the protected Tock Fatal projection receipt
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          command_timeout: 3m
+          script: |
+            set -Eeuo pipefail
+            cd "${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}"
+            slot="$(python3 -c 'import json; print(json.load(open(".deploy/microservices/slots.json", encoding="utf-8"))["transport"]["active"])')"
+            [[ "$slot" == blue || "$slot" == green ]]
+            docker exec -i "brain-ai-transport-$slot-1" python - <<'PY'
+            from datetime import datetime, timedelta, timezone
+            from services import chatwoot_api, supabase_client
+            from repositories import chatwoot_bridge
+            config = chatwoot_api.configuration()
+            rows = supabase_client._execute_with_retry(supabase_client.get_client().table('messages').select('id,lead_id,direction,content,created_at').eq('direction','inbound').ilike('content','%Teste Chatwoot%').gte('created_at',(datetime.now(timezone.utc)-timedelta(minutes=60)).isoformat()).order('created_at',desc=True).limit(30)).data or []
+            found = projected = mapped = False
+            status, attempts, error_type = 'missing', 0, 'none'
+            queue = {}
+            api = chatwoot_api.ChatwootApi(config) if config else None
+            try:
+                for row in rows:
+                    lead = supabase_client.get_lead_by_ref(int(row['lead_id'])) or {}
+                    if not config or str(lead.get('channel_binding_id') or '') != config.binding_id:
+                        continue
+                    found = True
+                    ops = supabase_client._execute_with_retry(supabase_client.get_client().table('chatwoot_bridge_operations').select('status,attempt_count,last_error').eq('source_kind','brain_message').eq('source_id',str(row['id'])).limit(1)).data or []
+                    op = ops[0] if ops else {}
+                    status = str(op.get('status') or 'missing')
+                    attempts = int(op.get('attempt_count') or 0)
+                    et = str(op.get('last_error') or '').split(':',1)[0]
+                    error_type = et if et.replace('_','').replace('.','').isalnum() else ('other' if et else 'none')
+                    mapping = chatwoot_bridge.get_conversation(config.binding_id,int(row['lead_id']))
+                    mapped = bool(mapping and mapping.get('conversation_id'))
+                    if mapped:
+                        projected = bool(api.find_message_by_source_id(conversation_id=int(mapping['conversation_id']),source_id=f"brain-message:{row['id']}",after_message_id=0))
+                    break
+                if config:
+                    states = supabase_client._execute_with_retry(supabase_client.get_client().table('chatwoot_bridge_operations').select('status').eq('channel_binding_id',config.binding_id).eq('source_kind','brain_message').in_('status',['pending','retry','processing','dead_letter']).limit(1000)).data or []
+                    for item in states:
+                        key = str(item.get('status') or 'unknown')
+                        queue[key] = queue.get(key,0)+1
+            finally:
+                if api: api.close()
+            print('test_message_in_tock_fatal_backend='+str(found).lower())
+            print('test_message_conversation_mapping='+str(mapped).lower())
+            print('test_message_projection_status='+status)
+            print('test_message_projection_attempts='+str(attempts))
+            print('test_message_projection_error_type='+error_type)
+            print('chatwoot_bridge_nonterminal_sample='+','.join(f'{k}:{queue[k]}' for k in sorted(queue)))
+            print('test_message_in_chatwoot_inbox='+str(projected).lower())
+            if config: print('chatwoot_inbox_id='+str(config.inbox_id))
+            PY
