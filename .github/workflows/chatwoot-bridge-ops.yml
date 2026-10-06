@@ -135,7 +135,49 @@ jobs:
               install -d -m 700 "$backup_dir"
               cp --preserve=mode .env.microservices/transport.env "$backup_dir/transport.env.$(date -u +%Y%m%dT%H%M%SZ).bak"
               chmod 600 "$backup_dir"/transport.env.*.bak
-              python3 ops/microservices/bootstrap-service-envs.py
+              python3 - <<'PY'
+            import os, pathlib, stat
+            source = pathlib.Path('.env.compose')
+            target = pathlib.Path('.env.microservices/transport.env')
+            keys = (
+                'CHATWOOT_BRIDGE_ENABLED', 'CHATWOOT_BASE_URL', 'CHATWOOT_API_ACCESS_TOKEN',
+                'CHATWOOT_ACCOUNT_ID', 'CHATWOOT_INBOX_ID', 'CHATWOOT_INBOX_IDENTIFIER',
+                'CHATWOOT_BRIDGE_BINDING_ID', 'CHATWOOT_WEBHOOK_SECRET', 'CHATWOOT_AGENT_ID',
+            )
+            def parse(path):
+                values = {}
+                for raw in path.read_text(encoding='utf-8').splitlines():
+                    line = raw.strip()
+                    if not line or line.startswith('#') or '=' not in line:
+                        continue
+                    key, value = line.split('=', 1)
+                    value = value.strip()
+                    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                        value = value[1:-1]
+                    values[key.strip()] = value
+                return values
+            source_values = parse(source)
+            if not all(source_values.get(key) for key in keys):
+                raise SystemExit('protected Chatwoot source settings are incomplete')
+            existing = target.read_text(encoding='utf-8').splitlines()
+            updated, seen = [], set()
+            for line in existing:
+                key = line.split('=', 1)[0] if '=' in line else ''
+                if key in keys:
+                    updated.append(f'{key}={source_values[key]}')
+                    seen.add(key)
+                else:
+                    updated.append(line)
+            for key in keys:
+                if key not in seen:
+                    updated.append(f'{key}={source_values[key]}')
+            temporary = target.with_suffix('.env.chatwoot.tmp')
+            temporary.write_text('\n'.join(updated) + '\n', encoding='utf-8')
+            os.chmod(temporary, stat.S_IMODE(target.stat().st_mode))
+            os.chown(temporary, target.stat().st_uid, target.stat().st_gid)
+            os.replace(temporary, target)
+            print('chatwoot_transport_settings_written=true')
+            PY
               python3 - <<'PY'
             from pathlib import Path
             values = {}
