@@ -7,7 +7,7 @@ on:
         description: Read protected configuration status or enable the bridge source flag
         required: true
         type: choice
-        options: [inspect, enable, clean-apt-cache, prune-build-cache, set-callback, refresh-transport-config]
+        options: [inspect, enable, clean-apt-cache, prune-build-cache, set-callback, refresh-transport-config, verify-live-test]
         default: inspect
 
 permissions:
@@ -35,7 +35,7 @@ jobs:
           envs: CHATWOOT_OPS_MODE
           script: |
             set -Eeuo pipefail
-            [[ "$CHATWOOT_OPS_MODE" == inspect || "$CHATWOOT_OPS_MODE" == enable || "$CHATWOOT_OPS_MODE" == clean-apt-cache || "$CHATWOOT_OPS_MODE" == prune-build-cache || "$CHATWOOT_OPS_MODE" == set-callback || "$CHATWOOT_OPS_MODE" == refresh-transport-config ]]
+            [[ "$CHATWOOT_OPS_MODE" == inspect || "$CHATWOOT_OPS_MODE" == enable || "$CHATWOOT_OPS_MODE" == clean-apt-cache || "$CHATWOOT_OPS_MODE" == prune-build-cache || "$CHATWOOT_OPS_MODE" == set-callback || "$CHATWOOT_OPS_MODE" == refresh-transport-config || "$CHATWOOT_OPS_MODE" == verify-live-test ]]
             cd "${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}"
             python3 - "$CHATWOOT_OPS_MODE" <<'PY'
             import os, pathlib, shutil, stat, sys, time
@@ -88,6 +88,9 @@ jobs:
                 sys.exit(0)
             if mode == 'refresh-transport-config':
                 print('transport_config_refresh_requested=true')
+                sys.exit(0)
+            if mode == 'verify-live-test':
+                print('chatwoot_live_test_verification_requested=true')
                 sys.exit(0)
             missing = [key for key in required if not values.get(key)]
             if missing:
@@ -244,6 +247,74 @@ jobs:
               docker exec "brain-ai-transport-$active_slot-1" python -c \
                 'from services.chatwoot_api import configuration; assert configuration() is not None; print("bridge_runtime_configured=true")'
               docker ps --format '{{.Names}}\t{{.Status}}' | grep -E "^brain-ai-transport(-dispatch|-media)?-$active_slot-1[[:space:]]"
+              exit 0
+            fi
+            if [[ "$CHATWOOT_OPS_MODE" == verify-live-test ]]; then
+              active_transport_slot="$(python3 -c 'import json; print(json.load(open(".deploy/microservices/slots.json", encoding="utf-8"))["transport"]["active"])')"
+              docker exec -i "brain-ai-transport-$active_transport_slot-1" python - <<'PY'
+            from datetime import datetime, timedelta, timezone
+            import time
+            from repositories import chatwoot_bridge
+            from services import chatwoot_api, supabase_client
+
+            config = chatwoot_api.configuration()
+            if config is None:
+                raise SystemExit('bridge_disabled=true')
+            client = chatwoot_api.ChatwootApi(config)
+            try:
+                deadline = time.monotonic() + 90
+                incoming = None
+                assistant_reply = None
+                remote_incoming = None
+                remote_reply = None
+                cutoff = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
+                while time.monotonic() < deadline:
+                    rows = getattr(supabase_client._execute_with_retry(
+                        supabase_client.get_client().table('messages').select(
+                            'id,lead_id,direction,role,status,created_at,message_origin,content'
+                        ).ilike('content', '%Teste Chatwoot%').gte('created_at', cutoff)
+                        .order('created_at', desc=True).limit(50)
+                    ), 'data', None) or []
+                    for row in rows:
+                        if row.get('direction') != 'inbound':
+                            continue
+                        lead_ref = int(row.get('lead_id') or 0)
+                        lead = supabase_client.get_lead_by_ref(lead_ref) or {}
+                        if str(lead.get('channel_binding_id') or '') != config.binding_id:
+                            continue
+                        incoming = row
+                        conversation = chatwoot_bridge.get_conversation(config.binding_id, lead_ref)
+                        if conversation and conversation.get('conversation_id'):
+                            remote_incoming = client.find_message_by_source_id(
+                                conversation_id=int(conversation['conversation_id']),
+                                source_id=f"brain-message:{row['id']}", after_message_id=0,
+                            )
+                        replies = getattr(supabase_client._execute_with_retry(
+                            supabase_client.get_client().table('messages').select(
+                                'id,lead_id,direction,role,status,created_at,message_origin'
+                            ).eq('lead_id', lead_ref).eq('direction', 'outbound')
+                            .gte('created_at', row['created_at']).order('created_at').limit(30)
+                        ), 'data', None) or []
+                        assistant_reply = next((item for item in replies if item.get('role') == 'assistant' and item.get('message_origin') == 'conversation'), None)
+                        if assistant_reply and conversation and conversation.get('conversation_id'):
+                            remote_reply = client.find_message_by_source_id(
+                                conversation_id=int(conversation['conversation_id']),
+                                source_id=f"brain-message:{assistant_reply['id']}", after_message_id=0,
+                            )
+                        if incoming and assistant_reply and remote_incoming and remote_reply:
+                            break
+                    if incoming and assistant_reply and remote_incoming and remote_reply:
+                        break
+                    time.sleep(3)
+                print('test_inbound_in_brain=' + str(bool(incoming)).lower())
+                print('vitória_reply_in_brain=' + str(bool(assistant_reply)).lower())
+                print('test_inbound_in_chatwoot=' + str(bool(remote_incoming)).lower())
+                print('vitória_reply_in_chatwoot=' + str(bool(remote_reply)).lower())
+                if not all((incoming, assistant_reply, remote_incoming, remote_reply)):
+                    raise SystemExit('live message path is not yet fully observed')
+            finally:
+                client.close()
+            PY
               exit 0
             fi
             if [[ "$CHATWOOT_OPS_MODE" == inspect ]]; then
