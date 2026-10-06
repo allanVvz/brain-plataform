@@ -265,8 +265,10 @@ jobs:
                 deadline = time.monotonic() + 90
                 incoming = None
                 assistant_reply = None
+                any_outbound = None
                 remote_incoming = None
                 remote_reply = None
+                projection = None
                 cutoff = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
                 while time.monotonic() < deadline:
                     rows = getattr(supabase_client._execute_with_retry(
@@ -283,6 +285,12 @@ jobs:
                         if str(lead.get('channel_binding_id') or '') != config.binding_id:
                             continue
                         incoming = row
+                        projection_rows = getattr(supabase_client._execute_with_retry(
+                            supabase_client.get_client().table('chatwoot_bridge_operations')
+                            .select('status,attempt_count,last_error').eq('source_kind', 'brain_message')
+                            .eq('source_id', str(row['id'])).limit(1)
+                        ), 'data', None) or []
+                        projection = projection_rows[0] if projection_rows else None
                         conversation = chatwoot_bridge.get_conversation(config.binding_id, lead_ref)
                         if conversation and conversation.get('conversation_id'):
                             remote_incoming = client.find_message_by_source_id(
@@ -295,6 +303,7 @@ jobs:
                             ).eq('lead_id', lead_ref).eq('direction', 'outbound')
                             .gte('created_at', row['created_at']).order('created_at').limit(30)
                         ), 'data', None) or []
+                        any_outbound = replies[0] if replies else None
                         assistant_reply = next((item for item in replies if item.get('role') == 'assistant' and item.get('message_origin') == 'conversation'), None)
                         if assistant_reply and conversation and conversation.get('conversation_id'):
                             remote_reply = client.find_message_by_source_id(
@@ -307,7 +316,10 @@ jobs:
                         break
                     time.sleep(3)
                 print('test_inbound_in_brain=' + str(bool(incoming)).lower())
+                print('any_outbound_after_test_in_brain=' + str(bool(any_outbound)).lower())
                 print('vitória_reply_in_brain=' + str(bool(assistant_reply)).lower())
+                print('test_projection_status=' + str((projection or {}).get('status') or 'missing'))
+                print('test_projection_attempts=' + str((projection or {}).get('attempt_count') or 0))
                 print('test_inbound_in_chatwoot=' + str(bool(remote_incoming)).lower())
                 print('vitória_reply_in_chatwoot=' + str(bool(remote_reply)).lower())
                 if not all((incoming, assistant_reply, remote_incoming, remote_reply)):
@@ -379,6 +391,10 @@ jobs:
             for name in ('gateway', 'transport'):
                 print(f'{name}_active_slot={data.get(name, {}).get("active", "unknown")}')
             PY
+            fi
+            if [[ "$CHATWOOT_OPS_MODE" == inspect ]]; then
+              active_dispatch_slot="$(python3 -c 'import json; print(json.load(open(".deploy/microservices/slots.json", encoding="utf-8"))["transport"]["active"])')"
+              docker logs --since 15m "brain-ai-transport-dispatch-$active_dispatch_slot-1" 2>&1 | python3 -c "import sys; lines=[line for line in sys.stdin if 'ChatwootBridgeWorker' in line]; print('chatwoot_worker_started=' + str(any('started' in line for line in lines)).lower()); print('chatwoot_worker_recent_error_count=' + str(sum('[ERROR]' in line for line in lines))); print('chatwoot_worker_recovered=' + str(any('recovered after' in line for line in lines)).lower())"
             fi
             docker ps --format '{{.Names}}\t{{.Status}}' | grep -E '^(brain-ai-(gateway|transport|chatwoot)|chatwoot[-_])' || true
             if docker compose --env-file .env.compose ps --services --status running | grep -qx db; then
