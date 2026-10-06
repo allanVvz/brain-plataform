@@ -99,7 +99,7 @@ jobs:
                 values[prefix + '_DIGEST'] = item['digest']
                 values[prefix + '_IMAGE_BLUE'] = 'ghcr.io/allanvvz/' + image_prefix + '@' + item['digest']
                 values[prefix + '_IMAGE_GREEN'] = values[prefix + '_IMAGE_BLUE']
-                values[env_name] = '.env.microservices/' + service + '.env'
+                values[env_name] = '.env.microservices/' + ('runtime' if service == 'conversation-runtime' else service) + '.env'
             for key, value in values.items():
                 print('export ' + key + '=' + shlex.quote(str(value)))
             PY
