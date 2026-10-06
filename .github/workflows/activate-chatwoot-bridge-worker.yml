@@ -1,0 +1,104 @@
+name: Activate Chatwoot bridge worker
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chatwoot-bridge-worker-activation
+  cancel-in-progress: false
+
+jobs:
+  activate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enable only the Chatwoot bridge worker in transport dispatch
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          command_timeout: 5m
+          script: |
+            set -Eeuo pipefail
+            cd "${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}"
+            [[ "$(hostname)" == srv1846215 ]]
+            active_slot="$(python3 -c 'import json; print(json.load(open(".deploy/microservices/slots.json", encoding="utf-8"))["transport"]["active"])')"
+            [[ "$active_slot" == blue || "$active_slot" == green ]]
+            dispatch="brain-ai-transport-dispatch-$active_slot-1"
+            docker exec "brain-ai-transport-$active_slot-1" python -c \
+              'from workers.runner import WORKERS; assert "chatwoot_bridge" in WORKERS; print("chatwoot_worker_code_available=true")'
+            active_cmd="$(docker inspect -f '{{json .Config.Cmd}}' "$dispatch")"
+            if CHATWOOT_ACTIVE_CMD="$active_cmd" python3 - <<'PY'
+            import json, os, sys
+            cmd = ' '.join(json.loads(os.environ['CHATWOOT_ACTIVE_CMD']) or [])
+            if 'chatwoot_bridge' in cmd:
+                print('dispatch_command_already_includes_chatwoot_worker=true')
+                sys.exit(10)
+            if 'whatsapp_dispatch' not in cmd:
+                raise SystemExit('active dispatch command is unexpected; refusing change')
+            PY
+            then
+              :
+            else
+              rc=$?
+              [[ "$rc" == 10 ]] && exit 0
+              exit "$rc"
+            fi
+            compose_file=infra/microservices/docker-compose.blue-green.yml
+            [[ -s "$compose_file" ]]
+            backup_dir=/var/backups/brain-ai/chatwoot-bridge-config
+            install -d -m 700 "$backup_dir"
+            chmod 700 "$backup_dir"
+            backup="$backup_dir/docker-compose.blue-green.$(date -u +%Y%m%dT%H%M%SZ).bak"
+            original_mode="$(stat -c '%a' "$compose_file")"
+            original_owner="$(stat -c '%u:%g' "$compose_file")"
+            cp --preserve=mode,ownership,timestamps "$compose_file" "$backup"
+            chmod 600 "$backup"
+            COMPOSE_FILE="$compose_file" python3 - <<'PY'
+            import os, pathlib
+            path = pathlib.Path(os.environ['COMPOSE_FILE'])
+            lines = path.read_text(encoding='utf-8').splitlines()
+            old = 'command: ["python", "-m", "workers.runner", "--worker", "whatsapp_dispatch"]'
+            new = old[:-1] + ', "--worker", "chatwoot_bridge"]'
+            matches = [i for i, line in enumerate(lines) if line.strip() == old]
+            if len(matches) != 1 or any(line.strip() == new for line in lines):
+                raise SystemExit('expected one legacy dispatch command; refusing compose edit')
+            i = matches[0]
+            indent = lines[i][:len(lines[i]) - len(lines[i].lstrip())]
+            lines[i] = indent + new
+            temporary = path.with_suffix('.chatwoot-worker.tmp')
+            temporary.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+            os.chmod(temporary, path.stat().st_mode & 0o777)
+            os.chown(temporary, path.stat().st_uid, path.stat().st_gid)
+            os.replace(temporary, path)
+            print('dispatch_compose_updated=true')
+            PY
+            compose=(docker compose --env-file .env.compose -f docker-compose.yml -f "$compose_file")
+            if ! "${compose[@]}" config --quiet; then
+              cp "$backup" "$compose_file"; chmod "$original_mode" "$compose_file"; chown "$original_owner" "$compose_file"
+              exit 1
+            fi
+            if ! "${compose[@]}" up -d --no-deps --force-recreate "transport-dispatch-$active_slot"; then
+              cp "$backup" "$compose_file"; chmod "$original_mode" "$compose_file"; chown "$original_owner" "$compose_file"
+              "${compose[@]}" up -d --no-deps --force-recreate "transport-dispatch-$active_slot" || true
+              exit 1
+            fi
+            for attempt in $(seq 1 30); do
+              if docker top "$dispatch" -eo pid,args 2>/dev/null | grep -q 'workers.runner.*chatwoot_bridge' \
+                 && docker top "$dispatch" -eo pid,args 2>/dev/null | grep -q 'workers.runner.*whatsapp_dispatch'; then
+                echo 'chatwoot_worker_active=true'
+                echo 'whatsapp_dispatch_worker_active=true'
+                echo 'dispatch_compose_backup_created=true'
+                echo 'restarted_service=transport-dispatch-only'
+                exit 0
+              fi
+              sleep 1
+            done
+            cp "$backup" "$compose_file"; chmod "$original_mode" "$compose_file"; chown "$original_owner" "$compose_file"
+            "${compose[@]}" up -d --no-deps --force-recreate "transport-dispatch-$active_slot" || true
+            echo 'chatwoot_worker_activation=rolled_back' >&2
+            exit 1
