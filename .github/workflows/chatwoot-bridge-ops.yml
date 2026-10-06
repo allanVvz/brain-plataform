@@ -353,6 +353,8 @@ jobs:
                 'import os; print("south_crm_api_enabled=" + str((os.getenv("AKIA_CRM_ENABLED") or "").strip().lower() in {"1", "true", "yes"}).lower())'
               docker top "brain-ai-transport-dispatch-$active_dispatch_slot-1" -eo pid,args | python3 -c \
                 'import sys; rows=[x for x in sys.stdin if "workers.runner" in x and "chatwoot_bridge" in x]; print("chatwoot_worker_process_count=" + str(len(rows)))'
+              docker inspect -f '{{json .Config.Cmd}}' "brain-ai-transport-dispatch-$active_dispatch_slot-1" | python3 -c \
+                'import json,sys; cmd=" ".join(json.load(sys.stdin) or []); print("dispatch_command_includes_chatwoot_worker=" + str("chatwoot_bridge" in cmd).lower())'
               docker logs --since 15m "brain-ai-transport-dispatch-$active_dispatch_slot-1" 2>&1 | python3 -c "import sys; lines=[line for line in sys.stdin if 'ChatwootBridgeWorker' in line]; print('chatwoot_worker_started=' + str(any('started' in line for line in lines)).lower()); print('chatwoot_worker_recent_error_count=' + str(sum('[ERROR]' in line for line in lines))); print('chatwoot_worker_recovered=' + str(any('recovered after' in line for line in lines)).lower())"
             fi
             docker ps --format '{{.Names}}\t{{.Status}}' | grep -E '^(brain-ai-(gateway|transport|chatwoot)|chatwoot[-_])' || true
