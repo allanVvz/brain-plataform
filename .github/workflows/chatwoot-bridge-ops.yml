@@ -7,7 +7,7 @@ on:
         description: Read protected configuration status or enable the bridge source flag
         required: true
         type: choice
-        options: [inspect, enable]
+        options: [inspect, enable, clean-apt-cache]
         default: inspect
 
 permissions:
@@ -61,6 +61,17 @@ jobs:
                 print('required_settings_present=' + str(all(values.get(key) for key in required)).lower())
                 print('required_setting_count=' + str(sum(bool(values.get(key)) for key in required)) + '/' + str(len(required)))
                 sys.exit(0)
+            if mode == 'clean-apt-cache':
+                for candidate in (pathlib.Path('/var/cache/apt/pkgcache.bin'), pathlib.Path('/var/cache/apt/srcpkgcache.bin')):
+                    if not candidate.exists():
+                        print(f'apt_cache_already_absent={candidate.name}')
+                        continue
+                    if candidate.is_symlink() or not candidate.is_file() or candidate.resolve(strict=True) != candidate:
+                        raise SystemExit(f'refusing unexpected APT cache path: {candidate}')
+                    size = candidate.stat().st_size
+                    candidate.unlink()
+                    print(f'apt_cache_removed={candidate.name} bytes={size}')
+                sys.exit(0)
             missing = [key for key in required if not values.get(key)]
             if missing:
                 raise SystemExit('required bridge settings missing: ' + ','.join(missing))
@@ -93,6 +104,7 @@ jobs:
             PY
             printf 'hostname='; hostname
             printf 'identity='; id -un
+            df -P / | awk 'NR==2 {printf "root_disk_usage=%s available_kb=%s\n", $5, $4}'
             if [[ -s .deploy/microservices/slots.json ]]; then
               python3 - <<'PY'
             import json
