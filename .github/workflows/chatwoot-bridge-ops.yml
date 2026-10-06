@@ -1,0 +1,110 @@
+name: Chatwoot bridge operations
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Read protected configuration status or enable the bridge source flag
+        required: true
+        type: choice
+        options: [inspect, enable]
+        default: inspect
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chatwoot-bridge-ops
+  cancel-in-progress: false
+
+jobs:
+  operate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Inspect or enable protected Chatwoot bridge configuration
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        env:
+          CHATWOOT_OPS_MODE: ${{ inputs.operation }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          command_timeout: 5m
+          envs: CHATWOOT_OPS_MODE
+          script: |
+            set -Eeuo pipefail
+            [[ "$CHATWOOT_OPS_MODE" == inspect || "$CHATWOOT_OPS_MODE" == enable ]]
+            cd "${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}"
+            python3 - "$CHATWOOT_OPS_MODE" <<'PY'
+            import os, pathlib, shutil, stat, sys, time
+
+            root = pathlib.Path.cwd()
+            mode = sys.argv[1]
+            env_file = root / '.env.compose'
+            lines = env_file.read_text(encoding='utf-8').splitlines()
+            values = {}
+            for line in lines:
+                stripped = line.strip()
+                if stripped and not stripped.startswith('#') and '=' in stripped:
+                    key, value = stripped.split('=', 1)
+                    values[key.strip()] = value.strip().strip('"\'')
+            required = (
+                'CHATWOOT_BASE_URL', 'CHATWOOT_API_ACCESS_TOKEN',
+                'CHATWOOT_ACCOUNT_ID', 'CHATWOOT_INBOX_ID',
+                'CHATWOOT_INBOX_IDENTIFIER', 'CHATWOOT_BRIDGE_BINDING_ID',
+                'CHATWOOT_WEBHOOK_SECRET', 'CHATWOOT_AGENT_ID',
+            )
+            if mode == 'inspect':
+                print('bridge_source_enabled=' + str(values.get('CHATWOOT_BRIDGE_ENABLED', '').lower() in {'1','true','yes'}).lower())
+                print('required_settings_present=' + str(all(values.get(key) for key in required)).lower())
+                print('required_setting_count=' + str(sum(bool(values.get(key)) for key in required)) + '/' + str(len(required)))
+                sys.exit(0)
+            missing = [key for key in required if not values.get(key)]
+            if missing:
+                raise SystemExit('required bridge settings missing: ' + ','.join(missing))
+            backup_dir = pathlib.Path('/var/backups/brain-ai/chatwoot-bridge-config')
+            backup_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            os.chmod(backup_dir, 0o700)
+            backup = backup_dir / f'env.compose.{int(time.time())}.bak'
+            shutil.copy2(env_file, backup)
+            os.chmod(backup, 0o600)
+            output = []
+            replaced = False
+            for line in lines:
+                if line.strip().startswith('CHATWOOT_BRIDGE_ENABLED='):
+                    output.append('CHATWOOT_BRIDGE_ENABLED=true')
+                    replaced = True
+                else:
+                    output.append(line)
+            if not replaced:
+                output.append('CHATWOOT_BRIDGE_ENABLED=true')
+            temporary = env_file.with_suffix('.compose.chatwoot.tmp')
+            temporary.write_text('\n'.join(output) + '\n', encoding='utf-8')
+            os.chmod(temporary, stat.S_IMODE(env_file.stat().st_mode))
+            os.replace(temporary, env_file)
+            os.chown(env_file, 0, 0)
+            import subprocess
+            subprocess.run(['python3', 'ops/microservices/bootstrap-service-envs.py'], check=True)
+            print('bridge_source_enabled=true')
+            print('protected_backup_created=true')
+            print('service_envs_refreshed=true')
+            PY
+            printf 'hostname='; hostname
+            printf 'identity='; id -un
+            if [[ -s .deploy/microservices/slots.json ]]; then
+              python3 - <<'PY'
+            import json
+            from pathlib import Path
+            data = json.loads(Path('.deploy/microservices/slots.json').read_text())
+            for name in ('gateway', 'transport'):
+                print(f'{name}_active_slot={data.get(name, {}).get("active", "unknown")}')
+            PY
+            fi
+            docker ps --format '{{.Names}}\t{{.Status}}' | grep -E '^(brain-ai-(gateway|transport|chatwoot)|chatwoot[-_])' || true
+            if docker compose --env-file .env.compose ps --services --status running | grep -qx db; then
+              migration_count="$(docker compose --env-file .env.compose exec -T db sh -c \
+                'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atqc "select count(*) from public._compose_migrations where filename = '\''164_chatwoot_api_bridge.sql'\''"')"
+              [[ "$migration_count" == 1 ]] && echo 'migration_164=applied' || echo 'migration_164=missing'
+            fi
