@@ -123,6 +123,40 @@ jobs:
             if [[ "$CHATWOOT_OPS_MODE" == refresh-transport-config ]]; then
               active_slot="$(python3 -c 'import json; print(json.load(open(".deploy/microservices/slots.json", encoding="utf-8"))["transport"]["active"])')"
               [[ "$active_slot" == blue || "$active_slot" == green ]]
+              eval "$(python3 - <<'PY'
+            import json, shlex
+            from pathlib import Path
+            manifest = json.loads(Path('ops/microservices/release-manifest.json').read_text(encoding='utf-8'))
+            values = {
+                'BRAIN_CONTRACTS_VERSION': manifest['contracts_version'],
+                'BRAIN_CONTRACTS_SHA': manifest['contracts_checksum'],
+                'REQUIRED_SCHEMA_VERSION': manifest['services']['transport']['required_schema_version'],
+                'CURRENT_SCHEMA_VERSION': manifest['services']['transport']['required_schema_version'],
+                'GATEWAY_SHA': manifest['services']['gateway']['sha'],
+                'GATEWAY_DIGEST': manifest['services']['gateway']['digest'],
+                'CONTROL_PLANE_SHA': manifest['services']['control-plane']['sha'],
+                'CONTROL_PLANE_DIGEST': manifest['services']['control-plane']['digest'],
+                'RUNTIME_SHA': manifest['services']['conversation-runtime']['sha'],
+                'RUNTIME_DIGEST': manifest['services']['conversation-runtime']['digest'],
+                'TRANSPORT_SHA': manifest['services']['transport']['sha'],
+                'TRANSPORT_DIGEST': manifest['services']['transport']['digest'],
+                'GATEWAY_IMAGE_BLUE': 'ghcr.io/allanvvz/brain-gateway@' + manifest['services']['gateway']['digest'],
+                'GATEWAY_IMAGE_GREEN': 'ghcr.io/allanvvz/brain-gateway@' + manifest['services']['gateway']['digest'],
+                'CONTROL_PLANE_IMAGE_BLUE': 'ghcr.io/allanvvz/brain-control-plane@' + manifest['services']['control-plane']['digest'],
+                'CONTROL_PLANE_IMAGE_GREEN': 'ghcr.io/allanvvz/brain-control-plane@' + manifest['services']['control-plane']['digest'],
+                'RUNTIME_IMAGE_BLUE': 'ghcr.io/allanvvz/brain-conversation-runtime@' + manifest['services']['conversation-runtime']['digest'],
+                'RUNTIME_IMAGE_GREEN': 'ghcr.io/allanvvz/brain-conversation-runtime@' + manifest['services']['conversation-runtime']['digest'],
+                'TRANSPORT_IMAGE_BLUE': 'ghcr.io/allanvvz/brain-transport@' + manifest['services']['transport']['digest'],
+                'TRANSPORT_IMAGE_GREEN': 'ghcr.io/allanvvz/brain-transport@' + manifest['services']['transport']['digest'],
+                'GATEWAY_ENV_FILE': '.env.microservices/gateway.env',
+                'CONTROL_PLANE_ENV_FILE': '.env.microservices/control-plane.env',
+                'RUNTIME_ENV_FILE': '.env.microservices/runtime.env',
+                'TRANSPORT_ENV_FILE': '.env.microservices/transport.env',
+            }
+            for key, value in values.items():
+                print('export ' + key + '=' + shlex.quote(str(value)))
+            PY
+              )"
               compose=(docker compose --env-file .env.compose -f docker-compose.yml -f infra/microservices/docker-compose.blue-green.yml)
               "${compose[@]}" config --quiet
               "${compose[@]}" up -d --no-deps --force-recreate \
