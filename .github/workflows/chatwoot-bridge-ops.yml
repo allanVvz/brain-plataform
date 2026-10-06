@@ -7,7 +7,7 @@ on:
         description: Read protected configuration status or enable the bridge source flag
         required: true
         type: choice
-        options: [inspect, enable, clean-apt-cache]
+        options: [inspect, enable, clean-apt-cache, prune-build-cache]
         default: inspect
 
 permissions:
@@ -35,7 +35,7 @@ jobs:
           envs: CHATWOOT_OPS_MODE
           script: |
             set -Eeuo pipefail
-            [[ "$CHATWOOT_OPS_MODE" == inspect || "$CHATWOOT_OPS_MODE" == enable || "$CHATWOOT_OPS_MODE" == clean-apt-cache ]]
+            [[ "$CHATWOOT_OPS_MODE" == inspect || "$CHATWOOT_OPS_MODE" == enable || "$CHATWOOT_OPS_MODE" == clean-apt-cache || "$CHATWOOT_OPS_MODE" == prune-build-cache ]]
             cd "${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}"
             python3 - "$CHATWOOT_OPS_MODE" <<'PY'
             import os, pathlib, shutil, stat, sys, time
@@ -72,6 +72,9 @@ jobs:
                     candidate.unlink()
                     print(f'apt_cache_removed={candidate.name} bytes={size}')
                 sys.exit(0)
+            if mode == 'prune-build-cache':
+                print('build_cache_prune_requested=true')
+                sys.exit(0)
             missing = [key for key in required if not values.get(key)]
             if missing:
                 raise SystemExit('required bridge settings missing: ' + ','.join(missing))
@@ -102,6 +105,15 @@ jobs:
             print('protected_backup_created=true')
             print('service_envs_refreshed=true')
             PY
+            if [[ "$CHATWOOT_OPS_MODE" == prune-build-cache ]]; then
+              before="$(docker system df --format '{{.Type}}:{{.Reclaimable}}' | grep '^Build Cache:' || true)"
+              docker builder prune --force >/dev/null
+              after="$(docker system df --format '{{.Type}}:{{.Reclaimable}}' | grep '^Build Cache:' || true)"
+              printf 'build_cache_reclaimable_before=%s\n' "${before#*:}"
+              printf 'build_cache_reclaimable_after=%s\n' "${after#*:}"
+              df -P / | awk 'NR==2 {printf "root_disk_usage=%s available_kb=%s\n", $5, $4}'
+              exit 0
+            fi
             printf 'hostname='; hostname
             printf 'identity='; id -un
             df -P / | awk 'NR==2 {printf "root_disk_usage=%s available_kb=%s\n", $5, $4}'
