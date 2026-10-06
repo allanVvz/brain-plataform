@@ -7,7 +7,7 @@ on:
         description: Read protected configuration status or enable the bridge source flag
         required: true
         type: choice
-        options: [inspect, enable, clean-apt-cache, prune-build-cache, set-callback, refresh-transport-config, verify-inbox]
+        options: [inspect, enable, clean-apt-cache, prune-build-cache, set-callback, refresh-transport-config]
         default: inspect
 
 permissions:
@@ -35,7 +35,7 @@ jobs:
           envs: CHATWOOT_OPS_MODE
           script: |
             set -Eeuo pipefail
-            [[ "$CHATWOOT_OPS_MODE" == inspect || "$CHATWOOT_OPS_MODE" == enable || "$CHATWOOT_OPS_MODE" == clean-apt-cache || "$CHATWOOT_OPS_MODE" == prune-build-cache || "$CHATWOOT_OPS_MODE" == set-callback || "$CHATWOOT_OPS_MODE" == refresh-transport-config || "$CHATWOOT_OPS_MODE" == verify-inbox ]]
+            [[ "$CHATWOOT_OPS_MODE" == inspect || "$CHATWOOT_OPS_MODE" == enable || "$CHATWOOT_OPS_MODE" == clean-apt-cache || "$CHATWOOT_OPS_MODE" == prune-build-cache || "$CHATWOOT_OPS_MODE" == set-callback || "$CHATWOOT_OPS_MODE" == refresh-transport-config ]]
             cd "${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}"
             python3 - "$CHATWOOT_OPS_MODE" <<'PY'
             import os, pathlib, shutil, stat, sys, time
@@ -88,9 +88,6 @@ jobs:
                 sys.exit(0)
             if mode == 'refresh-transport-config':
                 print('transport_config_refresh_requested=true')
-                sys.exit(0)
-            if mode == 'verify-inbox':
-                print('chatwoot_test_inbox_verification_requested=true')
                 sys.exit(0)
             missing = [key for key in required if not values.get(key)]
             if missing:
@@ -247,54 +244,6 @@ jobs:
               docker exec "brain-ai-transport-$active_slot-1" python -c \
                 'from services.chatwoot_api import configuration; assert configuration() is not None; print("bridge_runtime_configured=true")'
               docker ps --format '{{.Names}}\t{{.Status}}' | grep -E "^brain-ai-transport(-dispatch|-media)?-$active_slot-1[[:space:]]"
-              exit 0
-            fi
-            if [[ "$CHATWOOT_OPS_MODE" == verify-inbox ]]; then
-              slot="$(python3 -c 'import json; print(json.load(open(".deploy/microservices/slots.json", encoding="utf-8"))["transport"]["active"])')"
-              docker exec -i "brain-ai-transport-$slot-1" python - <<'PY'
-            from datetime import datetime, timedelta, timezone
-            from services import chatwoot_api, supabase_client
-            from repositories import chatwoot_bridge
-            config = chatwoot_api.configuration()
-            rows = supabase_client._execute_with_retry(supabase_client.get_client().table('messages').select('id,lead_id,direction,content,created_at').eq('direction', 'inbound').ilike('content', '%Teste Chatwoot%').gte('created_at', (datetime.now(timezone.utc)-timedelta(minutes=45)).isoformat()).order('created_at', desc=True).limit(30)).data or []
-            found = projected = mapping_found = False
-            projection_status = 'missing'
-            projection_attempts = 0
-            projection_error_type = 'none'
-            queue_status_counts = {}
-            api = chatwoot_api.ChatwootApi(config) if config else None
-            try:
-                for row in rows:
-                    lead = supabase_client.get_lead_by_ref(int(row['lead_id'])) or {}
-                    if not config or str(lead.get('channel_binding_id') or '') != config.binding_id:
-                        continue
-                    found = True
-                    operations = supabase_client._execute_with_retry(supabase_client.get_client().table('chatwoot_bridge_operations').select('status,attempt_count,last_error').eq('source_kind', 'brain_message').eq('source_id', str(row['id'])).limit(1)).data or []
-                    operation = operations[0] if operations else {}
-                    projection_status = str(operation.get('status') or 'missing')
-                    projection_attempts = int(operation.get('attempt_count') or 0)
-                    error_type = str(operation.get('last_error') or '').split(':', 1)[0]
-                    projection_error_type = error_type if error_type.replace('_', '').replace('.', '').isalnum() else ('other' if error_type else 'none')
-                    states = supabase_client._execute_with_retry(supabase_client.get_client().table('chatwoot_bridge_operations').select('status').eq('channel_binding_id', config.binding_id).eq('source_kind', 'brain_message').in_('status', ['pending', 'retry', 'processing', 'dead_letter']).limit(1000)).data or []
-                    for state in states:
-                        key = str(state.get('status') or 'unknown')
-                        queue_status_counts[key] = queue_status_counts.get(key, 0) + 1
-                    mapping = chatwoot_bridge.get_conversation(config.binding_id, int(row['lead_id']))
-                    mapping_found = bool(mapping and mapping.get('conversation_id'))
-                    if mapping and mapping.get('conversation_id'):
-                        projected = bool(api.find_message_by_source_id(conversation_id=int(mapping['conversation_id']), source_id=f"brain-message:{row['id']}", after_message_id=0))
-                    break
-            finally:
-                if api: api.close()
-            print('test_message_in_tock_fatal_backend=' + str(found).lower())
-            print('test_message_conversation_mapping=' + str(mapping_found).lower())
-            print('test_message_projection_status=' + projection_status)
-            print('test_message_projection_attempts=' + str(projection_attempts))
-            print('test_message_projection_error_type=' + projection_error_type)
-            print('chatwoot_bridge_nonterminal_sample=' + ','.join(f'{key}:{queue_status_counts[key]}' for key in sorted(queue_status_counts)))
-            print('test_message_in_chatwoot_inbox=' + str(projected).lower())
-            if config: print('chatwoot_inbox_id=' + str(config.inbox_id))
-            PY
               exit 0
             fi
             if [[ "$CHATWOOT_OPS_MODE" == inspect ]]; then
