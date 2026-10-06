@@ -280,7 +280,10 @@ def test_microservice_schema_gate_covers_the_manifest_target():
     manifest = json.loads(
         (ROOT / "ops/microservices/release-manifest.json").read_text(encoding="utf-8")
     )
-    assert manifest["schema_version"] == 160
+    assert manifest["schema_version"] == max(
+        int(path.name.split("_", 1)[0])
+        for path in (ROOT / "supabase/migrations").glob("*.sql")
+    )
 
     audit = (ROOT / "ops/vps/validate-production-release.sh").read_text(encoding="utf-8")
     for migration in (
@@ -311,9 +314,10 @@ def test_microservice_schema_gate_covers_the_manifest_target():
         "158_recover_stale_operator_preview_claim.sql",
         "159_recover_stale_worker_claim.sql",
         "160_fix_operator_preview_generated_column.sql",
+        "164_chatwoot_api_bridge.sql",
     ):
         assert migration in audit
-    assert "release migrations 112-160 are incomplete" in audit
+    assert "release migrations 112-164 are incomplete" in audit
 
     for script_name in (
         "ops/vps/deploy-microservice-blue-green.sh",
