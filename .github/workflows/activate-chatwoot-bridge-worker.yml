@@ -77,6 +77,33 @@ jobs:
             os.replace(temporary, path)
             print('dispatch_compose_updated=true')
             PY
+            eval "$(python3 - <<'PY'
+            import json, shlex
+            from pathlib import Path
+            manifest = json.loads(Path('ops/microservices/release-manifest.json').read_text(encoding='utf-8'))
+            values = {
+                'BRAIN_CONTRACTS_VERSION': manifest['contracts_version'],
+                'BRAIN_CONTRACTS_SHA': manifest['contracts_checksum'],
+                'REQUIRED_SCHEMA_VERSION': manifest['services']['transport']['required_schema_version'],
+                'CURRENT_SCHEMA_VERSION': manifest['services']['transport']['required_schema_version'],
+            }
+            for service, env_name, image_prefix in (
+                ('gateway', 'GATEWAY_ENV_FILE', 'brain-gateway'),
+                ('control-plane', 'CONTROL_PLANE_ENV_FILE', 'brain-control-plane'),
+                ('conversation-runtime', 'RUNTIME_ENV_FILE', 'brain-conversation-runtime'),
+                ('transport', 'TRANSPORT_ENV_FILE', 'brain-transport'),
+            ):
+                item = manifest['services'][service]
+                prefix = {'gateway': 'GATEWAY', 'control-plane': 'CONTROL_PLANE', 'conversation-runtime': 'RUNTIME', 'transport': 'TRANSPORT'}[service]
+                values[prefix + '_SHA'] = item['sha']
+                values[prefix + '_DIGEST'] = item['digest']
+                values[prefix + '_IMAGE_BLUE'] = 'ghcr.io/allanvvz/' + image_prefix + '@' + item['digest']
+                values[prefix + '_IMAGE_GREEN'] = values[prefix + '_IMAGE_BLUE']
+                values[env_name] = '.env.microservices/' + service + '.env'
+            for key, value in values.items():
+                print('export ' + key + '=' + shlex.quote(str(value)))
+            PY
+            )"
             compose=(docker compose --env-file .env.compose -f docker-compose.yml -f "$compose_file")
             if ! "${compose[@]}" config --quiet; then
               cp "$backup" "$compose_file"; chmod "$original_mode" "$compose_file"; chown "$original_owner" "$compose_file"
