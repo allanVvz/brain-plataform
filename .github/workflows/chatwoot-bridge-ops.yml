@@ -7,7 +7,7 @@ on:
         description: Read protected configuration status or enable the bridge source flag
         required: true
         type: choice
-        options: [inspect, enable, clean-apt-cache, prune-build-cache, set-callback]
+        options: [inspect, enable, clean-apt-cache, prune-build-cache, set-callback, refresh-transport-config]
         default: inspect
 
 permissions:
@@ -35,7 +35,7 @@ jobs:
           envs: CHATWOOT_OPS_MODE
           script: |
             set -Eeuo pipefail
-            [[ "$CHATWOOT_OPS_MODE" == inspect || "$CHATWOOT_OPS_MODE" == enable || "$CHATWOOT_OPS_MODE" == clean-apt-cache || "$CHATWOOT_OPS_MODE" == prune-build-cache || "$CHATWOOT_OPS_MODE" == set-callback ]]
+            [[ "$CHATWOOT_OPS_MODE" == inspect || "$CHATWOOT_OPS_MODE" == enable || "$CHATWOOT_OPS_MODE" == clean-apt-cache || "$CHATWOOT_OPS_MODE" == prune-build-cache || "$CHATWOOT_OPS_MODE" == set-callback || "$CHATWOOT_OPS_MODE" == refresh-transport-config ]]
             cd "${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}"
             python3 - "$CHATWOOT_OPS_MODE" <<'PY'
             import os, pathlib, shutil, stat, sys, time
@@ -78,6 +78,9 @@ jobs:
             if mode == 'set-callback':
                 print('chatwoot_callback_change_requested=true')
                 sys.exit(0)
+            if mode == 'refresh-transport-config':
+                print('transport_config_refresh_requested=true')
+                sys.exit(0)
             missing = [key for key in required if not values.get(key)]
             if missing:
                 raise SystemExit('required bridge settings missing: ' + ','.join(missing))
@@ -117,13 +120,31 @@ jobs:
               df -P / | awk 'NR==2 {printf "root_disk_usage=%s available_kb=%s\n", $5, $4}'
               exit 0
             fi
+            if [[ "$CHATWOOT_OPS_MODE" == refresh-transport-config ]]; then
+              active_slot="$(python3 -c 'import json; print(json.load(open(".deploy/microservices/slots.json", encoding="utf-8"))["transport"]["active"])')"
+              [[ "$active_slot" == blue || "$active_slot" == green ]]
+              compose=(docker compose --env-file .env.compose -f docker-compose.yml -f infra/microservices/docker-compose.blue-green.yml)
+              "${compose[@]}" config --quiet
+              "${compose[@]}" up -d --no-deps --force-recreate \
+                "transport-$active_slot" "transport-dispatch-$active_slot" "transport-media-$active_slot"
+              for attempt in $(seq 1 30); do
+                if docker inspect -f '{{.State.Running}}' "brain-ai-transport-$active_slot-1" 2>/dev/null | grep -qx true; then
+                  break
+                fi
+                sleep 2
+              done
+              docker exec "brain-ai-transport-$active_slot-1" python -c \
+                'from services.chatwoot_api import configuration; assert configuration() is not None; print("bridge_runtime_configured=true")'
+              docker ps --format '{{.Names}}\t{{.Status}}' | grep -E "^brain-ai-transport(-dispatch|-media)?-$active_slot-1[[:space:]]"
+              exit 0
+            fi
             if [[ "$CHATWOOT_OPS_MODE" == inspect ]]; then
               docker exec chatwoot-web-1 bundle exec rails runner -e production \
                 'inbox=Inbox.find_by!(name: "Tock Fatal WhatsApp"); channel=inbox.channel; puts "chatwoot_inbox_id=#{inbox.id}"; puts "chatwoot_account_id=#{inbox.account_id}"; puts "chatwoot_channel_type=#{channel.class.name}"; puts "chatwoot_callback_state=#{channel.webhook_url.blank? ? "blank" : channel.webhook_url == "https://lpapi.vzforeal.com/webhooks/chatwoot" ? "expected" : "other"}"'
             fi
             if [[ "$CHATWOOT_OPS_MODE" == set-callback ]]; then
               previous_callback="$(docker exec chatwoot-web-1 bundle exec rails runner -e production \
-                'i=Inbox.find_by!(name: "Tock Fatal WhatsApp"); c=i.channel; abort unless i.id == 1 && i.account_id == 1 && c.is_a?(Channel::Api); print c.webhook_url.to_s')"
+                'i=Inbox.find_by!(name: "Tock Fatal WhatsApp"); c=i.channel; abort unless i.id == 1 && i.account_id == 1 && c.is_a?(Channel::Api); puts "CHATWOOT_CALLBACK_VALUE=#{c.webhook_url}"' | sed -n 's/^CHATWOOT_CALLBACK_VALUE=//p' | tail -n 1)"
               [[ -z "$previous_callback" || "$previous_callback" == 'https://lpapi.vzforeal.com/webhooks/chatwoot' ]] || {
                 echo 'refusing to replace an unexpected Chatwoot inbox callback' >&2
                 exit 1
