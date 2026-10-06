@@ -250,7 +250,7 @@ jobs:
               active_transport_slot="$(python3 -c 'import json; print(json.load(open(".deploy/microservices/slots.json", encoding="utf-8"))["transport"]["active"])')"
               docker exec "brain-ai-transport-$active_transport_slot-1" python -c \
                 'import os; print("transport_container_bridge_enabled=" + str((os.getenv("CHATWOOT_BRIDGE_ENABLED") or "").strip().lower() in {"1", "true", "yes"}).lower())'
-              docker exec "brain-ai-transport-$active_transport_slot-1" python - <<'PY'
+              docker exec -i "brain-ai-transport-$active_transport_slot-1" python - <<'PY'
             from services import chatwoot_api, supabase_client
             try:
                 config = chatwoot_api.configuration()
