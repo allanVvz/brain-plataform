@@ -23,4 +23,7 @@ jobs:
             docker system df
             journalctl --disk-usage
             du -x -h -d1 /var /opt/brain-ai /root /tmp 2>/dev/null | sort -h | tail -30
+            du -x -h -d1 /var/lib /var/lib/apt /var/lib/systemd /var/lib/docker 2>/dev/null | sort -h | tail -40
+            if [[ -d /var/lib/systemd/coredump ]]; then du -x -h -d1 /var/lib/systemd/coredump; fi
+            if [[ -d /var/lib/apt/lists ]]; then du -x -h -d1 /var/lib/apt/lists; fi
             find /var/cache/apt -xdev -type f -printf '%s %p\n' 2>/dev/null | sort -nr | head -20
