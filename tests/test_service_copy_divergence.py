@@ -246,6 +246,9 @@ DIVERGENT_BASELINE: tuple[tuple[str, str], ...] = (
     # criaria uma segunda copia para divergir depois.
     ("control-plane", "agent_harness.py"),
     ("control-plane", "agent_harness_tools.py"),
+    # Deployed control-plane moved on (AKIA portal grants, graph editor over
+    # the active GraphBundle); the frozen monolith in api/ is not deployed.
+    ("control-plane", "auth_service.py"),
     ("control-plane", "campaigns_service.py"),
     # 2026-09-11: added a graph_publications fallback to current_graph() so
     # /knowledge/chat-context stops 404ing for GraphBundle-published personas
@@ -261,6 +264,7 @@ DIVERGENT_BASELINE: tuple[tuple[str, str], ...] = (
     # actually has. The monolith copy still loads persona-specific skills by
     # default. Production runs apps/, so the isolated behaviour is what ships.
     ("control-plane", "faq_bulk_generator.py"),
+    ("control-plane", "graph_bundle.py"),
     ("control-plane", "graph_bundle_publisher.py"),
     ("control-plane", "graph_bundle_view.py"),
     # Execution strategy is compiled only by the productive control-plane and

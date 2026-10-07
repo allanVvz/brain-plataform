@@ -21,25 +21,56 @@ class ChatwootBridgeWorker(BaseWorker):
         self.worker_id = f"{socket.gethostname()}:{uuid.uuid4()}"
 
     def _run_cycle(self) -> None:
-        config = chatwoot_api.configuration()
-        if config is None:
+        ready: dict[str, chatwoot_api.ChatwootConfig] = {}
+        for config in chatwoot_api.configurations():
+            try:
+                self._prepare(config)
+                ready[config.binding_id] = config
+            except Exception as exc:
+                self._log_failure(config, exc)
+        if not ready:
             return
-        binding = supabase_client.get_workflow_binding_by_id(config.binding_id)
-        if (
-            not binding or not binding.get("active")
-            or binding.get("provider") != "meta_cloud"
-            or not binding.get("whatsapp_phone_number_id")
-        ):
-            raise RuntimeError("configured Chatwoot binding is not an active Meta Cloud binding")
 
-        chatwoot_bridge.enqueue_projections(config.binding_id, limit=500)
-        api = chatwoot_api.ChatwootApi(config)
+        # One claim serves every binding; each operation is executed with the
+        # configuration of the binding it belongs to.
+        apis: dict[str, chatwoot_api.ChatwootApi] = {}
         try:
             for operation in chatwoot_bridge.claim_operations(self.worker_id, limit=20):
+                config = ready.get(str(operation.get("channel_binding_id")))
+                if config is None:
+                    # Binding switched off or misconfigured: keep the work.
+                    self._finish(operation, "retry", "Chatwoot binding is not configured", retry_seconds=300)
+                    continue
+                api = apis.get(config.binding_id) or apis.setdefault(
+                    config.binding_id, chatwoot_api.ChatwootApi(config),
+                )
                 self._process_operation(api, config, operation)
-            self._sync_delivery_statuses(api)
+            for config in ready.values():
+                try:
+                    api = apis.get(config.binding_id) or apis.setdefault(
+                        config.binding_id, chatwoot_api.ChatwootApi(config),
+                    )
+                    self._sync_delivery_statuses(api, config)
+                except Exception as exc:
+                    self._log_failure(config, exc)
         finally:
-            api.close()
+            for api in apis.values():
+                api.close()
+
+    def _prepare(self, config: chatwoot_api.ChatwootConfig) -> None:
+        binding = supabase_client.get_workflow_binding_by_id(config.binding_id)
+        # Chatwoot mirrors the ledger of any WhatsApp channel: Meta Cloud or an
+        # Evolution linked phone. Replies go back through the same outbox.
+        if (
+            not binding or not binding.get("active")
+            or binding.get("provider") not in chatwoot_bridge.WHATSAPP_PROVIDERS
+        ):
+            raise RuntimeError("configured Chatwoot binding is not an active WhatsApp binding")
+        chatwoot_bridge.enqueue_projections(config.binding_id, limit=500)
+
+    def _log_failure(self, config: chatwoot_api.ChatwootConfig, exc: Exception) -> None:
+        # Type only: messages can echo customer data or account identifiers.
+        sre_logger.error(self.name, f"binding={config.binding_id} error_type={type(exc).__name__}")
 
     def _process_operation(self, api: chatwoot_api.ChatwootApi, config, operation: dict[str, Any]) -> None:
         try:
@@ -160,11 +191,9 @@ class ChatwootBridgeWorker(BaseWorker):
             if kind != "human_reply" or message.get("private"):
                 self._finish(operation, "ignored", "only public human replies can be sent")
                 return
-            if message.get("attachments"):
-                self._finish(operation, "dead_letter", "Chatwoot attachments are not enabled for this bridge")
-                return
+            attachments = [item for item in (message.get("attachments") or []) if isinstance(item, dict)]
             content = str(message.get("content") or "").strip()
-            if not content:
+            if not content and not attachments:
                 self._finish(operation, "ignored", "empty human message")
                 return
 
@@ -175,22 +204,31 @@ class ChatwootBridgeWorker(BaseWorker):
             if not lead or str(lead.get("channel_binding_id") or "") != config.binding_id:
                 self._finish(operation, "ignored", "lead binding mismatch")
                 return
-            dedupe_uuid = str(uuid.uuid5(
-                uuid.NAMESPACE_URL,
-                f"chatwoot:{config.account_id}:{config.inbox_id}:{operation['chatwoot_message_id']}",
-            ))
-            result = operator_messaging.enqueue(
-                lead_ref=int(operation["lead_ref"]),
-                persona_id=str(lead["persona_id"]),
-                client_message_id=dedupe_uuid,
-                text=content,
-                metadata={
-                    "source": "chatwoot",
-                    "chatwoot_message_id": int(operation["chatwoot_message_id"]),
-                    "chatwoot_conversation_id": int(operation["chatwoot_conversation_id"]),
-                    "chatwoot_agent_id": config.agent_id,
-                },
-            )
+            identity = f"chatwoot:{config.account_id}:{config.inbox_id}:{operation['chatwoot_message_id']}"
+            metadata = {
+                "source": "chatwoot",
+                "chatwoot_message_id": int(operation["chatwoot_message_id"]),
+                "chatwoot_conversation_id": int(operation["chatwoot_conversation_id"]),
+                "chatwoot_agent_id": config.agent_id,
+            }
+            # Same outbox, same gate and pacing as the portal: the text rides on
+            # the first attachment as its caption; further attachments follow.
+            # Each part has its own idempotency key, so a retry never duplicates.
+            parts = [(content, attachment) for attachment in attachments[:1]] or [(content, None)]
+            parts += [("", attachment) for attachment in attachments[1:]]
+            result = None
+            for index, (text, attachment) in enumerate(parts):
+                sent = operator_messaging.enqueue(
+                    lead_ref=int(operation["lead_ref"]),
+                    persona_id=str(lead["persona_id"]),
+                    client_message_id=str(uuid.uuid5(
+                        uuid.NAMESPACE_URL, identity if index == 0 else f"{identity}:{index}",
+                    )),
+                    text=text,
+                    media=api.download_attachment(attachment) if attachment else None,
+                    metadata=metadata,
+                )
+                result = result or sent
             self._finish(
                 operation, "completed",
                 chatwoot_message_id=int(operation["chatwoot_message_id"]),
@@ -211,9 +249,15 @@ class ChatwootBridgeWorker(BaseWorker):
         mapping = chatwoot_bridge.get_conversation(config.binding_id, lead_ref)
         if mapping and mapping.get("conversation_id"):
             return mapping
-        phone = re.sub(r"\D", "", str(
-            lead.get("external_contact_id") or lead.get("telefone") or ""
-        ))
+        # Same identity order the dispatcher sends to: an Evolution lead may carry
+        # an opaque "@lid" id, and only its phone JID is a real number.
+        identities = (lead.get("metadata") or {}).get("identities") or {}
+        raw_phone = next((
+            str(value) for value in (
+                identities.get("remote_jid_alt"), lead.get("external_contact_id"), lead.get("telefone"),
+            ) if value and "@lid" not in str(value)
+        ), "")
+        phone = re.sub(r"\D", "", raw_phone.split("@", 1)[0])
         if not 8 <= len(phone) <= 15:
             raise RuntimeError("lead phone number is unavailable")
         identifier = f"brain:{config.binding_id}:{lead_ref}"
@@ -283,8 +327,8 @@ class ChatwootBridgeWorker(BaseWorker):
         })
         return saved
 
-    def _sync_delivery_statuses(self, api: chatwoot_api.ChatwootApi) -> None:
-        for operation in chatwoot_bridge.pending_delivery_updates(limit=50):
+    def _sync_delivery_statuses(self, api: chatwoot_api.ChatwootApi, config) -> None:
+        for operation in chatwoot_bridge.pending_delivery_updates(config.binding_id, limit=50):
             buffer = chatwoot_bridge.get_delivery_buffer(str(operation["transport_buffer_id"])) or {}
             source_status = str(buffer.get("status") or "")
             status = {

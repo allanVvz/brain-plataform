@@ -12,6 +12,8 @@ from urllib.parse import quote
 
 import httpx
 
+from repositories import chatwoot_bridge
+from services import secret_store, sre_logger
 from utils.tls import get_ca_bundle_path
 
 
@@ -64,10 +66,17 @@ class ChatwootConfig:
     agent_id: int
 
 
-def configuration() -> ChatwootConfig | None:
+def _https_url(value: object) -> str:
+    base_url = str(value or "").strip().rstrip("/")
+    if not base_url.startswith("https://"):
+        raise RuntimeError("Chatwoot bridge requires an HTTPS base URL")
+    return base_url
+
+
+def _env_configuration() -> ChatwootConfig | None:
+    """The single binding configured by CHATWOOT_* environment keys (fallback)."""
     if (os.getenv("CHATWOOT_BRIDGE_ENABLED") or "").strip().lower() not in {"1", "true", "yes"}:
         return None
-    base_url = (os.getenv("CHATWOOT_BASE_URL") or "").strip().rstrip("/")
     token = (os.getenv("CHATWOOT_API_ACCESS_TOKEN") or "").strip()
     inbox_identifier = (os.getenv("CHATWOOT_INBOX_IDENTIFIER") or "").strip()
     binding_id = (os.getenv("CHATWOOT_BRIDGE_BINDING_ID") or "").strip()
@@ -78,12 +87,10 @@ def configuration() -> ChatwootConfig | None:
         agent_id = int(os.getenv("CHATWOOT_AGENT_ID") or "")
     except ValueError as exc:
         raise RuntimeError("Chatwoot bridge identifiers are not configured") from exc
-    if not all((base_url, token, inbox_identifier, binding_id, secret)):
+    if not all((token, inbox_identifier, binding_id, secret)):
         raise RuntimeError("Chatwoot bridge credentials are not configured")
-    if not base_url.startswith("https://"):
-        raise RuntimeError("Chatwoot bridge requires an HTTPS base URL")
     return ChatwootConfig(
-        base_url=base_url,
+        base_url=_https_url(os.getenv("CHATWOOT_BASE_URL")),
         api_token=token,
         account_id=account_id,
         inbox_id=inbox_id,
@@ -92,6 +99,66 @@ def configuration() -> ChatwootConfig | None:
         webhook_secret=secret,
         agent_id=agent_id,
     )
+
+
+def _binding_configuration(binding: dict[str, Any]) -> ChatwootConfig:
+    """`workflow_bindings.metadata.chatwoot`: plain fields plus encrypted secrets."""
+    chatwoot = (binding.get("metadata") or {}).get("chatwoot") or {}
+    try:
+        token = secret_store.decrypt_secret(chatwoot.get("api_token_ciphertext"))
+        secret = secret_store.decrypt_secret(chatwoot.get("webhook_secret_ciphertext"))
+        account_id = int(chatwoot.get("account_id"))
+        inbox_id = int(chatwoot.get("inbox_id"))
+        agent_id = int(chatwoot.get("agent_id"))
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("Chatwoot binding configuration is incomplete") from exc
+    inbox_identifier = str(chatwoot.get("inbox_identifier") or "").strip()
+    if not all((token, secret, inbox_identifier)):
+        raise RuntimeError("Chatwoot binding credentials are not configured")
+    return ChatwootConfig(
+        base_url=_https_url(chatwoot.get("base_url")),
+        api_token=token,
+        account_id=account_id,
+        inbox_id=inbox_id,
+        inbox_identifier=inbox_identifier,
+        binding_id=str(binding["id"]),
+        webhook_secret=secret,
+        agent_id=agent_id,
+    )
+
+
+def configurations() -> list[ChatwootConfig]:
+    """One config per WhatsApp binding with `metadata.chatwoot.enabled`.
+
+    The CHATWOOT_* environment config is a fallback for its own binding only:
+    a binding that carries its own metadata always wins. A binding that cannot
+    be configured is logged (type only) and skipped; it never hides the others.
+    A database failure propagates, so a webhook is retried instead of ignored.
+    """
+    configs: dict[str, ChatwootConfig] = {}
+    for binding in chatwoot_bridge.list_enabled_bindings():
+        try:
+            configs[str(binding["id"])] = _binding_configuration(binding)
+        except Exception as exc:
+            sre_logger.error(
+                "chatwoot_api",
+                f"binding={binding.get('id')} config_invalid error_type={type(exc).__name__}",
+            )
+    try:
+        fallback = _env_configuration()
+    except Exception as exc:
+        sre_logger.error("chatwoot_api", f"env_config_invalid error_type={type(exc).__name__}")
+        fallback = None
+    if fallback and fallback.binding_id not in configs:
+        configs[fallback.binding_id] = fallback
+    return list(configs.values())
+
+
+def configuration_for_inbox(account_id: int | None, inbox_id: int | None) -> ChatwootConfig | None:
+    return next((
+        config for config in configurations()
+        if config.account_id == account_id and config.inbox_id == inbox_id
+    ), None)
 
 
 class ChatwootApi:
@@ -242,6 +309,27 @@ class ChatwootApi:
             if next_cursor <= cursor:
                 return None
             cursor = next_cursor
+
+    MAX_ATTACHMENT_BYTES = 16 * 1024 * 1024
+
+    def download_attachment(self, attachment: dict[str, Any]) -> dict[str, Any]:
+        """Bytes, mime and name of one attachment an attendant sent from Chatwoot."""
+        url = str(attachment.get("data_url") or attachment.get("file_url") or "")
+        if not url.startswith("https://"):
+            raise RuntimeError("Chatwoot attachment has no HTTPS URL")
+        chunks: list[bytes] = []
+        size = 0
+        with self._client.stream("GET", url, follow_redirects=True) as response:
+            if response.status_code >= 400:
+                raise RuntimeError(f"Chatwoot attachment returned HTTP {response.status_code}")
+            mime = (response.headers.get("content-type") or "application/octet-stream").split(";")[0].strip()
+            for chunk in response.iter_bytes():
+                size += len(chunk)
+                if size > self.MAX_ATTACHMENT_BYTES:
+                    raise RuntimeError("Chatwoot attachment exceeds the WhatsApp media limit")
+                chunks.append(chunk)
+        name = url.split("?", 1)[0].rsplit("/", 1)[-1] or "arquivo"
+        return {"data": b"".join(chunks), "mime": mime, "filename": name}
 
     def update_message_status(
         self, *, conversation_id: int, message_id: int, status: str,

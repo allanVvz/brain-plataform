@@ -242,7 +242,7 @@ jobs:
                 sleep 2
               done
               docker exec "brain-ai-transport-$active_slot-1" python -c \
-                'from services.chatwoot_api import configuration; assert configuration() is not None; print("bridge_runtime_configured=true")'
+                'from services.chatwoot_api import configurations; assert configurations(); print("bridge_runtime_configured=true")'
               docker ps --format '{{.Names}}\t{{.Status}}' | grep -E "^brain-ai-transport(-dispatch|-media)?-$active_slot-1[[:space:]]"
               exit 0
             fi
@@ -253,7 +253,7 @@ jobs:
               docker exec -i "brain-ai-transport-$active_transport_slot-1" python - <<'PY'
             from services import chatwoot_api, supabase_client
             try:
-                config = chatwoot_api.configuration()
+                config = next(iter(chatwoot_api.configurations()), None)
                 if config is None:
                     raise RuntimeError('bridge disabled')
                 binding = supabase_client.get_workflow_binding_by_id(config.binding_id)

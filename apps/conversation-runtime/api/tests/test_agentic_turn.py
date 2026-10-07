@@ -96,16 +96,18 @@ def test_public_question_metadata_is_normalized_only_when_unambiguous(monkeypatc
     assert observed[-1]["question_kind"] == "qualification"
     assert observed[-1]["asked_field_key"] == "nome_cliente"
 
-    # A confirmed name is not eligible even when the reply text matches its
-    # published question. It must never be sent as a new qualification prompt.
+    # A confirmed name is not eligible as a ledger question. Its public text
+    # remains available to proof with an auditable quality warning.
     resolved = resolved.model_copy(update={"eligible_fields": []})
-    with pytest.raises(RuntimeError, match="public_question_field_not_eligible"):
+    with pytest.raises(RuntimeError, match="captured before proof"):
         conversation_runtime.decide_agentic(
             context, resolved_understanding=resolved,
             conversation_reply=ConversationReplyV1(
                 reply="Como você prefere que eu te chame?", question_kind="none",
             ),
         )
+    assert observed[-1]["question_kind"] == "consultative"
+    assert observed[-1]["asked_field_key"] is None
 
 
 def test_active_publication_is_not_a_shadow_session():

@@ -1,0 +1,15 @@
+# VPS-only private service. No public port, worker, scheduler or graph dependency.
+services:
+  north-runtime:
+    image: ${AKIA_NORTH_RUNTIME_IMAGE:?set immutable North runtime digest}
+    env_file: ["${AKIA_NORTH_RUNTIME_ENV_FILE:?set private North runtime env file}"]
+    environment:
+      NORTH_RUNTIME_PORT: "8097"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8097/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+    networks: [backend]

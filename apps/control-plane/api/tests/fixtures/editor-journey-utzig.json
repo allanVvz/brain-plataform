@@ -1,0 +1,3575 @@
+{
+ "publication": {
+  "id": "25a62cf6-ff48-48f1-89d1-1d8644592b6e",
+  "version": 16,
+  "checksum": "sha256:681263e9121b6e0a44ca4fee29feb5668d49f61ca3a521387c1a22bd3e94263d",
+  "compiler_version": "graph-compiler-v3.6.6"
+ },
+ "previous_publication": {
+  "id": "previous-publication",
+  "version": 15
+ },
+ "editable": true,
+ "blocked_reasons": [],
+ "compiler_upgrade": null,
+ "persona_node_id": "persona:utzig-garage",
+ "journey": {
+  "model": "agendamento",
+  "branch_count": 11,
+  "stages": [
+   {
+    "key": "opening",
+    "label": "Abertura",
+    "rule_node_id": null,
+    "texts": [
+     {
+      "key": "opening",
+      "label": "Primeira mensagem",
+      "value": "Apresente-se uma vez como assistente virtual da Utzig Garage do Wilian, sem usar nome próprio e sem fingir ser o Wilian.",
+      "editable": true
+     }
+    ]
+   },
+   {
+    "key": "identification",
+    "label": "Identificação",
+    "rule_node_id": null,
+    "questions": [
+     {
+      "key": "nome_cliente",
+      "label": "nome",
+      "text": "Como você prefere que eu te chame? O sobrenome é opcional.",
+      "question_node_id": "faq:qualification:nome_cliente",
+      "active": true,
+      "essential": false,
+      "scope": "all",
+      "tracking": false,
+      "validation_mode": "schema",
+      "owner_node_ids": [
+       "product:chassis-wash",
+       "product:commercial-polish",
+       "product:detailed-wash",
+       "product:engine-bay-wash",
+       "product:evaluation",
+       "product:glass-polish",
+       "product:headlight-restoration",
+       "product:interior-cleaning",
+       "product:leather-conditioning",
+       "product:ppf",
+       "product:seat-vitrification",
+       "product:technical-polish",
+       "product:vitrification",
+       "product:windshield-crystallization"
+      ],
+      "knowledge_count": 1
+     },
+     {
+      "key": "modelo_veiculo",
+      "label": "modelo do veículo",
+      "text": "Qual é o modelo do veículo?",
+      "question_node_id": "faq:qualification:modelo_veiculo",
+      "active": true,
+      "essential": true,
+      "scope": "all",
+      "tracking": false,
+      "validation_mode": "schema",
+      "owner_node_ids": [
+       "product:chassis-wash",
+       "product:commercial-polish",
+       "product:detailed-wash",
+       "product:engine-bay-wash",
+       "product:evaluation",
+       "product:glass-polish",
+       "product:headlight-restoration",
+       "product:interior-cleaning",
+       "product:leather-conditioning",
+       "product:ppf",
+       "product:seat-vitrification",
+       "product:technical-polish",
+       "product:vitrification",
+       "product:windshield-crystallization"
+      ],
+      "knowledge_count": 1
+     }
+    ]
+   },
+   {
+    "key": "classification",
+    "label": "Classificação",
+    "rule_node_id": null,
+    "questions": [],
+    "selector": {
+     "field_key": "servico",
+     "question": {
+      "key": "servico",
+      "label": "serviço",
+      "text": "Qual serviço você procura para o veículo?",
+      "question_node_id": "faq:qualification:servico",
+      "active": true,
+      "essential": true,
+      "scope": "all",
+      "tracking": false,
+      "validation_mode": "schema",
+      "owner_node_ids": [
+       "product:chassis-wash",
+       "product:commercial-polish",
+       "product:detailed-wash",
+       "product:engine-bay-wash",
+       "product:evaluation",
+       "product:glass-polish",
+       "product:headlight-restoration",
+       "product:interior-cleaning",
+       "product:leather-conditioning",
+       "product:ppf",
+       "product:seat-vitrification",
+       "product:technical-polish",
+       "product:vitrification",
+       "product:windshield-crystallization"
+      ],
+      "knowledge_count": 1
+     },
+     "options": [
+      {
+       "branch_node_id": "product:evaluation",
+       "label": "Avaliação",
+       "path": [
+        "Utzig Garage",
+        "Avaliação e orientação",
+        "Avaliação"
+       ]
+      },
+      {
+       "branch_node_id": "product:commercial-polish",
+       "label": "Polimento comercial",
+       "path": [
+        "Utzig Garage",
+        "Brilho e correção",
+        "Polimento comercial"
+       ]
+      },
+      {
+       "branch_node_id": "product:glass-polish",
+       "label": "Polimento de vidros",
+       "path": [
+        "Utzig Garage",
+        "Brilho e correção",
+        "Polimento de vidros"
+       ]
+      },
+      {
+       "branch_node_id": "product:technical-polish",
+       "label": "Polimento técnico",
+       "path": [
+        "Utzig Garage",
+        "Brilho e correção",
+        "Polimento técnico"
+       ]
+      },
+      {
+       "branch_node_id": "product:headlight-restoration",
+       "label": "Restauração de faróis",
+       "path": [
+        "Utzig Garage",
+        "Brilho e correção",
+        "Restauração de faróis"
+       ]
+      },
+      {
+       "branch_node_id": "product:interior-cleaning",
+       "label": "Higienização interna",
+       "path": [
+        "Utzig Garage",
+        "Limpeza e higienização",
+        "Higienização interna"
+       ]
+      },
+      {
+       "branch_node_id": "product:engine-bay-wash",
+       "label": "Lavagem de motor",
+       "path": [
+        "Utzig Garage",
+        "Limpeza e higienização",
+        "Lavagem de motor"
+       ]
+      },
+      {
+       "branch_node_id": "product:detailed-wash",
+       "label": "Lavagem detalhada",
+       "path": [
+        "Utzig Garage",
+        "Limpeza e higienização",
+        "Lavagem detalhada"
+       ]
+      },
+      {
+       "branch_node_id": "product:windshield-crystallization",
+       "label": "Cristalização do para-brisa",
+       "path": [
+        "Utzig Garage",
+        "Proteção",
+        "Cristalização do para-brisa"
+       ]
+      },
+      {
+       "branch_node_id": "product:ppf",
+       "label": "PPF",
+       "path": [
+        "Utzig Garage",
+        "Proteção",
+        "PPF"
+       ]
+      },
+      {
+       "branch_node_id": "product:vitrification",
+       "label": "Vitrificação da pintura",
+       "path": [
+        "Utzig Garage",
+        "Proteção",
+        "Vitrificação da pintura"
+       ]
+      }
+     ]
+    }
+   },
+   {
+    "key": "service",
+    "label": "Perguntas do serviço",
+    "rule_node_id": null,
+    "questions": [
+     {
+      "key": "condicao",
+      "label": "condição atual",
+      "text": "Como está a condição atual do veículo nessa área?",
+      "question_node_id": "faq:qualification:condicao",
+      "active": true,
+      "essential": true,
+      "scope": "branches",
+      "tracking": false,
+      "validation_mode": "schema",
+      "owner_node_ids": [
+       "product:chassis-wash",
+       "product:detailed-wash",
+       "product:glass-polish",
+       "product:headlight-restoration",
+       "product:interior-cleaning",
+       "product:leather-conditioning",
+       "product:ppf",
+       "product:seat-vitrification",
+       "product:vitrification",
+       "product:windshield-crystallization"
+      ],
+      "knowledge_count": 1,
+      "branches": [
+       "product:glass-polish",
+       "product:headlight-restoration",
+       "product:interior-cleaning",
+       "product:detailed-wash",
+       "product:windshield-crystallization",
+       "product:ppf",
+       "product:vitrification"
+      ],
+      "per_branch": {
+       "product:glass-polish": {
+        "essential": true
+       },
+       "product:headlight-restoration": {
+        "essential": true
+       },
+       "product:interior-cleaning": {
+        "essential": true
+       },
+       "product:detailed-wash": {
+        "essential": true
+       },
+       "product:windshield-crystallization": {
+        "essential": true
+       },
+       "product:ppf": {
+        "essential": true
+       },
+       "product:vitrification": {
+        "essential": true
+       }
+      }
+     },
+     {
+      "key": "foco_brilho_riscos",
+      "label": "foco em brilho ou riscos",
+      "text": "Seu foco principal é recuperar o brilho, reduzir riscos ou os dois?",
+      "question_node_id": "faq:qualification:foco_brilho_riscos",
+      "active": true,
+      "essential": true,
+      "scope": "branches",
+      "tracking": false,
+      "validation_mode": "schema",
+      "owner_node_ids": [
+       "product:commercial-polish",
+       "product:technical-polish"
+      ],
+      "knowledge_count": 1,
+      "branches": [
+       "product:commercial-polish",
+       "product:technical-polish"
+      ],
+      "per_branch": {
+       "product:commercial-polish": {
+        "essential": true
+       },
+       "product:technical-polish": {
+        "essential": true
+       }
+      }
+     },
+     {
+      "key": "procedimento_anterior",
+      "label": "procedimento anterior",
+      "text": "Já foi feito algum procedimento nessa pintura antes?",
+      "question_node_id": "faq:qualification:procedimento_anterior",
+      "active": true,
+      "essential": false,
+      "scope": "branches",
+      "tracking": false,
+      "validation_mode": "schema",
+      "owner_node_ids": [
+       "product:technical-polish"
+      ],
+      "knowledge_count": 1,
+      "branches": [
+       "product:technical-polish"
+      ],
+      "per_branch": {
+       "product:technical-polish": {
+        "essential": false
+       }
+      }
+     },
+     {
+      "key": "revestimento_bancos",
+      "label": "revestimento dos bancos",
+      "text": "Os bancos são de couro ou tecido?",
+      "question_node_id": "faq:qualification:revestimento_bancos",
+      "active": true,
+      "essential": true,
+      "scope": "branches",
+      "tracking": false,
+      "validation_mode": "schema",
+      "owner_node_ids": [
+       "product:interior-cleaning"
+      ],
+      "knowledge_count": 1,
+      "branches": [
+       "product:interior-cleaning"
+      ],
+      "per_branch": {
+       "product:interior-cleaning": {
+        "essential": true
+       }
+      }
+     },
+     {
+      "key": "evaluation_route",
+      "label": "rota de avaliação",
+      "text": "Você prefere uma avaliação presencial ou uma avaliação inicial por fotos?",
+      "question_node_id": "faq:qualification:evaluation_route",
+      "active": true,
+      "essential": true,
+      "scope": "branches",
+      "tracking": false,
+      "validation_mode": "schema",
+      "owner_node_ids": [
+       "product:evaluation"
+      ],
+      "knowledge_count": 1,
+      "branches": [
+       "product:evaluation"
+      ],
+      "per_branch": {
+       "product:evaluation": {
+        "essential": true
+       }
+      }
+     },
+     {
+      "key": "vazamento_oleo",
+      "label": "sinal de vazamento",
+      "text": "Há sinal de vazamento de óleo no motor ou no cofre?",
+      "question_node_id": "faq:qualification:vazamento_oleo",
+      "active": true,
+      "essential": true,
+      "scope": "branches",
+      "tracking": false,
+      "validation_mode": "schema",
+      "owner_node_ids": [
+       "product:engine-bay-wash"
+      ],
+      "knowledge_count": 1,
+      "branches": [
+       "product:engine-bay-wash"
+      ],
+      "per_branch": {
+       "product:engine-bay-wash": {
+        "essential": true
+       }
+      }
+     },
+     {
+      "key": "estrada_de_chao",
+      "label": "uso em estrada de chão",
+      "text": "O veículo circula com frequência em estrada de chão?",
+      "question_node_id": "faq:qualification:estrada_de_chao",
+      "active": true,
+      "essential": true,
+      "scope": "branches",
+      "tracking": false,
+      "validation_mode": "schema",
+      "owner_node_ids": [
+       "product:engine-bay-wash"
+      ],
+      "knowledge_count": 1,
+      "branches": [
+       "product:engine-bay-wash"
+      ],
+      "per_branch": {
+       "product:engine-bay-wash": {
+        "essential": true
+       }
+      }
+     }
+    ],
+    "branches": [
+     {
+      "branch_node_id": "product:evaluation",
+      "label": "Avaliação",
+      "path": [
+       "Utzig Garage",
+       "Avaliação e orientação",
+       "Avaliação"
+      ]
+     },
+     {
+      "branch_node_id": "product:commercial-polish",
+      "label": "Polimento comercial",
+      "path": [
+       "Utzig Garage",
+       "Brilho e correção",
+       "Polimento comercial"
+      ]
+     },
+     {
+      "branch_node_id": "product:glass-polish",
+      "label": "Polimento de vidros",
+      "path": [
+       "Utzig Garage",
+       "Brilho e correção",
+       "Polimento de vidros"
+      ]
+     },
+     {
+      "branch_node_id": "product:technical-polish",
+      "label": "Polimento técnico",
+      "path": [
+       "Utzig Garage",
+       "Brilho e correção",
+       "Polimento técnico"
+      ]
+     },
+     {
+      "branch_node_id": "product:headlight-restoration",
+      "label": "Restauração de faróis",
+      "path": [
+       "Utzig Garage",
+       "Brilho e correção",
+       "Restauração de faróis"
+      ]
+     },
+     {
+      "branch_node_id": "product:interior-cleaning",
+      "label": "Higienização interna",
+      "path": [
+       "Utzig Garage",
+       "Limpeza e higienização",
+       "Higienização interna"
+      ]
+     },
+     {
+      "branch_node_id": "product:engine-bay-wash",
+      "label": "Lavagem de motor",
+      "path": [
+       "Utzig Garage",
+       "Limpeza e higienização",
+       "Lavagem de motor"
+      ]
+     },
+     {
+      "branch_node_id": "product:detailed-wash",
+      "label": "Lavagem detalhada",
+      "path": [
+       "Utzig Garage",
+       "Limpeza e higienização",
+       "Lavagem detalhada"
+      ]
+     },
+     {
+      "branch_node_id": "product:windshield-crystallization",
+      "label": "Cristalização do para-brisa",
+      "path": [
+       "Utzig Garage",
+       "Proteção",
+       "Cristalização do para-brisa"
+      ]
+     },
+     {
+      "branch_node_id": "product:ppf",
+      "label": "PPF",
+      "path": [
+       "Utzig Garage",
+       "Proteção",
+       "PPF"
+      ]
+     },
+     {
+      "branch_node_id": "product:vitrification",
+      "label": "Vitrificação da pintura",
+      "path": [
+       "Utzig Garage",
+       "Proteção",
+       "Vitrificação da pintura"
+      ]
+     }
+    ]
+   },
+   {
+    "key": "confirmation",
+    "label": "Confirmação",
+    "rule_node_id": null,
+    "description": "O agente escreve o resumo com as respostas da lead e pede confirmação antes de encaminhar."
+   },
+   {
+    "key": "handoff",
+    "label": "Encaminhamento",
+    "rule_node_id": null,
+    "texts": [
+     {
+      "key": "closing",
+      "label": "Encerramento",
+      "value": "Quando o cliente confirmar o resumo, encerre em uma mensagem curta: diga que o Wilian vai continuar o atendimento e, uma única vez, dê a dica de que fotos do veículo (da área do serviço, com boa luz) ajudam a adiantar a avaliação, e que também dá para levar o carro pessoalmente. É uma sugestão, não uma pergunta: não insista nem volte ao assunto se a pessoa não mandar.",
+      "editable": true
+     }
+    ],
+    "rules": [
+     {
+      "node_id": "rule:human-handoff",
+      "title": "Encaminhamento humano",
+      "text": "Preço, agenda, disponibilidade e resultado são confirmados pelo Wilian."
+     }
+    ]
+   }
+  ]
+ },
+ "knowledge": {
+  "nodes": [
+   {
+    "id": "asset:editorial",
+    "node_type": "asset",
+    "title": "Wilian — retrato editorial",
+    "status": "approved",
+    "text": "Asset original aprovado para a identidade e o site da Utzig Garage.",
+    "path": [
+     "Utzig Garage",
+     "Wilian — retrato editorial"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "asset:engine-before",
+    "node_type": "asset",
+    "title": "Trabalho real — cofre antes",
+    "status": "approved",
+    "text": "Asset original aprovado para a identidade e o site da Utzig Garage.",
+    "path": [
+     "Utzig Garage",
+     "Trabalho real — cofre antes"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "asset:engine-detail",
+    "node_type": "asset",
+    "title": "Trabalho real — cofre detalhado",
+    "status": "approved",
+    "text": "Asset original aprovado para a identidade e o site da Utzig Garage.",
+    "path": [
+     "Utzig Garage",
+     "Trabalho real — cofre detalhado"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "asset:engine-final",
+    "node_type": "asset",
+    "title": "Trabalho real — cofre final",
+    "status": "approved",
+    "text": "Asset original aprovado para a identidade e o site da Utzig Garage.",
+    "path": [
+     "Utzig Garage",
+     "Trabalho real — cofre final"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "asset:engine-wash",
+    "node_type": "asset",
+    "title": "Trabalho real — lavagem de cofre",
+    "status": "approved",
+    "text": "Asset original aprovado para a identidade e o site da Utzig Garage.",
+    "path": [
+     "Utzig Garage",
+     "Trabalho real — lavagem de cofre"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "asset:extractor",
+    "node_type": "asset",
+    "title": "Processo real — extratora",
+    "status": "approved",
+    "text": "Asset original aprovado para a identidade e o site da Utzig Garage.",
+    "path": [
+     "Utzig Garage",
+     "Processo real — extratora"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "asset:glass-before",
+    "node_type": "asset",
+    "title": "Trabalho real — vidro antes",
+    "status": "approved",
+    "text": "Asset original aprovado para a identidade e o site da Utzig Garage.",
+    "path": [
+     "Utzig Garage",
+     "Trabalho real — vidro antes"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "asset:glass-before-after",
+    "node_type": "asset",
+    "title": "Trabalho real — vidro antes e depois",
+    "status": "approved",
+    "text": "Asset original aprovado para a identidade e o site da Utzig Garage.",
+    "path": [
+     "Utzig Garage",
+     "Trabalho real — vidro antes e depois"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "asset:headlight-before",
+    "node_type": "asset",
+    "title": "Trabalho real — farol antes",
+    "status": "approved",
+    "text": "Asset original aprovado para a identidade e o site da Utzig Garage.",
+    "path": [
+     "Utzig Garage",
+     "Trabalho real — farol antes"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "asset:headlight-ready",
+    "node_type": "asset",
+    "title": "Trabalho real — farol pronto",
+    "status": "approved",
+    "text": "Asset original aprovado para a identidade e o site da Utzig Garage.",
+    "path": [
+     "Utzig Garage",
+     "Trabalho real — farol pronto"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "asset:hero",
+    "node_type": "asset",
+    "title": "Wilian — o Wilian da Utzig",
+    "status": "approved",
+    "text": "Asset original aprovado para a identidade e o site da Utzig Garage.",
+    "path": [
+     "Utzig Garage",
+     "Wilian — o Wilian da Utzig"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "asset:interior",
+    "node_type": "asset",
+    "title": "Trabalho real — interior",
+    "status": "approved",
+    "text": "Asset original aprovado para a identidade e o site da Utzig Garage.",
+    "path": [
+     "Utzig Garage",
+     "Trabalho real — interior"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "asset:interior-care",
+    "node_type": "asset",
+    "title": "Processo real — cuidado interno",
+    "status": "approved",
+    "text": "Asset original aprovado para a identidade e o site da Utzig Garage.",
+    "path": [
+     "Utzig Garage",
+     "Processo real — cuidado interno"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "asset:logo",
+    "node_type": "asset",
+    "title": "Logo oficial Utzig Garage",
+    "status": "approved",
+    "text": "Asset original aprovado para a identidade e o site da Utzig Garage.",
+    "path": [
+     "Utzig Garage",
+     "Logo oficial Utzig Garage"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "asset:process",
+    "node_type": "asset",
+    "title": "Wilian trabalhando na Utzig Garage",
+    "status": "approved",
+    "text": "Asset original aprovado para a identidade e o site da Utzig Garage.",
+    "path": [
+     "Utzig Garage",
+     "Wilian trabalhando na Utzig Garage"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "asset:work-polish",
+    "node_type": "asset",
+    "title": "Trabalho real — polimento",
+    "status": "approved",
+    "text": "Asset original aprovado para a identidade e o site da Utzig Garage.",
+    "path": [
+     "Utzig Garage",
+     "Trabalho real — polimento"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "audience:daily-care",
+    "node_type": "audience",
+    "title": "Cuidar no dia a dia",
+    "status": "approved",
+    "text": "Cuidados para conservar o veículo com uma rotina adequada ao seu uso.",
+    "path": [
+     "Utzig Garage",
+     "Cuidar no dia a dia"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "audience:enhancement",
+    "node_type": "audience",
+    "title": "Aprimoramento",
+    "status": "approved",
+    "text": "Para quem busca aprimorar o veículo.",
+    "path": [
+     "Utzig Garage",
+     "Aprimoramento"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "audience:prepare-sale",
+    "node_type": "audience",
+    "title": "Preparar para venda",
+    "status": "approved",
+    "text": "Uma avaliação da apresentação e dos pontos que merecem atenção antes da venda.",
+    "path": [
+     "Utzig Garage",
+     "Preparar para venda"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "audience:preservation",
+    "node_type": "audience",
+    "title": "Preservação",
+    "status": "approved",
+    "text": "Para quem busca preservar o cuidado do veículo.",
+    "path": [
+     "Utzig Garage",
+     "Preservação"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "audience:revitalization",
+    "node_type": "audience",
+    "title": "Revitalização",
+    "status": "approved",
+    "text": "Para quem busca revitalizar aspectos do veículo.",
+    "path": [
+     "Utzig Garage",
+     "Revitalização"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "brand:utzig-garage",
+    "node_type": "brand",
+    "title": "Utzig Garage",
+    "status": "approved",
+    "text": "Utzig Garage do Wilian: estética automotiva em Santa Maria do Herval.",
+    "path": [
+     "Utzig Garage"
+    ],
+    "branch_node_ids": [
+     "product:evaluation",
+     "product:commercial-polish",
+     "product:glass-polish",
+     "product:technical-polish",
+     "product:headlight-restoration",
+     "product:interior-cleaning",
+     "product:engine-bay-wash",
+     "product:detailed-wash",
+     "product:windshield-crystallization",
+     "product:ppf",
+     "product:vitrification"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "campaign:automotive-detailing",
+    "node_type": "campaign",
+    "title": "Estética automotiva",
+    "status": "approved",
+    "text": "Landing page de serviços da Utzig Garage.",
+    "path": [
+     "Utzig Garage",
+     "Estética automotiva"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "campaign:editorial-enhancement",
+    "node_type": "campaign",
+    "title": "Aprimoramento",
+    "status": "approved",
+    "text": "Acabamento e mudanças escolhidas para o veículo.",
+    "path": [
+     "Utzig Garage",
+     "Aprimoramento"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "campaign:editorial-preservation",
+    "node_type": "campaign",
+    "title": "Preservação",
+    "status": "approved",
+    "text": "Cuidados para conservar o carro no dia a dia.",
+    "path": [
+     "Utzig Garage",
+     "Preservação"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "campaign:editorial-revitalization",
+    "node_type": "campaign",
+    "title": "Revitalização",
+    "status": "approved",
+    "text": "Cuidados para renovar o que o uso deixou para trás.",
+    "path": [
+     "Utzig Garage",
+     "Revitalização"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "campaign:home",
+    "node_type": "campaign",
+    "title": "Linktree Utzig Garage",
+    "status": "approved",
+    "text": "Página inicial minimalista com acessos aos serviços, atendimento, contato humano e localização.",
+    "path": [
+     "Utzig Garage",
+     "Linktree Utzig Garage"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "campaign:local",
+    "node_type": "campaign",
+    "title": "Campanha local — Santa Maria do Herval",
+    "status": "approved",
+    "text": "Comunicação comercial local para Santa Maria do Herval.",
+    "path": [
+     "Utzig Garage",
+     "Campanha local — Santa Maria do Herval"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "campaign:physical-store",
+    "node_type": "campaign",
+    "title": "Localização Utzig Garage",
+    "status": "approved",
+    "text": "Local de atendimento informado para a Utzig Garage.",
+    "path": [
+     "Utzig Garage",
+     "Localização Utzig Garage"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "campaign:premium-serra-gaucha",
+    "node_type": "campaign",
+    "title": "Campanha premium — Serra Gaúcha",
+    "status": "approved",
+    "text": "Comunicação comercial premium para a Serra Gaúcha.",
+    "path": [
+     "Utzig Garage",
+     "Campanha premium — Serra Gaúcha"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "campaign:regional",
+    "node_type": "campaign",
+    "title": "Campanha regional",
+    "status": "approved",
+    "text": "Comunicação comercial regional.",
+    "path": [
+     "Utzig Garage",
+     "Campanha regional"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:benefit-care",
+    "node_type": "copy",
+    "title": "Cuidado que aparece",
+    "status": "approved",
+    "text": "Da lavagem ao acabamento, cada etapa recebe atenção aos materiais e aos detalhes do veículo.",
+    "path": [
+     "Utzig Garage",
+     "Estética automotiva",
+     "Cuidado que aparece"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:benefit-choice",
+    "node_type": "copy",
+    "title": "Solução para cada objetivo",
+    "status": "approved",
+    "text": "Você pode combinar limpeza, correção e proteção em um plano definido após a avaliação.",
+    "path": [
+     "Utzig Garage",
+     "Estética automotiva",
+     "Solução para cada objetivo"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:benefit-finish",
+    "node_type": "copy",
+    "title": "Resultado para durar",
+    "status": "approved",
+    "text": "Ao entregar o carro, a Utzig orienta como manter a aparência e a proteção de cada serviço.",
+    "path": [
+     "Utzig Garage",
+     "Estética automotiva",
+     "Resultado para durar"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:campaign-local",
+    "node_type": "copy",
+    "title": "Copy campanha local",
+    "status": "approved",
+    "text": "Atendimento da Utzig Garage para Santa Maria do Herval.",
+    "path": [
+     "Utzig Garage",
+     "Campanha local — Santa Maria do Herval",
+     "Copy campanha local"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:campaign-premium",
+    "node_type": "copy",
+    "title": "Copy campanha premium",
+    "status": "approved",
+    "text": "Atendimento premium da Utzig Garage para a Serra Gaúcha.",
+    "path": [
+     "Utzig Garage",
+     "Campanha premium — Serra Gaúcha",
+     "Copy campanha premium"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:campaign-regional",
+    "node_type": "copy",
+    "title": "Copy campanha regional",
+    "status": "approved",
+    "text": "Atendimento regional da Utzig Garage.",
+    "path": [
+     "Utzig Garage",
+     "Campanha regional",
+     "Copy campanha regional"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:chassis-wash",
+    "node_type": "copy",
+    "title": "Apresentação — Lavagem de chassis",
+    "status": "approved",
+    "text": "Limpeza da parte inferior do veículo para remover sujeira acumulada em áreas de difícil acesso. O procedimento é escolhido de acordo com o uso e a condição do carro.",
+    "path": [
+     "Utzig Garage",
+     "Limpeza e higienização",
+     "Lavagem de chassi",
+     "Apresentação — Lavagem de chassis"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:commercial-polish",
+    "node_type": "copy",
+    "title": "Apresentação — Polimento comercial",
+    "status": "approved",
+    "text": "Recupera o brilho e melhora a apresentação da pintura. É a escolha para quem quer um resultado visual perceptível, com a intensidade do trabalho definida depois da avaliação da superfície.",
+    "path": [
+     "Utzig Garage",
+     "Brilho e correção",
+     "Polimento comercial",
+     "Apresentação — Polimento comercial"
+    ],
+    "branch_node_ids": [
+     "product:commercial-polish"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:contact-human",
+    "node_type": "copy",
+    "title": "Falar com o Wilian",
+    "status": "approved",
+    "text": "Deixe sua mensagem para o Wilian. Ele responde pessoalmente assim que puder.",
+    "path": [
+     "Utzig Garage",
+     "Falar com o Wilian"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:detailed-wash",
+    "node_type": "copy",
+    "title": "Apresentação — Lavagem detalhada",
+    "status": "approved",
+    "text": "Mais que uma lavagem: limpeza cuidadosa de carroceria, rodas e detalhes, com técnica de dois baldes, pincéis e produtos adequados. Uma forma segura de recuperar a apresentação do carro e manter o acabamento em dia. A partir de R$ (removido).",
+    "path": [
+     "Utzig Garage",
+     "Limpeza e higienização",
+     "Lavagem detalhada",
+     "Apresentação — Lavagem detalhada"
+    ],
+    "branch_node_ids": [
+     "product:detailed-wash"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:engine-bay-wash",
+    "node_type": "copy",
+    "title": "Apresentação — Lavagem de cofre",
+    "status": "approved",
+    "text": "Limpeza técnica do cofre do motor, com atenção aos componentes e ao estado do veículo. Remove a sujeira acumulada e devolve uma apresentação mais cuidada ao compartimento.",
+    "path": [
+     "Utzig Garage",
+     "Limpeza e higienização",
+     "Lavagem de motor",
+     "Apresentação — Lavagem de cofre"
+    ],
+    "branch_node_ids": [
+     "product:engine-bay-wash"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:evaluation",
+    "node_type": "copy",
+    "title": "Apresentação — Avaliação",
+    "status": "approved",
+    "text": "Cada carro tem uma história e uma necessidade. Na avaliação, Wilian observa o estado do veículo, entende seu objetivo e indica uma combinação de serviços, com orçamento e prazo definidos para o caso.",
+    "path": [
+     "Utzig Garage",
+     "Avaliação e orientação",
+     "Avaliação",
+     "Apresentação — Avaliação"
+    ],
+    "branch_node_ids": [
+     "product:evaluation"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:final-cta",
+    "node_type": "copy",
+    "title": "Chamada para avaliação",
+    "status": "approved",
+    "text": "Conte o que você procura. A Utzig avalia o veículo e orienta a combinação certa de serviços.",
+    "path": [
+     "Utzig Garage",
+     "Chamada para avaliação"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:glass-polish",
+    "node_type": "copy",
+    "title": "Apresentação — Polimento de vidros",
+    "status": "approved",
+    "text": "Trata marcas e manchas compatíveis com polimento e melhora a leitura visual dos vidros. Wilian avalia o estado do vidro e indica o acabamento possível antes do serviço.",
+    "path": [
+     "Utzig Garage",
+     "Brilho e correção",
+     "Polimento de vidros",
+     "Apresentação — Polimento de vidros"
+    ],
+    "branch_node_ids": [
+     "product:glass-polish"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:headlight-restoration",
+    "node_type": "copy",
+    "title": "Apresentação — Restauração de faróis",
+    "status": "approved",
+    "text": "Faróis opacos fazem o carro parecer mais cansado. A restauração trabalha a transparência e o acabamento da lente, com proteção indicada conforme sua condição.",
+    "path": [
+     "Utzig Garage",
+     "Brilho e correção",
+     "Restauração de faróis",
+     "Apresentação — Restauração de faróis"
+    ],
+    "branch_node_ids": [
+     "product:headlight-restoration"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:hero",
+    "node_type": "copy",
+    "title": "Hero da estética automotiva",
+    "status": "approved",
+    "text": "Mais de 20 serviços que valorizam e deixam o seu carro na melhor versão",
+    "path": [
+     "Utzig Garage",
+     "Hero da estética automotiva"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:home-hero",
+    "node_type": "copy",
+    "title": "Hero do linktree",
+    "status": "approved",
+    "text": "Encontre o cuidado certo para o seu carro.",
+    "path": [
+     "Utzig Garage",
+     "Linktree Utzig Garage",
+     "Hero do linktree"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:interior-cleaning",
+    "node_type": "copy",
+    "title": "Apresentação — Higienização interna",
+    "status": "approved",
+    "text": "Cuidado profundo para bancos, carpetes, painéis e áreas de contato. A limpeza trata sujeira e odores com equipamentos e produtos compatíveis com cada revestimento, para um interior mais agradável. A partir de R$ (removido).",
+    "path": [
+     "Utzig Garage",
+     "Limpeza e higienização",
+     "Higienização interna",
+     "Apresentação — Higienização interna"
+    ],
+    "branch_node_ids": [
+     "product:interior-cleaning"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:leather-conditioning",
+    "node_type": "copy",
+    "title": "Apresentação — Hidratação dos couros",
+    "status": "approved",
+    "text": "Tratamento para bancos e revestimentos de couro que combina limpeza, hidratação e acabamento. Ajuda a manter o toque e a apresentação das superfícies no uso diário.",
+    "path": [
+     "Utzig Garage",
+     "Limpeza e higienização",
+     "Hidratação dos couros",
+     "Apresentação — Hidratação dos couros"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:ppf",
+    "node_type": "copy",
+    "title": "Apresentação — PPF",
+    "status": "approved",
+    "text": "Uma proteção transparente para áreas expostas a pedras, atrito e pequenos riscos. O PPF ajuda a preservar a pintura original, tem característica autorreparável e pode ser aplicado em partes selecionadas. A partir de R$ (removido); garantia informada de 10 anos.",
+    "path": [
+     "Utzig Garage",
+     "Proteção",
+     "PPF",
+     "Apresentação — PPF"
+    ],
+    "branch_node_ids": [
+     "product:ppf"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:process",
+    "node_type": "copy",
+    "title": "Processo e avaliação",
+    "status": "approved",
+    "text": "Agende pelo WhatsApp, apresente o que deseja melhorar e passe pela avaliação do veículo. A execução é definida conforme a necessidade, e a entrega inclui orientações para conservar o resultado.",
+    "path": [
+     "Utzig Garage",
+     "Processo e avaliação"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:process-step-contact",
+    "node_type": "copy",
+    "title": "01 · Conte o que você busca",
+    "status": "approved",
+    "text": "Envie uma mensagem e diga o que deseja melhorar, proteger ou renovar no veículo.",
+    "path": [
+     "Utzig Garage",
+     "Estética automotiva",
+     "01 · Conte o que você busca"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:process-step-delivery",
+    "node_type": "copy",
+    "title": "03 · Cuidamos de cada detalhe",
+    "status": "approved",
+    "text": "A execução segue o plano definido, com orientações para conservar o resultado depois da entrega.",
+    "path": [
+     "Utzig Garage",
+     "Estética automotiva",
+     "03 · Cuidamos de cada detalhe"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:process-step-diagnosis",
+    "node_type": "copy",
+    "title": "02 · Avaliamos o veículo",
+    "status": "approved",
+    "text": "Wilian observa o estado das superfícies e combina com você os serviços, o prazo e o orçamento.",
+    "path": [
+     "Utzig Garage",
+     "Estética automotiva",
+     "02 · Avaliamos o veículo"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:seat-vitrification",
+    "node_type": "copy",
+    "title": "Apresentação — Vitrificação dos bancos",
+    "status": "approved",
+    "text": "Camada de proteção para bancos e estofados, indicada conforme o material. Ajuda a reduzir a absorção de sujeira e facilita a rotina de cuidado com o interior.",
+    "path": [
+     "Utzig Garage",
+     "Proteção",
+     "Vitrificação de plásticos e couros",
+     "Apresentação — Vitrificação dos bancos"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:site-faq:aftercare",
+    "node_type": "copy",
+    "title": "Contexto — Como cuidar do carro depois do serviço?",
+    "status": "approved",
+    "text": "A Utzig orienta o intervalo e os produtos adequados a cada aplicação. Como regra geral, prefira lavagens sem escovas agressivas e produtos neutros para preservar o acabamento.",
+    "path": [
+     "Utzig Garage",
+     "Estética automotiva",
+     "Contexto — Como cuidar do carro depois do serviço?"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:site-faq:budget",
+    "node_type": "copy",
+    "title": "Contexto — Como recebo um orçamento?",
+    "status": "approved",
+    "text": "Conte qual é o veículo e o que você procura. Fotos ajudam a iniciar a conversa; Wilian confirma o serviço indicado, o valor final e a agenda depois da avaliação.",
+    "path": [
+     "Utzig Garage",
+     "Estética automotiva",
+     "Contexto — Como recebo um orçamento?"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:site-faq:ppf-benefit",
+    "node_type": "copy",
+    "title": "Contexto — O que o PPF protege?",
+    "status": "approved",
+    "text": "O PPF cria uma película transparente sobre áreas selecionadas da pintura. Ajuda a proteger contra marcas de uso, pequenas pedras e exposição ao tempo, preservando a aparência original.",
+    "path": [
+     "Utzig Garage",
+     "Estética automotiva",
+     "Contexto — O que o PPF protege?"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:site-faq:service-duration",
+    "node_type": "copy",
+    "title": "Contexto — Quanto tempo cada serviço leva?",
+    "status": "approved",
+    "text": "Depende do serviço e do estado do carro. Lavagem detalhada costuma levar de 1 a 2 horas, higienização cerca de 6 horas, polimento técnico cerca de 1 dia e vitrificação de 1 a 3 dias. A Utzig confirma o prazo na avaliação.",
+    "path": [
+     "Utzig Garage",
+     "Estética automotiva",
+     "Contexto — Quanto tempo cada serviço leva?"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:site-faq:used-car-ppf",
+    "node_type": "copy",
+    "title": "Contexto — Posso aplicar PPF em um carro usado?",
+    "status": "approved",
+    "text": "Sim, depois de avaliar a condição da pintura. Se houver marcas ou correções necessárias, a Utzig indica a preparação adequada antes da aplicação.",
+    "path": [
+     "Utzig Garage",
+     "Estética automotiva",
+     "Contexto — Posso aplicar PPF em um carro usado?"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:site-faq:vitrification-vs-wax",
+    "node_type": "copy",
+    "title": "Contexto — Qual a diferença entre vitrificação e cera?",
+    "status": "approved",
+    "text": "A vitrificação forma uma camada cerâmica de proteção e brilho com durabilidade maior que a de uma cera comum. O resultado depende do preparo e dos cuidados posteriores.",
+    "path": [
+     "Utzig Garage",
+     "Estética automotiva",
+     "Contexto — Qual a diferença entre vitrificação e cera?"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:site-faq:warranty",
+    "node_type": "copy",
+    "title": "Contexto — Os serviços têm garantia?",
+    "status": "approved",
+    "text": "A cobertura depende do serviço escolhido. No PPF, a garantia informada é de 10 anos; os demais detalhes são apresentados no orçamento antes da execução.",
+    "path": [
+     "Utzig Garage",
+     "Estética automotiva",
+     "Contexto — Os serviços têm garantia?"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:specialist",
+    "node_type": "copy",
+    "title": "Wilian — Utzig Garage",
+    "status": "approved",
+    "text": "Fundador e especialista à frente dos cuidados realizados na Utzig Garage.",
+    "path": [
+     "Utzig Garage",
+     "Wilian — Utzig Garage"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:technical-polish",
+    "node_type": "copy",
+    "title": "Apresentação — Polimento técnico",
+    "status": "approved",
+    "text": "Correção de pintura para reduzir microrriscos, hologramas e sinais de oxidação compatíveis com o processo. Recupera profundidade de cor e brilho, além de preparar a superfície para proteção. A partir de R$ (removido).",
+    "path": [
+     "Utzig Garage",
+     "Brilho e correção",
+     "Polimento técnico",
+     "Apresentação — Polimento técnico"
+    ],
+    "branch_node_ids": [
+     "product:technical-polish"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:vitrification",
+    "node_type": "copy",
+    "title": "Apresentação — Vitrificação",
+    "status": "approved",
+    "text": "Proteção cerâmica que destaca o brilho, facilita a limpeza e ajuda a proteger a superfície contra contaminantes. O preparo e a aplicação são personalizados; durabilidade informada de até 3 anos. A partir de R$ (removido).",
+    "path": [
+     "Utzig Garage",
+     "Proteção",
+     "Vitrificação da pintura",
+     "Apresentação — Vitrificação"
+    ],
+    "branch_node_ids": [
+     "product:vitrification"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "copy:windshield-crystallization",
+    "node_type": "copy",
+    "title": "Cristalização de para-brisa",
+    "status": "approved",
+    "text": "Tratamento para o para-brisa com repelência à água e acabamento mais fácil de manter. Uma camada de cuidado que favorece a visibilidade em dias de chuva, conforme a condição do vidro.",
+    "path": [
+     "Utzig Garage",
+     "Proteção",
+     "Cristalização do para-brisa",
+     "Cristalização de para-brisa"
+    ],
+    "branch_node_ids": [
+     "product:windshield-crystallization"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "entity:alemao",
+    "node_type": "entity",
+    "title": "Wilian",
+    "status": "approved",
+    "text": "Fundador e especialista à frente dos cuidados realizados na Utzig Garage.",
+    "path": [
+     "Utzig Garage",
+     "Wilian"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "faq:assessment",
+    "node_type": "faq",
+    "title": "Como pedir uma avaliação?",
+    "status": "approved",
+    "text": "Como pedir uma avaliação?\nConte qual serviço procura e as informações do veículo. A assistente virtual organiza o pedido e encaminha para o Wilian.",
+    "path": [
+     "Utzig Garage",
+     "Encaminhamento humano",
+     "Como pedir uma avaliação?"
+    ],
+    "branch_node_ids": [
+     "product:evaluation",
+     "product:commercial-polish",
+     "product:glass-polish",
+     "product:technical-polish",
+     "product:headlight-restoration",
+     "product:interior-cleaning",
+     "product:engine-bay-wash",
+     "product:detailed-wash",
+     "product:windshield-crystallization",
+     "product:ppf",
+     "product:vitrification"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:location",
+    "node_type": "faq",
+    "title": "Onde fica a Utzig Garage?",
+    "status": "approved",
+    "text": "Onde fica a Utzig Garage?\nNa VRS-873 — Bairro Aparecida, Santa Maria do Herval — RS, 93995-000.",
+    "path": [
+     "Utzig Garage",
+     "Encaminhamento humano",
+     "Onde fica a Utzig Garage?"
+    ],
+    "branch_node_ids": [
+     "product:evaluation",
+     "product:commercial-polish",
+     "product:glass-polish",
+     "product:technical-polish",
+     "product:headlight-restoration",
+     "product:interior-cleaning",
+     "product:engine-bay-wash",
+     "product:detailed-wash",
+     "product:windshield-crystallization",
+     "product:ppf",
+     "product:vitrification"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:photos",
+    "node_type": "faq",
+    "title": "Posso enviar fotos?",
+    "status": "approved",
+    "text": "Posso enviar fotos?\nPode sim. As fotos ajudam a adiantar a avaliação, mas não substituem a avaliação do Wilian.",
+    "path": [
+     "Utzig Garage",
+     "Encaminhamento humano",
+     "Posso enviar fotos?"
+    ],
+    "branch_node_ids": [
+     "product:evaluation",
+     "product:commercial-polish",
+     "product:glass-polish",
+     "product:technical-polish",
+     "product:headlight-restoration",
+     "product:interior-cleaning",
+     "product:engine-bay-wash",
+     "product:detailed-wash",
+     "product:windshield-crystallization",
+     "product:ppf",
+     "product:vitrification"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:price-and-schedule",
+    "node_type": "faq",
+    "title": "Como funcionam preço e agenda?",
+    "status": "approved",
+    "text": "Como funcionam preço e agenda?\nOs orçamentos são personalizados conforme o tamanho e as condições do veículo. Depois da avaliação presencial ou do envio de informações, a Utzig informa valor e prazo para reservar a agenda.",
+    "path": [
+     "Utzig Garage",
+     "Encaminhamento humano",
+     "Como funcionam preço e agenda?"
+    ],
+    "branch_node_ids": [
+     "product:evaluation",
+     "product:commercial-polish",
+     "product:glass-polish",
+     "product:technical-polish",
+     "product:headlight-restoration",
+     "product:interior-cleaning",
+     "product:engine-bay-wash",
+     "product:detailed-wash",
+     "product:windshield-crystallization",
+     "product:ppf",
+     "product:vitrification"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:qualification:condicao",
+    "node_type": "faq",
+    "title": "condição atual",
+    "status": "approved",
+    "text": "Como está a condição atual do veículo nessa área?",
+    "path": [
+     "condição atual"
+    ],
+    "branch_node_ids": [
+     "product:glass-polish",
+     "product:headlight-restoration",
+     "product:interior-cleaning",
+     "product:detailed-wash",
+     "product:windshield-crystallization",
+     "product:ppf",
+     "product:vitrification"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:qualification:estrada_de_chao",
+    "node_type": "faq",
+    "title": "uso em estrada de chão",
+    "status": "approved",
+    "text": "O veículo circula com frequência em estrada de chão?",
+    "path": [
+     "uso em estrada de chão"
+    ],
+    "branch_node_ids": [
+     "product:engine-bay-wash"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:qualification:evaluation_route",
+    "node_type": "faq",
+    "title": "rota de avaliação",
+    "status": "approved",
+    "text": "Você prefere uma avaliação presencial ou uma avaliação inicial por fotos?",
+    "path": [
+     "rota de avaliação"
+    ],
+    "branch_node_ids": [
+     "product:evaluation"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:qualification:foco_brilho_riscos",
+    "node_type": "faq",
+    "title": "foco em brilho ou riscos",
+    "status": "approved",
+    "text": "Seu foco principal é recuperar o brilho, reduzir riscos ou os dois?",
+    "path": [
+     "foco em brilho ou riscos"
+    ],
+    "branch_node_ids": [
+     "product:commercial-polish",
+     "product:technical-polish"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:qualification:modelo_veiculo",
+    "node_type": "faq",
+    "title": "modelo do veículo",
+    "status": "approved",
+    "text": "Qual é o modelo do veículo?",
+    "path": [
+     "modelo do veículo"
+    ],
+    "branch_node_ids": [
+     "product:evaluation",
+     "product:commercial-polish",
+     "product:glass-polish",
+     "product:technical-polish",
+     "product:headlight-restoration",
+     "product:interior-cleaning",
+     "product:engine-bay-wash",
+     "product:detailed-wash",
+     "product:windshield-crystallization",
+     "product:ppf",
+     "product:vitrification"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:qualification:nome_cliente",
+    "node_type": "faq",
+    "title": "nome",
+    "status": "approved",
+    "text": "Como você prefere que eu te chame? O sobrenome é opcional.",
+    "path": [
+     "nome"
+    ],
+    "branch_node_ids": [
+     "product:evaluation",
+     "product:commercial-polish",
+     "product:glass-polish",
+     "product:technical-polish",
+     "product:headlight-restoration",
+     "product:interior-cleaning",
+     "product:engine-bay-wash",
+     "product:detailed-wash",
+     "product:windshield-crystallization",
+     "product:ppf",
+     "product:vitrification"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:qualification:objective",
+    "node_type": "faq",
+    "title": "objetivo",
+    "status": "approved",
+    "text": "O que você espera melhorar ou preservar no veículo?",
+    "path": [
+     "objetivo"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "faq:qualification:procedimento_anterior",
+    "node_type": "faq",
+    "title": "procedimento anterior",
+    "status": "approved",
+    "text": "Já foi feito algum procedimento nessa pintura antes?",
+    "path": [
+     "procedimento anterior"
+    ],
+    "branch_node_ids": [
+     "product:technical-polish"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:qualification:revestimento_bancos",
+    "node_type": "faq",
+    "title": "revestimento dos bancos",
+    "status": "approved",
+    "text": "Os bancos são de couro ou tecido?",
+    "path": [
+     "revestimento dos bancos"
+    ],
+    "branch_node_ids": [
+     "product:interior-cleaning"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:qualification:servico",
+    "node_type": "faq",
+    "title": "serviço",
+    "status": "approved",
+    "text": "Qual serviço você procura para o veículo?",
+    "path": [
+     "serviço"
+    ],
+    "branch_node_ids": [
+     "product:evaluation",
+     "product:commercial-polish",
+     "product:glass-polish",
+     "product:technical-polish",
+     "product:headlight-restoration",
+     "product:interior-cleaning",
+     "product:engine-bay-wash",
+     "product:detailed-wash",
+     "product:windshield-crystallization",
+     "product:ppf",
+     "product:vitrification"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:qualification:vazamento_oleo",
+    "node_type": "faq",
+    "title": "sinal de vazamento",
+    "status": "approved",
+    "text": "Há sinal de vazamento de óleo no motor ou no cofre?",
+    "path": [
+     "sinal de vazamento"
+    ],
+    "branch_node_ids": [
+     "product:engine-bay-wash"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:service:chassis-wash",
+    "node_type": "faq",
+    "title": "A Utzig oferece Lavagem de chassis?",
+    "status": "approved",
+    "text": "A Utzig oferece Lavagem de chassis?\nSim. Limpeza da parte inferior do veículo para remover sujeira acumulada em áreas de difícil acesso. O procedimento é escolhido de acordo com o uso e a condição do carro.",
+    "path": [
+     "Utzig Garage",
+     "Limpeza e higienização",
+     "Lavagem de chassi",
+     "Apresentação — Lavagem de chassis",
+     "A Utzig oferece Lavagem de chassis?"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "faq:service:commercial-polish",
+    "node_type": "faq",
+    "title": "A Utzig Garage oferece Polimento comercial?",
+    "status": "approved",
+    "text": "A Utzig Garage oferece Polimento comercial?\nSim. Polimento comercial faz parte do catálogo de serviços. A Utzig confirma avaliação, valor e próximos passos.",
+    "path": [
+     "Utzig Garage",
+     "Brilho e correção",
+     "Polimento comercial",
+     "Apresentação — Polimento comercial",
+     "A Utzig Garage oferece Polimento comercial?"
+    ],
+    "branch_node_ids": [
+     "product:commercial-polish"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:service:commercial-polish:polimento-comercial-diferenca",
+    "node_type": "faq",
+    "title": "Comercial ou técnico?",
+    "status": "approved",
+    "text": "Comercial ou técnico?\nA escolha entre polimento comercial e técnico depende do objetivo e da condição observada; a equipe orienta após a avaliação.",
+    "path": [
+     "Utzig Garage",
+     "Brilho e correção",
+     "Polimento comercial",
+     "Comercial ou técnico?"
+    ],
+    "branch_node_ids": [
+     "product:commercial-polish"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:service:detailed-wash",
+    "node_type": "faq",
+    "title": "A Utzig Garage oferece Lavagem detalhada?",
+    "status": "approved",
+    "text": "A Utzig Garage oferece Lavagem detalhada?\nSim. Lavagem detalhada faz parte do catálogo de serviços. O Wilian confirma avaliação, valor e próximos passos.",
+    "path": [
+     "Utzig Garage",
+     "Limpeza e higienização",
+     "Lavagem detalhada",
+     "Apresentação — Lavagem detalhada",
+     "A Utzig Garage oferece Lavagem detalhada?"
+    ],
+    "branch_node_ids": [
+     "product:detailed-wash"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:service:detailed-wash:lavagem-detalhada-objetivo",
+    "node_type": "faq",
+    "title": "Lavagem serve para meu caso?",
+    "status": "approved",
+    "text": "Lavagem serve para meu caso?\nPara orientar a lavagem técnica detalhada, a assistente virtual registra o que o cliente quer melhorar e a condição atual do veículo.",
+    "path": [
+     "Utzig Garage",
+     "Limpeza e higienização",
+     "Lavagem detalhada",
+     "Lavagem serve para meu caso?"
+    ],
+    "branch_node_ids": [
+     "product:detailed-wash"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:service:detailed-wash:lavagem-detalhada-preco",
+    "node_type": "faq",
+    "title": "Preço da lavagem detalhada?",
+    "status": "approved",
+    "text": "Preço da lavagem detalhada?\nA lavagem leva cerca de 3 horas. O valor o atendente confirma depois de avaliar o veículo.",
+    "path": [
+     "Utzig Garage",
+     "Limpeza e higienização",
+     "Lavagem detalhada",
+     "Preço da lavagem detalhada?"
+    ],
+    "branch_node_ids": [
+     "product:detailed-wash"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:service:engine-bay-wash",
+    "node_type": "faq",
+    "title": "A Utzig Garage oferece Lavagem de cofre?",
+    "status": "approved",
+    "text": "A Utzig Garage oferece Lavagem de cofre?\nSim. Lavagem de cofre faz parte do catálogo de serviços. A Utzig confirma avaliação, valor e próximos passos.",
+    "path": [
+     "Utzig Garage",
+     "Limpeza e higienização",
+     "Lavagem de motor",
+     "Apresentação — Lavagem de cofre",
+     "A Utzig Garage oferece Lavagem de cofre?"
+    ],
+    "branch_node_ids": [
+     "product:engine-bay-wash"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:service:engine-bay-wash:motor-estrada",
+    "node_type": "faq",
+    "title": "Estrada de chão influencia?",
+    "status": "approved",
+    "text": "Estrada de chão influencia?\nA frequência em estrada de chão é uma informação usada para contextualizar a condição do motor e do cofre.",
+    "path": [
+     "Utzig Garage",
+     "Limpeza e higienização",
+     "Lavagem de motor",
+     "Estrada de chão influencia?"
+    ],
+    "branch_node_ids": [
+     "product:engine-bay-wash"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:service:engine-bay-wash:motor-vazamento",
+    "node_type": "faq",
+    "title": "Tem problema lavar com vazamento?",
+    "status": "approved",
+    "text": "Tem problema lavar com vazamento?\nPara esse serviço, é importante informar se há sinal de vazamento de óleo antes da avaliação.",
+    "path": [
+     "Utzig Garage",
+     "Limpeza e higienização",
+     "Lavagem de motor",
+     "Tem problema lavar com vazamento?"
+    ],
+    "branch_node_ids": [
+     "product:engine-bay-wash"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:service:evaluation",
+    "node_type": "faq",
+    "title": "A Utzig Garage oferece Avaliação?",
+    "status": "approved",
+    "text": "A Utzig Garage oferece Avaliação?\nSim. Avaliação faz parte do catálogo de serviços. O Wilian confirma avaliação, valor e próximos passos.",
+    "path": [
+     "Utzig Garage",
+     "Avaliação e orientação",
+     "Avaliação",
+     "Apresentação — Avaliação",
+     "A Utzig Garage oferece Avaliação?"
+    ],
+    "branch_node_ids": [
+     "product:evaluation"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:service:glass-polish",
+    "node_type": "faq",
+    "title": "A Utzig Garage oferece Polimento de vidros?",
+    "status": "approved",
+    "text": "A Utzig Garage oferece Polimento de vidros?\nSim. Polimento de vidros faz parte do catálogo de serviços. A Utzig confirma avaliação, valor e próximos passos.",
+    "path": [
+     "Utzig Garage",
+     "Brilho e correção",
+     "Polimento de vidros",
+     "Apresentação — Polimento de vidros",
+     "A Utzig Garage oferece Polimento de vidros?"
+    ],
+    "branch_node_ids": [
+     "product:glass-polish"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:service:glass-polish:vidros-orcamento",
+    "node_type": "faq",
+    "title": "Polimento tira minha mancha?",
+    "status": "approved",
+    "text": "Polimento tira minha mancha?\nResultado esperado, preço e duração do polimento de vidros dependem da avaliação e são confirmados pela equipe.",
+    "path": [
+     "Utzig Garage",
+     "Brilho e correção",
+     "Polimento de vidros",
+     "Polimento tira minha mancha?"
+    ],
+    "branch_node_ids": [
+     "product:glass-polish"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:service:headlight-restoration",
+    "node_type": "faq",
+    "title": "A Utzig Garage oferece Restauração de faróis?",
+    "status": "approved",
+    "text": "A Utzig Garage oferece Restauração de faróis?\nSim. Restauração de faróis faz parte do catálogo de serviços. O Wilian confirma avaliação, valor e próximos passos.",
+    "path": [
+     "Utzig Garage",
+     "Brilho e correção",
+     "Restauração de faróis",
+     "Apresentação — Restauração de faróis",
+     "A Utzig Garage oferece Restauração de faróis?"
+    ],
+    "branch_node_ids": [
+     "product:headlight-restoration"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:service:headlight-restoration:farois-resultado",
+    "node_type": "faq",
+    "title": "Farol fica novo?",
+    "status": "approved",
+    "text": "Farol fica novo?\nO resultado possível na restauração de faróis depende da condição observada e não é garantido automaticamente pela assistente virtual.",
+    "path": [
+     "Utzig Garage",
+     "Brilho e correção",
+     "Restauração de faróis",
+     "Farol fica novo?"
+    ],
+    "branch_node_ids": [
+     "product:headlight-restoration"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:service:headlight-restoration:farois-uv",
+    "node_type": "faq",
+    "title": "Tem proteção uv?",
+    "status": "approved",
+    "text": "Tem proteção uv?\nProteção UV não é uma alegação publicada nesta revisão; a equipe deve confirmar qualquer proteção ou acabamento aplicável.",
+    "path": [
+     "Utzig Garage",
+     "Brilho e correção",
+     "Restauração de faróis",
+     "Tem proteção uv?"
+    ],
+    "branch_node_ids": [
+     "product:headlight-restoration"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:service:interior-cleaning",
+    "node_type": "faq",
+    "title": "A Utzig Garage oferece Higienização interna?",
+    "status": "approved",
+    "text": "A Utzig Garage oferece Higienização interna?\nSim. Higienização interna faz parte do catálogo de serviços. A Utzig confirma avaliação, valor e próximos passos.",
+    "path": [
+     "Utzig Garage",
+     "Limpeza e higienização",
+     "Higienização interna",
+     "Apresentação — Higienização interna",
+     "A Utzig Garage oferece Higienização interna?"
+    ],
+    "branch_node_ids": [
+     "product:interior-cleaning"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:service:interior-cleaning:higienizacao-estrada",
+    "node_type": "faq",
+    "title": "Estrada de chão afeta interior?",
+    "status": "approved",
+    "text": "Estrada de chão afeta interior?\nO uso frequente em estrada de chão ajuda a equipe a entender a exposição do interior à poeira e à sujeira.",
+    "path": [
+     "Utzig Garage",
+     "Limpeza e higienização",
+     "Higienização interna",
+     "Estrada de chão afeta interior?"
+    ],
+    "branch_node_ids": [
+     "product:interior-cleaning"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:service:interior-cleaning:higienizacao-preco-tempo",
+    "node_type": "faq",
+    "title": "Quanto custa higienizar?",
+    "status": "approved",
+    "text": "Quanto custa higienizar?\nA higienização interna leva cerca de 12 horas, por causa da secagem dos bancos. O valor o atendente confirma depois de avaliar o veículo.",
+    "path": [
+     "Utzig Garage",
+     "Limpeza e higienização",
+     "Higienização interna",
+     "Quanto custa higienizar?"
+    ],
+    "branch_node_ids": [
+     "product:interior-cleaning"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:service:interior-cleaning:higienizacao-revestimento",
+    "node_type": "faq",
+    "title": "Importa ser couro?",
+    "status": "approved",
+    "text": "Importa ser couro?\nPara qualificar a higienização, a assistente virtual pergunta se os bancos são de couro ou tecido.",
+    "path": [
+     "Utzig Garage",
+     "Limpeza e higienização",
+     "Higienização interna",
+     "Importa ser couro?"
+    ],
+    "branch_node_ids": [
+     "product:interior-cleaning"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:service:leather-conditioning",
+    "node_type": "faq",
+    "title": "A Utzig oferece Hidratação dos couros?",
+    "status": "approved",
+    "text": "A Utzig oferece Hidratação dos couros?\nSim. Tratamento para bancos e revestimentos de couro que combina limpeza, hidratação e acabamento. Ajuda a manter o toque e a apresentação das superfícies no uso diário.",
+    "path": [
+     "Utzig Garage",
+     "Limpeza e higienização",
+     "Hidratação dos couros",
+     "Apresentação — Hidratação dos couros",
+     "A Utzig oferece Hidratação dos couros?"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "faq:service:ppf",
+    "node_type": "faq",
+    "title": "A Utzig Garage oferece PPF?",
+    "status": "approved",
+    "text": "A Utzig Garage oferece PPF?\nSim. PPF faz parte do catálogo de serviços. O Wilian confirma avaliação, valor e próximos passos.",
+    "path": [
+     "Utzig Garage",
+     "Proteção",
+     "PPF",
+     "Apresentação — PPF",
+     "A Utzig Garage oferece PPF?"
+    ],
+    "branch_node_ids": [
+     "product:ppf"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:service:ppf:ppf-avaliacao",
+    "node_type": "faq",
+    "title": "Ppf serve no meu carro?",
+    "status": "approved",
+    "text": "Ppf serve no meu carro?\nA aplicação de PPF precisa ser orientada pela equipe conforme o veículo, a condição e o objetivo informado.",
+    "path": [
+     "Utzig Garage",
+     "Proteção",
+     "PPF",
+     "Ppf serve no meu carro?"
+    ],
+    "branch_node_ids": [
+     "product:ppf"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:service:ppf:ppf-preco-tempo",
+    "node_type": "faq",
+    "title": "Quanto custa ppf?",
+    "status": "approved",
+    "text": "Quanto custa ppf?\nO tempo do PPF depende das áreas escolhidas e é combinado na avaliação. O valor o atendente confirma depois de avaliar o veículo.",
+    "path": [
+     "Utzig Garage",
+     "Proteção",
+     "PPF",
+     "Quanto custa ppf?"
+    ],
+    "branch_node_ids": [
+     "product:ppf"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:service:seat-vitrification",
+    "node_type": "faq",
+    "title": "A Utzig oferece Vitrificação dos bancos?",
+    "status": "approved",
+    "text": "A Utzig oferece Vitrificação dos bancos?\nSim. Camada de proteção para bancos e estofados, indicada conforme o material. Ajuda a reduzir a absorção de sujeira e facilita a rotina de cuidado com o interior.",
+    "path": [
+     "Utzig Garage",
+     "Proteção",
+     "Vitrificação de plásticos e couros",
+     "Apresentação — Vitrificação dos bancos",
+     "A Utzig oferece Vitrificação dos bancos?"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "faq:service:technical-polish",
+    "node_type": "faq",
+    "title": "A Utzig Garage oferece Polimento técnico?",
+    "status": "approved",
+    "text": "A Utzig Garage oferece Polimento técnico?\nSim. Polimento técnico faz parte do catálogo de serviços. A Utzig confirma avaliação, valor e próximos passos.",
+    "path": [
+     "Utzig Garage",
+     "Brilho e correção",
+     "Polimento técnico",
+     "Apresentação — Polimento técnico",
+     "A Utzig Garage oferece Polimento técnico?"
+    ],
+    "branch_node_ids": [
+     "product:technical-polish"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:service:technical-polish:polimento-anterior",
+    "node_type": "faq",
+    "title": "Já poli antes importa?",
+    "status": "approved",
+    "text": "Já poli antes importa?\nA equipe precisa saber se já houve procedimento anterior na pintura para contextualizar a avaliação do polimento.",
+    "path": [
+     "Utzig Garage",
+     "Brilho e correção",
+     "Polimento técnico",
+     "Já poli antes importa?"
+    ],
+    "branch_node_ids": [
+     "product:technical-polish"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:service:technical-polish:polimento-avaliacao",
+    "node_type": "faq",
+    "title": "Precisa avaliar para polir?",
+    "status": "approved",
+    "text": "Precisa avaliar para polir?\nO polimento requer avaliação para relacionar objetivo, histórico e condição da pintura antes do orçamento.",
+    "path": [
+     "Utzig Garage",
+     "Brilho e correção",
+     "Polimento técnico",
+     "Precisa avaliar para polir?"
+    ],
+    "branch_node_ids": [
+     "product:technical-polish"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:service:technical-polish:polimento-espelhamento",
+    "node_type": "faq",
+    "title": "Vocês fazem espelhamento?",
+    "status": "approved",
+    "text": "Vocês fazem espelhamento?\n“Espelhamento”, “pintura opaca” e “melhorar o brilho” são tratados como formas de descrever uma necessidade de polimento, sujeita a avaliação.",
+    "path": [
+     "Utzig Garage",
+     "Brilho e correção",
+     "Polimento técnico",
+     "Vocês fazem espelhamento?"
+    ],
+    "branch_node_ids": [
+     "product:technical-polish"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:service:technical-polish:polimento-foco",
+    "node_type": "faq",
+    "title": "Quero tirar riscos?",
+    "status": "approved",
+    "text": "Quero tirar riscos?\nNa qualificação do polimento, a assistente virtual diferencia se o foco principal é brilho, riscos ou ambos.",
+    "path": [
+     "Utzig Garage",
+     "Brilho e correção",
+     "Polimento técnico",
+     "Quero tirar riscos?"
+    ],
+    "branch_node_ids": [
+     "product:technical-polish"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:service:vitrification",
+    "node_type": "faq",
+    "title": "A Utzig Garage oferece Vitrificação?",
+    "status": "approved",
+    "text": "A Utzig Garage oferece Vitrificação?\nSim. Vitrificação faz parte do catálogo de serviços. O Wilian confirma avaliação, valor e próximos passos.",
+    "path": [
+     "Utzig Garage",
+     "Proteção",
+     "Vitrificação da pintura",
+     "Apresentação — Vitrificação",
+     "A Utzig Garage oferece Vitrificação?"
+    ],
+    "branch_node_ids": [
+     "product:vitrification"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:service:vitrification:vitrificacao-avaliacao",
+    "node_type": "faq",
+    "title": "Precisa avaliar para vitrificar?",
+    "status": "approved",
+    "text": "Precisa avaliar para vitrificar?\nA indicação e o orçamento da vitrificação dependem da avaliação do veículo e do objetivo do cliente.",
+    "path": [
+     "Utzig Garage",
+     "Proteção",
+     "Vitrificação da pintura",
+     "Precisa avaliar para vitrificar?"
+    ],
+    "branch_node_ids": [
+     "product:vitrification"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:service:vitrification:vitrificacao-preco-tempo",
+    "node_type": "faq",
+    "title": "Valor da vitrificação?",
+    "status": "approved",
+    "text": "Valor da vitrificação?\nA vitrificação leva cerca de 3 dias. O valor o atendente confirma depois de avaliar o veículo.",
+    "path": [
+     "Utzig Garage",
+     "Proteção",
+     "Vitrificação da pintura",
+     "Valor da vitrificação?"
+    ],
+    "branch_node_ids": [
+     "product:vitrification"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:service:windshield-crystallization",
+    "node_type": "faq",
+    "title": "Cristalização de para-brisa",
+    "status": "approved",
+    "text": "A Utzig Garage oferece cristalização de para-brisa?\nA disponibilidade e a avaliação da cristalização de para-brisa são confirmadas pela equipe da Utzig Garage.",
+    "path": [
+     "Utzig Garage",
+     "Proteção",
+     "Cristalização do para-brisa",
+     "Cristalização de para-brisa",
+     "Cristalização de para-brisa"
+    ],
+    "branch_node_ids": [
+     "product:windshield-crystallization"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:site:aftercare",
+    "node_type": "faq",
+    "title": "Como cuidar do carro depois do serviço?",
+    "status": "approved",
+    "text": "Como cuidar do carro depois do serviço?\nA Utzig orienta o intervalo e os produtos adequados a cada aplicação. Como regra geral, prefira lavagens sem escovas agressivas e produtos neutros para preservar o acabamento.",
+    "path": [
+     "Utzig Garage",
+     "Estética automotiva",
+     "Contexto — Como cuidar do carro depois do serviço?",
+     "Como cuidar do carro depois do serviço?"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "faq:site:budget",
+    "node_type": "faq",
+    "title": "Como recebo um orçamento?",
+    "status": "approved",
+    "text": "Como recebo um orçamento?\nA avaliação e o orçamento são feitos pelo WhatsApp: mande fotos e informações do veículo, ou combine uma avaliação presencial.",
+    "path": [
+     "Utzig Garage",
+     "Estética automotiva",
+     "Contexto — Como recebo um orçamento?",
+     "Como recebo um orçamento?"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "faq:site:ppf-benefit",
+    "node_type": "faq",
+    "title": "O que o PPF protege?",
+    "status": "approved",
+    "text": "O que o PPF protege?\nO PPF é uma película transparente de proteção física contra riscos, arranhões e pequenos impactos. Pode ir em áreas críticas, em partes maiores ou no carro todo.",
+    "path": [
+     "Utzig Garage",
+     "Estética automotiva",
+     "Contexto — O que o PPF protege?",
+     "O que o PPF protege?"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "faq:site:service-duration",
+    "node_type": "faq",
+    "title": "Quanto tempo cada serviço leva?",
+    "status": "approved",
+    "text": "Quanto tempo cada serviço leva?\nEm média: lavagem cerca de 3 horas, higienização interna cerca de 12 horas (secagem dos bancos), polimento cerca de 12 horas e vitrificação cerca de 3 dias.",
+    "path": [
+     "Utzig Garage",
+     "Estética automotiva",
+     "Contexto — Quanto tempo cada serviço leva?",
+     "Quanto tempo cada serviço leva?"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "faq:site:used-car-ppf",
+    "node_type": "faq",
+    "title": "Posso aplicar PPF em um carro usado?",
+    "status": "approved",
+    "text": "Posso aplicar PPF em um carro usado?\nSim, depois de avaliar a condição da pintura. Se houver marcas ou correções necessárias, a Utzig indica a preparação adequada antes da aplicação.",
+    "path": [
+     "Utzig Garage",
+     "Estética automotiva",
+     "Contexto — Posso aplicar PPF em um carro usado?",
+     "Posso aplicar PPF em um carro usado?"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "faq:site:vitrification-vs-wax",
+    "node_type": "faq",
+    "title": "Qual a diferença entre vitrificação e cera?",
+    "status": "approved",
+    "text": "Qual a diferença entre vitrificação e cera?\nA vitrificação forma uma camada cerâmica de proteção e brilho com durabilidade maior que a de uma cera comum. O resultado depende do preparo e dos cuidados posteriores.",
+    "path": [
+     "Utzig Garage",
+     "Estética automotiva",
+     "Contexto — Qual a diferença entre vitrificação e cera?",
+     "Qual a diferença entre vitrificação e cera?"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "faq:site:warranty",
+    "node_type": "faq",
+    "title": "Os serviços têm garantia?",
+    "status": "approved",
+    "text": "Os serviços têm garantia?\nA cobertura depende do serviço escolhido. No PPF, a garantia informada é de 10 anos; os demais detalhes são apresentados no orçamento antes da execução.",
+    "path": [
+     "Utzig Garage",
+     "Estética automotiva",
+     "Contexto — Os serviços têm garantia?",
+     "Os serviços têm garantia?"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "faq:utzig:duration-polish",
+    "node_type": "faq",
+    "title": "Quanto tempo leva o polimento?",
+    "status": "approved",
+    "text": "Quanto tempo leva o polimento?\nO polimento leva cerca de 12 horas.",
+    "path": [
+     "Utzig Garage",
+     "Brilho e correção",
+     "Polimento comercial",
+     "Quanto tempo leva o polimento?"
+    ],
+    "branch_node_ids": [
+     "product:commercial-polish"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:utzig:duration-wash",
+    "node_type": "faq",
+    "title": "Quanto tempo leva a lavagem?",
+    "status": "approved",
+    "text": "Quanto tempo leva a lavagem?\nA lavagem leva cerca de 3 horas.",
+    "path": [
+     "Utzig Garage",
+     "Limpeza e higienização",
+     "Lavagem detalhada",
+     "Quanto tempo leva a lavagem?"
+    ],
+    "branch_node_ids": [
+     "product:detailed-wash"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:utzig:how-to-quote",
+    "node_type": "faq",
+    "title": "Como peço avaliação ou orçamento?",
+    "status": "approved",
+    "text": "Como peço avaliação ou orçamento?\nPelo WhatsApp: mande fotos e informações do veículo, ou combine uma avaliação presencial na Utzig.",
+    "path": [
+     "Utzig Garage",
+     "Encaminhamento humano",
+     "Como peço avaliação ou orçamento?"
+    ],
+    "branch_node_ids": [
+     "product:evaluation",
+     "product:commercial-polish",
+     "product:glass-polish",
+     "product:technical-polish",
+     "product:headlight-restoration",
+     "product:interior-cleaning",
+     "product:engine-bay-wash",
+     "product:detailed-wash",
+     "product:windshield-crystallization",
+     "product:ppf",
+     "product:vitrification"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:utzig:in-person",
+    "node_type": "faq",
+    "title": "Posso levar o carro pessoalmente?",
+    "status": "approved",
+    "text": "Posso levar o carro pessoalmente?\nPode sim. O Wilian avalia o carro na Utzig e passa valor e prazo.",
+    "path": [
+     "Utzig Garage",
+     "Encaminhamento humano",
+     "Posso levar o carro pessoalmente?"
+    ],
+    "branch_node_ids": [
+     "product:evaluation",
+     "product:commercial-polish",
+     "product:glass-polish",
+     "product:technical-polish",
+     "product:headlight-restoration",
+     "product:interior-cleaning",
+     "product:engine-bay-wash",
+     "product:detailed-wash",
+     "product:windshield-crystallization",
+     "product:ppf",
+     "product:vitrification"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:utzig:next-steps",
+    "node_type": "faq",
+    "title": "E agora, o que acontece?",
+    "status": "approved",
+    "text": "E agora, o que acontece?\nO Wilian recebe seu pedido e continua o atendimento por aqui para combinar avaliação, valor e agenda.",
+    "path": [
+     "Utzig Garage",
+     "Encaminhamento humano",
+     "E agora, o que acontece?"
+    ],
+    "branch_node_ids": [
+     "product:evaluation",
+     "product:commercial-polish",
+     "product:glass-polish",
+     "product:technical-polish",
+     "product:headlight-restoration",
+     "product:interior-cleaning",
+     "product:engine-bay-wash",
+     "product:detailed-wash",
+     "product:windshield-crystallization",
+     "product:ppf",
+     "product:vitrification"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:utzig:photos-optional",
+    "node_type": "faq",
+    "title": "Preciso mandar foto?",
+    "status": "approved",
+    "text": "Preciso mandar foto?\nNão é obrigatório. As fotos só ajudam a adiantar; o Wilian também avalia com o carro na Utzig.",
+    "path": [
+     "Utzig Garage",
+     "Encaminhamento humano",
+     "Preciso mandar foto?"
+    ],
+    "branch_node_ids": [
+     "product:evaluation",
+     "product:commercial-polish",
+     "product:glass-polish",
+     "product:technical-polish",
+     "product:headlight-restoration",
+     "product:interior-cleaning",
+     "product:engine-bay-wash",
+     "product:detailed-wash",
+     "product:windshield-crystallization",
+     "product:ppf",
+     "product:vitrification"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:utzig:photos-what",
+    "node_type": "faq",
+    "title": "Que fotos devo mandar?",
+    "status": "approved",
+    "text": "Que fotos devo mandar?\nFotos da área do serviço, de perto e de um pouco mais longe, com boa luz.",
+    "path": [
+     "Utzig Garage",
+     "Encaminhamento humano",
+     "Que fotos devo mandar?"
+    ],
+    "branch_node_ids": [
+     "product:evaluation",
+     "product:commercial-polish",
+     "product:glass-polish",
+     "product:technical-polish",
+     "product:headlight-restoration",
+     "product:interior-cleaning",
+     "product:engine-bay-wash",
+     "product:detailed-wash",
+     "product:windshield-crystallization",
+     "product:ppf",
+     "product:vitrification"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:utzig:ppf-areas",
+    "node_type": "faq",
+    "title": "Onde dá para aplicar PPF?",
+    "status": "approved",
+    "text": "Onde dá para aplicar PPF?\nNa pintura, em áreas críticas como conchas de maçaneta, quinas de portas e soleiras, e em partes maiores como para-choque, capô, teto e retrovisor — ou no carro todo.",
+    "path": [
+     "Utzig Garage",
+     "Proteção",
+     "PPF",
+     "Onde dá para aplicar PPF?"
+    ],
+    "branch_node_ids": [
+     "product:ppf"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:utzig:ppf-interior",
+    "node_type": "faq",
+    "title": "PPF serve para multimídia e painel?",
+    "status": "approved",
+    "text": "PPF serve para multimídia e painel?\nSim. O PPF também pode ser aplicado em áreas sensíveis como multimídia, painéis e acabamentos em black piano.",
+    "path": [
+     "Utzig Garage",
+     "Proteção",
+     "PPF",
+     "PPF serve para multimídia e painel?"
+    ],
+    "branch_node_ids": [
+     "product:ppf"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:utzig:quote-by-photo",
+    "node_type": "faq",
+    "title": "Dá pra fazer orçamento só pela foto?",
+    "status": "approved",
+    "text": "Dá pra fazer orçamento só pela foto?\nA foto ajuda a ter uma ideia, mas valor e prazo a Utzig confirma depois da avaliação.",
+    "path": [
+     "Utzig Garage",
+     "Encaminhamento humano",
+     "Dá pra fazer orçamento só pela foto?"
+    ],
+    "branch_node_ids": [
+     "product:evaluation",
+     "product:commercial-polish",
+     "product:glass-polish",
+     "product:technical-polish",
+     "product:headlight-restoration",
+     "product:interior-cleaning",
+     "product:engine-bay-wash",
+     "product:detailed-wash",
+     "product:windshield-crystallization",
+     "product:ppf",
+     "product:vitrification"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "faq:utzig:services-overview",
+    "node_type": "faq",
+    "title": "Quais serviços a Utzig faz?",
+    "status": "approved",
+    "text": "Quais serviços a Utzig faz?\nA Utzig trabalha em três frentes: limpeza e higienização (lavagem detalhada, chassi, motor, higienização interna), brilho e correção (polimento comercial, técnico, de vidros e restauração de faróis) e proteção (vitrificação, vitrificação de plásticos e couros, cristalização do para-brisa e PPF).",
+    "path": [
+     "Utzig Garage",
+     "Encaminhamento humano",
+     "Quais serviços a Utzig faz?"
+    ],
+    "branch_node_ids": [
+     "product:evaluation",
+     "product:commercial-polish",
+     "product:glass-polish",
+     "product:technical-polish",
+     "product:headlight-restoration",
+     "product:interior-cleaning",
+     "product:engine-bay-wash",
+     "product:detailed-wash",
+     "product:windshield-crystallization",
+     "product:ppf",
+     "product:vitrification"
+    ],
+    "used_by_sdr": true
+   },
+   {
+    "id": "group:cleaning",
+    "node_type": "product_group",
+    "title": "Limpeza e higienização",
+    "status": "approved",
+    "text": "Grupo de serviços da Utzig Garage; a capa é uma referência visual do grupo.",
+    "path": [
+     "Utzig Garage",
+     "Limpeza e higienização"
+    ],
+    "branch_node_ids": [
+     "product:interior-cleaning",
+     "product:engine-bay-wash",
+     "product:detailed-wash"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "group:enhancement",
+    "node_type": "product_group",
+    "title": "Proteção",
+    "status": "approved",
+    "text": "Grupo de serviços da Utzig Garage; a capa é uma referência visual do grupo.",
+    "path": [
+     "Utzig Garage",
+     "Proteção"
+    ],
+    "branch_node_ids": [
+     "product:windshield-crystallization",
+     "product:ppf",
+     "product:vitrification"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "group:preservation",
+    "node_type": "product_group",
+    "title": "Avaliação e orientação",
+    "status": "approved",
+    "text": "Grupo de serviços da Utzig Garage; a capa é uma referência visual do grupo.",
+    "path": [
+     "Utzig Garage",
+     "Avaliação e orientação"
+    ],
+    "branch_node_ids": [
+     "product:evaluation"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "group:revitalization",
+    "node_type": "product_group",
+    "title": "Brilho e correção",
+    "status": "approved",
+    "text": "Grupo de serviços da Utzig Garage; a capa é uma referência visual do grupo.",
+    "path": [
+     "Utzig Garage",
+     "Brilho e correção"
+    ],
+    "branch_node_ids": [
+     "product:commercial-polish",
+     "product:glass-polish",
+     "product:technical-polish",
+     "product:headlight-restoration"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "offer:chassis-wash:starting-price",
+    "node_type": "offer",
+    "title": "Preço — Lavagem de chassi",
+    "status": "approved",
+    "text": "Lavagem de chassi a partir de R$ (removido)",
+    "path": [
+     "Utzig Garage",
+     "Limpeza e higienização",
+     "Lavagem de chassi",
+     "Preço — Lavagem de chassi"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "offer:commercial-polish:starting-price",
+    "node_type": "offer",
+    "title": "Preço — Polimento comercial",
+    "status": "approved",
+    "text": "Polimento comercial R$ (removido)",
+    "path": [
+     "Utzig Garage",
+     "Brilho e correção",
+     "Polimento comercial",
+     "Preço — Polimento comercial"
+    ],
+    "branch_node_ids": [
+     "product:commercial-polish"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "offer:detailed-wash:starting-price",
+    "node_type": "offer",
+    "title": "Preço — Lavagem detalhada",
+    "status": "approved",
+    "text": "Lavagem detalhada sem preço registrado pela Utzig",
+    "path": [
+     "Utzig Garage",
+     "Limpeza e higienização",
+     "Lavagem detalhada",
+     "Preço — Lavagem detalhada"
+    ],
+    "branch_node_ids": [
+     "product:detailed-wash"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "offer:engine-bay-wash:starting-price",
+    "node_type": "offer",
+    "title": "Preço — Lavagem de motor",
+    "status": "approved",
+    "text": "Lavagem de motor a partir de R$ (removido)",
+    "path": [
+     "Utzig Garage",
+     "Limpeza e higienização",
+     "Lavagem de motor",
+     "Preço — Lavagem de motor"
+    ],
+    "branch_node_ids": [
+     "product:engine-bay-wash"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "offer:glass-polish:starting-price",
+    "node_type": "offer",
+    "title": "Preço — Polimento de vidros",
+    "status": "approved",
+    "text": "Polimento de vidros a partir de R$ (removido)",
+    "path": [
+     "Utzig Garage",
+     "Brilho e correção",
+     "Polimento de vidros",
+     "Preço — Polimento de vidros"
+    ],
+    "branch_node_ids": [
+     "product:glass-polish"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "offer:headlight-restoration:starting-price",
+    "node_type": "offer",
+    "title": "Preço — Restauração de faróis",
+    "status": "approved",
+    "text": "Restauração de faróis R$ (removido)",
+    "path": [
+     "Utzig Garage",
+     "Brilho e correção",
+     "Restauração de faróis",
+     "Preço — Restauração de faróis"
+    ],
+    "branch_node_ids": [
+     "product:headlight-restoration"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "offer:interior-cleaning:starting-price",
+    "node_type": "offer",
+    "title": "Preço — Higienização interna",
+    "status": "approved",
+    "text": "Higienização interna R$ (removido)",
+    "path": [
+     "Utzig Garage",
+     "Limpeza e higienização",
+     "Higienização interna",
+     "Preço — Higienização interna"
+    ],
+    "branch_node_ids": [
+     "product:interior-cleaning"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "offer:leather-conditioning:starting-price",
+    "node_type": "offer",
+    "title": "Preço — Hidratação dos couros",
+    "status": "approved",
+    "text": "Hidratação dos couros R$ (removido)",
+    "path": [
+     "Utzig Garage",
+     "Limpeza e higienização",
+     "Hidratação dos couros",
+     "Preço — Hidratação dos couros"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "offer:ppf:multimedia-starting-price",
+    "node_type": "offer",
+    "title": "Preço — PPF — multimídia",
+    "status": "approved",
+    "text": "PPF — multimídia a partir de R$ (removido)",
+    "path": [
+     "Utzig Garage",
+     "Proteção",
+     "PPF",
+     "Preço — PPF — multimídia"
+    ],
+    "branch_node_ids": [
+     "product:ppf"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "offer:ppf:starting-price",
+    "node_type": "offer",
+    "title": "Preço — PPF — kit básico",
+    "status": "approved",
+    "text": "PPF — kit básico R$ (removido)",
+    "path": [
+     "Utzig Garage",
+     "Proteção",
+     "PPF",
+     "Preço — PPF — kit básico"
+    ],
+    "branch_node_ids": [
+     "product:ppf"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "offer:seat-vitrification:starting-price",
+    "node_type": "offer",
+    "title": "Preço — Vitrificação dos bancos",
+    "status": "approved",
+    "text": "Vitrificação dos bancos a partir de R$ (removido)",
+    "path": [
+     "Utzig Garage",
+     "Proteção",
+     "Vitrificação de plásticos e couros",
+     "Preço — Vitrificação dos bancos"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "offer:technical-polish:starting-price",
+    "node_type": "offer",
+    "title": "Preço — Polimento técnico",
+    "status": "approved",
+    "text": "Polimento técnico a partir de R$ (removido)",
+    "path": [
+     "Utzig Garage",
+     "Brilho e correção",
+     "Polimento técnico",
+     "Preço — Polimento técnico"
+    ],
+    "branch_node_ids": [
+     "product:technical-polish"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "offer:vitrification:starting-price",
+    "node_type": "offer",
+    "title": "Preço — Vitrificação",
+    "status": "approved",
+    "text": "Vitrificação a partir de R$ (removido)",
+    "path": [
+     "Utzig Garage",
+     "Proteção",
+     "Vitrificação da pintura",
+     "Preço — Vitrificação"
+    ],
+    "branch_node_ids": [
+     "product:vitrification"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "offer:windshield-crystallization:starting-price",
+    "node_type": "offer",
+    "title": "Preço — Cristalização do para-brisa",
+    "status": "approved",
+    "text": "Cristalização do para-brisa a partir de R$ (removido)",
+    "path": [
+     "Utzig Garage",
+     "Proteção",
+     "Cristalização do para-brisa",
+     "Preço — Cristalização do para-brisa"
+    ],
+    "branch_node_ids": [
+     "product:windshield-crystallization"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "product:chassis-wash",
+    "node_type": "product",
+    "title": "Lavagem de chassi",
+    "status": "approved",
+    "text": "Limpeza da parte inferior do veículo para remover sujeira acumulada em áreas de difícil acesso. O procedimento é escolhido de acordo com o uso e a condição do carro.",
+    "path": [
+     "Utzig Garage",
+     "Limpeza e higienização",
+     "Lavagem de chassi"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "product:commercial-polish",
+    "node_type": "product",
+    "title": "Polimento comercial",
+    "status": "approved",
+    "text": "Recupera o brilho e melhora a apresentação da pintura. É a escolha para quem quer um resultado visual perceptível, com a intensidade do trabalho definida depois da avaliação da superfície.",
+    "path": [
+     "Utzig Garage",
+     "Brilho e correção",
+     "Polimento comercial"
+    ],
+    "branch_node_ids": [
+     "product:commercial-polish"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "product:detailed-wash",
+    "node_type": "product",
+    "title": "Lavagem detalhada",
+    "status": "approved",
+    "text": "Mais que uma lavagem: limpeza cuidadosa de carroceria, rodas e detalhes, com técnica de dois baldes, pincéis e produtos adequados. Uma forma segura de recuperar a apresentação do carro e manter o acabamento em dia. A partir de R$ (removido).",
+    "path": [
+     "Utzig Garage",
+     "Limpeza e higienização",
+     "Lavagem detalhada"
+    ],
+    "branch_node_ids": [
+     "product:detailed-wash"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "product:engine-bay-wash",
+    "node_type": "product",
+    "title": "Lavagem de motor",
+    "status": "approved",
+    "text": "Limpeza técnica do cofre do motor, com atenção aos componentes e ao estado do veículo. Remove a sujeira acumulada e devolve uma apresentação mais cuidada ao compartimento.",
+    "path": [
+     "Utzig Garage",
+     "Limpeza e higienização",
+     "Lavagem de motor"
+    ],
+    "branch_node_ids": [
+     "product:engine-bay-wash"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "product:evaluation",
+    "node_type": "product",
+    "title": "Avaliação",
+    "status": "approved",
+    "text": "Cada carro tem uma história e uma necessidade. Na avaliação, Wilian observa o estado do veículo, entende seu objetivo e indica uma combinação de serviços, com orçamento e prazo definidos para o caso.",
+    "path": [
+     "Utzig Garage",
+     "Avaliação e orientação",
+     "Avaliação"
+    ],
+    "branch_node_ids": [
+     "product:evaluation"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "product:glass-polish",
+    "node_type": "product",
+    "title": "Polimento de vidros",
+    "status": "approved",
+    "text": "Trata marcas e manchas compatíveis com polimento e melhora a leitura visual dos vidros. Wilian avalia o estado do vidro e indica o acabamento possível antes do serviço.",
+    "path": [
+     "Utzig Garage",
+     "Brilho e correção",
+     "Polimento de vidros"
+    ],
+    "branch_node_ids": [
+     "product:glass-polish"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "product:headlight-restoration",
+    "node_type": "product",
+    "title": "Restauração de faróis",
+    "status": "approved",
+    "text": "Faróis opacos fazem o carro parecer mais cansado. A restauração trabalha a transparência e o acabamento da lente, com proteção indicada conforme sua condição.",
+    "path": [
+     "Utzig Garage",
+     "Brilho e correção",
+     "Restauração de faróis"
+    ],
+    "branch_node_ids": [
+     "product:headlight-restoration"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "product:interior-cleaning",
+    "node_type": "product",
+    "title": "Higienização interna",
+    "status": "approved",
+    "text": "Cuidado profundo para bancos, carpetes, painéis e áreas de contato. A limpeza trata sujeira e odores com equipamentos e produtos compatíveis com cada revestimento, para um interior mais agradável. A partir de R$ (removido).",
+    "path": [
+     "Utzig Garage",
+     "Limpeza e higienização",
+     "Higienização interna"
+    ],
+    "branch_node_ids": [
+     "product:interior-cleaning"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "product:leather-conditioning",
+    "node_type": "product",
+    "title": "Hidratação dos couros",
+    "status": "approved",
+    "text": "Tratamento para bancos e revestimentos de couro que combina limpeza, hidratação e acabamento. Ajuda a manter o toque e a apresentação das superfícies no uso diário.",
+    "path": [
+     "Utzig Garage",
+     "Limpeza e higienização",
+     "Hidratação dos couros"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "product:ppf",
+    "node_type": "product",
+    "title": "PPF",
+    "status": "approved",
+    "text": "Uma proteção transparente para áreas expostas a pedras, atrito e pequenos riscos. O PPF ajuda a preservar a pintura original, tem característica autorreparável e pode ser aplicado em partes selecionadas. A partir de R$ (removido); garantia informada de 10 anos.",
+    "path": [
+     "Utzig Garage",
+     "Proteção",
+     "PPF"
+    ],
+    "branch_node_ids": [
+     "product:ppf"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "product:seat-vitrification",
+    "node_type": "product",
+    "title": "Vitrificação de plásticos e couros",
+    "status": "approved",
+    "text": "Camada de proteção para bancos e estofados, indicada conforme o material. Ajuda a reduzir a absorção de sujeira e facilita a rotina de cuidado com o interior.",
+    "path": [
+     "Utzig Garage",
+     "Proteção",
+     "Vitrificação de plásticos e couros"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   },
+   {
+    "id": "product:technical-polish",
+    "node_type": "product",
+    "title": "Polimento técnico",
+    "status": "approved",
+    "text": "Correção de pintura para reduzir microrriscos, hologramas e sinais de oxidação compatíveis com o processo. Recupera profundidade de cor e brilho, além de preparar a superfície para proteção. A partir de R$ (removido).",
+    "path": [
+     "Utzig Garage",
+     "Brilho e correção",
+     "Polimento técnico"
+    ],
+    "branch_node_ids": [
+     "product:technical-polish"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "product:vitrification",
+    "node_type": "product",
+    "title": "Vitrificação da pintura",
+    "status": "approved",
+    "text": "Proteção cerâmica que destaca o brilho, facilita a limpeza e ajuda a proteger a superfície contra contaminantes. O preparo e a aplicação são personalizados; durabilidade informada de até 3 anos. A partir de R$ (removido).",
+    "path": [
+     "Utzig Garage",
+     "Proteção",
+     "Vitrificação da pintura"
+    ],
+    "branch_node_ids": [
+     "product:vitrification"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "product:windshield-crystallization",
+    "node_type": "product",
+    "title": "Cristalização do para-brisa",
+    "status": "approved",
+    "text": "Tratamento para o para-brisa com repelência à água e acabamento mais fácil de manter. Uma camada de cuidado que favorece a visibilidade em dias de chuva, conforme a condição do vidro.",
+    "path": [
+     "Utzig Garage",
+     "Proteção",
+     "Cristalização do para-brisa"
+    ],
+    "branch_node_ids": [
+     "product:windshield-crystallization"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "rule:human-handoff",
+    "node_type": "rule",
+    "title": "Encaminhamento humano",
+    "status": "approved",
+    "text": "Preço, agenda, disponibilidade e resultado são confirmados pelo Wilian.",
+    "path": [
+     "Utzig Garage",
+     "Encaminhamento humano"
+    ],
+    "branch_node_ids": [
+     "product:evaluation",
+     "product:commercial-polish",
+     "product:glass-polish",
+     "product:technical-polish",
+     "product:headlight-restoration",
+     "product:interior-cleaning",
+     "product:engine-bay-wash",
+     "product:detailed-wash",
+     "product:windshield-crystallization",
+     "product:ppf",
+     "product:vitrification"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "rule:one-question",
+    "node_type": "rule",
+    "title": "Uma pergunta útil por turno",
+    "status": "approved",
+    "text": "A assistente responde primeiro e faz no máximo uma pergunta útil por turno.",
+    "path": [
+     "Utzig Garage",
+     "Uma pergunta útil por turno"
+    ],
+    "branch_node_ids": [
+     "product:evaluation",
+     "product:commercial-polish",
+     "product:glass-polish",
+     "product:technical-polish",
+     "product:headlight-restoration",
+     "product:interior-cleaning",
+     "product:engine-bay-wash",
+     "product:detailed-wash",
+     "product:windshield-crystallization",
+     "product:ppf",
+     "product:vitrification"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "rule:photos-no-diagnosis",
+    "node_type": "rule",
+    "title": "Fotos sem diagnóstico",
+    "status": "approved",
+    "text": "Fotos recebidas servem como contexto inicial e não autorizam diagnóstico, preço ou promessa de resultado.",
+    "path": [
+     "Utzig Garage",
+     "Fotos sem diagnóstico"
+    ],
+    "branch_node_ids": [
+     "product:evaluation",
+     "product:commercial-polish",
+     "product:glass-polish",
+     "product:technical-polish",
+     "product:headlight-restoration",
+     "product:interior-cleaning",
+     "product:engine-bay-wash",
+     "product:detailed-wash",
+     "product:windshield-crystallization",
+     "product:ppf",
+     "product:vitrification"
+    ],
+    "used_by_sdr": false
+   },
+   {
+    "id": "tone:consultative",
+    "node_type": "tone",
+    "title": "Tom consultivo e técnico",
+    "status": "approved",
+    "text": "Linguagem jovem, clara e humana, com uma pergunta útil por turno e sem pressão comercial. Mensagens curtas e objetivas: no máximo duas frases curtas por mensagem. Não repita explicações nem resumos já enviados. Emoji só na primeira mensagem e na mensagem de encerramento, no máximo um. Refira-se ao negócio como Utzig Garage do Wilian, alternando com Utzig e Wilian. Nunca use apelido para o dono.",
+    "path": [
+     "Utzig Garage",
+     "Tom consultivo e técnico"
+    ],
+    "branch_node_ids": [],
+    "used_by_sdr": false
+   }
+  ],
+  "by_branch": {
+   "product:evaluation": [
+    "faq:assessment",
+    "faq:location",
+    "faq:photos",
+    "faq:price-and-schedule",
+    "faq:service:evaluation",
+    "faq:utzig:how-to-quote",
+    "faq:utzig:in-person",
+    "faq:utzig:next-steps",
+    "faq:utzig:photos-optional",
+    "faq:utzig:photos-what",
+    "faq:utzig:quote-by-photo",
+    "faq:utzig:services-overview"
+   ],
+   "product:commercial-polish": [
+    "faq:assessment",
+    "faq:location",
+    "faq:photos",
+    "faq:price-and-schedule",
+    "faq:service:commercial-polish",
+    "faq:service:commercial-polish:polimento-comercial-diferenca",
+    "faq:utzig:duration-polish",
+    "faq:utzig:how-to-quote",
+    "faq:utzig:in-person",
+    "faq:utzig:next-steps",
+    "faq:utzig:photos-optional",
+    "faq:utzig:photos-what",
+    "faq:utzig:quote-by-photo",
+    "faq:utzig:services-overview"
+   ],
+   "product:glass-polish": [
+    "faq:assessment",
+    "faq:location",
+    "faq:photos",
+    "faq:price-and-schedule",
+    "faq:service:glass-polish",
+    "faq:service:glass-polish:vidros-orcamento",
+    "faq:utzig:how-to-quote",
+    "faq:utzig:in-person",
+    "faq:utzig:next-steps",
+    "faq:utzig:photos-optional",
+    "faq:utzig:photos-what",
+    "faq:utzig:quote-by-photo",
+    "faq:utzig:services-overview"
+   ],
+   "product:technical-polish": [
+    "faq:assessment",
+    "faq:location",
+    "faq:photos",
+    "faq:price-and-schedule",
+    "faq:service:technical-polish",
+    "faq:service:technical-polish:polimento-anterior",
+    "faq:service:technical-polish:polimento-avaliacao",
+    "faq:service:technical-polish:polimento-espelhamento",
+    "faq:service:technical-polish:polimento-foco",
+    "faq:utzig:how-to-quote",
+    "faq:utzig:in-person",
+    "faq:utzig:next-steps",
+    "faq:utzig:photos-optional",
+    "faq:utzig:photos-what",
+    "faq:utzig:quote-by-photo",
+    "faq:utzig:services-overview"
+   ],
+   "product:headlight-restoration": [
+    "faq:assessment",
+    "faq:location",
+    "faq:photos",
+    "faq:price-and-schedule",
+    "faq:service:headlight-restoration",
+    "faq:service:headlight-restoration:farois-resultado",
+    "faq:service:headlight-restoration:farois-uv",
+    "faq:utzig:how-to-quote",
+    "faq:utzig:in-person",
+    "faq:utzig:next-steps",
+    "faq:utzig:photos-optional",
+    "faq:utzig:photos-what",
+    "faq:utzig:quote-by-photo",
+    "faq:utzig:services-overview"
+   ],
+   "product:interior-cleaning": [
+    "faq:assessment",
+    "faq:location",
+    "faq:photos",
+    "faq:price-and-schedule",
+    "faq:service:interior-cleaning",
+    "faq:service:interior-cleaning:higienizacao-estrada",
+    "faq:service:interior-cleaning:higienizacao-preco-tempo",
+    "faq:service:interior-cleaning:higienizacao-revestimento",
+    "faq:utzig:how-to-quote",
+    "faq:utzig:in-person",
+    "faq:utzig:next-steps",
+    "faq:utzig:photos-optional",
+    "faq:utzig:photos-what",
+    "faq:utzig:quote-by-photo",
+    "faq:utzig:services-overview"
+   ],
+   "product:engine-bay-wash": [
+    "faq:assessment",
+    "faq:location",
+    "faq:photos",
+    "faq:price-and-schedule",
+    "faq:service:engine-bay-wash",
+    "faq:service:engine-bay-wash:motor-estrada",
+    "faq:service:engine-bay-wash:motor-vazamento",
+    "faq:utzig:how-to-quote",
+    "faq:utzig:in-person",
+    "faq:utzig:next-steps",
+    "faq:utzig:photos-optional",
+    "faq:utzig:photos-what",
+    "faq:utzig:quote-by-photo",
+    "faq:utzig:services-overview"
+   ],
+   "product:detailed-wash": [
+    "faq:assessment",
+    "faq:location",
+    "faq:photos",
+    "faq:price-and-schedule",
+    "faq:service:detailed-wash",
+    "faq:service:detailed-wash:lavagem-detalhada-objetivo",
+    "faq:service:detailed-wash:lavagem-detalhada-preco",
+    "faq:utzig:duration-wash",
+    "faq:utzig:how-to-quote",
+    "faq:utzig:in-person",
+    "faq:utzig:next-steps",
+    "faq:utzig:photos-optional",
+    "faq:utzig:photos-what",
+    "faq:utzig:quote-by-photo",
+    "faq:utzig:services-overview"
+   ],
+   "product:windshield-crystallization": [
+    "faq:assessment",
+    "faq:location",
+    "faq:photos",
+    "faq:price-and-schedule",
+    "faq:service:windshield-crystallization",
+    "faq:utzig:how-to-quote",
+    "faq:utzig:in-person",
+    "faq:utzig:next-steps",
+    "faq:utzig:photos-optional",
+    "faq:utzig:photos-what",
+    "faq:utzig:quote-by-photo",
+    "faq:utzig:services-overview"
+   ],
+   "product:ppf": [
+    "faq:assessment",
+    "faq:location",
+    "faq:photos",
+    "faq:price-and-schedule",
+    "faq:service:ppf",
+    "faq:service:ppf:ppf-avaliacao",
+    "faq:service:ppf:ppf-preco-tempo",
+    "faq:utzig:how-to-quote",
+    "faq:utzig:in-person",
+    "faq:utzig:next-steps",
+    "faq:utzig:photos-optional",
+    "faq:utzig:photos-what",
+    "faq:utzig:ppf-areas",
+    "faq:utzig:ppf-interior",
+    "faq:utzig:quote-by-photo",
+    "faq:utzig:services-overview"
+   ],
+   "product:vitrification": [
+    "faq:assessment",
+    "faq:location",
+    "faq:photos",
+    "faq:price-and-schedule",
+    "faq:service:vitrification",
+    "faq:service:vitrification:vitrificacao-avaliacao",
+    "faq:service:vitrification:vitrificacao-preco-tempo",
+    "faq:utzig:how-to-quote",
+    "faq:utzig:in-person",
+    "faq:utzig:next-steps",
+    "faq:utzig:photos-optional",
+    "faq:utzig:photos-what",
+    "faq:utzig:quote-by-photo",
+    "faq:utzig:services-overview"
+   ]
+  },
+  "by_question": {
+   "nome_cliente": [
+    "faq:qualification:nome_cliente"
+   ],
+   "servico": [
+    "faq:qualification:servico"
+   ],
+   "modelo_veiculo": [
+    "faq:qualification:modelo_veiculo"
+   ],
+   "condicao": [
+    "faq:qualification:condicao"
+   ],
+   "foco_brilho_riscos": [
+    "faq:qualification:foco_brilho_riscos"
+   ],
+   "vazamento_oleo": [
+    "faq:qualification:vazamento_oleo"
+   ],
+   "estrada_de_chao": [
+    "faq:qualification:estrada_de_chao"
+   ],
+   "evaluation_route": [
+    "faq:qualification:evaluation_route"
+   ],
+   "revestimento_bancos": [
+    "faq:qualification:revestimento_bancos"
+   ],
+   "procedimento_anterior": [
+    "faq:qualification:procedimento_anterior"
+   ]
+  },
+  "by_stage": {
+   "opening": [],
+   "confirmation": [],
+   "handoff": [
+    "rule:human-handoff"
+   ]
+  }
+ }
+}

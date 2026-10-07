@@ -2902,6 +2902,15 @@ SYSTEM_PROMPT = (
 
 
 
+def _lead_scoped_field(field: dict) -> bool:
+    """A field the graph scopes to the persona describes the lead, not the order."""
+    return bool(
+        field.get("carry_over")
+        or str(field.get("scope") or "") == "persona"
+        or str(field.get("owner_node_id") or "").startswith("persona:")
+    )
+
+
 def _carry_over_field_keys(document: dict) -> set[str]:
     """Fields que atravessam o fim de um pedido, segundo o contrato compilado.
 
@@ -2913,7 +2922,7 @@ def _carry_over_field_keys(document: dict) -> set[str]:
     for contract in [document.get("common_contract") or {},
                      *(document.get("branch_contracts") or {}).values()]:
         for field in (contract or {}).get("fields") or []:
-            if isinstance(field, dict) and field.get("carry_over"):
+            if isinstance(field, dict) and _lead_scoped_field(field):
                 key = str(field.get("key") or "").strip()
                 if key:
                     keys.add(key)
@@ -2998,7 +3007,7 @@ def _seed_carried_facts(
             *((document.get("branch_contracts") or {}).values()),
         ]
         for field in contract.get("fields") or []
-        if field.get("carry_over")
+        if _lead_scoped_field(field)
     }
     for row in rows:
         key = str(row.get("field_key") or "")
@@ -4983,6 +4992,30 @@ def _consultative_support_active(
     return bool(collection_complete and customer_questions and not post_support)
 
 
+def _lead_stage_for_turn(
+    *, confirmation_accepted: bool, qualification_complete: bool,
+    grouped_facts: dict[str, list[dict[str, Any]]],
+) -> str:
+    """Funnel stage from what the conversation proved, never from points.
+
+    contatado: the SDR answered and nothing is known yet; engajado: the customer
+    gave at least one fact; qualificado: every required SDR question answered;
+    oportunidade: the customer confirmed the summary, which is the handoff to
+    the closer. commit() keeps the stage monotonic.
+    """
+    if confirmation_accepted:
+        return "oportunidade"
+    if qualification_complete:
+        return "qualificado"
+    if any(
+        str(fact.get("status") or "") == "known"
+        for rows in grouped_facts.values() for fact in rows or []
+        if isinstance(fact, dict)
+    ):
+        return "engajado"
+    return "contatado"
+
+
 def _qualification_confirmation_accepted(
     context: ConversationContext, *, confirmation: dict[str, Any],
     confirmation_ref: str, qualification_complete: bool,
@@ -4995,13 +5028,15 @@ def _qualification_confirmation_accepted(
         )
         or ""
     )
+    # The customer's explicit affirmation of a complete qualification is the
+    # confirmation. The model's reference echo is lineage, not a precondition;
+    # a pending summary of another branch still is not this confirmation.
     return bool(
         qualification_complete
         and active_branch_node_ids
         and not customer_questions
-        and pending_ref == confirmation_ref
+        and (not pending_ref or pending_ref == confirmation_ref)
         and str(confirmation.get("state") or "") == "affirm"
-        and str(confirmation.get("target_ref") or "") == pending_ref
         and graph_proof_checker_v3._literal_span(
             _latest_user_message(context), str(confirmation.get("evidence_span") or "")
         )
@@ -5089,16 +5124,16 @@ def _finalize_resolved_reply(
         gates.append("empty_reply")
     public_question = "?" in proposal.reply
     if public_question and kind in {None, "none"}:
-        gates.append("question_kind_required_for_public_question")
+        warnings.append("question_kind_required_for_public_question")
     if kind == "qualification" and (
         not public_question or not field or not question_id
     ):
-        gates.append("qualification_question_field_not_eligible")
+        warnings.append("qualification_question_field_not_eligible")
     if kind in {"consultative", "confirmation"} and not public_question:
-        gates.append("question_kind_without_public_question")
+        warnings.append("question_kind_without_public_question")
     matched_keys = conversation_repetition.question_field_matches(proposal.reply, contract)
     if matched_keys and (kind != "qualification" or matched_keys != {asked_field}):
-        gates.append("public_question_field_metadata_mismatch")
+        warnings.append("public_question_field_metadata_mismatch")
     profile_name = context.retrieval_trace.get("profile_name") or {}
     if (
         kind == "qualification"
@@ -5106,9 +5141,9 @@ def _finalize_resolved_reply(
         and asked_field == profile_name.get("field_key")
         and str(profile_name.get("candidate") or "") not in proposal.reply
     ):
-        gates.append("profile_name_confirmation_must_quote_candidate")
+        warnings.append("profile_name_confirmation_must_quote_candidate")
     if not repetition["passed"]:
-        gates.extend(repetition["failures"])
+        warnings.extend(repetition["failures"])
     previous_reply = next((
         str(row.get("content") or "") for row in reversed(context.messages)
         if row.get("role") == "assistant"
@@ -5121,7 +5156,7 @@ def _finalize_resolved_reply(
             _last_public_question(proposal.reply),
         ) >= 0.67
     ):
-        gates.append("repeated_public_question")
+        warnings.append("repeated_public_question")
     gates = list(dict.fromkeys(gates))
     warnings = list(dict.fromkeys([*(resolved.proof.get("quality_warnings") or []), *warnings]))
     state = {**context.cart, "asked_question_node_ids": [
@@ -6048,7 +6083,11 @@ def _decide(
         return (
             ConversationDecision(classifier="graph_proof_checker_v3",
                                  intent=resolved_intent,
-                                 route=route, confidence=1, lead_stage="qualificado" if qualification_complete else "engajado",
+                                 route=route, confidence=1, lead_stage=_lead_stage_for_turn(
+                                     confirmation_accepted=confirmation_accepted,
+                                     qualification_complete=qualification_complete,
+                                     grouped_facts=next_grouped,
+                                 ),
                                  handoff_reason=(
                                      "graph_qualification_confirmed" if confirmation_accepted
                                      else "graph_terminal_qualification" if terminal_intent else None

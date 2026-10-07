@@ -7,6 +7,24 @@ from typing import Any
 from repositories import transport
 
 
+WHATSAPP_PROVIDERS = ("meta_cloud", "evolution_baileys")
+
+
+def list_enabled_bindings() -> list[dict[str, Any]]:
+    """Active WhatsApp bindings whose `metadata.chatwoot.enabled` is true."""
+    # Raises on a database failure: a webhook must fail (and be retried by
+    # Chatwoot) rather than mistake an outage for "no inbox configured".
+    result = transport._execute_with_retry(
+        transport.get_client().table("workflow_bindings").select("id,provider,metadata")
+        .eq("active", True).in_("provider", list(WHATSAPP_PROVIDERS))
+    )
+    rows = getattr(result, "data", None) or []
+    return [
+        row for row in rows
+        if ((row.get("metadata") or {}).get("chatwoot") or {}).get("enabled") is True
+    ]
+
+
 def enqueue_projections(binding_id: str, *, limit: int = 500) -> int:
     result = transport._execute_with_retry(
         transport.get_client().rpc(
@@ -126,11 +144,12 @@ def get_conversation_by_chatwoot_id(
     )
 
 
-def pending_delivery_updates(*, limit: int = 50) -> list[dict[str, Any]]:
+def pending_delivery_updates(binding_id: str, *, limit: int = 50) -> list[dict[str, Any]]:
     return transport._q(
         transport.get_client().table("chatwoot_bridge_operations").select(
             "id,channel_binding_id,lead_ref,chatwoot_message_id,chatwoot_conversation_id,transport_buffer_id"
         ).eq("source_kind", "chatwoot_event").eq("operation", "human_reply")
+        .eq("channel_binding_id", binding_id)
         .eq("status", "completed").not_.is_("transport_buffer_id", "null")
         .is_("chatwoot_delivery_status", "null").order("created_at").limit(limit)
     )

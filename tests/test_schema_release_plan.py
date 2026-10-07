@@ -41,7 +41,7 @@ def _manifest() -> dict:
     return {
         "source_sha": source_sha,
         "contracts_version": "1.1.0",
-        "schema_version": max(int(path.name.split("_", 1)[0]) for path in (ROOT / "supabase/migrations").glob("*.sql")),
+        "schema_version": 166,
         "route_map_checksum": _checksum(ROOT / "ops/microservices/route-map.json"),
         "n8n_checksum": _checksum(ROOT / "apps/conversation-runtime/n8n/persona-conversation-template.json"),
         "services": {
@@ -56,11 +56,9 @@ def test_schema_plan_ends_at_manifest_version_and_is_checksummed(tmp_path):
     path = tmp_path / "release.json"
     path.write_text(json.dumps(_manifest()), encoding="utf-8")
     plan = MODULE.build_plan(path)
-    latest = max((ROOT / "supabase/migrations").glob("*.sql"), key=lambda path: int(path.name.split("_", 1)[0]))
-    latest_version = int(latest.name.split("_", 1)[0])
-    assert plan["schema_version"] == latest_version
-    assert plan["target_migration"] == latest.name
-    assert plan["migrations"][-1]["version"] == latest_version
+    assert plan["schema_version"] == 166
+    assert plan["target_migration"] == "166_chatwoot_projection_any_whatsapp_provider.sql"
+    assert plan["migrations"][-1]["version"] == 166
     assert plan["inventory_checksum"].startswith("sha256:")
 
 

@@ -110,7 +110,7 @@ def test_database_jwt_is_restricted_to_manifest_role(monkeypatch):
 def test_readiness_uses_image_schema_requirement_and_build_metadata(monkeypatch):
     from routes import health
 
-    monkeypatch.setenv("CURRENT_SCHEMA_VERSION", "131")
+    monkeypatch.setenv("CURRENT_SCHEMA_VERSION", "163")
     monkeypatch.setenv("REQUIRED_SCHEMA_VERSION", "131")
     monkeypatch.setenv("SOURCE_SHA", "a" * 40)
     monkeypatch.setenv("BUILD_DIGEST", "sha256:image")
@@ -119,7 +119,7 @@ def test_readiness_uses_image_schema_requirement_and_build_metadata(monkeypatch)
     result = health.health_ready()
 
     assert result["status"] == "ready"
-    assert result["required_schema_version"] == 131
+    assert result["required_schema_version"] == 163
     assert result["source_sha"] == "a" * 40
     assert result["build_digest"] == "sha256:image"
 
@@ -136,7 +136,7 @@ def test_control_plane_repository_has_only_the_reachable_domain_surface():
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
 
-    assert len(functions) == 202
+    assert len(functions) == 203
     assert functions.isdisjoint({
         "claim_conversation_commit",
         "claim_pending_media_assets",

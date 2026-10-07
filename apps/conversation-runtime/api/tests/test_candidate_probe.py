@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.probe_conversation_candidate import select_cases, validate_case
+from scripts.probe_conversation_candidate import quality_observations, select_cases, validate_case
 
 
 def test_candidate_can_select_one_baked_case_for_the_affected_persona():
@@ -23,8 +23,8 @@ def test_candidate_rejects_public_question_without_question_kind():
             "question_kind": "none", "asked_field_key": None,
         }),
     }
-    with pytest.raises(AssertionError, match="no valid question kind"):
-        validate_case({}, result)
+    validate_case({}, result)
+    assert "candidate_public_question_kind_missing" in quality_observations({}, result)
 
 
 def test_candidate_rejects_interrupted_field_repeated_by_model():
@@ -52,15 +52,14 @@ def test_candidate_rejects_interrupted_field_repeated_by_model():
         ),
     }
 
-    with pytest.raises(AssertionError, match="repeated the interrupted"):
-        validate_case(case, result)
+    validate_case(case, result)
+    assert "candidate_interrupted_field_repeated_in_metadata" in quality_observations(case, result)
 
     result["response"].proof.update(asked_field_key=None, question_kind="none")
-    with pytest.raises(AssertionError, match="public text"):
-        validate_case(case, result)
+    validate_case(case, result)
+    assert "candidate_interrupted_field_repeated_in_text" in quality_observations(case, result)
     result["response"].proof["repetition_audit"] = {"passed": True}
-    with pytest.raises(AssertionError, match="public text"):
-        validate_case(case, result)
+    assert "candidate_interrupted_field_repeated_in_text" in quality_observations(case, result)
 
 
 def test_candidate_rejects_utzig_name_question_marked_consultative():
@@ -81,5 +80,5 @@ def test_candidate_rejects_utzig_name_question_marked_consultative():
                    "question_kind": "consultative"},
         ),
     }
-    with pytest.raises(AssertionError, match="contradicts its metadata"):
-        validate_case({}, result)
+    validate_case({}, result)
+    assert "candidate_question_metadata_mismatch" in quality_observations({}, result)

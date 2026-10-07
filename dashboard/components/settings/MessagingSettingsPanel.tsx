@@ -28,6 +28,8 @@ type RoutingConfig = {
   migration_applied?: boolean;
   model_required?: boolean;
   field_extractor?: string | null;
+  /** Agent hours: bundle default, overridden by what is saved on this screen. */
+  business_hours?: { enabled: boolean; start?: string | null; end?: string | null; timezone?: string | null; source?: string };
   readiness?: {
     operational: boolean;
     operational_state: "ready" | "blocked" | "paused";
@@ -482,7 +484,7 @@ function CanalSubPanel({ personaSlug }: { personaSlug: string }) {
   );
 }
 
-function AgentesSubPanel({ personaSlug }: { personaSlug: string }) {
+export function AgentesSubPanel({ personaSlug }: { personaSlug: string }) {
   const [routing, setRouting] = useState<RoutingConfig | null>(null);
   const [routingBusy, setRoutingBusy] = useState(false);
   const [routingMessage, setRoutingMessage] = useState("");
@@ -526,6 +528,33 @@ function AgentesSubPanel({ personaSlug }: { personaSlug: string }) {
         : "Motor selecionado, mas ainda não operacional. Revise os bloqueios abaixo.");
     } catch (error: any) {
       setRoutingError(error?.message || "Falha ao atualizar o motor de atendimento.");
+    } finally {
+      setRoutingBusy(false);
+    }
+  }
+
+  const hours = routing?.business_hours;
+  const [hoursDraft, setHoursDraft] = useState({ start: "08:00", end: "20:00" });
+  useEffect(() => {
+    if (hours) setHoursDraft({ start: hours.start || "08:00", end: hours.end || "20:00" });
+  }, [hours?.start, hours?.end]);
+
+  // Outside these hours the agent is off for every lead (red in Mensagens); a
+  // conversation already going finishes first. People always send at once.
+  async function saveHours(patch: { enabled?: boolean; start?: string; end?: string }) {
+    if (!personaSlug || routingBusy) return;
+    setRoutingBusy(true);
+    setRoutingMessage("");
+    setRoutingError("");
+    try {
+      const updated = await api.updatePersonaRouting(personaSlug, {
+        business_hours: { timezone: hours?.timezone || "America/Sao_Paulo", ...patch },
+      });
+      setRouting(updated);
+      const saved = updated?.business_hours;
+      setRoutingMessage(saved?.enabled ? `Horário do agente: ${saved.start}–${saved.end}.` : "Agente atende a qualquer hora.");
+    } catch (error: any) {
+      setRoutingError(error?.message || "Falha ao salvar o horário do agente.");
     } finally {
       setRoutingBusy(false);
     }
@@ -629,6 +658,42 @@ function AgentesSubPanel({ personaSlug }: { personaSlug: string }) {
           </p>
         )}
       </section>
+
+      {hours && (
+        <section className="rounded-2xl border border-white/10 bg-obs-surface p-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 text-sm font-semibold text-obs-text">
+              <input
+                type="checkbox"
+                role="switch"
+                aria-label="Horário do agente"
+                checked={hours.enabled}
+                disabled={routingBusy}
+                onChange={(event) => saveHours({ enabled: event.target.checked, ...hoursDraft })}
+              />
+              Horário do agente
+            </label>
+            {hours.enabled && (
+              <>
+                <input type="time" aria-label="Abre" value={hoursDraft.start} disabled={routingBusy}
+                  onChange={(event) => setHoursDraft((value) => ({ ...value, start: event.target.value }))}
+                  className="rounded-lg border border-white/10 bg-obs-base/60 px-2 py-1 text-sm text-obs-text" />
+                <span className="text-xs text-obs-faint">até</span>
+                <input type="time" aria-label="Fecha" value={hoursDraft.end} disabled={routingBusy}
+                  onChange={(event) => setHoursDraft((value) => ({ ...value, end: event.target.value }))}
+                  className="rounded-lg border border-white/10 bg-obs-base/60 px-2 py-1 text-sm text-obs-text" />
+                <button type="button"
+                  disabled={routingBusy || hoursDraft.start >= hoursDraft.end || (hoursDraft.start === hours.start && hoursDraft.end === hours.end)}
+                  onClick={() => saveHours({ enabled: true, ...hoursDraft })}
+                  className="rounded-lg border border-white/10 px-3 py-1 text-xs text-obs-text disabled:opacity-40">Salvar</button>
+              </>
+            )}
+          </div>
+          <p className="mt-2 text-xs text-obs-subtle">
+            Fora do horário o agente fica desligado; uma conversa em andamento termina antes. Atendentes enviam sempre.
+          </p>
+        </section>
+      )}
 
       <section className={`rounded-2xl border border-white/10 bg-obs-surface p-4 ${!needsAgent ? "opacity-60" : ""}`}>
         <h3 className="text-sm font-semibold text-obs-text">Agente de IA</h3>

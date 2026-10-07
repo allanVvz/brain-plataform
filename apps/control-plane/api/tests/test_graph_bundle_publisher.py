@@ -13,7 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(API_ROOT) not in sys.path:
     sys.path.insert(0, str(API_ROOT))
 
-from services import graph_bundle, graph_bundle_publisher
+from services import graph_bundle, graph_bundle_publisher, graph_editor
 
 
 def _bundle() -> dict:
@@ -23,8 +23,9 @@ def _bundle() -> dict:
     )
 
 
-def test_stage_bundle_materializes_then_requires_exact_runtime_checksum(monkeypatch):
+def test_stage_bundle_leaves_active_source_untouched_and_requires_exact_runtime_checksum(monkeypatch):
     bundle = _bundle()
+    bundle.setdefault("metadata", {})["baseline_publication"] = {"publication_id": "base-publication"}
     plan = graph_bundle.build_publication_plan(bundle)
     normalized = graph_bundle.normalize_bundle(bundle)
     persona, compiled_nodes, compiled_edges, _profile = graph_bundle._compiler_inputs(bundle)
@@ -101,6 +102,7 @@ def test_stage_bundle_materializes_then_requires_exact_runtime_checksum(monkeypa
         graph_bundle_publisher.supabase_client, "insert_event", lambda *_a, **_k: None
     )
 
+    monkeypatch.setattr(graph_editor, "active_publication", lambda slug: {"id": "base-publication"})
     staged = graph_bundle_publisher.stage_bundle(
         bundle,
         approved_draft_checksum=plan["draft_checksum"],
@@ -110,12 +112,8 @@ def test_stage_bundle_materializes_then_requires_exact_runtime_checksum(monkeypa
 
     assert staged["publication"]["checksum"] == plan["runtime_checksum"]
     assert staged["activation"] is None
-    assert materialized_nodes
-    assert len(replaced_nodes) == len(normalized["nodes"])
-    assert len(replaced_edges) == len(normalized["edges"])
-    assert all("source_id" not in row for row in materialized_nodes)
-    assert all(row["metadata"].get("graph_json_node_id") for row in materialized_nodes)
-    assert all(set(row["metadata"]) >= {"active", "graph_json_edge_id"} for row in replaced_edges)
+    assert materialized_nodes == replaced_nodes == replaced_edges == []
+    assert staged["base_publication_id"] == "base-publication"
 
 
 def test_stage_bundle_rejects_stale_human_approval_before_writes(monkeypatch):
@@ -193,6 +191,18 @@ def test_activate_staged_bundle_rejects_publication_of_another_persona(monkeypat
             approved_draft_checksum=plan["draft_checksum"],
             approved_runtime_checksum=plan["runtime_checksum"],
             actor="test",
+            expected_base_publication_id="base-publication",
         )
 
     assert client.rpc_calls == []
+
+
+def test_generated_bundle_keeps_its_base_when_an_editor_has_published_later(monkeypatch):
+    bundle = _bundle()
+    bundle.setdefault("metadata", {})["baseline_publication"] = {"publication_id": "publication-A"}
+    plan = graph_bundle.build_publication_plan(bundle)
+    monkeypatch.setattr(graph_bundle_publisher.supabase_client, "get_persona", lambda slug: {"id": bundle["persona"]["id"]})
+    monkeypatch.setattr(graph_editor, "active_publication", lambda slug: {"id": "publication-B"})
+    monkeypatch.setattr(graph_bundle_publisher.graph_compiler_v3, "compile_persona_publication", lambda *args, **kwargs: pytest.fail("stale bundle compiled"))
+    with pytest.raises(graph_bundle_publisher.GraphBundlePublishError, match="bundle_base_not_active"):
+        graph_bundle_publisher.stage_bundle(bundle, approved_draft_checksum=plan["draft_checksum"], actor="generator")

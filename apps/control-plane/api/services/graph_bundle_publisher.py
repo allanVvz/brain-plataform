@@ -23,7 +23,19 @@ def _preflight_source_scope(
     normalized: dict[str, Any],
     node_rows: list[dict[str, Any]],
     edge_rows: list[dict[str, Any]],
+    base_document: dict[str, Any] | None = None,
 ) -> None:
+    base_document = base_document or {}
+    retired = {row.get("id") for row in normalized.get("metadata", {}).get("retired_nodes", []) if isinstance(row, dict)}
+    base_nodes = {node["id"]: node for node in base_document.get("nodes", [])}
+    permitted_retired_ids = {str(base_nodes[key].get("projection_node_id")) for key in retired if key in base_nodes}
+    declared_removed_edges = {row.get("id") for row in (normalized.get("metadata", {}).get("visual_media_reconciliation") or {}).get("soft_disabled_edges", []) if isinstance(row, dict)}
+    permitted_removed_edges = {
+        (str(base_nodes[e["source"]].get("projection_node_id")), str(base_nodes[e["target"]].get("projection_node_id")), e["relation_type"])
+        for e in base_document.get("edges", [])
+        if (e.get("id") in declared_removed_edges or e["source"] in retired or e["target"] in retired)
+        and e["source"] in base_nodes and e["target"] in base_nodes
+    }
     desired_nodes = {
         (node["node_type"], node["slug"]) for node in normalized["nodes"]
     }
@@ -39,6 +51,7 @@ def _preflight_source_scope(
         for row in node_rows
         if str(row.get("status") or "").lower() in graph_compiler_v3.PUBLISHED_STATUSES
         and str(row.get("id") or "") not in desired_projection_ids
+        and str(row.get("id") or "") not in permitted_retired_ids
         and not (
             has_authored_persona
             and str(row.get("node_type") or "").lower() == "persona"
@@ -83,7 +96,7 @@ def _preflight_source_scope(
         and str(row.get("source_node_id")) not in ignored_legacy_persona_projection_ids
         and str(row.get("target_node_id")) not in ignored_legacy_persona_projection_ids
     }
-    unexpected_edges = sorted(existing_edges - desired_edges)
+    unexpected_edges = sorted(existing_edges - desired_edges - permitted_removed_edges)
     if unexpected_edges:
         raise GraphBundlePublishError(
             "source_graph_has_unplanned_edges:" + ",".join(
@@ -119,131 +132,36 @@ def stage_bundle(
     if not persona or str(persona.get("id") or "") != persona_id:
         raise GraphBundlePublishError("persona_scope_mismatch")
 
+    # Editor candidates compile their immutable reviewed inputs. Published
+    # source nodes/edges are replaced only by commit_graph_editor_v1.
+    from services import graph_editor
+    try:
+        base_publication = graph_editor.active_publication(persona_slug)
+    except graph_editor.GraphEditorError as exc:
+        if str(exc) != "active_publication_not_found":
+            raise
+        base_publication = None
+    active_base_id = str(base_publication["id"]) if base_publication else None
+    reviewed_base_id = (normalized.get("metadata", {}).get("baseline_publication") or {}).get("publication_id")
+    reviewed_base_id = str(reviewed_base_id) if reviewed_base_id else None
+    if reviewed_base_id != active_base_id:
+        raise GraphBundlePublishError("bundle_base_not_active")
+    reviewed_checksum = (normalized.get("metadata", {}).get("baseline_publication") or {}).get("checksum")
+    if reviewed_checksum and reviewed_checksum != (base_publication or {}).get("checksum"):
+        raise GraphBundlePublishError("bundle_base_checksum_mismatch")
     current_nodes, current_edges = supabase_client.list_all_knowledge_graph(
         persona_id=persona_id, limit_nodes=10000
     )
-    _preflight_source_scope(normalized, current_nodes, current_edges)
 
-    projection_by_stable: dict[str, str] = {}
-    for node in normalized["nodes"]:
-        row = supabase_client.upsert_knowledge_node({
-            "id": node["projection_node_id"],
-            "persona_id": persona_id,
-            "node_type": node["node_type"],
-            "slug": node["slug"],
-            "title": node["title"],
-            "summary": node["summary"],
-            "tags": node["tags"],
-            "status": node["status"],
-            "source_table": "graph_bundle",
-            "metadata": {
-                "graph_json_node_id": node["id"],
-                "graph_bundle_draft_checksum": approved_draft_checksum,
-                **node["data"],
-            },
-        })
-        if not row or not row.get("id"):
-            raise GraphBundlePublishError(f"node_materialization_failed:{node['id']}")
-        if str(row["id"]) != node["projection_node_id"]:
-            raise GraphBundlePublishError(
-                f"projection_node_id_drift:{node['id']}:{row['id']}:"
-                f"{node['projection_node_id']}"
-            )
-        row = supabase_client.update_knowledge_node(
-            str(row["id"]),
-            {
-                "slug": node["slug"],
-                "title": node["title"],
-                "summary": node["summary"],
-                "tags": node["tags"],
-                "status": node["status"],
-                "source_table": "graph_bundle",
-                "metadata": {
-                    "graph_json_node_id": node["id"],
-                    "graph_bundle_draft_checksum": approved_draft_checksum,
-                    **node["data"],
-                },
-            },
-            mark_related_faqs=False,
-        )
-        if not row:
-            raise GraphBundlePublishError(f"node_projection_replace_failed:{node['id']}")
-        projection_by_stable[node["id"]] = str(row["id"])
-
-    for edge in normalized["edges"]:
-        row = supabase_client.upsert_knowledge_edge(
-            projection_by_stable[edge["source"]],
-            projection_by_stable[edge["target"]],
-            edge["relation_type"],
-            persona_id=persona_id,
-            weight=edge["weight"],
-            metadata={
-                "active": True,
-                "primary_tree": edge["relation_type"] == "contains",
-                "graph_json_edge_id": edge["id"],
-                "graph_bundle_draft_checksum": approved_draft_checksum,
-                **edge["metadata"],
-            },
-        )
-        if not row:
-            raise GraphBundlePublishError(f"edge_materialization_failed:{edge['id']}")
-        row = supabase_client.update_knowledge_edge(
-            str(row["id"]),
-            {
-                "persona_id": persona_id,
-                "weight": edge["weight"],
-                "metadata": {
-                    "active": True,
-                    "primary_tree": edge["relation_type"] == "contains",
-                    "graph_json_edge_id": edge["id"],
-                    "graph_bundle_draft_checksum": approved_draft_checksum,
-                    **edge["metadata"],
-                },
-            },
-        )
-        if not row:
-            raise GraphBundlePublishError(f"edge_projection_replace_failed:{edge['id']}")
-
-    node_rows, edge_rows = supabase_client.list_all_knowledge_graph(
-        persona_id=persona_id, limit_nodes=10000
-    )
-    document = graph_compiler_v3.compile_graph(
-        persona=persona,
-        node_rows=node_rows,
-        edge_rows=edge_rows,
-        embedding_profile=normalized["metadata"]["embedding_profile"],
-    )
-    if document["checksum"] != plan["runtime_checksum"]:
-        raise GraphBundlePublishError(
-            f"materialized_runtime_checksum_mismatch:{document['checksum']}:"
-            f"{plan['runtime_checksum']}"
-        )
-
+    _preflight_source_scope(normalized, current_nodes, current_edges, (base_publication or {}).get("document_json"))
+    _, node_rows, edge_rows, profile = graph_bundle._compiler_inputs(normalized)
     staged = graph_compiler_v3.compile_persona_publication(
-        persona_slug,
-        activate=False,
-        embedder=embedder,
-        embedding_profile=normalized["metadata"]["embedding_profile"],
+        persona_slug, activate=False, embedder=embedder, embedding_profile=profile,
+        source_rows=(node_rows, edge_rows),
     )
-    publication = staged.get("publication") or {}
-    if publication.get("checksum") != plan["runtime_checksum"]:
+    if (staged.get("publication") or {}).get("checksum") != plan["runtime_checksum"]:
         raise GraphBundlePublishError("staged_publication_checksum_mismatch")
-    supabase_client.insert_event({
-        "event_type": "graph_bundle_publication_staged",
-        "entity_type": "graph_publication",
-        "entity_id": str(publication.get("id") or ""),
-        "persona_id": persona_id,
-        "payload": {
-            "persona_slug": persona_slug,
-            "draft_checksum": plan["draft_checksum"],
-            "runtime_checksum": plan["runtime_checksum"],
-            "publication_id": publication.get("id"),
-            "version": publication.get("version"),
-            "actor": actor,
-        },
-    }, source="services.graph_bundle_publisher")
-    return {"plan": plan, **staged}
-
+    return {"plan": plan, **staged, "base_publication_id": active_base_id}
 
 def activate_staged_bundle(
     bundle: dict[str, Any],
@@ -252,6 +170,7 @@ def activate_staged_bundle(
     approved_draft_checksum: str,
     approved_runtime_checksum: str,
     actor: str,
+    expected_base_publication_id: str | None,
 ) -> dict[str, Any]:
     plan = graph_bundle.build_publication_plan(bundle)
     if plan.get("draft_checksum") != approved_draft_checksum:
@@ -285,20 +204,20 @@ def activate_staged_bundle(
         )
     if publication.get("checksum") != approved_runtime_checksum:
         raise GraphBundlePublishError("publication_checksum_changed_before_activation")
-    activation = client.rpc(
-        "activate_graph_publication_v3", {"p_publication_id": publication_id}
-    ).execute().data
-    supabase_client.insert_event({
-        "event_type": "graph_bundle_publication_activated",
-        "entity_type": "graph_publication",
-        "entity_id": publication_id,
-        "persona_id": publication.get("persona_id"),
-        "payload": {
-            "draft_checksum": approved_draft_checksum,
-            "runtime_checksum": approved_runtime_checksum,
-            "publication_id": publication_id,
-            "version": publication.get("version"),
-            "actor": actor,
-        },
-    }, source="services.graph_bundle_publisher")
+    if publication.get("status") == "active" and str(supabase_client.get_active_graph_publication(persona_id).get("id")) == publication_id:
+        return {"publication": publication, "activation": {"status": "active", "publication_id": publication_id}}
+    from services import graph_editor
+    import hashlib
+    params = graph_editor._request_params(
+        persona_id, actor,
+        "bundle:" + hashlib.sha256(f"{actor}:{expected_base_publication_id}:{approved_runtime_checksum}".encode()).hexdigest(),
+        "publish", expected_base_publication_id, {"checksum": approved_runtime_checksum,
+            "draft_checksum": approved_draft_checksum},
+    )
+    activation = client.rpc("commit_graph_editor_v1", {
+        **params, "p_publication_id": publication_id,
+        "p_runtime_checksum": approved_runtime_checksum,
+        "p_audit": {"writer": "graph_bundle_publisher", "actor": actor,
+                    "draft_checksum": approved_draft_checksum},
+    }).execute().data
     return {"publication": publication, "activation": activation}

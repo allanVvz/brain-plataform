@@ -274,4 +274,5 @@ def test_agentic_runtime_transport_failure_terminalizes_once_without_retry(monke
     worker._dispatch_inbound(row)
 
     assert len(terminalized) == 1
-    assert handoffs == [9]
+    # A technical failure is logged and terminalized; it never pauses the lead.
+    assert handoffs == []

@@ -497,14 +497,18 @@ def _session_window_closed(lead: dict, window: dict) -> bool:
 
 def _reactivation_text(lead: dict, *, reason: str, window_reason: str = "") -> str:
     """Pick the published opening that matches why the AI came back."""
-    from services import graph_agent_runtime_v3
+    from services import conversation_repetition
 
     published = _reactivation_policy(lead)
     key = _reactivation_key(lead, reason=reason, window_reason=window_reason)
-    variants = published.get(key) or []
-    return graph_agent_runtime_v3._unrepeated_variant(
-        [str(value) for value in variants], _recent_agent_texts(lead)
-    )
+    variants = [text for value in published.get(key) or [] if (text := str(value or "").strip())]
+    recent = _recent_agent_texts(lead)
+    # First published phrasing the customer has not just read; "" when every
+    # variant was already used. The graph is the sole author of this copy.
+    for candidate in variants:
+        if not any(conversation_repetition.is_semantic_repetition(prev, candidate) for prev in recent):
+            return candidate
+    return ""
 
 
 def _reactivation_key(lead: dict, *, reason: str, window_reason: str = "") -> str:

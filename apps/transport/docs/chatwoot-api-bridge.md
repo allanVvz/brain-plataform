@@ -1,10 +1,45 @@
 # Chatwoot API Inbox bridge
 
-The transport-owned bridge mirrors the active `meta_cloud` binding selected by
-`CHATWOOT_BRIDGE_BINDING_ID`. Meta continues to call
-`https://lpapi.vzforeal.com/webhooks/whatsapp`; Chatwoot is a projection of the
+The transport-owned bridge mirrors every active WhatsApp binding (`meta_cloud`
+or `evolution_baileys`) that has `workflow_bindings.metadata.chatwoot.enabled`.
+The WhatsApp provider keeps calling its existing webhook (for Meta,
+`https://lpapi.vzforeal.com/webhooks/whatsapp`); Chatwoot is a projection of the
 canonical `messages` ledger and sends human replies through the existing
 transport outbox. Do not configure Meta to call Chatwoot directly.
+
+## Per-binding configuration
+
+`metadata.chatwoot` on the binding row (one API inbox per binding; all bindings
+share the single `https://lpapi.vzforeal.com/webhooks/chatwoot` callback):
+
+| field | secret | meaning |
+| --- | --- | --- |
+| `enabled` | no | `true` turns the mirror on for this binding |
+| `base_url`, `account_id`, `inbox_id`, `inbox_identifier`, `agent_id` | no | the API inbox and its attending agent |
+| `api_token_ciphertext`, `webhook_secret_ciphertext` | yes | `secret_store.encrypt_secret(...)` of the access token and callback signing secret |
+
+- The non-secret fields can be set with the `set-persona-chatwoot.yml` workflow
+  (`persona_slug`, `enabled`, `base_url`, `account_id`, `inbox_id`,
+  `inbox_identifier`, `agent_id`; dry-run by default, `apply` writes one audit
+  event). It never accepts or prints secrets, and does not read GitHub secrets.
+- The two ciphertext fields must be written from the protected server (a
+  one-off `python` session in the control-plane container calling
+  `secret_store.encrypt_secret`, then merging into `metadata.chatwoot`); the
+  values must never go through Git, tickets, shell arguments or logs. No HTTP
+  route returns them. An enabled binding without both ciphertexts is logged
+  (binding id and error type) and skipped; the other bindings keep running.
+- Webhook: the payload's `(account_id, inbox_id)` selects the binding, then the
+  HMAC is verified with that binding's own secret. An unknown inbox is
+  acknowledged and ignored; a wrong secret is rejected with 401.
+- Worker: each cycle projects, claims and delivers per binding. One binding
+  failing never stops the others. Claimed work for a binding that is no longer
+  configured is retried every 5 minutes instead of dropped.
+- Fallback: the `CHATWOOT_*` environment keys below still configure the one
+  binding named by `CHATWOOT_BRIDGE_BINDING_ID` when it has no
+  `metadata.chatwoot`; if it has one, the metadata wins. Production keeps
+  working with no data change.
+- Each Chatwoot API inbox needs the attending agent as a member and the shared
+  callback URL; every binding may use its own Chatwoot account, inbox and agent.
 
 ## Setup and cutover
 
@@ -15,7 +50,8 @@ transport outbox. Do not configure Meta to call Chatwoot directly.
    signing secret through the protected Chatwoot administration path. Put
    those values in the protected server `.env.compose`; never put them in Git,
    tickets, shell arguments, or logs.
-3. Set the following transport environment keys in that protected file:
+3. For the environment fallback only (a binding without `metadata.chatwoot`), set the
+   following transport environment keys in that protected file:
    `CHATWOOT_BRIDGE_ENABLED=true`, `CHATWOOT_BASE_URL`,
    `CHATWOOT_API_ACCESS_TOKEN`, `CHATWOOT_ACCOUNT_ID`, `CHATWOOT_INBOX_ID`,
    `CHATWOOT_INBOX_IDENTIFIER`, `CHATWOOT_BRIDGE_BINDING_ID`,
