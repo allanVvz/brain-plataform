@@ -253,7 +253,9 @@ def prepare_outbound_envelope(
     # previews keep the window they will be released under. An agent reply
     # awaiting its proof is still a reply and carries no window.
     if campaign_scope or origin in {"proactive", "system"} or initial_status == "preview_ready":
-        if effective_metadata.get("published_business_hours") is None:
+        # Runtime pins an absent delivery window as explicit null; only a
+        # missing key requires consulting control-plane.
+        if "published_business_hours" not in effective_metadata:
             try:
                 effective_metadata.update(control_plane_client.published_outbound_policy(str(lead["persona_id"])))
             except Exception as exc:

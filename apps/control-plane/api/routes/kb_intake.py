@@ -788,6 +788,7 @@ def approve_publication(session_id: str, body: ApprovePublicationBody, request: 
                 approved_draft_checksum=body.approved_draft_checksum,
                 approved_runtime_checksum=body.approved_runtime_checksum,
                 actor=actor,
+                expected_base_publication_id=staged["base_publication_id"],
             )
         except graph_bundle_publisher.GraphBundlePublishError as exc:
             raise HTTPException(400, {"error": str(exc), "error_code": "GRAPH_BUNDLE_ACTIVATE_FAILED"})

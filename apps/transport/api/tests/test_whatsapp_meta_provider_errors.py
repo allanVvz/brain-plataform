@@ -17,7 +17,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from services.whatsapp_providers.meta import MetaWhatsAppProvider
+from services.whatsapp_providers.meta import MetaWhatsAppProvider, OutsideCustomerServiceWindow
 
 
 def _binding() -> dict:
@@ -80,6 +80,17 @@ def test_send_text_surfaces_meta_error_message(monkeypatch):
         provider.send_text(_binding(), "invalid", "oi")
 
     assert "Invalid recipient phone number" in str(exc.value)
+
+
+def test_send_text_outside_24h_window_raises_dedicated_error(monkeypatch):
+    body = {"error": {"message": "(#131047) Re-engagement message", "code": 131047}}
+    monkeypatch.setattr(
+        "services.whatsapp_providers.meta.httpx.post",
+        lambda *_a, **_k: _fake_response(400, body),
+    )
+
+    with pytest.raises(OutsideCustomerServiceWindow):
+        MetaWhatsAppProvider().send_text(_binding(), "5551992623375", "oi")
 
 
 def test_non_json_error_body_falls_back_to_raw_text(monkeypatch):

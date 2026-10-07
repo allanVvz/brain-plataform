@@ -6,7 +6,7 @@ from services import supabase_client
 
 router = APIRouter(tags=["health"])
 SERVICE_NAME = "brain-control-plane"
-DEFAULT_REQUIRED_SCHEMA_VERSION = 131
+DEFAULT_REQUIRED_SCHEMA_VERSION = 163
 
 
 def _build_metadata() -> dict:
@@ -43,9 +43,9 @@ def health_live():
 def health_ready():
     ok, detail = supabase_client.ping_supabase()
     schema_version = int(os.environ.get("CURRENT_SCHEMA_VERSION") or "0")
-    required_schema_version = int(
+    required_schema_version = max(DEFAULT_REQUIRED_SCHEMA_VERSION, int(
         os.environ.get("REQUIRED_SCHEMA_VERSION") or DEFAULT_REQUIRED_SCHEMA_VERSION
-    )
+    ))
     schema_ok = schema_version >= required_schema_version
     payload = {
         "status": "ready" if ok and schema_ok else "not_ready",

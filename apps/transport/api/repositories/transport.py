@@ -1285,6 +1285,45 @@ def record_whatsapp_safety_violation(
         payload = payload[0] if payload else {}
     return payload if isinstance(payload, dict) else {}
 
+_HOLD_UNTIL = "2099-12-31T00:00:00+00:00"
+
+
+def hold_whatsapp_outbound(row: dict, reason: str) -> None:
+    """Hold an outbound while its sender may not speak (shows as "Pausada")."""
+    from datetime import datetime, timezone
+    payload = {**(row.get("payload") or {}), "queue_pause": True, "queue_hold_reason": reason}
+    _execute_with_retry(get_client().table("lead_buffer").update({
+        "status": "buffered", "available_at": _HOLD_UNTIL, "payload": payload,
+        "last_error": f"held:{reason}", "locked_at": None, "locked_by": None,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }).eq("id", row["id"]).eq("direction", "outbound"))
+
+
+def list_held_whatsapp_outbound(limit: int = 200) -> list:
+    """Outbounds held by the send gate (not the ones an operator paused)."""
+    return _q(
+        get_client().table("lead_buffer")
+        .select("id,lead_ref,channel_binding_id,persona_id,payload,created_at")
+        .eq("direction", "outbound").eq("status", "buffered")
+        .not_.is_("payload->>queue_hold_reason", "null")
+        .order("created_at").limit(limit)
+    )
+
+
+def release_held_whatsapp_outbound(row: dict) -> None:
+    """Put a held outbound back in line, in its original order."""
+    from datetime import datetime, timezone
+    payload = {
+        key: value for key, value in (row.get("payload") or {}).items()
+        if key not in {"queue_pause", "queue_hold_reason"}
+    }
+    _execute_with_retry(get_client().table("lead_buffer").update({
+        "status": "pending_send", "available_at": datetime.now(timezone.utc).isoformat(),
+        "payload": payload, "last_error": None,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }).eq("id", row["id"]).eq("status", "buffered"))
+
+
 def defer_whatsapp_inbound(buffer_id: str, available_at: str, reason: str) -> None:
     """Put an unprocessed inbound back in the queue until `available_at`.
 

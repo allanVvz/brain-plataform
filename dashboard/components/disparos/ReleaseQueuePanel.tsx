@@ -1,37 +1,46 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertCircle, CheckCircle2, RefreshCw, RotateCcw, Send } from "lucide-react";
+import { Pause, Play, RefreshCw, Send, Sparkles } from "lucide-react";
 import { ApiError, api } from "@/lib/api";
 import { useGlobalPersona } from "@/lib/useGlobalPersona";
+import {
+  ACTION_LABEL, STATE_LABEL, simplifyMessage,
+  type SimpleAction, type SimpleActionKey, type SimpleState,
+} from "./queueSimple";
 
-type QueueAction = "reprocess" | "send-preview" | "regenerate-preview" | "operator-preview";
-type ContextMessage = { id?: string | number | null; content?: string | null; direction?: string | null; role?: string | null; sender_type?: string | null; created_at?: string | null };
+type ContextMessage = { id?: string | number | null; content?: string | null; direction?: string | null; role?: string | null; created_at?: string | null };
 type OutboundMessage = {
-  buffer_id: string; sequence: number; kind: string; text?: string | null;
-  proof_id?: string | null; status?: string | null; can_retry?: boolean;
-  retry_reason?: string | null; can_generate_preview?: boolean; generate_preview_reason?: string | null;
+  buffer_id: string; sequence: number; kind: string; text?: string | null; status?: string | null;
   can_send?: boolean; send_reason?: string | null;
 };
 type QueueItem = {
   id: string; demand_id?: string | null; lead_ref?: number | null; persona_id?: string | null;
   persona?: { name?: string; slug?: string } | null; lead?: { nome?: string | null; name?: string | null } | null;
-  origin?: string | null; status?: string | null; queue_state?: string | null; available_at?: string | null;
-  created_at?: string | null; customer_message?: string | null; customer_message_at?: string | null;
-  last_agent_message?: string | null; last_agent_message_at?: string | null;
-  recent_context?: ContextMessage[] | null; outbound_messages?: OutboundMessage[] | null; actions?: string[];
+  queue_state?: string | null; available_at?: string | null; created_at?: string | null;
+  customer_message?: string | null; customer_message_at?: string | null;
+  last_agent_message?: string | null; recent_context?: ContextMessage[] | null;
+  outbound_messages?: OutboundMessage[] | null;
 };
 
-const ORIGINS: Record<string, string> = {
-  conversation: "Resposta IA", campaign: "Campanha", manual: "Manual",
-  proactive: "Aviso / reativação", system: "Operacional",
-};
-const STATES: Array<[string, string]> = [
-  ["pending", "Aguardando envio"], ["preview_ready", "Prévia pronta"],
-  ["technical_failure", "Falha técnica"], ["blocked", "Bloqueada"],
-  ["pending_response", "Aguardando resposta da IA"], ["paused", "Pausada"],
-  ["awaiting_customer", "Enviada — aguarda resposta"],
+const FILTERS: Array<[SimpleState | "", string]> = [
+  ["", "Todas"], ["pausada", "Pausadas"], ["agendada", "Agendadas"],
+  ["preview", "Preview pronto"], ["sem_preview", "Sem preview"], ["enviada", "Enviadas"],
 ];
+const STATE_STYLE: Record<SimpleState, string> = {
+  pausada: "bg-rose-500/15 text-rose-200",
+  agendada: "bg-sky-500/15 text-sky-100",
+  preview: "bg-violet-500/15 text-violet-100",
+  sem_preview: "bg-amber-500/15 text-amber-100",
+  enviada: "bg-emerald-500/15 text-emerald-200",
+};
+const ICON: Record<SimpleActionKey, typeof Pause> = { pausar: Pause, retomar: Play, gerar_preview: Sparkles, enviar: Send };
+const RESULT_LABEL: Record<string, string> = {
+  pausado: "Pausada", retomado: "Retomada", agendado: "Agendada para envio",
+  preview_gerado: "Preview gerado", operator_preview_gerado: "Preview gerado",
+  preview_individual_regenerado: "Preview gerado", preview_reativacao_gerado: "Preview gerado",
+  recuperando_tentativa_antiga: "Preview gerado", bloqueado: "Não foi possível", superado: "A conversa mudou",
+};
 
 function formatDate(value?: string | null) {
   if (!value) return "—";
@@ -39,160 +48,106 @@ function formatDate(value?: string | null) {
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(date);
 }
-function statusLabel(state?: string | null) { return STATES.find(([value]) => value === state)?.[1] || state || "—"; }
-// A message blocked from sending only because its proof/publication check
-// failed reads as "Pronta" (its buffer status is still preview_ready) unless
-// the send_reason is consulted — this maps that specific reason to its own
-// label so an operator does not read a bad proof as a healthy preview.
-function messageStatusLabel(status?: string | null, sendReason?: string | null) {
-  if (status === "preview_ready" && /proof|publica/i.test(sendReason || "")) return "Proof inválida";
-  const labels: Record<string, string> = {
-    preview_ready: "Pronta", pending_send: "Envio solicitado", buffered: "Agendada", processing: "Enviando",
-    sent: "Enviada", delivered: "Entregue", read: "Lida", failed: "Falhou", dead_letter: "Falha técnica",
-    retry: "Nova tentativa", technical_failure: "Sem prévia", blocked: "Bloqueada",
-  };
-  return labels[status || ""] || status || "—";
-}
-function contextLabel(message: ContextMessage) {
-  return message.direction === "outbound" || ["assistant", "agent", "ai"].includes(message.role || "") ? "Agente" : "Cliente";
-}
-// The two headline lines above ("Demanda da cliente" / "Última resposta
-// efetiva") already show the newest inbound/outbound. Without this filter,
-// expanding "Histórico recente" repeated those exact two lines a second time
-// — confusing, since they read as if the conversation had four turns instead
-// of two.
-function dedupeAgainstHeadline(
-  messages: ContextMessage[],
-  headline: Array<{ content?: string | null; at?: string | null }>,
-): ContextMessage[] {
-  return messages.filter((message) => !headline.some(
-    (shown) => shown.content && shown.at && shown.content === message.content && shown.at === message.created_at,
-  ));
-}
-function ContextHistory({ messages, headline }: {
-  messages: ContextMessage[];
-  headline: Array<{ content?: string | null; at?: string | null }>;
-}) {
-  const filtered = useMemo(() => dedupeAgainstHeadline(messages, headline), [messages, headline]);
-  return <details className="mt-2 rounded-lg border border-white/10 bg-obs-panel/50 px-2 py-1 text-xs">
-    <summary className="cursor-pointer text-obs-faint">Histórico recente ({filtered.length})</summary>
-    {filtered.length ? <ol className="mt-2 space-y-2 pb-1">{filtered.map((message, index) =>
-      <li key={String(message.id ?? `${message.created_at || "message"}-${index}`)} className="border-t border-white/[0.06] pt-2 first:border-0 first:pt-0">
-        <p className="text-obs-faint">{contextLabel(message)} · {formatDate(message.created_at)}</p>
-        <p className="mt-0.5 whitespace-pre-wrap text-obs-subtle">{message.content || "[sem texto]"}</p>
-      </li>)}</ol> : <p className="mt-2 pb-1 text-obs-faint">Nenhuma mensagem anterior além do que já está exibido acima.</p>}
-  </details>;
-}
-function exactReason(enabled: boolean | undefined, reason?: string | null) { return enabled ? "" : (reason || "Ação indisponível no estado atual"); }
 
 function newIdempotencyKey(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
   return `queue-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-// Turns the raw ApiError into an operator-facing sentence that never lets a
-// 401/403/409/422 read as "backend indisponível" (they are not the same
-// failure and demand different operator reactions), and always keeps the
-// request_id visible for support/log correlation.
+// Never lets a 401/403/409/422 read as "backend fora do ar", and keeps the
+// request_id for support.
 function describeQueueError(cause: unknown): string {
   if (!(cause instanceof ApiError)) return cause instanceof Error ? cause.message : "Ação não concluída.";
-  const requestSuffix = cause.requestId ? ` (request_id ${cause.requestId})` : "";
-  if (cause.status === 0) return `Tempo esgotado ou sem conexão com o backend. Tente novamente.${requestSuffix}`;
-  if (cause.kind === "unauthenticated") return `Sessão expirada — faça login novamente.${requestSuffix}`;
-  if (cause.kind === "forbidden") return `Sem permissão para esta ação nesta persona.${requestSuffix}`;
-  if (cause.status === 409) return `Outro operador ou uma nova mensagem já mudou este item — atualize a fila.${requestSuffix}`;
-  if (cause.status === 422) return `Dados inválidos para esta ação: ${cause.detail || "confira os campos"}.${requestSuffix}`;
-  if (cause.kind === "unavailable") return `Backend respondeu indisponível (HTTP ${cause.status}). Tentando novamente pode ajudar.${requestSuffix}`;
-  if (cause.kind === "server") return `Erro interno no servidor (HTTP ${cause.status}).${requestSuffix}`;
-  return `${cause.detail || "Ação não concluída"} (HTTP ${cause.status}).${requestSuffix}`;
+  const suffix = cause.requestId ? ` (request_id ${cause.requestId})` : "";
+  if (cause.status === 0) return `Sem conexão com o backend. Tente novamente.${suffix}`;
+  if (cause.kind === "unauthenticated") return `Sessão expirada — faça login novamente.${suffix}`;
+  if (cause.kind === "forbidden") return `Sem permissão para esta ação nesta persona.${suffix}`;
+  if (cause.status === 409) return `A conversa mudou enquanto você agia — atualize a fila.${suffix}`;
+  if (cause.status === 422) return `Dados inválidos: ${cause.detail || "confira os campos"}.${suffix}`;
+  return `${cause.detail || "Ação não concluída"} (HTTP ${cause.status}).${suffix}`;
 }
 
 export function ReleaseQueuePanel() {
   const persona = useGlobalPersona();
   const [items, setItems] = useState<QueueItem[]>([]);
-  const [origin, setOrigin] = useState("");
-  const [status, setStatus] = useState("");
+  const [filter, setFilter] = useState<SimpleState | "">("");
   const [nextOffset, setNextOffset] = useState<number | null>(null);
-  const [busyMessage, setBusyMessage] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
 
   const load = useCallback(async (offset = 0, append = false) => {
     if (!persona.id) { setItems([]); setNextOffset(null); return; }
-    const result = await api.messagingQueue({ personaId: persona.id, origin: origin || undefined, status: status || undefined, offset, limit: 50 });
+    const result = await api.messagingQueue({ personaId: persona.id, offset, limit: 50 });
     const rows = (result.items || []) as QueueItem[];
     setItems((current) => append ? [...current, ...rows] : rows);
     setNextOffset(result.next_offset ?? null);
-  }, [origin, persona.id, status]);
+  }, [persona.id]);
 
   useEffect(() => { load().catch((cause) => setError(describeQueueError(cause))); }, [load]);
   useEffect(() => {
     const timer = window.setInterval(() => load().catch((cause) => setError(describeQueueError(cause))), 10000);
     return () => window.clearInterval(timer);
   }, [load]);
-  const visibleItems = useMemo(() => items.filter((item) => item.persona_id === persona.id), [items, persona.id]);
 
-  async function runMessageAction(action: "retry" | "generate" | "send", item: QueueItem, message: OutboundMessage) {
-    const capability = action === "retry" ? message.can_retry : action === "generate" ? message.can_generate_preview : message.can_send;
-    const reason = action === "retry" ? message.retry_reason : action === "generate" ? message.generate_preview_reason : message.send_reason;
-    if (action === "generate" && !window.confirm("Vou reativar somente esta lead e gerar uma prévia usando a mensagem original. Nada será enviado até você clicar em Enviar. Continuar?")) return;
-    if (!capability || busyMessage) { if (!capability) setError(reason || "Ação indisponível no estado atual."); return; }
-    const actionName: QueueAction = action === "send" ? "send-preview" : action === "generate" ? "operator-preview" : item.queue_state === "technical_failure" ? "reprocess" : "regenerate-preview";
-    setBusyMessage(message.buffer_id); setError(""); setNotice("");
+  const rows = useMemo(() => items
+    .filter((item) => item.persona_id === persona.id)
+    .map((item) => ({
+      item,
+      messages: (item.outbound_messages || []).map((message) => ({ message, view: simplifyMessage(item.queue_state, message) })),
+    }))
+    .filter(({ messages }) => !filter || messages.some(({ view }) => view.state === filter)),
+  [items, persona.id, filter]);
+
+  async function run(message: OutboundMessage, action: SimpleAction) {
+    if (!action.enabled || busy) { if (!action.enabled) setError(action.reason || "Ação indisponível agora."); return; }
+    if (action.key === "gerar_preview" && action.endpoint !== "regenerate-preview"
+      && !window.confirm("Vou gerar um preview para esta lead. Nada é enviado até você clicar em Enviar. Continuar?")) return;
+    setBusy(message.buffer_id); setError(""); setNotice("");
     try {
-      // A key per click, not per component: a browser/network retry of the
-      // same POST replays this exact key and gets back the same recorded
-      // result from the backend instead of running the action twice.
-      const idempotency_key = newIdempotencyKey();
-      const result = await api.controlMessagingQueue(actionName, { buffer_ids: [message.buffer_id], idempotency_key });
-      const labels: Record<string, string> = {
-        operator_preview_gerado: "Previa gerada a partir da mensagem da cliente",
-        recuperando_tentativa_antiga: "Recuperando tentativa antiga — prévia gerada",
-        preview_gerado: "Prévia gerada", preview_individual_regenerado: "Mensagem regenerada",
-        preview_reativacao_gerado: "Demanda de reativação criada", agendado: "Envio solicitado",
-        bloqueado: "Ação bloqueada", superado: "Contexto mudou",
-      };
-      setNotice((result.items || []).map((row: { result?: string; reason?: string }) => `${labels[row.result || ""] || row.result || "Concluído"}${row.reason ? `: ${row.reason}` : ""}`).join(" · "));
+      // One key per click: a network retry of the same POST replays it and gets
+      // the recorded result back instead of running the action twice.
+      const result = await api.controlMessagingQueue(action.endpoint, { buffer_ids: [message.buffer_id], idempotency_key: newIdempotencyKey() });
+      setNotice((result.items || []).map((row: { result?: string; reason?: string }) =>
+        `${RESULT_LABEL[row.result || ""] || "Concluído"}${row.reason ? `: ${row.reason}` : ""}`).join(" · "));
       await load();
     } catch (cause) { setError(describeQueueError(cause)); }
-    finally { setBusyMessage(null); }
+    finally { setBusy(null); }
   }
 
   return <section className="flex flex-col gap-4">
-    <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-obs-surface px-3 py-2 text-xs text-obs-subtle">
-      <AlertCircle size={15} className="text-obs-violet" />Até três demandas reais por lead. Sessões do WA Validator permanecem disponíveis apenas em Logs.
-    </div>
-    <div className="flex flex-wrap items-end gap-2 rounded-xl border border-white/10 bg-obs-surface p-3">
-      <label className="min-w-40 text-xs text-obs-faint">Origem<select aria-label="Origem" value={origin} onChange={(event) => setOrigin(event.target.value)} className="mt-1 block w-full rounded-lg border border-white/10 bg-obs-panel px-3 py-2 text-sm text-obs-text"><option value="">Todas as origens</option>{Object.entries(ORIGINS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
-      <label className="min-w-52 text-xs text-obs-faint">Estado<select aria-label="Estado" value={status} onChange={(event) => setStatus(event.target.value)} className="mt-1 block w-full rounded-lg border border-white/10 bg-obs-panel px-3 py-2 text-sm text-obs-text"><option value="">Todos os estados</option>{STATES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-      <button type="button" onClick={() => load().catch((cause) => setError(describeQueueError(cause)))} className="flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-sm text-obs-subtle"><RefreshCw size={15} />Atualizar</button>
+    <div className="flex flex-wrap items-center gap-2 rounded-xl border border-white/10 bg-obs-surface p-3">
+      {FILTERS.map(([value, label]) => <button key={label} type="button" aria-pressed={filter === value}
+        onClick={() => setFilter(value)}
+        className={`rounded-full px-3 py-1.5 text-xs ${filter === value ? "bg-obs-violet/20 text-obs-text" : "text-obs-subtle hover:text-obs-text"}`}>{label}</button>)}
+      <button type="button" onClick={() => load().catch((cause) => setError(describeQueueError(cause)))}
+        className="ml-auto flex items-center gap-2 rounded-lg border border-white/10 px-3 py-1.5 text-xs text-obs-subtle"><RefreshCw size={13} />Atualizar</button>
     </div>
     {notice && <p role="status" className="rounded-lg bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300">{notice}</p>}
     {error && <p role="alert" className="rounded-lg bg-rose-500/10 px-3 py-2 text-xs text-rose-200">{error}</p>}
     <div className="overflow-x-auto rounded-xl border border-white/10 bg-obs-surface">
-      <table className="w-full min-w-[1120px] text-left text-sm">
-        <thead className="bg-white/[0.03] text-xs text-obs-faint"><tr><th className="p-3">Contexto da conversa</th><th className="p-3">Prévia atual</th><th className="p-3">Lead</th><th className="p-3">Origem</th><th className="p-3">Horário</th><th className="p-3">Estado</th><th className="p-3 text-right">Ações</th></tr></thead>
-        <tbody>{visibleItems.map((item) => {
-          const sent = item.queue_state === "awaiting_customer";
-          const messages = item.outbound_messages || [];
-          return <tr key={item.demand_id || item.id} className={`border-t border-white/[0.06] align-top ${sent ? "bg-emerald-500/[0.04]" : "bg-rose-500/[0.04]"}`}>
-            <td className="max-w-sm p-3"><p className="text-xs text-obs-faint">Demanda da cliente · {formatDate(item.customer_message_at || item.created_at)}</p><p className="mt-1 whitespace-pre-wrap text-obs-text">{item.customer_message || "Demanda sem texto disponível"}</p><p className="mt-3 text-xs text-obs-faint">Última resposta efetiva do agente</p><p className="mt-1 whitespace-pre-wrap text-obs-subtle">{item.last_agent_message || "Ainda sem resposta do agente"}</p><ContextHistory messages={item.recent_context || []} headline={[
-              { content: item.customer_message, at: item.customer_message_at },
-              { content: item.last_agent_message, at: item.last_agent_message_at },
-            ]} /></td>
-            <td className="max-w-sm space-y-3 p-3">{messages.map((message, index) => <article key={message.buffer_id} className="rounded-lg border border-white/10 bg-obs-panel/40 p-2"><p className="text-xs font-medium text-obs-faint">Mensagem {index + 1} de {messages.length}</p><p className="mt-1 whitespace-pre-wrap text-obs-text">{message.text || "Nenhuma prévia gerada"}</p><p className="mt-2 text-xs text-obs-faint">{messageStatusLabel(message.status, message.send_reason)}{message.proof_id ? ` · proof ${message.proof_id.slice(0, 8)}` : " · sem proof"}</p></article>)}</td>
-            <td className="p-3"><p className="text-obs-text">{item.lead?.nome || item.lead?.name || "Lead"}</p><p className="text-xs text-obs-faint">{item.persona?.name || item.persona?.slug || ""}</p></td>
-            <td className="p-3 text-obs-subtle">{ORIGINS[item.origin || ""] || item.origin || "—"}</td><td className="p-3 text-obs-subtle">{formatDate(item.available_at || item.created_at)}</td>
-            <td className="p-3"><span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs ${sent ? "bg-emerald-500/15 text-emerald-200" : "bg-rose-500/15 text-rose-100"}`}>{sent ? <CheckCircle2 size={13} /> : <AlertCircle size={13} />}{statusLabel(item.queue_state)}</span><ul className="mt-2 space-y-1 text-xs text-obs-faint">{messages.map((message, index) => <li key={message.buffer_id}>Mensagem {index + 1}: {messageStatusLabel(message.status, message.send_reason)}</li>)}</ul></td>
-            <td className="p-3 text-right"><div className="space-y-3">{messages.map((message, index) => {
-              const retryReason = exactReason(message.can_retry, message.retry_reason); const sendReason = exactReason(message.can_send, message.send_reason);
-              const generateReason = exactReason(message.can_generate_preview, message.generate_preview_reason);
-              return <div key={message.buffer_id} className="rounded-lg border border-white/[0.08] p-2"><p className="mb-2 text-xs text-obs-faint">Mensagem {index + 1}</p><div className="flex justify-end gap-1">{message.can_generate_preview !== undefined && <button type="button" disabled={Boolean(busyMessage) || !message.can_generate_preview} title={generateReason} aria-label={`Gerar prévia da mensagem ${index + 1}`} onClick={() => void runMessageAction("generate", item, message)} className="inline-flex items-center gap-1 rounded-lg border border-sky-400/20 px-2 py-2 text-xs text-sky-100 disabled:cursor-not-allowed disabled:opacity-40">Gerar prévia</button>}<button type="button" disabled={Boolean(busyMessage) || !message.can_retry} title={retryReason} aria-label={`Retry mensagem ${index + 1}`} onClick={() => void runMessageAction("retry", item, message)} className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2 py-2 text-xs text-obs-text disabled:cursor-not-allowed disabled:opacity-40"><RotateCcw size={13} />Retry</button><button type="button" disabled={Boolean(busyMessage) || !message.can_send} title={sendReason} aria-label={`Enviar mensagem ${index + 1}`} onClick={() => void runMessageAction("send", item, message)} className="inline-flex items-center gap-1 rounded-lg bg-emerald-500/20 px-2 py-2 text-xs text-emerald-100 disabled:cursor-not-allowed disabled:opacity-40"><Send size={13} />Enviar</button></div>{message.can_generate_preview !== undefined && generateReason && <p className="mt-1 max-w-52 text-xs text-obs-faint">Gerar prévia: {generateReason}</p>}{retryReason && <p className="mt-1 max-w-52 text-xs text-obs-faint">Retry: {retryReason}</p>}{sendReason && <p className="mt-1 max-w-52 text-xs text-obs-faint">Enviar: {sendReason}</p>}</div>;
-            })}</div></td>
-          </tr>;
-        })}</tbody>
+      <table className="w-full min-w-[900px] text-left text-sm">
+        <thead className="bg-white/[0.03] text-xs text-obs-faint"><tr><th className="p-3">Lead</th><th className="p-3">Conversa</th><th className="p-3">Mensagem</th><th className="p-3">Estado</th><th className="p-3 text-right">Ações</th></tr></thead>
+        <tbody>{rows.map(({ item, messages }) => messages.map(({ message, view }, index) =>
+          <tr key={message.buffer_id} className="border-t border-white/[0.06] align-top">
+            {index === 0 && <>
+              <td rowSpan={messages.length} className="p-3"><p className="text-obs-text">{item.lead?.nome || item.lead?.name || "Lead"}</p><p className="text-xs text-obs-faint">{item.persona?.name || item.persona?.slug || ""}</p></td>
+              <td rowSpan={messages.length} className="max-w-xs p-3"><p className="text-xs text-obs-faint">Cliente · {formatDate(item.customer_message_at || item.created_at)}</p><p className="mt-1 whitespace-pre-wrap text-obs-text">{item.customer_message || "—"}</p>{item.last_agent_message && <><p className="mt-2 text-xs text-obs-faint">Última resposta do agente</p><p className="mt-1 whitespace-pre-wrap text-obs-subtle">{item.last_agent_message}</p></>}</td>
+            </>}
+            <td className="max-w-sm p-3 whitespace-pre-wrap text-obs-text">{message.text || <span className="text-obs-faint">Sem preview</span>}</td>
+            <td className="p-3"><span className={`inline-flex rounded-full px-2 py-1 text-xs ${STATE_STYLE[view.state]}`}>{STATE_LABEL[view.state]}</span>{view.state === "agendada" && item.available_at && <p className="mt-1 text-xs text-obs-faint">{formatDate(item.available_at)}</p>}</td>
+            <td className="p-3"><div className="flex justify-end gap-1">{view.actions.map((action) => {
+              const Icon = ICON[action.key];
+              return <button key={action.key} type="button" disabled={Boolean(busy) || !action.enabled}
+                title={action.enabled ? undefined : action.reason || undefined}
+                aria-label={`${ACTION_LABEL[action.key]} mensagem ${index + 1}`}
+                onClick={() => void run(message, action)}
+                className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-40 ${action.key === "enviar" ? "bg-emerald-500/20 text-emerald-100" : "border border-white/10 text-obs-text"}`}>
+                <Icon size={13} />{ACTION_LABEL[action.key]}</button>;
+            })}</div>{view.actions.some((action) => !action.enabled && action.reason) && <p className="mt-1 text-right text-xs text-obs-faint">{view.actions.find((action) => !action.enabled)?.reason}</p>}</td>
+          </tr>))}</tbody>
       </table>
-      {!visibleItems.length && <p className="p-10 text-center text-sm text-obs-subtle">Nenhuma demanda real aguarda ação.</p>}
+      {!rows.length && <p className="p-10 text-center text-sm text-obs-subtle">Nada na fila.</p>}
     </div>
     {nextOffset !== null && <button type="button" onClick={() => load(nextOffset, true)} className="self-center rounded-lg border border-white/10 px-4 py-2 text-sm text-obs-text">Carregar mais</button>}
   </section>;

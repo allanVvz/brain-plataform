@@ -84,7 +84,7 @@ def test_technical_failure_uses_transport_owned_buffer(monkeypatch):
     assert result["handoff"] is False
 
 
-def test_second_consecutive_failure_handoffs_and_duplicate_reuses_events(monkeypatch):
+def test_second_consecutive_failure_never_pauses_and_duplicate_reuses_events(monkeypatch):
     inserted = []
     prior = {
         "id": "prior-failure", "event_type": "conversation.failure_observed",
@@ -137,8 +137,8 @@ def test_second_consecutive_failure_handoffs_and_duplicate_reuses_events(monkeyp
             stage="reply_model",
         )
     )
-    assert result["status"] == "technical_handoff"
-    assert result["handoff"] is True
-    assert result["ai_paused"] is True
+    # Technical failures are logged, never a pause of the lead (SDR without guards).
+    assert result["handoff"] is False
+    assert result["ai_paused"] is False
     assert result["terminalization_status"] == "dead_letter"
     assert inserted == []

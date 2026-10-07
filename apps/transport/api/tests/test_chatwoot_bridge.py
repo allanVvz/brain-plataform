@@ -293,3 +293,92 @@ def test_brain_projection_uses_account_api_and_preserves_direction(incoming, mes
 )
 def test_private_note_commands_use_one_vocabulary(note, operation):
     assert chatwoot_api.command_operation(note) == operation
+
+
+def test_chatwoot_attachments_go_through_the_same_outbox_with_the_text_as_caption(monkeypatch):
+    config = chatwoot_api.ChatwootConfig(
+        base_url="https://chat.example", api_token="not-used", account_id=3,
+        inbox_id=8, inbox_identifier="inbox-test", binding_id="binding-1",
+        webhook_secret="not-used", agent_id=17,
+    )
+    enqueued = []
+
+    class FakeApi:
+        def get_message(self, **_kwargs):
+            return {"id": 9010, "content": "Olha essa foto", "private": False,
+                    "sender": {"id": 17, "type": "user"},
+                    "attachments": [{"data_url": "https://chat.example/a.jpg", "file_type": "image"},
+                                    {"data_url": "https://chat.example/b.ogg", "file_type": "audio"}]}
+
+        def download_attachment(self, attachment):
+            return {"data": b"bytes", "mime": "image/jpeg" if attachment["data_url"].endswith("jpg") else "audio/ogg",
+                    "filename": attachment["data_url"].rsplit("/", 1)[-1]}
+
+    monkeypatch.setattr("workers.chatwoot_bridge_worker.chatwoot_bridge.get_conversation",
+                        lambda *_a: {"conversation_id": 44})
+    monkeypatch.setattr("workers.chatwoot_bridge_worker.runtime_client.pause_ai", lambda _ref: {"ai_paused": True})
+    monkeypatch.setattr("workers.chatwoot_bridge_worker.supabase_client.get_lead_by_ref",
+                        lambda ref: {"id": ref, "persona_id": "persona-1", "channel_binding_id": "binding-1"})
+    monkeypatch.setattr("workers.chatwoot_bridge_worker.operator_messaging.enqueue",
+                        lambda **kwargs: enqueued.append(kwargs) or {"buffer_id": f"buf-{len(enqueued)}"})
+    finished = []
+    monkeypatch.setattr("workers.chatwoot_bridge_worker.chatwoot_bridge.finish_operation",
+                        lambda *args, **kwargs: finished.append((args, kwargs)) or True)
+
+    ChatwootBridgeWorker()._process_operation(FakeApi(), config, {
+        "id": "op-2", "operation": "human_reply", "lead_ref": 51,
+        "chatwoot_message_id": 9010, "chatwoot_conversation_id": 44, "attempt_count": 1,
+    })
+
+    assert [part["text"] for part in enqueued] == ["Olha essa foto", ""]
+    assert [part["media"]["mime"] for part in enqueued] == ["image/jpeg", "audio/ogg"]
+    assert enqueued[0]["client_message_id"] != enqueued[1]["client_message_id"]
+    assert finished[-1][0][2] == "completed" and finished[-1][1]["transport_buffer_id"] == "buf-1"
+
+
+def test_evolution_lead_uses_its_phone_jid_not_the_opaque_lid(monkeypatch):
+    config = chatwoot_api.ChatwootConfig(
+        base_url="https://chat.example", api_token="not-used", account_id=3,
+        inbox_id=8, inbox_identifier="inbox-test", binding_id="binding-evo",
+        webhook_secret="not-used", agent_id=17,
+    )
+    seen = {}
+
+    class FakeApi:
+        def create_or_get_contact(self, **kwargs):
+            seen.update(kwargs)
+            return {"id": 61, "contact_inboxes": [{"inbox": {"id": 8}, "source_id": "session-61"}]}
+
+        def list_conversations(self, **_kwargs):
+            return []
+
+        def create_conversation(self, **_kwargs):
+            return {"id": 902}
+
+        def assign_conversation(self, _conversation_id):
+            return {}
+
+    monkeypatch.setattr("workers.chatwoot_bridge_worker.chatwoot_bridge.get_conversation", lambda *_a: None)
+    monkeypatch.setattr("workers.chatwoot_bridge_worker.chatwoot_bridge.save_conversation", lambda row: row)
+    ChatwootBridgeWorker()._ensure_conversation(FakeApi(), config, 77, {
+        "external_contact_id": "140000000000001@lid", "nome": "Cliente",
+        "metadata": {"identities": {"remote_jid_alt": "5551999998888@s.whatsapp.net"}},
+    })
+    assert seen["phone_number"] == "+5551999998888"
+
+
+def test_bridge_accepts_an_evolution_binding(monkeypatch):
+    config = chatwoot_api.ChatwootConfig(
+        base_url="https://chat.example", api_token="t", account_id=3, inbox_id=8,
+        inbox_identifier="inbox-test", binding_id="binding-evo", webhook_secret="s", agent_id=17,
+    )
+    monkeypatch.setattr("workers.chatwoot_bridge_worker.chatwoot_api.configuration", lambda: config)
+    monkeypatch.setattr("workers.chatwoot_bridge_worker.supabase_client.get_workflow_binding_by_id",
+                        lambda _id: {"id": "binding-evo", "active": True, "provider": "evolution_baileys"})
+    enqueued = []
+    monkeypatch.setattr("workers.chatwoot_bridge_worker.chatwoot_bridge.enqueue_projections",
+                        lambda binding_id, limit: enqueued.append(binding_id) or 0)
+    monkeypatch.setattr("workers.chatwoot_bridge_worker.chatwoot_bridge.claim_operations", lambda *_a, **_k: [])
+    monkeypatch.setattr("workers.chatwoot_bridge_worker.chatwoot_bridge.pending_delivery_updates", lambda **_k: [])
+    ChatwootBridgeWorker()._run_cycle()
+    assert enqueued == ["binding-evo"]

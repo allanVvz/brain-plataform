@@ -95,6 +95,9 @@ def _execute_with_retry(query, retries: int = 4):
         try:
             return query.execute()
         except Exception as exc:
+            if getattr(exc, "code", None) == "40001" and "raw_published_graph_write_requires_editor" in str(exc):
+                from fastapi import HTTPException
+                raise HTTPException(409, detail={"errors": [{"code": "published_graph_requires_editor", "message": "Este conteúdo pertence ao grafo publicado. Faça a alteração no editor de configurações do agente."}]}) from exc
             last_exc = exc
             if not _is_transient_transport_error(exc) or attempt >= retries:
                 raise
@@ -119,6 +122,8 @@ def _q(query) -> list:
             return []
         return result.data or []
     except Exception as exc:
+        if getattr(exc, "status_code", None) == 409:
+            raise
         try:
             from services import sre_logger
             sre_logger.error("supabase_client", f"query failed: {exc}", exc)
@@ -135,6 +140,8 @@ def _one(query) -> Optional[dict]:
             return None
         return result.data
     except Exception as exc:
+        if getattr(exc, "status_code", None) == 409:
+            raise
         try:
             from services import sre_logger
             sre_logger.error("supabase_client", f"query failed: {exc}", exc)
@@ -1163,13 +1170,18 @@ def upsert_knowledge_node(data: dict) -> Optional[dict]:
         raise
 
 
+def _visible_graph_nodes(rows: list[dict]) -> list[dict]:
+    return [row for row in rows if (row.get("metadata") or {}).get("editor_staging") is not True]
+
+
 def get_knowledge_node(node_id: str) -> Optional[dict]:
     """Fetch a single knowledge node by UUID."""
     global _KG_TABLES_MISSING
     if _KG_TABLES_MISSING or not node_id:
         return None
     try:
-        return _one(get_client().table("knowledge_nodes").select("*").eq("id", node_id).maybe_single())
+        row = _one(get_client().table("knowledge_nodes").select("*").eq("id", node_id).maybe_single())
+        return row if row and not (row.get("metadata") or {}).get("editor_staging") else None
     except Exception as exc:
         if _kg_unavailable(exc):
             _KG_TABLES_MISSING = True
@@ -1712,9 +1724,9 @@ def get_knowledge_node_for_source(
         )
         if persona_id:
             q = q.eq("persona_id", persona_id)
-        rows = _q(q.order("created_at", desc=True).limit(5))
+        rows = _visible_graph_nodes(_q(q.order("created_at", desc=True).limit(5)))
         for row in rows:
-            if row.get("status") != "deleted":
+            if row.get("status") != "deleted" and (row.get("metadata") or {}).get("editor_staging") is not True:
                 return row
         return rows[0] if rows else None
     except Exception as exc:
@@ -1739,7 +1751,7 @@ def get_knowledge_node_by_slug(
             q = q.eq("persona_id", persona_id)
         if node_type:
             q = q.eq("node_type", node_type)
-        rows = _q(q.limit(20))
+        rows = _visible_graph_nodes(_q(q.limit(20)))
         for row in rows:
             if row.get("status") != "deleted":
                 return row
@@ -1854,7 +1866,7 @@ def get_knowledge_neighbors(
             _KG_TABLES_MISSING = True
         return [], []
 
-    return nodes, list(edges.values())
+    return _visible_graph_nodes(nodes), list(edges.values())
 
 
 def list_knowledge_nodes_by_type(
@@ -1872,7 +1884,7 @@ def list_knowledge_nodes_by_type(
         q = client.table("knowledge_nodes").select("id,slug,title,node_type,tags,metadata,persona_id").in_("node_type", node_types).limit(limit)
         if persona_id:
             q = q.eq("persona_id", persona_id)
-        return q.execute().data or []
+        return _visible_graph_nodes(q.execute().data or [])
     except Exception as exc:
         if _kg_unavailable(exc):
             _KG_TABLES_MISSING = True
@@ -1996,7 +2008,7 @@ def list_knowledge_nodes_by_ids(node_ids: list[str]) -> list[dict]:
                 get_client().table("knowledge_nodes").select("*")
                 .in_("id", chunk).limit(len(chunk))
             ))
-        return rows
+        return _visible_graph_nodes(rows)
     except Exception as exc:
         if _kg_unavailable(exc):
             _KG_TABLES_MISSING = True
@@ -2018,7 +2030,8 @@ def list_all_knowledge_graph(persona_id: Optional[str] = None, limit_nodes: int 
         nq = client.table("knowledge_nodes").select("*").limit(limit_nodes)
         if persona_id:
             nq = nq.eq("persona_id", persona_id)
-        nodes = nq.execute().data or []
+        nodes = [node for node in (nq.execute().data or [])
+                 if (node.get("metadata") or {}).get("editor_staging") is not True]
     except Exception as exc:
         if _kg_unavailable(exc):
             _KG_TABLES_MISSING = True

@@ -138,13 +138,20 @@ python3 ops/microservices/validate-atomic-migrations.py "$pending_files"
 bash ops/vps/backup.sh
 backup_dir="$(realpath /var/backups/brain-ai/latest)"
 restore_db="brain_restore_schema${target_schema}_$(date -u +%Y%m%d%H%M%S)"
-bash ops/vps/restore.sh "$backup_dir" "$restore_db" --confirm-isolated-restore
 
 while IFS= read -r filename; do
   [[ -n "$filename" ]] || continue
   cat "supabase/migrations/$filename" >> "$combined_sql"
   printf "\ninsert into public._compose_migrations(filename) values ('%s') on conflict do nothing;\n" "$filename" >> "$combined_sql"
 done < "$pending_files"
+
+# Apply the exact pending bytes to the restored database before production.
+# Restore success alone does not prove that the new RPCs work with real data.
+restore_args=("$backup_dir" "$restore_db" --confirm-isolated-restore --rehearse-schema "$combined_sql")
+if grep -Fxq '163_graph_editor_cas.sql' "$pending_files"; then
+  restore_args+=(--graph-editor-rehearsal)
+fi
+bash ops/vps/restore.sh "${restore_args[@]}"
 
 "${COMPOSE[@]}" exec -T db sh -c \
   'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 --single-transaction' \

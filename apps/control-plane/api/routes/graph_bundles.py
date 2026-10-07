@@ -5,7 +5,8 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 import mimetypes
 
-from services import auth_service, graph_bundle_view, supabase_client
+from services import auth_service, graph_bundle_view, graph_editor, supabase_client
+from services.graph_bundle_publisher import GraphBundlePublishError
 from pydantic import BaseModel, Field
 from services import catalog_media_plan
 from services import site_blocks
@@ -118,3 +119,95 @@ def graph_bundle_view_get(
         return graph_bundle_view.get_view(persona_slug, source=source, ref=ref)
     except graph_bundle_view.GraphBundleViewNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+# ── Graph editor (akia/docs/architecture/engenharia-de-grafo.md) ─────────────
+
+class EditorSaveBody(BaseModel):
+    persona_slug: str = Field(min_length=1, max_length=128)
+    base_publication_id: str = Field(min_length=1, max_length=64)
+    changes: list[dict] = Field(min_length=1, max_length=200)
+    idempotency_key: str = Field(min_length=8, max_length=128)
+
+
+class EditorRevertBody(BaseModel):
+    persona_slug: str = Field(min_length=1, max_length=128)
+    to_publication_id: str = Field(min_length=1, max_length=64)
+    base_publication_id: str = Field(min_length=1, max_length=64)
+    idempotency_key: str = Field(min_length=8, max_length=128)
+
+
+def _editor_http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, graph_editor.GraphEditorOutcomeUnknown):
+        return _editor_save_error(exc)
+    if isinstance(exc, graph_editor.GraphEditorConflict):
+        return HTTPException(status_code=409, detail={"errors": graph_editor.readable_errors([str(exc)])})
+    if isinstance(exc, graph_editor.GraphEditorError) and str(exc) in {"persona_not_found", "active_publication_not_found"}:
+        return HTTPException(status_code=404, detail=str(exc))
+    return HTTPException(status_code=422, detail=str(exc))
+
+
+def _editor_save_error(exc: Exception) -> HTTPException:
+    """Save failures always carry {errors: [{code, message}]} in plain Portuguese."""
+    if isinstance(exc, graph_editor.GraphEditorRejected):
+        return HTTPException(status_code=422, detail={"errors": exc.errors})
+    if isinstance(exc, graph_editor.GraphEditorOutcomeUnknown):
+        return HTTPException(status_code=503, detail={"errors": [{
+            "code": "publication_outcome_unknown_retry_same_key",
+            "message": "Não foi possível confirmar o salvamento. Tente novamente; seu rascunho foi preservado.",
+        }]})
+    if isinstance(exc, graph_editor.GraphEditorConflict):
+        return HTTPException(status_code=409, detail={"errors": graph_editor.readable_errors([str(exc)])})
+    if isinstance(exc, graph_editor.GraphEditorError) and str(exc) in {"persona_not_found", "active_publication_not_found"}:
+        return HTTPException(status_code=404, detail={"errors": graph_editor.readable_errors([str(exc)])})
+    if isinstance(exc, (GraphBundlePublishError, graph_editor.GraphEditorError)):
+        # Validation/staging errors do not trigger a compensating activation.
+        return HTTPException(status_code=422, detail={"errors": [{
+            "code": "publication_failed",
+            "message": f"A publicação foi recusada ({str(exc).split(':')[0]}).",
+        }]})
+    return HTTPException(status_code=422, detail={"errors": graph_editor.readable_errors([str(exc)])})
+
+
+def _assert_editor_publisher(request: Request, persona_slug: str) -> str:
+    # Phase 1: publishing from the editor is limited to platform admins.
+    auth_service.assert_persona_capability(request, "edit", persona_slug=persona_slug)
+    user = auth_service.current_user(request)
+    if not auth_service.is_admin(user):
+        raise HTTPException(status_code=403, detail="Publicação pelo editor restrita a administradores nesta fase.")
+    return str(user.get("id") or user.get("email") or "unknown")
+
+
+@router.get("/editor")
+def graph_editor_get(request: Request, persona_slug: str = Query(..., min_length=1)):
+    _assert_persona_view(request, persona_slug)
+    try:
+        publication = graph_editor.active_publication(persona_slug)
+        view = graph_editor.editor_view(publication)
+        previous = graph_editor.previous_publication(persona_slug, str(publication.get("id")))
+        return {"publication": view.pop("publication"), "previous_publication": previous, **view}
+    except (graph_editor.GraphEditorError, ValueError) as exc:
+        raise _editor_http_error(exc) from exc
+
+
+@router.post("/editor/save")
+def graph_editor_save(body: EditorSaveBody, request: Request):
+    actor = _assert_editor_publisher(request, body.persona_slug)
+    try:
+        return graph_editor.save(
+            persona_slug=body.persona_slug, base_publication_id=body.base_publication_id,
+            changes=body.changes, actor=actor, idempotency_key=body.idempotency_key,
+        )
+    except (graph_editor.GraphEditorError, GraphBundlePublishError, ValueError) as exc:
+        raise _editor_save_error(exc) from exc
+
+
+@router.post("/editor/revert")
+def graph_editor_revert(body: EditorRevertBody, request: Request):
+    actor = _assert_editor_publisher(request, body.persona_slug)
+    try:
+        return graph_editor.revert(persona_slug=body.persona_slug, to_publication_id=body.to_publication_id,
+                                   actor=actor, base_publication_id=body.base_publication_id,
+                                   idempotency_key=body.idempotency_key)
+    except (graph_editor.GraphEditorError, ValueError) as exc:
+        raise _editor_http_error(exc) from exc

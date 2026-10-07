@@ -35,11 +35,31 @@ def _extract_meta_error_detail(response: httpx.Response) -> str:
     return "; ".join(str(part) for part in parts)[:500]
 
 
+# Graph error 131047: free-text/media sent more than 24h after the customer's
+# last message. Only an approved template can reopen the conversation.
+OUTSIDE_WINDOW_CODE = 131047
+OUTSIDE_WINDOW_REASON = "Fora da janela de 24h da Meta — envie um template"
+
+
+class OutsideCustomerServiceWindow(Exception):
+    """Meta rejected a non-template send because the 24h window is closed."""
+
+
+def _meta_error_code(response: httpx.Response) -> int | None:
+    try:
+        payload = response.json()
+        return int(payload["error"]["code"])
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
 def _raise_for_status_with_detail(response: httpx.Response) -> None:
     try:
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
         detail = _extract_meta_error_detail(response)
+        if _meta_error_code(response) == OUTSIDE_WINDOW_CODE:
+            raise OutsideCustomerServiceWindow(detail) from exc
         raise httpx.HTTPStatusError(
             f"{exc} | meta_error: {detail}" if detail else str(exc),
             request=exc.request,
@@ -285,15 +305,29 @@ class MetaWhatsAppProvider:
         raise NotImplementedError("Meta Cloud bindings have no local instance to log out")
 
     def send_media(self, binding: dict[str, Any], recipient: str, media: dict[str, Any]) -> dict[str, Any]:
-        if media.get("mediatype") != "image" or not binding.get("whatsapp_phone_number_id"):
-            raise ValueError("Meta catalog send requires an image and a phone number binding")
+        """Send an image, audio, video or document by link (same contract as Evolution).
+
+        WhatsApp has no caption on audio, so an audio with text is followed by
+        that text as its own message; the audio's id identifies the send.
+        """
+        kind = str(media.get("mediatype") or "")
+        if kind not in {"image", "audio", "video", "document"} or not binding.get("whatsapp_phone_number_id"):
+            raise ValueError("Meta media send requires image/audio/video/document and a phone number binding")
+        caption = str(media.get("caption") or "")
+        body: dict[str, Any] = {"link": media["media"]}
+        if kind in {"image", "video", "document"} and caption:
+            body["caption"] = caption
+        if kind == "document" and media.get("fileName"):
+            body["filename"] = str(media["fileName"])
         token, api_version = _credential(binding)
         response = httpx.post(
             f"https://graph.facebook.com/{api_version}/{binding['whatsapp_phone_number_id']}/messages",
             headers={"Authorization": f"Bearer {token}"},
-            json={"messaging_product": "whatsapp", "to": recipient, "type": "image",
-                  "image": {"link": media["media"], "caption": str(media.get("caption") or "")}},
+            json={"messaging_product": "whatsapp", "to": recipient, "type": kind, kind: body},
             timeout=30.0,
         )
         _raise_for_status_with_detail(response)
-        return response.json()
+        result = response.json()
+        if kind == "audio" and caption.strip():
+            self.send_text(binding, recipient, caption)
+        return result
