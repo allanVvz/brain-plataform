@@ -12,6 +12,10 @@ estado, store ou workflow paralelo; simplifique o existente.
 | Portal do cliente e North (`*.pages.dev`), gateway CRM | `akia` (`apps/portal-web`, `apps/gateway`) | Cloudflare Pages por portal |
 | Chatwoot (app iPhone) | VPS `chat.vzforeal.com` | ponte no transport (`/webhooks/chatwoot`, worker `chatwoot_bridge`), config por env |
 
+**Uma linhagem**: publique só a partir da `main` (a branch `feat/utzig-commercial-v15`
+foi unida a ela no PR #226). O manifest registra o que está no ar; confira em
+`/health/ready` do gateway antes de publicar. Próximos passos: [handoff de 2026-10-07](handoffs/CODEX_HANDOFF_2026-10-07.md).
+
 `akia/apps/{control-plane,transport,conversation-runtime}` e `akia/dashboard` são
 cópias: não vão para produção. Banco: leitura com `akia-db` (somente leitura);
 escrita só por workflow com dry-run/apply.
