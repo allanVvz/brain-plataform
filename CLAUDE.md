@@ -1,5 +1,7 @@
 # Claude Project Contract
 
+> Mapa curto do sistema e regras de simplicidade: [docs/ESTRUTURA.md](docs/ESTRUTURA.md). Leia primeiro.
+
 ## Ordem de precedência (resolve qualquer contradição)
 
 ```
