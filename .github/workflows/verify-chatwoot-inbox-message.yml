@@ -42,7 +42,7 @@ jobs:
                     if not config or str(lead.get('channel_binding_id') or '') != config.binding_id:
                         continue
                     found = True
-                    ops = supabase_client._execute_with_retry(supabase_client.get_client().table('chatwoot_bridge_operations').select('status,attempt_count,last_error,available_at').eq('source_kind','brain_message').eq('source_id',str(row['id'])).limit(1)).data or []
+                    ops = supabase_client._execute_with_retry(supabase_client.get_client().table('chatwoot_bridge_operations').select('id,status,attempt_count,last_error,available_at').eq('source_kind','brain_message').eq('source_id',str(row['id'])).limit(1)).data or []
                     op = ops[0] if ops else {}
                     status = str(op.get('status') or 'missing')
                     attempts = int(op.get('attempt_count') or 0)
@@ -107,6 +107,13 @@ jobs:
                                     setup_result = ('message_http_' + http.group(1)) if http else 'message_error_' + type(exc).__name__
                             else:
                                 setup_result = 'retry_due_or_too_close'
+                        if projected and status == 'retry':
+                            released = supabase_client._execute_with_retry(
+                                supabase_client.get_client().table('chatwoot_bridge_operations')
+                                .update({'available_at': datetime.now(timezone.utc).isoformat()})
+                                .eq('id', str(op['id'])).eq('status', 'retry').select('id'),
+                            ).data or []
+                            setup_result += '_retry_released' if released else '_retry_not_changed'
                     break
                 if config:
                     states = supabase_client._execute_with_retry(supabase_client.get_client().table('chatwoot_bridge_operations').select('status').eq('channel_binding_id',config.binding_id).eq('source_kind','brain_message').in_('status',['pending','retry','processing','dead_letter']).limit(1000)).data or []
