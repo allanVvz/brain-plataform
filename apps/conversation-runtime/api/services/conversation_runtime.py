@@ -1655,41 +1655,36 @@ def decide_agentic(
         matched_keys = conversation_repetition.question_field_matches(
             conversation_reply.reply, resolved_context.graph_contract,
         )
-        if public_question and matched_keys - eligible_keys:
-            raise RuntimeError("public_question_field_not_eligible")
-        # The model owns the wording. A question with missing or generic
-        # metadata has an unambiguous classification when its text matches one
-        # eligible published field, or matches no field at all. Normalize that
-        # metadata before proof; conflicting keys and ineligible fields still
-        # fail closed below.
-        if public_question and not asked_key:
-            if len(matched_keys) == 1 and matched_keys <= eligible_keys and kind in {
-                None, "none", "consultative",
-            }:
-                asked_key = next(iter(matched_keys))
-                kind = "qualification"
-            elif not matched_keys and kind in {None, "none"}:
-                kind = "consultative"
-            if (kind, asked_key) != (
-                conversation_reply.question_kind,
-                str(conversation_reply.asked_field_key or ""),
-            ):
-                conversation_reply = conversation_reply.model_copy(update={
-                    "question_kind": kind,
-                    "asked_field_key": asked_key or None,
-                })
-        if public_question and kind in {None, "none"}:
-            raise RuntimeError("question_kind_required_for_public_question")
-        if kind == "qualification" and (
-            not public_question or not asked_key or asked_key not in eligible_keys
-        ):
-            raise RuntimeError("qualification_question_field_not_eligible")
-        if kind != "qualification" and asked_key:
-            raise RuntimeError("asked_field_key_requires_qualification_question")
-        if kind in {"consultative", "confirmation"} and not public_question:
-            raise RuntimeError("question_kind_without_public_question")
-        if matched_keys and (kind != "qualification" or matched_keys != {asked_key}):
-            raise RuntimeError("public_question_field_metadata_mismatch")
+        metadata_warnings: list[str] = []
+        original_metadata = (kind, asked_key)
+        # A published question is a wording example, not a semantic veto.
+        # Only attach an eligible question pointer to the ledger. Preserve the
+        # model's public text when its wording or metadata disagrees.
+        if public_question:
+            if matched_keys - eligible_keys:
+                metadata_warnings.append("public_question_field_not_eligible")
+            if kind == "confirmation":
+                # A summary naturally repeats field names; it is still the
+                # confirmation question the next "sim" answers.
+                asked_key = ""
+            elif len(matched_keys) == 1 and matched_keys <= eligible_keys:
+                kind, asked_key = "qualification", next(iter(matched_keys))
+            elif kind == "qualification" and asked_key in eligible_keys:
+                pass  # The model may phrase the published field differently.
+            else:
+                if asked_key or kind == "qualification" or matched_keys:
+                    metadata_warnings.append("public_question_field_metadata_mismatch")
+                kind, asked_key = "consultative", ""
+        else:
+            if kind not in {None, "none"} or asked_key:
+                metadata_warnings.append("question_metadata_without_public_question")
+            kind, asked_key = "none", ""
+        if (kind, asked_key) != original_metadata:
+            metadata_warnings.append("reply_question_metadata_normalized")
+            conversation_reply = conversation_reply.model_copy(update={
+                "question_kind": kind,
+                "asked_field_key": asked_key or None,
+            })
         profile_name = resolved_understanding.conversation_brief.get("profile_name") or {}
         if (
             kind == "qualification"
@@ -1697,7 +1692,7 @@ def decide_agentic(
             and profile_name.get("state") == "confirm_once"
             and str(profile_name.get("candidate") or "") not in conversation_reply.reply
         ):
-            raise RuntimeError("profile_name_confirmation_must_quote_candidate")
+            metadata_warnings.append("profile_name_confirmation_missing_candidate")
         matching_questions = {
             str(field.get("question_node_id"))
             for field in resolved_understanding.eligible_fields
@@ -1760,6 +1755,7 @@ def decide_agentic(
             ),
             "token_usage": usage,
             "validation_publication_id": validation_publication_id,
+            "reply_metadata_warnings": metadata_warnings,
         }
         context = resolved_context
     if not isinstance(model_observation, dict):
@@ -1805,6 +1801,7 @@ def decide_agentic(
             *(response.proof.get("quality_warnings") or []),
             *(resolved_understanding.resolution_proof.get("quality_warnings") or []),
             *understanding_warnings,
+            *((model_observation or {}).get("reply_metadata_warnings") or []),
         ]))
         response = response.model_copy(update={
             "proof": {
@@ -2862,88 +2859,6 @@ def commit(
 ) -> dict[str, Any]:
     if outbound_initial_status not in {"awaiting_proof", "preview_ready"}:
         raise ValueError("unsupported outbound initial status")
-    if _reply_confirms_price_or_schedule(response.reply_text):
-        if response.proposal is not None:
-            authorized = bool(context.graph_contract.get("confirmation_required"))
-            decision = decision.model_copy(
-                update={
-                    "route": ConversationRoute.HUMAN if authorized else ConversationRoute.SDR,
-                    "handoff_reason": (
-                        decision.handoff_reason or "unsafe_reply_blocked_by_graph_proof"
-                        if authorized else None
-                    ),
-                }
-            )
-            response = response.model_copy(
-                update={
-                    "reply_text": None,
-                    "role": ConversationRoute.HUMAN if authorized else ConversationRoute.SDR,
-                    "handoff_required": authorized,
-                    "proof": {
-                        **response.proof,
-                        "unsafe_confirmation_blocked": True,
-                        "delivery_authorized": False,
-                        "gating_errors": [
-                            *(response.proof.get("gating_errors") or []),
-                            "unsafe_price_or_schedule_confirmation",
-                        ],
-                    },
-                }
-            )
-        else:
-            decision = decision.model_copy(
-                update={
-                    "route": ConversationRoute.HUMAN,
-                    "handoff_reason": decision.handoff_reason
-                    or "unsafe_reply_blocked_price_or_schedule_confirmation",
-                }
-            )
-            response = response.model_copy(
-                update={
-                    "reply_text": None,
-                    "role": ConversationRoute.HUMAN,
-                    "handoff_required": True,
-                    "proof": {
-                        **response.proof,
-                        "unsafe_confirmation_blocked": True,
-                        "delivery_authorized": False,
-                        "gating_errors": [
-                            *(response.proof.get("gating_errors") or []),
-                            "unsafe_price_or_schedule_confirmation",
-                        ],
-                    },
-                }
-            )
-
-    appointment_policy = _context_appointment_policy(context)
-    if _reply_states_a_price(
-        response.reply_text,
-        appointment_policy,
-        cited_nodes=_cited_context_nodes(context, decision),
-    ):
-        decision = decision.model_copy(
-            update={
-                "route": ConversationRoute.HUMAN,
-                "handoff_reason": "price_disclosure_requires_human",
-            }
-        )
-        response = response.model_copy(
-            update={
-                "reply_text": None,
-                "role": ConversationRoute.HUMAN,
-                "handoff_required": True,
-                "proof": {
-                    **response.proof,
-                    "price_disclosure_blocked": True,
-                    "delivery_authorized": False,
-                    "gating_errors": [
-                        *(response.proof.get("gating_errors") or []),
-                        "price_disclosure_requires_human",
-                    ],
-                },
-            }
-        )
-
     extracted_fields = _resolve_identified_service(
         dict(response.extracted_fields),
         response.identified_service_slug,
@@ -3142,7 +3057,13 @@ def commit(
         required_total = int(response.proof.get("required_field_count") or 0)
         resolved_required = max(0, required_total - len(missing))
         qualification_score = _qualification_score(required_total, resolved_required)
+        # A lead never moves backwards automatically; manual terminal stages win.
+        current_stage = str(lead.get("stage") or "novo").lower()
         qualified_stage = decision.lead_stage
+        if current_stage in {"fechado", "perdido"}:
+            qualified_stage = current_stage
+        elif current_stage in STAGES and qualified_stage in STAGES:
+            qualified_stage = STAGES[max(STAGES.index(current_stage), STAGES.index(qualified_stage))]
         qualification = {
             "version": graph_agent_runtime_v3.RUNTIME_VERSION,
             "complete": bool(response.proof.get("qualification_complete", not missing)),

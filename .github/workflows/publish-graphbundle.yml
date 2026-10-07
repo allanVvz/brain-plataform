@@ -2,35 +2,60 @@ name: Publish GraphBundle
 on:
   workflow_dispatch:
     inputs:
+      # One step: pick the bundle and the persona, run, approve the
+      # production-content environment. The checksums are the ones this run's
+      # plan computes; pass them only to pin a plan reviewed earlier.
       action:
-        description: Compile only, stage, or activate the approved persona graph
+        description: activate = publish now (plan + stage + activate); plan = compile only
         type: choice
-        options: [plan, stage, activate]
-        default: plan
+        options: [activate, plan, stage]
+        default: activate
       bundle_path: {description: Versioned GraphBundle path, required: true}
       persona_slug: {description: Target persona, required: true}
-      approved_draft_checksum: {description: Human-approved draft checksum, required: true}
-      approved_runtime_checksum: {description: Human-approved runtime checksum, required: true}
+      approved_draft_checksum: {description: "Optional: pin a previously reviewed draft checksum", required: false, default: ""}
+      approved_runtime_checksum: {description: "Optional: pin a previously reviewed runtime checksum", required: false, default: ""}
 permissions:
   contents: read
 jobs:
   plan:
     runs-on: ubuntu-latest
+    outputs:
+      draft_checksum: ${{ steps.checksums.outputs.draft_checksum }}
+      runtime_checksum: ${{ steps.checksums.outputs.runtime_checksum }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: "3.12"}
-      - run: pip install -r api/requirements.txt
+      - run: pip install -r apps/control-plane/api/requirements.txt
       - name: Compile without publication
-        run: python api/scripts/compile_graph_bundle.py "${{ inputs.bundle_path }}" > publication-plan.json
+        run: python apps/control-plane/api/scripts/compile_graph_bundle.py "${{ inputs.bundle_path }}" > publication-plan.json
+      - name: Resolve the checksums this publication will carry
+        id: checksums
+        env:
+          PINNED_DRAFT: ${{ inputs.approved_draft_checksum }}
+          PINNED_RUNTIME: ${{ inputs.approved_runtime_checksum }}
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          plan = json.load(open("publication-plan.json", encoding="utf-8"))
+          print("draft_checksum=" + (os.environ["PINNED_DRAFT"] or str(plan.get("draft_checksum") or "")))
+          print("runtime_checksum=" + (os.environ["PINNED_RUNTIME"] or str(plan.get("runtime_checksum") or "")))
+          PY
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          plan = json.load(open("publication-plan.json", encoding="utf-8"))
+          print("### GraphBundle plan")
+          for key in ("persona_slug", "publication_allowed", "draft_checksum", "runtime_checksum", "validation_errors"):
+              print(f"- **{key}**: `{plan.get(key)}`")
+          PY
       - name: Verify persona scope, checksums, and publication gates
         run: |
           python ops/microservices/validate-graphbundle-plan.py \
             --bundle "${{ inputs.bundle_path }}" \
             --plan publication-plan.json \
             --persona-slug "${{ inputs.persona_slug }}" \
-            --approved-draft-checksum "${{ inputs.approved_draft_checksum }}" \
-            --approved-runtime-checksum "${{ inputs.approved_runtime_checksum }}" \
+            --approved-draft-checksum "${{ steps.checksums.outputs.draft_checksum }}" \
+            --approved-runtime-checksum "${{ steps.checksums.outputs.runtime_checksum }}" \
             > graphbundle-review.json
       - uses: actions/upload-artifact@v4
         with:
@@ -61,7 +86,7 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
-          source: ${{ inputs.bundle_path }},api/scripts/apply_graph_edge_tombstones.py,api/scripts/sync_graph_media_assets.py,graphbundle-media.tar.gz
+          source: ${{ inputs.bundle_path }},api/scripts/sync_graph_media_assets.py,graphbundle-media.tar.gz
           target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           overwrite: true
       - name: Stage or activate through the active control plane
@@ -71,8 +96,8 @@ jobs:
           GRAPH_ACTION: ${{ inputs.action }}
           BUNDLE_PATH: ${{ inputs.bundle_path }}
           PERSONA_SLUG: ${{ inputs.persona_slug }}
-          APPROVED_DRAFT_CHECKSUM: ${{ inputs.approved_draft_checksum }}
-          APPROVED_RUNTIME_CHECKSUM: ${{ inputs.approved_runtime_checksum }}
+          APPROVED_DRAFT_CHECKSUM: ${{ needs.plan.outputs.draft_checksum }}
+          APPROVED_RUNTIME_CHECKSUM: ${{ needs.plan.outputs.runtime_checksum }}
           PUBLISH_ACTOR: github:${{ github.actor }}:${{ github.run_id }}
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -94,23 +119,10 @@ jobs:
             control_container="brain-ai-control-plane-$control_slot-1"
             [[ "$(docker inspect -f '{{.State.Health.Status}}' "$control_container")" == healthy ]]
             compose=(docker compose --env-file .env.compose -f docker-compose.yml -f infra/microservices/docker-compose.blue-green.yml)
-            previous_publication_id="$("${compose[@]}" exec -T "$control_service" python -c 'import sys; from services import supabase_client; persona=supabase_client.get_persona(sys.argv[1]); publication=supabase_client.get_active_graph_publication(str(persona["id"])); print((publication or {}).get("id") or "")' "$PERSONA_SLUG")"
-            tombstones_applied=false
-            rollback_on_error() {
-              exit_code=$?
-              trap - ERR
-              current_publication_id="$("${compose[@]}" exec -T "$control_service" python -c 'import sys; from services import supabase_client; persona=supabase_client.get_persona(sys.argv[1]); publication=supabase_client.get_active_graph_publication(str(persona["id"])); print((publication or {}).get("id") or "")' "$PERSONA_SLUG" || true)"
-              if [[ -n "$previous_publication_id" && "$current_publication_id" != "$previous_publication_id" ]]; then
-                "${compose[@]}" exec -T "$control_service" python -c 'import json,sys; from services import supabase_client; result=supabase_client.get_client().rpc("activate_graph_publication_v3", {"p_publication_id":sys.argv[1]}).execute().data; print("GRAPH_PUBLICATION_ROLLBACK="+json.dumps(result,sort_keys=True,default=str))' "$previous_publication_id"
-              fi
-              if [[ "$tombstones_applied" == true ]]; then
-                "${compose[@]}" exec -T "$control_service" python /tmp/apply_graph_edge_tombstones.py /tmp/approved-graphbundle.json --approved-draft-checksum "$APPROVED_DRAFT_CHECKSUM" --actor "$PUBLISH_ACTOR" --restore
-              fi
-              exit "$exit_code"
-            }
-            trap rollback_on_error ERR
+            # The control plane commits source + activation + receipt atomically.
+            # An ambiguous result must be reconciled with its same key; never
+            # restore source nodes or reactivate a stale base unconditionally.
             docker cp "$BUNDLE_PATH" "$control_container:/tmp/approved-graphbundle.json"
-            docker cp api/scripts/apply_graph_edge_tombstones.py "$control_container:/tmp/apply_graph_edge_tombstones.py"
             docker cp api/scripts/sync_graph_media_assets.py "$control_container:/tmp/sync_graph_media_assets.py"
             run_id="${PUBLISH_ACTOR##*:}"
             media_root="/tmp/graphbundle-media-$run_id"
@@ -123,14 +135,6 @@ jobs:
             )
             "${compose[@]}" exec -T "$control_service" "${media_args[@]}"
             "${compose[@]}" exec -T "$control_service" "${media_args[@]}" --apply
-            tombstone_args=(
-              python /tmp/apply_graph_edge_tombstones.py /tmp/approved-graphbundle.json
-              --approved-draft-checksum "$APPROVED_DRAFT_CHECKSUM"
-              --actor "$PUBLISH_ACTOR"
-            )
-            "${compose[@]}" exec -T "$control_service" "${tombstone_args[@]}"
-            "${compose[@]}" exec -T "$control_service" "${tombstone_args[@]}" --apply
-            tombstones_applied=true
             args=(
               python scripts/publish_graph_bundle.py /tmp/approved-graphbundle.json
               --approved-draft-checksum "$APPROVED_DRAFT_CHECKSUM"
@@ -147,4 +151,3 @@ jobs:
               curl --fail --silent --show-error "${public_api_url%/}/api/menu/$PERSONA_SLUG" \
                 | python3 -c 'import json,sys; payload=json.load(sys.stdin); assert payload.get("ok") is True; assert payload.get("graph_checksum") == sys.argv[1]' "$APPROVED_RUNTIME_CHECKSUM"
             fi
-            trap - ERR

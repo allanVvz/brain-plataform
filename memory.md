@@ -1,3 +1,15 @@
+# Checkpoint 2026-10-03 - Utzig SDR livre, estagios e grafo v17
+
+Em producao: grafo Utzig v17 (publicacao version 16, runtime
+`sha256:681263e9...`), runtime `5ad1678`, transport `e6eaafc`, control-plane
+`91b7aad`, schema 162. Branch de producao `feat/utzig-commercial-v15`; PRs
+abertos #195 (brain-plataform) e #3 (Card-pio). SDR sem guardas; falha tecnica
+logada sem pausar a lead; servico nunca expoe preco (ofertas
+`registered_only`); dono sempre "Wilian"; mensagens curtas; estagios
+contatado -> engajado -> qualificado -> oportunidade (handoff). Leads de teste
+328 (Allan) e 369 (Alisson) limpas. Acesso direto somente leitura `akia-db`.
+Detalhes e pendencias: `docs/handoffs/UTZIG_SDR_GRAPH_V17_HANDOFF_2026-10-03.md`.
+
 # Checkpoint 2026-09-26 - Tock e Utzig ativos, auditoria e WA Validator
 
 O usuario pediu para garantir Tock e Utzig funcionando. Auditoria produtiva

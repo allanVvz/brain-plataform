@@ -36,48 +36,54 @@ def scenario(cur):
             "embedding_dimension": 1536,
         },
     }
+    lease = str(uuid.uuid4())
     cur.execute(
         """
         insert into public.graph_publications(
-          persona_id,version,checksum,document_json,status,compiler_version
-        ) values(%s,1,%s,%s::jsonb,'compiled','test-v3') returning id
+          persona_id,version,checksum,document_json,status,compiler_version,
+          editor_lease_token,editor_lease_until
+        ) values(%s,1,%s,%s::jsonb,'building','test-v3',%s,now()+interval '5 minutes') returning id
         """,
-        (persona_id, checksum, json.dumps(document)),
+        (persona_id, checksum, json.dumps(document), lease),
     )
     publication_id = cur.fetchone()["id"]
     cur.execute(
         """
         insert into public.graph_node_coordinates(
-          publication_id,node_id,branch_anchor_node_id,path_node_ids,path_edge_ids,depth,path_checksum
-        ) values(%s,'branch:a','branch:a',array['branch:a'],array[]::text[],0,%s)
+          publication_id,node_id,branch_anchor_node_id,path_node_ids,path_edge_ids,depth,path_checksum,
+          editor_lease_token
+        ) values(%s,'branch:a','branch:a',array['branch:a'],array[]::text[],0,%s,%s)
         """,
-        (publication_id, checksum),
+        (publication_id, checksum, lease),
     )
     cur.execute(
         """
         insert into public.graph_branch_memberships(
-          publication_id,branch_node_id,node_id,graph_distance,inclusion_reason,structural_weight
-        ) values(%s,'branch:a','branch:a',0,'anchor',1)
+          publication_id,branch_node_id,node_id,graph_distance,inclusion_reason,structural_weight,
+          editor_lease_token
+        ) values(%s,'branch:a','branch:a',0,'anchor',1,%s)
         """,
-        (publication_id,),
+        (publication_id, lease),
     )
     cur.execute(
         """
         insert into public.graph_branch_contracts(
-          publication_id,branch_node_id,path_checksum,closure_checksum,contract_json,compiler_version
-        ) values(%s,'branch:a',%s,%s,'{}','test-v3')
+          publication_id,branch_node_id,path_checksum,closure_checksum,contract_json,compiler_version,
+          editor_lease_token
+        ) values(%s,'branch:a',%s,%s,'{}','test-v3',%s)
         """,
-        (publication_id, checksum, checksum),
+        (publication_id, checksum, checksum, lease),
     )
     cur.execute(
         """
         insert into public.knowledge_rag_entries(
           persona_id,publication_id,source_graph_node_id,content_type,semantic_level,
-          title,content,canonical_key,slug,status,projection_status
-        ) values(%s,%s,'branch:a','general_note',1,'Branch','branch alpha',%s,'branch-a','validated','ready')
+          title,content,canonical_key,slug,status,projection_status,metadata
+        ) values(%s,%s,'branch:a','general_note',1,'Branch','branch alpha',%s,'branch-a','validated','ready',
+          jsonb_build_object('editor_lease_token',%s::text))
         returning id
         """,
-        (persona_id, publication_id, f"test:{publication_id}"),
+        (persona_id, publication_id, f"test:{publication_id}", lease),
     )
     entry_id = cur.fetchone()["id"]
     cur.execute(
@@ -88,12 +94,19 @@ def scenario(cur):
           path_checksum,chunk_kind,chunk_checksum,metadata
         ) values(%s,%s,%s,'branch:a','branch:a',0,'branch alpha',
           array_fill(0::real,array[1536])::vector,'test',now(),'ready',%s,'content',%s,
-          '{"path_node_ids":["branch:a"],"priority":1}'::jsonb)
+          jsonb_build_object('path_node_ids',jsonb_build_array('branch:a'),'priority',1,
+            'editor_lease_token',%s::text))
         returning id
         """,
-        (entry_id, persona_id, publication_id, checksum, checksum),
+        (entry_id, persona_id, publication_id, checksum, checksum, lease),
     )
     chunk_id = cur.fetchone()["id"]
+    # Projections are written under the publication's lease (migration 163),
+    # exactly like the publisher; then the publication is ready to activate.
+    cur.execute(
+        "update public.graph_publications set status='compiled' where id=%s",
+        (publication_id,),
+    )
     return persona_id, lead_ref, publication_id, checksum, chunk_id
 
 

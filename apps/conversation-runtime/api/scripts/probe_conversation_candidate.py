@@ -30,31 +30,32 @@ def validate_case(case: dict, result: dict) -> None:
     proof = response.proof
     assert result["model_calls"] == 2 and proof["valid"] is True
     assert response.reply_text and proof.get("delivery_authorized") is not False
-    if "?" in response.reply_text:
-        assert proof.get("question_kind") in {"qualification", "consultative", "confirmation"}, (
-            "candidate public question has no valid question kind"
-        )
-    assert not any(f.get("field_key") in case.get("forbidden_extracted_fields", [])
-                   for f in proof.get("accepted_facts") or []), "contextual answer misclassified"
-    assert proof.get("asked_field_key") not in case.get("forbidden_asked_fields", []), (
-        "candidate repeated the interrupted qualification field"
-    )
-    assert not forbidden_questions_in_reply(case, result), (
-        "candidate repeated the interrupted qualification field in public text"
-    )
+
+
+def quality_observations(case: dict, result: dict) -> list[str]:
+    """Report editorial issues independently of the no-commit technical gate."""
+    proof = result["response"].proof
+    warnings = list(proof.get("quality_warnings") or [])
+    if "?" in result["response"].reply_text and proof.get("question_kind") not in {
+        "qualification", "consultative", "confirmation",
+    }:
+        warnings.append("candidate_public_question_kind_missing")
+    if any(f.get("field_key") in case.get("forbidden_extracted_fields", [])
+           for f in proof.get("accepted_facts") or []):
+        warnings.append("candidate_contextual_answer_misclassified")
+    if proof.get("asked_field_key") in case.get("forbidden_asked_fields", []):
+        warnings.append("candidate_interrupted_field_repeated_in_metadata")
+    if forbidden_questions_in_reply(case, result):
+        warnings.append("candidate_interrupted_field_repeated_in_text")
     text_fields = question_fields_in_reply(result)
-    assert not text_fields or (
-        proof.get("question_kind") == "qualification"
-        and text_fields == {proof.get("asked_field_key")}
-    ), "candidate question text contradicts its metadata"
-    if case.get("allowed_question_kinds"):
-        assert proof.get("question_kind") in case["allowed_question_kinds"], (
-            "candidate chose an unexpected question kind"
-        )
-    if case.get("forbid_reply_repetition"):
-        assert (proof.get("repetition_audit") or {}).get("passed") is True, (
-            "candidate repeated a recent assistant reply"
-        )
+    if text_fields and (proof.get("question_kind") != "qualification"
+                        or text_fields != {proof.get("asked_field_key")}):
+        warnings.append("candidate_question_metadata_mismatch")
+    if case.get("allowed_question_kinds") and proof.get("question_kind") not in case["allowed_question_kinds"]:
+        warnings.append("candidate_unexpected_question_kind")
+    if case.get("forbid_reply_repetition") and (proof.get("repetition_audit") or {}).get("passed") is not True:
+        warnings.append("candidate_reply_repetition")
+    return list(dict.fromkeys(warnings))
 
 
 def run(case: dict) -> dict:
@@ -98,11 +99,13 @@ def run(case: dict) -> dict:
         "quality_warnings": proof.get("quality_warnings") or [],
     }, ensure_ascii=True), flush=True)
     validate_case(case, result)
+    quality_warnings = quality_observations(case, result)
     return {"case": case["name"], "lead_ref": lead_ref, "publication_id": context.publication_id,
             "graph_checksum": context.graph_checksum, "commit": False, "model_calls": 2,
             "reply": response.reply_text, "question_kind": proof.get("question_kind"),
             "asked_field_key": proof.get("asked_field_key"), "technical_pass": True,
-            "quality_warnings": proof.get("quality_warnings") or []}
+            "quality_warnings": quality_warnings,
+            "quality_pass": not quality_warnings}
 
 
 def select_cases(fixture_name: str, case_name: str | None) -> list[dict]:

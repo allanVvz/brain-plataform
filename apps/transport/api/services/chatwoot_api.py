@@ -243,6 +243,27 @@ class ChatwootApi:
                 return None
             cursor = next_cursor
 
+    MAX_ATTACHMENT_BYTES = 16 * 1024 * 1024
+
+    def download_attachment(self, attachment: dict[str, Any]) -> dict[str, Any]:
+        """Bytes, mime and name of one attachment an attendant sent from Chatwoot."""
+        url = str(attachment.get("data_url") or attachment.get("file_url") or "")
+        if not url.startswith("https://"):
+            raise RuntimeError("Chatwoot attachment has no HTTPS URL")
+        chunks: list[bytes] = []
+        size = 0
+        with self._client.stream("GET", url, follow_redirects=True) as response:
+            if response.status_code >= 400:
+                raise RuntimeError(f"Chatwoot attachment returned HTTP {response.status_code}")
+            mime = (response.headers.get("content-type") or "application/octet-stream").split(";")[0].strip()
+            for chunk in response.iter_bytes():
+                size += len(chunk)
+                if size > self.MAX_ATTACHMENT_BYTES:
+                    raise RuntimeError("Chatwoot attachment exceeds the WhatsApp media limit")
+                chunks.append(chunk)
+        name = url.split("?", 1)[0].rsplit("/", 1)[-1] or "arquivo"
+        return {"data": b"".join(chunks), "mime": mime, "filename": name}
+
     def update_message_status(
         self, *, conversation_id: int, message_id: int, status: str,
     ) -> dict[str, Any]:

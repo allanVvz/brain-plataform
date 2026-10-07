@@ -133,6 +133,24 @@ def normalize_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
                 value = qualification.get(key)
                 if not isinstance(value, str) or not value.strip():
                     errors.append(f"bundle_sales_qualification_copy_required:{key}")
+        for policy_name, policy in (
+            ("appointment_policy", persona_data.get("appointment_policy")),
+            ("qualification", (persona_data.get("conversation_policy") or {}).get("qualification")
+             if isinstance(persona_data.get("conversation_policy"), dict) else None),
+        ):
+            if not isinstance(policy, dict):
+                continue
+            modes = policy.get("question_modes")
+            if modes is None:
+                continue
+            if not isinstance(modes, dict):
+                errors.append(f"bundle_question_modes_invalid:{policy_name}")
+                continue
+            for field_key, mode in modes.items():
+                if str(mode or "").strip().lower() not in {"required", "optional", "disabled"}:
+                    errors.append(
+                        f"bundle_question_mode_invalid:{policy_name}:{field_key}:{mode}"
+                    )
 
     edges: list[dict[str, Any]] = []
     edge_ids: set[str] = set()

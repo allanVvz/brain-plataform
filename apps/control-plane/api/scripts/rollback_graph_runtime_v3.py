@@ -1,47 +1,33 @@
-"""Rollback one persona to a previous GraphRAG publication/runtime binding."""
-from __future__ import annotations
+"""Revert the previous graph publication through the transactional CAS writer.
 
+Runtime/binding rollback uses the service release workflow, never a graph CLI.
+"""
+from __future__ import annotations
 import argparse
 import json
 import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from services import graph_editor
 
 
-API_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(API_ROOT))
-
-from services import supabase_client
-
-
-def rollback(persona_slug: str, target_version: int, *, runtime_version: str | None) -> dict:
-    persona = supabase_client.get_persona(persona_slug)
-    if not persona:
-        raise LookupError(f"persona not found: {persona_slug}")
-    activation = supabase_client.get_client().rpc("rollback_graph_publication_v3", {
-        "p_persona_id": persona["id"], "p_target_version": target_version,
-    }).execute().data
-    bindings: list[str] = []
-    for binding in supabase_client.get_workflow_bindings(str(persona["id"])):
-        if not binding.get("id"):
-            continue
-        metadata = dict(binding.get("metadata") or {})
-        if runtime_version:
-            metadata["runtime_version"] = runtime_version
-        else:
-            metadata.pop("runtime_version", None)
-            metadata.pop("shadow_runtime_version", None)
-            metadata["pipeline_contract"] = "conversation_v1"
-        supabase_client.update_workflow_binding_metadata(str(binding["id"]), metadata)
-        bindings.append(str(binding["id"]))
-    return {"persona_slug": persona_slug, "activation": activation, "binding_ids": bindings}
+def rollback(persona_slug: str, target_version: int, *, actor: str,
+             base_publication_id: str, idempotency_key: str) -> dict:
+    previous = graph_editor.previous_publication(persona_slug, base_publication_id)
+    if not previous or int(previous["version"]) != target_version:
+        raise graph_editor.GraphEditorConflict("revert_target_not_previous")
+    return graph_editor.revert(persona_slug=persona_slug, to_publication_id=str(previous["id"]),
+        base_publication_id=base_publication_id, actor=actor, idempotency_key=idempotency_key)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("persona_slug")
     parser.add_argument("target_version", type=int)
-    parser.add_argument("--runtime-version")
+    parser.add_argument("--actor", required=True)
+    parser.add_argument("--expected-base-publication-id", required=True)
+    parser.add_argument("--idempotency-key", required=True)
     args = parser.parse_args()
-    print(json.dumps(rollback(
-        args.persona_slug, args.target_version, runtime_version=args.runtime_version
-    ), ensure_ascii=False, default=str))
+    print(json.dumps(rollback(args.persona_slug, args.target_version, actor=args.actor,
+        base_publication_id=args.expected_base_publication_id, idempotency_key=args.idempotency_key),
+        ensure_ascii=False, default=str))

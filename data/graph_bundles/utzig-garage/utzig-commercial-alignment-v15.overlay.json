@@ -1,0 +1,3421 @@
+{
+  "overlay_version": "1.0",
+  "base_publication": {
+    "publication_id": "6b85bf7a-ab87-4f3b-a1d1-4a6b4ae4c05f",
+    "version": 13,
+    "checksum": "sha256:961c06d8fe7e707b3e71c74c2aa1b8c50d6b828436b0b15f2005381dc00a5f32"
+  },
+  "metadata": {
+    "purpose": "Utzig commercial alignment: three sectors, Luiza prices on offers only, services discontinued, retrievable FAQs, lead-scoped vehicle and name",
+    "source": "luiza_camargo_whatsapp_2026_09_28",
+    "retired_nodes": [
+      {
+        "id": "asset:repair-paint-representative-v1",
+        "node_type": "asset",
+        "slug": "repair-paint-representative-v1",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "copy:bodywork",
+        "node_type": "copy",
+        "slug": "copy-bodywork",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "copy:painting",
+        "node_type": "copy",
+        "slug": "copy-painting",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "copy:site-faq:window-film-benefit",
+        "node_type": "copy",
+        "slug": "site-faq-window-film-benefit",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "copy:vehicle-wrap",
+        "node_type": "copy",
+        "slug": "copy-vehicle-wrap",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "copy:window-film",
+        "node_type": "copy",
+        "slug": "copy-window-film",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "faq:qualification:vehicle_color",
+        "node_type": "faq",
+        "slug": "qualification-vehicle_color",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "faq:service:bodywork",
+        "node_type": "faq",
+        "slug": "faq-bodywork",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "faq:service:bodywork:chapeacao-preco-tempo",
+        "node_type": "faq",
+        "slug": "faq-service-bodywork-chapeacao-preco-tempo",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "faq:service:bodywork:chapeacao-remota",
+        "node_type": "faq",
+        "slug": "faq-service-bodywork-chapeacao-remota",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "faq:service:painting",
+        "node_type": "faq",
+        "slug": "faq-painting",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "faq:service:painting:pintura-preco-tempo",
+        "node_type": "faq",
+        "slug": "faq-service-painting-pintura-preco-tempo",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "faq:service:painting:pintura-remota",
+        "node_type": "faq",
+        "slug": "faq-service-painting-pintura-remota",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "faq:service:vehicle-wrap",
+        "node_type": "faq",
+        "slug": "faq-vehicle-wrap",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "faq:service:window-film",
+        "node_type": "faq",
+        "slug": "faq-window-film",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "faq:site:window-film-benefit",
+        "node_type": "faq",
+        "slug": "site-window-film-benefit",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "group:repair-paint",
+        "node_type": "product_group",
+        "slug": "repair-paint",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "offer:window-film:starting-price",
+        "node_type": "offer",
+        "slug": "window-film-starting-price",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "product:bodywork",
+        "node_type": "product",
+        "slug": "bodywork",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "product:painting",
+        "node_type": "product",
+        "slug": "painting",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "product:vehicle-wrap",
+        "node_type": "product",
+        "slug": "vehicle-wrap",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "product:window-film",
+        "node_type": "product",
+        "slug": "window-film",
+        "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+      },
+      {
+        "id": "gallery:gallery-default",
+        "node_type": "gallery",
+        "slug": "gallery-default",
+        "removal_reason": "galeria_vazia_duplicada_criada_por_upload"
+      }
+    ],
+    "visual_media_reconciliation": {
+      "soft_disabled_edges": [
+        {
+          "id": "edge:bodywork-copy",
+          "source": "product:bodywork",
+          "target": "copy:bodywork",
+          "relation_type": "supports_copy",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:bodywork:chapeacao-preco-tempo",
+          "source": "product:bodywork",
+          "target": "faq:service:bodywork:chapeacao-preco-tempo",
+          "relation_type": "answers_question",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:bodywork:chapeacao-preco-tempo:contains",
+          "source": "product:bodywork",
+          "target": "faq:service:bodywork:chapeacao-preco-tempo",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:bodywork:chapeacao-preco-tempo:embedded",
+          "source": "faq:service:bodywork:chapeacao-preco-tempo",
+          "target": "embedded:utzig",
+          "relation_type": "publishes_to",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:bodywork:chapeacao-remota",
+          "source": "product:bodywork",
+          "target": "faq:service:bodywork:chapeacao-remota",
+          "relation_type": "answers_question",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:bodywork:chapeacao-remota:contains",
+          "source": "product:bodywork",
+          "target": "faq:service:bodywork:chapeacao-remota",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:bodywork:chapeacao-remota:embedded",
+          "source": "faq:service:bodywork:chapeacao-remota",
+          "target": "embedded:utzig",
+          "relation_type": "publishes_to",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:brand-repair-paint",
+          "source": "brand:utzig-garage",
+          "target": "group:repair-paint",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:copy-faq-bodywork",
+          "source": "copy:bodywork",
+          "target": "faq:service:bodywork",
+          "relation_type": "answers_question",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:copy-faq-painting",
+          "source": "copy:painting",
+          "target": "faq:service:painting",
+          "relation_type": "answers_question",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:editorial-enhancement-painting",
+          "source": "product:painting",
+          "target": "campaign:editorial-enhancement",
+          "relation_type": "part_of_campaign",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:editorial-enhancement-vehicle-wrap",
+          "source": "product:vehicle-wrap",
+          "target": "campaign:editorial-enhancement",
+          "relation_type": "part_of_campaign",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:faq-embed-bodywork",
+          "source": "faq:service:bodywork",
+          "target": "embedded:utzig",
+          "relation_type": "publishes_to",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:faq-embed-painting",
+          "source": "faq:service:painting",
+          "target": "embedded:utzig",
+          "relation_type": "publishes_to",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:group-cover:repair-paint",
+          "source": "group:repair-paint",
+          "target": "asset:repair-paint-representative-v1",
+          "relation_type": "category_has_asset",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:painting-copy",
+          "source": "product:painting",
+          "target": "copy:painting",
+          "relation_type": "supports_copy",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:painting:pintura-preco-tempo",
+          "source": "product:painting",
+          "target": "faq:service:painting:pintura-preco-tempo",
+          "relation_type": "answers_question",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:painting:pintura-preco-tempo:contains",
+          "source": "product:painting",
+          "target": "faq:service:painting:pintura-preco-tempo",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:painting:pintura-preco-tempo:embedded",
+          "source": "faq:service:painting:pintura-preco-tempo",
+          "target": "embedded:utzig",
+          "relation_type": "publishes_to",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:painting:pintura-remota",
+          "source": "product:painting",
+          "target": "faq:service:painting:pintura-remota",
+          "relation_type": "answers_question",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:painting:pintura-remota:contains",
+          "source": "product:painting",
+          "target": "faq:service:painting:pintura-remota",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:painting:pintura-remota:embedded",
+          "source": "faq:service:painting:pintura-remota",
+          "target": "embedded:utzig",
+          "relation_type": "publishes_to",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:persona-question-vehicle_color",
+          "source": "persona:utzig-garage",
+          "target": "faq:qualification:vehicle_color",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:primary:bodywork-copy",
+          "source": "product:bodywork",
+          "target": "copy:bodywork",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:primary:bodywork-faq",
+          "source": "copy:bodywork",
+          "target": "faq:service:bodywork",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:primary:painting-copy",
+          "source": "product:painting",
+          "target": "copy:painting",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:primary:painting-faq",
+          "source": "copy:painting",
+          "target": "faq:service:painting",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:primary:repair-paint-representative-v1",
+          "source": "group:repair-paint",
+          "target": "asset:repair-paint-representative-v1",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:public-group:repair-paint",
+          "source": "group:repair-paint",
+          "target": "gallery:utzig",
+          "relation_type": "publishes_to",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:public-product:vehicle-wrap",
+          "source": "product:vehicle-wrap",
+          "target": "gallery:utzig",
+          "relation_type": "publishes_to",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:public-product:window-film",
+          "source": "product:window-film",
+          "target": "gallery:utzig",
+          "relation_type": "publishes_to",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:public:a89bc65897263c664979",
+          "source": "product:painting",
+          "target": "gallery:utzig",
+          "relation_type": "publishes_to",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:public:f3326cdb1851ecc4536c",
+          "source": "product:bodywork",
+          "target": "gallery:utzig",
+          "relation_type": "publishes_to",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:public:repair-paint-representative-v1",
+          "source": "asset:repair-paint-representative-v1",
+          "target": "gallery:utzig",
+          "relation_type": "publishes_to",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:repair-paint-bodywork",
+          "source": "group:repair-paint",
+          "target": "product:bodywork",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:repair-paint-painting",
+          "source": "group:repair-paint",
+          "target": "product:painting",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:repair-paint-representative-gallery",
+          "source": "asset:repair-paint-representative-v1",
+          "target": "gallery:utzig",
+          "relation_type": "gallery_asset",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:site-faq:window-film-benefit:answers",
+          "source": "copy:site-faq:window-film-benefit",
+          "target": "faq:site:window-film-benefit",
+          "relation_type": "answers_question",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:site-faq:window-film-benefit:copy",
+          "source": "copy:site-faq:window-film-benefit",
+          "target": "faq:site:window-film-benefit",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:site-faq:window-film-benefit:parent",
+          "source": "campaign:automotive-detailing",
+          "target": "copy:site-faq:window-film-benefit",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:vehicle-wrap:answers",
+          "source": "copy:vehicle-wrap",
+          "target": "faq:service:vehicle-wrap",
+          "relation_type": "answers_question",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:vehicle-wrap:copy",
+          "source": "product:vehicle-wrap",
+          "target": "copy:vehicle-wrap",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:vehicle-wrap:faq",
+          "source": "copy:vehicle-wrap",
+          "target": "faq:service:vehicle-wrap",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:vehicle-wrap:group",
+          "source": "group:repair-paint",
+          "target": "product:vehicle-wrap",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:vehicle-wrap:supports-copy",
+          "source": "product:vehicle-wrap",
+          "target": "copy:vehicle-wrap",
+          "relation_type": "supports_copy",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:window-film:answers",
+          "source": "copy:window-film",
+          "target": "faq:service:window-film",
+          "relation_type": "answers_question",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:window-film:copy",
+          "source": "product:window-film",
+          "target": "copy:window-film",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:window-film:faq",
+          "source": "copy:window-film",
+          "target": "faq:service:window-film",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:window-film:group",
+          "source": "group:enhancement",
+          "target": "product:window-film",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:window-film:offer",
+          "source": "product:window-film",
+          "target": "offer:window-film:starting-price",
+          "relation_type": "contains",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:window-film:offer-product",
+          "source": "offer:window-film:starting-price",
+          "target": "product:window-film",
+          "relation_type": "about_product",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        },
+        {
+          "id": "edge:window-film:supports-copy",
+          "source": "product:window-film",
+          "target": "copy:window-film",
+          "relation_type": "supports_copy",
+          "removal_reason": "servico_descontinuado_pela_utzig_2026_09_28"
+        }
+      ],
+      "soft_disabled_edge_count": 52
+    }
+  },
+  "remove_edge_ids": [
+    "edge:bodywork-copy",
+    "edge:bodywork:chapeacao-preco-tempo",
+    "edge:bodywork:chapeacao-preco-tempo:contains",
+    "edge:bodywork:chapeacao-preco-tempo:embedded",
+    "edge:bodywork:chapeacao-remota",
+    "edge:bodywork:chapeacao-remota:contains",
+    "edge:bodywork:chapeacao-remota:embedded",
+    "edge:brand-repair-paint",
+    "edge:copy-faq-bodywork",
+    "edge:copy-faq-painting",
+    "edge:editorial-enhancement-painting",
+    "edge:editorial-enhancement-vehicle-wrap",
+    "edge:faq-embed-bodywork",
+    "edge:faq-embed-painting",
+    "edge:group-cover:repair-paint",
+    "edge:painting-copy",
+    "edge:painting:pintura-preco-tempo",
+    "edge:painting:pintura-preco-tempo:contains",
+    "edge:painting:pintura-preco-tempo:embedded",
+    "edge:painting:pintura-remota",
+    "edge:painting:pintura-remota:contains",
+    "edge:painting:pintura-remota:embedded",
+    "edge:persona-question-vehicle_color",
+    "edge:primary:bodywork-copy",
+    "edge:primary:bodywork-faq",
+    "edge:primary:painting-copy",
+    "edge:primary:painting-faq",
+    "edge:primary:repair-paint-representative-v1",
+    "edge:public-group:repair-paint",
+    "edge:public-product:vehicle-wrap",
+    "edge:public-product:window-film",
+    "edge:public:a89bc65897263c664979",
+    "edge:public:f3326cdb1851ecc4536c",
+    "edge:public:repair-paint-representative-v1",
+    "edge:repair-paint-bodywork",
+    "edge:repair-paint-painting",
+    "edge:repair-paint-representative-gallery",
+    "edge:site-faq:window-film-benefit:answers",
+    "edge:site-faq:window-film-benefit:copy",
+    "edge:site-faq:window-film-benefit:parent",
+    "edge:vehicle-wrap:answers",
+    "edge:vehicle-wrap:copy",
+    "edge:vehicle-wrap:faq",
+    "edge:vehicle-wrap:group",
+    "edge:vehicle-wrap:supports-copy",
+    "edge:window-film:answers",
+    "edge:window-film:copy",
+    "edge:window-film:faq",
+    "edge:window-film:group",
+    "edge:window-film:offer",
+    "edge:window-film:offer-product",
+    "edge:window-film:supports-copy"
+  ],
+  "remove_node_ids": [
+    "asset:repair-paint-representative-v1",
+    "copy:bodywork",
+    "copy:painting",
+    "copy:site-faq:window-film-benefit",
+    "copy:vehicle-wrap",
+    "copy:window-film",
+    "faq:qualification:vehicle_color",
+    "faq:service:bodywork",
+    "faq:service:bodywork:chapeacao-preco-tempo",
+    "faq:service:bodywork:chapeacao-remota",
+    "faq:service:painting",
+    "faq:service:painting:pintura-preco-tempo",
+    "faq:service:painting:pintura-remota",
+    "faq:service:vehicle-wrap",
+    "faq:service:window-film",
+    "faq:site:window-film-benefit",
+    "group:repair-paint",
+    "offer:window-film:starting-price",
+    "product:bodywork",
+    "product:painting",
+    "product:vehicle-wrap",
+    "product:window-film"
+  ],
+  "upsert_nodes": [
+    {
+      "id": "offer:chassis-wash:starting-price",
+      "node_type": "offer",
+      "slug": "chassis-wash-starting-price",
+      "status": "approved",
+      "title": "Preço — Lavagem de chassi",
+      "summary": "Lavagem de chassi a partir de R$ 450,00",
+      "tags": [],
+      "data": {
+        "offer": {
+          "amount": 450.0,
+          "currency": "BRL"
+        },
+        "price_qualifier": "a_partir_de",
+        "price_kind": "service_reference",
+        "visibility": "registered_only",
+        "graph_json_node_id": "offer:chassis-wash:starting-price",
+        "source": "luiza_camargo_whatsapp_2026_09_28",
+        "validation_status": "approved"
+      }
+    },
+    {
+      "id": "offer:engine-bay-wash:starting-price",
+      "node_type": "offer",
+      "slug": "engine-bay-wash-starting-price",
+      "status": "approved",
+      "title": "Preço — Lavagem de motor",
+      "summary": "Lavagem de motor a partir de R$ 190,00",
+      "tags": [],
+      "data": {
+        "offer": {
+          "amount": 190.0,
+          "currency": "BRL"
+        },
+        "price_qualifier": "a_partir_de",
+        "price_kind": "service_reference",
+        "visibility": "registered_only",
+        "graph_json_node_id": "offer:engine-bay-wash:starting-price",
+        "source": "luiza_camargo_whatsapp_2026_09_28",
+        "validation_status": "approved"
+      }
+    },
+    {
+      "id": "offer:leather-conditioning:starting-price",
+      "node_type": "offer",
+      "slug": "leather-conditioning-starting-price",
+      "status": "approved",
+      "title": "Preço — Hidratação dos couros",
+      "summary": "Hidratação dos couros R$ 490,00",
+      "tags": [],
+      "data": {
+        "offer": {
+          "amount": 490.0,
+          "currency": "BRL"
+        },
+        "price_qualifier": "valor_base",
+        "price_kind": "service_reference",
+        "visibility": "registered_only",
+        "graph_json_node_id": "offer:leather-conditioning:starting-price",
+        "source": "luiza_camargo_whatsapp_2026_09_28",
+        "validation_status": "approved"
+      }
+    },
+    {
+      "id": "offer:glass-polish:starting-price",
+      "node_type": "offer",
+      "slug": "glass-polish-starting-price",
+      "status": "approved",
+      "title": "Preço — Polimento de vidros",
+      "summary": "Polimento de vidros a partir de R$ 350,00",
+      "tags": [],
+      "data": {
+        "offer": {
+          "amount": 350.0,
+          "currency": "BRL"
+        },
+        "price_qualifier": "a_partir_de",
+        "price_kind": "service_reference",
+        "visibility": "registered_only",
+        "graph_json_node_id": "offer:glass-polish:starting-price",
+        "source": "luiza_camargo_whatsapp_2026_09_28",
+        "validation_status": "approved"
+      }
+    },
+    {
+      "id": "offer:commercial-polish:starting-price",
+      "node_type": "offer",
+      "slug": "commercial-polish-starting-price",
+      "status": "approved",
+      "title": "Preço — Polimento comercial",
+      "summary": "Polimento comercial R$ 650,00",
+      "tags": [],
+      "data": {
+        "offer": {
+          "amount": 650.0,
+          "currency": "BRL"
+        },
+        "price_qualifier": "valor_base",
+        "price_kind": "service_reference",
+        "visibility": "registered_only",
+        "graph_json_node_id": "offer:commercial-polish:starting-price",
+        "source": "luiza_camargo_whatsapp_2026_09_28",
+        "validation_status": "approved"
+      }
+    },
+    {
+      "id": "offer:headlight-restoration:starting-price",
+      "node_type": "offer",
+      "slug": "headlight-restoration-starting-price",
+      "status": "approved",
+      "title": "Preço — Restauração de faróis",
+      "summary": "Restauração de faróis R$ 280,00",
+      "tags": [],
+      "data": {
+        "offer": {
+          "amount": 280.0,
+          "currency": "BRL"
+        },
+        "price_qualifier": "valor_base",
+        "price_kind": "service_reference",
+        "visibility": "registered_only",
+        "graph_json_node_id": "offer:headlight-restoration:starting-price",
+        "source": "luiza_camargo_whatsapp_2026_09_28",
+        "validation_status": "approved"
+      }
+    },
+    {
+      "id": "offer:windshield-crystallization:starting-price",
+      "node_type": "offer",
+      "slug": "windshield-crystallization-starting-price",
+      "status": "approved",
+      "title": "Preço — Cristalização do para-brisa",
+      "summary": "Cristalização do para-brisa a partir de R$ 250,00",
+      "tags": [],
+      "data": {
+        "offer": {
+          "amount": 250.0,
+          "currency": "BRL"
+        },
+        "price_qualifier": "a_partir_de",
+        "price_kind": "service_reference",
+        "visibility": "registered_only",
+        "graph_json_node_id": "offer:windshield-crystallization:starting-price",
+        "source": "luiza_camargo_whatsapp_2026_09_28",
+        "validation_status": "approved"
+      }
+    },
+    {
+      "id": "offer:seat-vitrification:starting-price",
+      "node_type": "offer",
+      "slug": "seat-vitrification-starting-price",
+      "status": "approved",
+      "title": "Preço — Vitrificação dos bancos",
+      "summary": "Vitrificação dos bancos a partir de R$ 350,00",
+      "tags": [],
+      "data": {
+        "offer": {
+          "amount": 350.0,
+          "currency": "BRL"
+        },
+        "price_qualifier": "a_partir_de",
+        "price_kind": "service_reference",
+        "visibility": "registered_only",
+        "graph_json_node_id": "offer:seat-vitrification:starting-price",
+        "source": "luiza_camargo_whatsapp_2026_09_28",
+        "validation_status": "approved"
+      }
+    },
+    {
+      "id": "offer:ppf:multimedia-starting-price",
+      "node_type": "offer",
+      "slug": "offer-ppf-multimedia-starting-price",
+      "status": "approved",
+      "title": "Preço — PPF — multimídia",
+      "summary": "PPF — multimídia a partir de R$ 190,00",
+      "tags": [],
+      "data": {
+        "offer": {
+          "amount": 190.0,
+          "currency": "BRL"
+        },
+        "price_qualifier": "a_partir_de",
+        "price_kind": "service_reference",
+        "visibility": "registered_only",
+        "graph_json_node_id": "offer:ppf:multimedia-starting-price",
+        "source": "luiza_camargo_whatsapp_2026_09_28",
+        "validation_status": "approved"
+      }
+    },
+    {
+      "id": "faq:utzig:services-overview",
+      "node_type": "faq",
+      "slug": "faq-utzig-services-overview",
+      "status": "approved",
+      "title": "Quais serviços a Utzig faz?",
+      "summary": "A Utzig trabalha em três frentes: limpeza e higienização (lavagem detalhada, chassi, motor, higienização interna), brilho e correção (polimento comercial, técnico, de vidros e restauração de faróis) e proteção (vitrificação, vitrificação de plásticos e couros, cristalização do para-brisa e PPF).",
+      "tags": [],
+      "data": {
+        "question": "Quais serviços a Utzig faz?",
+        "answer": "A Utzig trabalha em três frentes: limpeza e higienização (lavagem detalhada, chassi, motor, higienização interna), brilho e correção (polimento comercial, técnico, de vidros e restauração de faróis) e proteção (vitrificação, vitrificação de plásticos e couros, cristalização do para-brisa e PPF).",
+        "question_aliases": [
+          "o que vocês fazem",
+          "quais serviços tem",
+          "vocês fazem o quê",
+          "lista de serviços",
+          "serviços da utzig"
+        ],
+        "aliases": [
+          "o que vocês fazem",
+          "quais serviços tem",
+          "vocês fazem o quê",
+          "lista de serviços",
+          "serviços da utzig"
+        ],
+        "claims": [
+          {
+            "claim_type": "public_information",
+            "evidence_node_ids": [
+              "faq:utzig:services-overview"
+            ],
+            "policy": {
+              "mode": "informational"
+            }
+          }
+        ],
+        "graph_json_node_id": "faq:utzig:services-overview",
+        "source": "luiza_camargo_whatsapp_2026_09_28",
+        "validation_status": "approved",
+        "capabilities": {
+          "global_context": true
+        }
+      }
+    },
+    {
+      "id": "faq:utzig:ppf-areas",
+      "node_type": "faq",
+      "slug": "faq-utzig-ppf-areas",
+      "status": "approved",
+      "title": "Onde dá para aplicar PPF?",
+      "summary": "Na pintura, em áreas críticas como conchas de maçaneta, quinas de portas e soleiras, e em partes maiores como para-choque, capô, teto e retrovisor — ou no carro todo.",
+      "tags": [],
+      "data": {
+        "question": "Onde dá para aplicar PPF?",
+        "answer": "Na pintura, em áreas críticas como conchas de maçaneta, quinas de portas e soleiras, e em partes maiores como para-choque, capô, teto e retrovisor — ou no carro todo.",
+        "question_aliases": [
+          "onde aplica ppf",
+          "ppf no capô",
+          "ppf na maçaneta",
+          "ppf no carro inteiro",
+          "quais partes recebem ppf"
+        ],
+        "aliases": [
+          "onde aplica ppf",
+          "ppf no capô",
+          "ppf na maçaneta",
+          "ppf no carro inteiro",
+          "quais partes recebem ppf"
+        ],
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "evidence_node_ids": [
+              "faq:utzig:ppf-areas"
+            ],
+            "policy": "published_service_detail_with_source_provenance"
+          }
+        ],
+        "graph_json_node_id": "faq:utzig:ppf-areas",
+        "source": "luiza_camargo_whatsapp_2026_09_28",
+        "validation_status": "approved"
+      }
+    },
+    {
+      "id": "faq:utzig:ppf-interior",
+      "node_type": "faq",
+      "slug": "faq-utzig-ppf-interior",
+      "status": "approved",
+      "title": "PPF serve para multimídia e painel?",
+      "summary": "Sim. O PPF também pode ser aplicado em áreas sensíveis como multimídia, painéis e acabamentos em black piano.",
+      "tags": [],
+      "data": {
+        "question": "PPF serve para multimídia e painel?",
+        "answer": "Sim. O PPF também pode ser aplicado em áreas sensíveis como multimídia, painéis e acabamentos em black piano.",
+        "question_aliases": [
+          "ppf na multimídia",
+          "ppf no painel",
+          "proteger black piano",
+          "película na central",
+          "ppf interno"
+        ],
+        "aliases": [
+          "ppf na multimídia",
+          "ppf no painel",
+          "proteger black piano",
+          "película na central",
+          "ppf interno"
+        ],
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "evidence_node_ids": [
+              "faq:utzig:ppf-interior"
+            ],
+            "policy": "published_service_detail_with_source_provenance"
+          }
+        ],
+        "graph_json_node_id": "faq:utzig:ppf-interior",
+        "source": "luiza_camargo_whatsapp_2026_09_28",
+        "validation_status": "approved"
+      }
+    },
+    {
+      "id": "faq:utzig:duration-wash",
+      "node_type": "faq",
+      "slug": "faq-utzig-duration-wash",
+      "status": "approved",
+      "title": "Quanto tempo leva a lavagem?",
+      "summary": "A lavagem leva cerca de 3 horas.",
+      "tags": [],
+      "data": {
+        "question": "Quanto tempo leva a lavagem?",
+        "answer": "A lavagem leva cerca de 3 horas.",
+        "question_aliases": [
+          "demora a lavagem",
+          "lavagem fica pronta quando",
+          "tempo da lavagem",
+          "quantas horas a lavagem"
+        ],
+        "aliases": [
+          "demora a lavagem",
+          "lavagem fica pronta quando",
+          "tempo da lavagem",
+          "quantas horas a lavagem"
+        ],
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "evidence_node_ids": [
+              "faq:utzig:duration-wash"
+            ],
+            "policy": "published_service_detail_with_source_provenance"
+          }
+        ],
+        "graph_json_node_id": "faq:utzig:duration-wash",
+        "source": "luiza_camargo_whatsapp_2026_09_28",
+        "validation_status": "approved"
+      }
+    },
+    {
+      "id": "faq:utzig:duration-polish",
+      "node_type": "faq",
+      "slug": "faq-utzig-duration-polish",
+      "status": "approved",
+      "title": "Quanto tempo leva o polimento?",
+      "summary": "O polimento leva cerca de 12 horas.",
+      "tags": [],
+      "data": {
+        "question": "Quanto tempo leva o polimento?",
+        "answer": "O polimento leva cerca de 12 horas.",
+        "question_aliases": [
+          "demora o polimento",
+          "tempo do polimento",
+          "polimento fica pronto quando",
+          "polimento é no mesmo dia"
+        ],
+        "aliases": [
+          "demora o polimento",
+          "tempo do polimento",
+          "polimento fica pronto quando",
+          "polimento é no mesmo dia"
+        ],
+        "claims": [
+          {
+            "claim_type": "service_detail",
+            "evidence_node_ids": [
+              "faq:utzig:duration-polish"
+            ],
+            "policy": "published_service_detail_with_source_provenance"
+          }
+        ],
+        "graph_json_node_id": "faq:utzig:duration-polish",
+        "source": "luiza_camargo_whatsapp_2026_09_28",
+        "validation_status": "approved"
+      }
+    },
+    {
+      "id": "faq:utzig:how-to-quote",
+      "node_type": "faq",
+      "slug": "faq-utzig-how-to-quote",
+      "status": "approved",
+      "title": "Como peço avaliação ou orçamento?",
+      "summary": "Pelo WhatsApp: mande fotos e informações do veículo, ou combine uma avaliação presencial na Utzig.",
+      "tags": [],
+      "data": {
+        "question": "Como peço avaliação ou orçamento?",
+        "answer": "Pelo WhatsApp: mande fotos e informações do veículo, ou combine uma avaliação presencial na Utzig.",
+        "question_aliases": [
+          "quero orçamento",
+          "como faço orçamento",
+          "posso mandar fotos",
+          "avaliação presencial",
+          "como funciona a avaliação"
+        ],
+        "aliases": [
+          "quero orçamento",
+          "como faço orçamento",
+          "posso mandar fotos",
+          "avaliação presencial",
+          "como funciona a avaliação"
+        ],
+        "claims": [
+          {
+            "claim_type": "public_information",
+            "evidence_node_ids": [
+              "faq:utzig:how-to-quote"
+            ],
+            "policy": {
+              "mode": "informational"
+            }
+          }
+        ],
+        "graph_json_node_id": "faq:utzig:how-to-quote",
+        "source": "luiza_camargo_whatsapp_2026_09_28",
+        "validation_status": "approved",
+        "capabilities": {
+          "global_context": true
+        }
+      }
+    }
+  ],
+  "patch_nodes": [
+    {
+      "id": "group:cleaning",
+      "patch": {
+        "title": "Limpeza e higienização"
+      }
+    },
+    {
+      "id": "group:revitalization",
+      "patch": {
+        "title": "Brilho e correção"
+      }
+    },
+    {
+      "id": "group:enhancement",
+      "patch": {
+        "title": "Proteção"
+      }
+    },
+    {
+      "id": "group:preservation",
+      "patch": {
+        "title": "Avaliação e orientação"
+      }
+    },
+    {
+      "id": "product:detailed-wash",
+      "patch": {
+        "title": "Lavagem detalhada"
+      }
+    },
+    {
+      "id": "product:chassis-wash",
+      "patch": {
+        "title": "Lavagem de chassi"
+      }
+    },
+    {
+      "id": "product:engine-bay-wash",
+      "patch": {
+        "title": "Lavagem de motor"
+      }
+    },
+    {
+      "id": "product:vitrification",
+      "patch": {
+        "title": "Vitrificação da pintura"
+      }
+    },
+    {
+      "id": "product:seat-vitrification",
+      "patch": {
+        "title": "Vitrificação de plásticos e couros"
+      }
+    },
+    {
+      "id": "product:windshield-crystallization",
+      "patch": {
+        "title": "Cristalização do para-brisa"
+      }
+    },
+    {
+      "id": "product:headlight-restoration",
+      "patch": {
+        "title": "Restauração de faróis"
+      }
+    },
+    {
+      "id": "product:chassis-wash",
+      "patch": {
+        "data": {
+          "qualification": {
+            "fields": [
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "nome_cliente",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "persona:utzig-garage",
+                "priority": 1,
+                "question_node_id": "faq:qualification:nome_cliente",
+                "required": false,
+                "scope": "persona",
+                "validation": {
+                  "mode": "schema",
+                  "semantic_type": "human_full_name",
+                  "min_tokens": 1,
+                  "max_tokens": 6
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "carry_over": true
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "servico",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:chassis-wash",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:servico",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "modelo_veiculo",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "persona:utzig-garage",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:modelo_veiculo",
+                "required": true,
+                "scope": "persona",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "carry_over": true
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [
+                  "servico"
+                ],
+                "key": "condicao",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:chassis-wash",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:condicao",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "product:commercial-polish",
+      "patch": {
+        "data": {
+          "qualification": {
+            "fields": [
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "nome_cliente",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "persona:utzig-garage",
+                "priority": 1,
+                "question_node_id": "faq:qualification:nome_cliente",
+                "required": false,
+                "scope": "persona",
+                "validation": {
+                  "mode": "schema",
+                  "semantic_type": "human_full_name",
+                  "min_tokens": 1,
+                  "max_tokens": 6
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "carry_over": true
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "servico",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:commercial-polish",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:servico",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "modelo_veiculo",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "persona:utzig-garage",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:modelo_veiculo",
+                "required": true,
+                "scope": "persona",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "carry_over": true
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [
+                  "servico"
+                ],
+                "key": "foco_brilho_riscos",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:commercial-polish",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:foco_brilho_riscos",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "product:detailed-wash",
+      "patch": {
+        "data": {
+          "qualification": {
+            "fields": [
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "nome_cliente",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "persona:utzig-garage",
+                "priority": 1,
+                "question_node_id": "faq:qualification:nome_cliente",
+                "required": false,
+                "scope": "persona",
+                "validation": {
+                  "mode": "schema",
+                  "semantic_type": "human_full_name",
+                  "min_tokens": 1,
+                  "max_tokens": 6
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "carry_over": true
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "servico",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:detailed-wash",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:servico",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "modelo_veiculo",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "persona:utzig-garage",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:modelo_veiculo",
+                "required": true,
+                "scope": "persona",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "carry_over": true
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [
+                  "servico"
+                ],
+                "key": "condicao",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:detailed-wash",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:condicao",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "product:engine-bay-wash",
+      "patch": {
+        "data": {
+          "qualification": {
+            "fields": [
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "nome_cliente",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "persona:utzig-garage",
+                "priority": 1,
+                "question_node_id": "faq:qualification:nome_cliente",
+                "required": false,
+                "scope": "persona",
+                "validation": {
+                  "mode": "schema",
+                  "semantic_type": "human_full_name",
+                  "min_tokens": 1,
+                  "max_tokens": 6
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "carry_over": true
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "servico",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:engine-bay-wash",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:servico",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "modelo_veiculo",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "persona:utzig-garage",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:modelo_veiculo",
+                "required": true,
+                "scope": "persona",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "carry_over": true
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [
+                  "servico"
+                ],
+                "key": "vazamento_oleo",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:engine-bay-wash",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:vazamento_oleo",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [
+                  "servico"
+                ],
+                "key": "estrada_de_chao",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:engine-bay-wash",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:estrada_de_chao",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "product:evaluation",
+      "patch": {
+        "data": {
+          "qualification": {
+            "fields": [
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "nome_cliente",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "persona:utzig-garage",
+                "priority": 1,
+                "question_node_id": "faq:qualification:nome_cliente",
+                "required": false,
+                "scope": "persona",
+                "validation": {
+                  "mode": "schema",
+                  "semantic_type": "human_full_name",
+                  "min_tokens": 1,
+                  "max_tokens": 6
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "carry_over": true
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "servico",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:evaluation",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:servico",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "modelo_veiculo",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "persona:utzig-garage",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:modelo_veiculo",
+                "required": true,
+                "scope": "persona",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "carry_over": true
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [
+                  "servico"
+                ],
+                "key": "objective",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:evaluation",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:objective",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [
+                  "servico"
+                ],
+                "key": "evaluation_route",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:evaluation",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:evaluation_route",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "product:glass-polish",
+      "patch": {
+        "data": {
+          "qualification": {
+            "fields": [
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "nome_cliente",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "persona:utzig-garage",
+                "priority": 1,
+                "question_node_id": "faq:qualification:nome_cliente",
+                "required": false,
+                "scope": "persona",
+                "validation": {
+                  "mode": "schema",
+                  "semantic_type": "human_full_name",
+                  "min_tokens": 1,
+                  "max_tokens": 6
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "carry_over": true
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "servico",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:glass-polish",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:servico",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "modelo_veiculo",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "persona:utzig-garage",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:modelo_veiculo",
+                "required": true,
+                "scope": "persona",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "carry_over": true
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [
+                  "servico"
+                ],
+                "key": "condicao",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:glass-polish",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:condicao",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "product:headlight-restoration",
+      "patch": {
+        "data": {
+          "qualification": {
+            "fields": [
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "nome_cliente",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "persona:utzig-garage",
+                "priority": 1,
+                "question_node_id": "faq:qualification:nome_cliente",
+                "required": false,
+                "scope": "persona",
+                "validation": {
+                  "mode": "schema",
+                  "semantic_type": "human_full_name",
+                  "min_tokens": 1,
+                  "max_tokens": 6
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "carry_over": true
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "servico",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:headlight-restoration",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:servico",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "modelo_veiculo",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "persona:utzig-garage",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:modelo_veiculo",
+                "required": true,
+                "scope": "persona",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "carry_over": true
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [
+                  "servico"
+                ],
+                "key": "condicao",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:headlight-restoration",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:condicao",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "product:interior-cleaning",
+      "patch": {
+        "data": {
+          "qualification": {
+            "fields": [
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "nome_cliente",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "persona:utzig-garage",
+                "priority": 1,
+                "question_node_id": "faq:qualification:nome_cliente",
+                "required": false,
+                "scope": "persona",
+                "validation": {
+                  "mode": "schema",
+                  "semantic_type": "human_full_name",
+                  "min_tokens": 1,
+                  "max_tokens": 6
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "carry_over": true
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "servico",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:interior-cleaning",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:servico",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "modelo_veiculo",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "persona:utzig-garage",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:modelo_veiculo",
+                "required": true,
+                "scope": "persona",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "carry_over": true
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [
+                  "servico"
+                ],
+                "key": "revestimento_bancos",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:interior-cleaning",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:revestimento_bancos",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [
+                  "servico"
+                ],
+                "key": "condicao",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:interior-cleaning",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:condicao",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "product:leather-conditioning",
+      "patch": {
+        "data": {
+          "qualification": {
+            "fields": [
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "nome_cliente",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "persona:utzig-garage",
+                "priority": 1,
+                "question_node_id": "faq:qualification:nome_cliente",
+                "required": false,
+                "scope": "persona",
+                "validation": {
+                  "mode": "schema",
+                  "semantic_type": "human_full_name",
+                  "min_tokens": 1,
+                  "max_tokens": 6
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "carry_over": true
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "servico",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:leather-conditioning",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:servico",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "modelo_veiculo",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "persona:utzig-garage",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:modelo_veiculo",
+                "required": true,
+                "scope": "persona",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "carry_over": true
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [
+                  "servico"
+                ],
+                "key": "condicao",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:leather-conditioning",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:condicao",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "product:ppf",
+      "patch": {
+        "data": {
+          "qualification": {
+            "fields": [
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "nome_cliente",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "persona:utzig-garage",
+                "priority": 1,
+                "question_node_id": "faq:qualification:nome_cliente",
+                "required": false,
+                "scope": "persona",
+                "validation": {
+                  "mode": "schema",
+                  "semantic_type": "human_full_name",
+                  "min_tokens": 1,
+                  "max_tokens": 6
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "carry_over": true
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "servico",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:ppf",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:servico",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "modelo_veiculo",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "persona:utzig-garage",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:modelo_veiculo",
+                "required": true,
+                "scope": "persona",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "carry_over": true
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [
+                  "servico"
+                ],
+                "key": "condicao",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:ppf",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:condicao",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [
+                  "servico"
+                ],
+                "key": "objective",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:ppf",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:objective",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "product:seat-vitrification",
+      "patch": {
+        "data": {
+          "qualification": {
+            "fields": [
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "nome_cliente",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "persona:utzig-garage",
+                "priority": 1,
+                "question_node_id": "faq:qualification:nome_cliente",
+                "required": false,
+                "scope": "persona",
+                "validation": {
+                  "mode": "schema",
+                  "semantic_type": "human_full_name",
+                  "min_tokens": 1,
+                  "max_tokens": 6
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "carry_over": true
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "servico",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:seat-vitrification",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:servico",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "modelo_veiculo",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "persona:utzig-garage",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:modelo_veiculo",
+                "required": true,
+                "scope": "persona",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "carry_over": true
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [
+                  "servico"
+                ],
+                "key": "condicao",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:seat-vitrification",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:condicao",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "product:technical-polish",
+      "patch": {
+        "data": {
+          "qualification": {
+            "fields": [
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "nome_cliente",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "persona:utzig-garage",
+                "priority": 1,
+                "question_node_id": "faq:qualification:nome_cliente",
+                "required": false,
+                "scope": "persona",
+                "validation": {
+                  "mode": "schema",
+                  "semantic_type": "human_full_name",
+                  "min_tokens": 1,
+                  "max_tokens": 6
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "carry_over": true
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "servico",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:technical-polish",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:servico",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "modelo_veiculo",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "persona:utzig-garage",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:modelo_veiculo",
+                "required": true,
+                "scope": "persona",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "carry_over": true
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [
+                  "servico"
+                ],
+                "key": "procedimento_anterior",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:technical-polish",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:procedimento_anterior",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [
+                  "servico"
+                ],
+                "key": "foco_brilho_riscos",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:technical-polish",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:foco_brilho_riscos",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "product:vitrification",
+      "patch": {
+        "data": {
+          "qualification": {
+            "fields": [
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "nome_cliente",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "persona:utzig-garage",
+                "priority": 1,
+                "question_node_id": "faq:qualification:nome_cliente",
+                "required": false,
+                "scope": "persona",
+                "validation": {
+                  "mode": "schema",
+                  "semantic_type": "human_full_name",
+                  "min_tokens": 1,
+                  "max_tokens": 6
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "carry_over": true
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "servico",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:vitrification",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:servico",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "modelo_veiculo",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "persona:utzig-garage",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:modelo_veiculo",
+                "required": true,
+                "scope": "persona",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "carry_over": true
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [
+                  "servico"
+                ],
+                "key": "condicao",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:vitrification",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:condicao",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [
+                  "servico"
+                ],
+                "key": "objective",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:vitrification",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:objective",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "product:windshield-crystallization",
+      "patch": {
+        "data": {
+          "qualification": {
+            "fields": [
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "nome_cliente",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "persona:utzig-garage",
+                "priority": 1,
+                "question_node_id": "faq:qualification:nome_cliente",
+                "required": false,
+                "scope": "persona",
+                "validation": {
+                  "mode": "schema",
+                  "semantic_type": "human_full_name",
+                  "min_tokens": 1,
+                  "max_tokens": 6
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "carry_over": true
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "servico",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:windshield-crystallization",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:servico",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [],
+                "key": "modelo_veiculo",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "persona:utzig-garage",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:modelo_veiculo",
+                "required": true,
+                "scope": "persona",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "carry_over": true
+              },
+              {
+                "accepted_statuses": [
+                  "known"
+                ],
+                "depends_on": [
+                  "servico"
+                ],
+                "key": "condicao",
+                "overwrite_policy": "explicit_correction",
+                "owner_node_id": "product:windshield-crystallization",
+                "priority": 0.8,
+                "question_node_id": "faq:qualification:condicao",
+                "required": true,
+                "scope": "branch",
+                "validation": {
+                  "mode": "schema"
+                },
+                "value_schema": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "offer:interior-cleaning:starting-price",
+      "patch": {
+        "title": "Preço — Higienização interna",
+        "summary": "Higienização interna R$ 650,00",
+        "data": {
+          "offer": {
+            "amount": 650.0,
+            "currency": "BRL"
+          },
+          "price_qualifier": "valor_base",
+          "price_kind": "service_reference",
+          "visibility": "registered_only",
+          "graph_json_node_id": "offer:interior-cleaning:starting-price",
+          "source": "luiza_camargo_whatsapp_2026_09_28",
+          "validation_status": "approved"
+        }
+      }
+    },
+    {
+      "id": "offer:technical-polish:starting-price",
+      "patch": {
+        "title": "Preço — Polimento técnico",
+        "summary": "Polimento técnico a partir de R$ 950,00",
+        "data": {
+          "offer": {
+            "amount": 950.0,
+            "currency": "BRL"
+          },
+          "price_qualifier": "a_partir_de",
+          "price_kind": "service_reference",
+          "visibility": "registered_only",
+          "graph_json_node_id": "offer:technical-polish:starting-price",
+          "source": "luiza_camargo_whatsapp_2026_09_28",
+          "validation_status": "approved"
+        }
+      }
+    },
+    {
+      "id": "offer:ppf:starting-price",
+      "patch": {
+        "title": "Preço — PPF — kit básico",
+        "summary": "PPF — kit básico R$ 650,00",
+        "data": {
+          "offer": {
+            "amount": 650.0,
+            "currency": "BRL"
+          },
+          "price_qualifier": "valor_base",
+          "price_kind": "service_reference",
+          "visibility": "registered_only",
+          "graph_json_node_id": "offer:ppf:starting-price",
+          "source": "luiza_camargo_whatsapp_2026_09_28",
+          "validation_status": "approved"
+        }
+      }
+    },
+    {
+      "id": "offer:vitrification:starting-price",
+      "patch": {
+        "title": "Preço — Vitrificação",
+        "summary": "Vitrificação a partir de R$ 1550,00",
+        "data": {
+          "offer": {
+            "amount": 1550.0,
+            "currency": "BRL"
+          },
+          "price_qualifier": "a_partir_de",
+          "price_kind": "service_reference",
+          "visibility": "registered_only",
+          "graph_json_node_id": "offer:vitrification:starting-price",
+          "source": "luiza_camargo_whatsapp_2026_09_28",
+          "validation_status": "approved"
+        }
+      }
+    },
+    {
+      "id": "offer:detailed-wash:starting-price",
+      "patch": {
+        "title": "Preço — Lavagem detalhada",
+        "summary": "Lavagem detalhada sem preço registrado pela Utzig",
+        "data": {
+          "offer": null,
+          "price_kind": "service_reference",
+          "visibility": "registered_only",
+          "source": "luiza_camargo_whatsapp_2026_09_28",
+          "price_status": "not_provided_by_client"
+        }
+      }
+    },
+    {
+      "id": "faq:price-and-schedule",
+      "patch": {
+        "summary": "Os orçamentos são personalizados conforme o tamanho e as condições do veículo. Depois da avaliação presencial ou do envio de informações, a Utzig informa valor e prazo para reservar a agenda.",
+        "data": {
+          "answer": "Os orçamentos são personalizados conforme o tamanho e as condições do veículo. Depois da avaliação presencial ou do envio de informações, a Utzig informa valor e prazo para reservar a agenda.",
+          "source": "luiza_camargo_whatsapp_2026_09_28",
+          "validation_status": "approved",
+          "question_aliases": [
+            "quanto custa",
+            "qual o valor",
+            "qual o preço",
+            "tem tabela de preço",
+            "como funciona o orçamento",
+            "tem horário disponível",
+            "como agendar"
+          ],
+          "aliases": [
+            "quanto custa",
+            "qual o valor",
+            "qual o preço",
+            "tem tabela de preço",
+            "como funciona o orçamento",
+            "tem horário disponível",
+            "como agendar"
+          ]
+        }
+      }
+    },
+    {
+      "id": "faq:site:service-duration",
+      "patch": {
+        "summary": "Em média: lavagem cerca de 3 horas, higienização interna cerca de 12 horas (secagem dos bancos), polimento cerca de 12 horas e vitrificação cerca de 3 dias.",
+        "data": {
+          "answer": "Em média: lavagem cerca de 3 horas, higienização interna cerca de 12 horas (secagem dos bancos), polimento cerca de 12 horas e vitrificação cerca de 3 dias.",
+          "source": "luiza_camargo_whatsapp_2026_09_28",
+          "validation_status": "approved",
+          "question_aliases": [
+            "quanto tempo demora",
+            "quanto tempo leva",
+            "fica pronto quando",
+            "quantos dias fica o carro",
+            "prazo do serviço"
+          ],
+          "aliases": [
+            "quanto tempo demora",
+            "quanto tempo leva",
+            "fica pronto quando",
+            "quantos dias fica o carro",
+            "prazo do serviço"
+          ]
+        }
+      }
+    },
+    {
+      "id": "faq:site:ppf-benefit",
+      "patch": {
+        "summary": "O PPF é uma película transparente de proteção física contra riscos, arranhões e pequenos impactos. Pode ir em áreas críticas, em partes maiores ou no carro todo.",
+        "data": {
+          "answer": "O PPF é uma película transparente de proteção física contra riscos, arranhões e pequenos impactos. Pode ir em áreas críticas, em partes maiores ou no carro todo.",
+          "source": "luiza_camargo_whatsapp_2026_09_28",
+          "validation_status": "approved",
+          "question_aliases": [
+            "o que é ppf",
+            "pra que serve o ppf",
+            "ppf protege do que",
+            "película de proteção da pintura",
+            "vale a pena ppf"
+          ],
+          "aliases": [
+            "o que é ppf",
+            "pra que serve o ppf",
+            "ppf protege do que",
+            "película de proteção da pintura",
+            "vale a pena ppf"
+          ]
+        }
+      }
+    },
+    {
+      "id": "faq:site:budget",
+      "patch": {
+        "summary": "A avaliação e o orçamento são feitos pelo WhatsApp: mande fotos e informações do veículo, ou combine uma avaliação presencial.",
+        "data": {
+          "answer": "A avaliação e o orçamento são feitos pelo WhatsApp: mande fotos e informações do veículo, ou combine uma avaliação presencial.",
+          "source": "luiza_camargo_whatsapp_2026_09_28",
+          "validation_status": "approved",
+          "question_aliases": [
+            "como faço um orçamento",
+            "quero um orçamento",
+            "como pedir avaliação",
+            "posso mandar foto",
+            "como agendar avaliação"
+          ],
+          "aliases": [
+            "como faço um orçamento",
+            "quero um orçamento",
+            "como pedir avaliação",
+            "posso mandar foto",
+            "como agendar avaliação"
+          ]
+        }
+      }
+    },
+    {
+      "id": "faq:service:detailed-wash:lavagem-detalhada-preco",
+      "patch": {
+        "summary": "A lavagem leva cerca de 3 horas. O valor o atendente confirma depois de avaliar o veículo.",
+        "data": {
+          "answer": "A lavagem leva cerca de 3 horas. O valor o atendente confirma depois de avaliar o veículo.",
+          "source": "luiza_camargo_whatsapp_2026_09_28",
+          "validation_status": "approved"
+        }
+      }
+    },
+    {
+      "id": "faq:service:interior-cleaning:higienizacao-preco-tempo",
+      "patch": {
+        "summary": "A higienização interna leva cerca de 12 horas, por causa da secagem dos bancos. O valor o atendente confirma depois de avaliar o veículo.",
+        "data": {
+          "answer": "A higienização interna leva cerca de 12 horas, por causa da secagem dos bancos. O valor o atendente confirma depois de avaliar o veículo.",
+          "source": "luiza_camargo_whatsapp_2026_09_28",
+          "validation_status": "approved"
+        }
+      }
+    },
+    {
+      "id": "faq:service:vitrification:vitrificacao-preco-tempo",
+      "patch": {
+        "summary": "A vitrificação leva cerca de 3 dias. O valor o atendente confirma depois de avaliar o veículo.",
+        "data": {
+          "answer": "A vitrificação leva cerca de 3 dias. O valor o atendente confirma depois de avaliar o veículo.",
+          "source": "luiza_camargo_whatsapp_2026_09_28",
+          "validation_status": "approved"
+        }
+      }
+    },
+    {
+      "id": "faq:service:ppf:ppf-preco-tempo",
+      "patch": {
+        "summary": "O tempo do PPF depende das áreas escolhidas e é combinado na avaliação. O valor o atendente confirma depois de avaliar o veículo.",
+        "data": {
+          "answer": "O tempo do PPF depende das áreas escolhidas e é combinado na avaliação. O valor o atendente confirma depois de avaliar o veículo.",
+          "source": "luiza_camargo_whatsapp_2026_09_28",
+          "validation_status": "approved"
+        }
+      }
+    },
+    {
+      "id": "campaign:automotive-detailing",
+      "patch": {
+        "data": {
+          "page": {
+            "actions": [],
+            "blocks": [
+              {
+                "asset_node_ids": [
+                  "asset:hero"
+                ],
+                "contact_key": "quick_booking",
+                "cta_label": "Conversar sobre meu carro",
+                "description": "Limpeza e higienização, brilho e correção e proteção para o seu carro.",
+                "eyebrow": "Estética Automotiva Premium",
+                "id": "lp-hero",
+                "kind": "hero",
+                "message_template": "Olá, gostaria de pedir uma avaliação.",
+                "node_ids": [
+                  "copy:hero"
+                ],
+                "title": "Utzig Estética automotiva Santa Maria do Herval"
+              },
+              {
+                "description": "Vai vender ou quer cuidar melhor do carro no dia a dia? Escolha e veja por onde começar.",
+                "eyebrow": "Seu objetivo",
+                "id": "lp-audiences",
+                "kind": "audience_links",
+                "node_ids": [
+                  "audience:prepare-sale",
+                  "audience:daily-care"
+                ],
+                "title": "O que você quer fazer com o carro?"
+              },
+              {
+                "cta_label": "Descubra este serviço",
+                "description": "Encontre o cuidado que faz sentido para o seu carro. Abra os detalhes para conhecer cada serviço.",
+                "eyebrow": "Escolha o cuidado ideal",
+                "id": "lp-services",
+                "kind": "service_catalog",
+                "node_ids": [
+                  "group:cleaning",
+                  "product:detailed-wash",
+                  "product:chassis-wash",
+                  "product:engine-bay-wash",
+                  "product:interior-cleaning",
+                  "product:leather-conditioning",
+                  "group:revitalization",
+                  "product:commercial-polish",
+                  "product:technical-polish",
+                  "product:glass-polish",
+                  "product:headlight-restoration",
+                  "group:enhancement",
+                  "product:vitrification",
+                  "product:seat-vitrification",
+                  "product:windshield-crystallization",
+                  "product:ppf"
+                ],
+                "title": "Do detalhe à transformação"
+              },
+              {
+                "asset_node_ids": [
+                  "asset:process"
+                ],
+                "description": "Uma conversa, uma avaliação cuidadosa e uma execução definida para o seu carro.",
+                "eyebrow": "Avaliação e orientação",
+                "id": "lp-process",
+                "kind": "process",
+                "node_ids": [
+                  "copy:process-step-contact",
+                  "copy:process-step-diagnosis",
+                  "copy:process-step-delivery"
+                ],
+                "title": "Seu carro em boas mãos, passo a passo"
+              },
+              {
+                "asset_node_ids": [
+                  "asset:work-polish",
+                  "asset:headlight-ready",
+                  "asset:engine-before",
+                  "asset:engine-final",
+                  "asset:interior",
+                  "asset:glass-before-after"
+                ],
+                "description": "Veja detalhes de trabalhos realizados na oficina.",
+                "eyebrow": "Resultados",
+                "id": "lp-gallery",
+                "kind": "gallery",
+                "node_ids": [
+                  "gallery:utzig"
+                ],
+                "title": "O cuidado visto de perto"
+              },
+              {
+                "cta_label": "Como chegar",
+                "eyebrow": "Venha conhecer nosso espaço",
+                "id": "lp-location",
+                "kind": "location",
+                "node_ids": [
+                  "campaign:physical-store"
+                ],
+                "title": "A Utzig fica em Santa Maria do Herval"
+              },
+              {
+                "description": "Respostas diretas para escolher o próximo cuidado do seu carro.",
+                "eyebrow": "Antes de agendar",
+                "id": "lp-faq",
+                "kind": "faq",
+                "node_ids": [
+                  "faq:price-and-schedule",
+                  "faq:photos",
+                  "faq:assessment",
+                  "faq:location",
+                  "faq:site:ppf-benefit",
+                  "faq:site:vitrification-vs-wax",
+                  "faq:site:service-duration",
+                  "faq:site:aftercare",
+                  "faq:site:warranty",
+                  "faq:site:used-car-ppf",
+                  "faq:site:budget"
+                ],
+                "title": "Dúvidas frequentes"
+              },
+              {
+                "asset_node_ids": [
+                  "asset:editorial"
+                ],
+                "description": "Olhar técnico, cuidado em cada etapa e uma indicação pensada para o seu carro.",
+                "eyebrow": "Quem está por trás",
+                "id": "lp-specialist",
+                "kind": "specialist",
+                "node_ids": [
+                  "entity:alemao",
+                  "copy:benefit-care",
+                  "copy:benefit-choice",
+                  "copy:benefit-finish"
+                ],
+                "title": "Wilian, o Alemão da Utzig"
+              },
+              {
+                "contact_key": "quick_booking",
+                "cta_label": "Conversar com a Utzig",
+                "description": "Conte o que você procura. A Utzig avalia o veículo e orienta a combinação certa de serviços.",
+                "eyebrow": "O próximo passo é simples",
+                "id": "lp-final",
+                "kind": "final_cta",
+                "message_template": "Olá, gostaria de pedir uma avaliação.",
+                "node_ids": [
+                  "copy:final-cta"
+                ],
+                "title": "Vamos descobrir o melhor para o seu carro?"
+              }
+            ],
+            "description": "Mais de 20 serviços que valorizam e deixam o seu carro na melhor versão.",
+            "eyebrow": "Estética Automotiva Premium",
+            "kind": "landing_page",
+            "ribbon_terms": [
+              "Proteção e conservação",
+              "Correção e brilho",
+              "Limpeza e conforto"
+            ],
+            "route": "/estetica-automotiva",
+            "template_key": "automotive_detailing",
+            "title": "Estética Automotiva Premium"
+          }
+        }
+      }
+    }
+  ],
+  "upsert_edges": [
+    {
+      "id": "edge:chassis-wash:offer:contains",
+      "source": "product:chassis-wash",
+      "target": "offer:chassis-wash:starting-price",
+      "relation_type": "contains",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:chassis-wash:offer:contains",
+        "primary": true
+      }
+    },
+    {
+      "id": "edge:chassis-wash:offer:about",
+      "source": "offer:chassis-wash:starting-price",
+      "target": "product:chassis-wash",
+      "relation_type": "about_product",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:chassis-wash:offer:about"
+      }
+    },
+    {
+      "id": "edge:engine-bay-wash:offer:contains",
+      "source": "product:engine-bay-wash",
+      "target": "offer:engine-bay-wash:starting-price",
+      "relation_type": "contains",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:engine-bay-wash:offer:contains",
+        "primary": true
+      }
+    },
+    {
+      "id": "edge:engine-bay-wash:offer:about",
+      "source": "offer:engine-bay-wash:starting-price",
+      "target": "product:engine-bay-wash",
+      "relation_type": "about_product",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:engine-bay-wash:offer:about"
+      }
+    },
+    {
+      "id": "edge:leather-conditioning:offer:contains",
+      "source": "product:leather-conditioning",
+      "target": "offer:leather-conditioning:starting-price",
+      "relation_type": "contains",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:leather-conditioning:offer:contains",
+        "primary": true
+      }
+    },
+    {
+      "id": "edge:leather-conditioning:offer:about",
+      "source": "offer:leather-conditioning:starting-price",
+      "target": "product:leather-conditioning",
+      "relation_type": "about_product",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:leather-conditioning:offer:about"
+      }
+    },
+    {
+      "id": "edge:glass-polish:offer:contains",
+      "source": "product:glass-polish",
+      "target": "offer:glass-polish:starting-price",
+      "relation_type": "contains",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:glass-polish:offer:contains",
+        "primary": true
+      }
+    },
+    {
+      "id": "edge:glass-polish:offer:about",
+      "source": "offer:glass-polish:starting-price",
+      "target": "product:glass-polish",
+      "relation_type": "about_product",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:glass-polish:offer:about"
+      }
+    },
+    {
+      "id": "edge:commercial-polish:offer:contains",
+      "source": "product:commercial-polish",
+      "target": "offer:commercial-polish:starting-price",
+      "relation_type": "contains",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:commercial-polish:offer:contains",
+        "primary": true
+      }
+    },
+    {
+      "id": "edge:commercial-polish:offer:about",
+      "source": "offer:commercial-polish:starting-price",
+      "target": "product:commercial-polish",
+      "relation_type": "about_product",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:commercial-polish:offer:about"
+      }
+    },
+    {
+      "id": "edge:headlight-restoration:offer:contains",
+      "source": "product:headlight-restoration",
+      "target": "offer:headlight-restoration:starting-price",
+      "relation_type": "contains",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:headlight-restoration:offer:contains",
+        "primary": true
+      }
+    },
+    {
+      "id": "edge:headlight-restoration:offer:about",
+      "source": "offer:headlight-restoration:starting-price",
+      "target": "product:headlight-restoration",
+      "relation_type": "about_product",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:headlight-restoration:offer:about"
+      }
+    },
+    {
+      "id": "edge:windshield-crystallization:offer:contains",
+      "source": "product:windshield-crystallization",
+      "target": "offer:windshield-crystallization:starting-price",
+      "relation_type": "contains",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:windshield-crystallization:offer:contains",
+        "primary": true
+      }
+    },
+    {
+      "id": "edge:windshield-crystallization:offer:about",
+      "source": "offer:windshield-crystallization:starting-price",
+      "target": "product:windshield-crystallization",
+      "relation_type": "about_product",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:windshield-crystallization:offer:about"
+      }
+    },
+    {
+      "id": "edge:seat-vitrification:offer:contains",
+      "source": "product:seat-vitrification",
+      "target": "offer:seat-vitrification:starting-price",
+      "relation_type": "contains",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:seat-vitrification:offer:contains",
+        "primary": true
+      }
+    },
+    {
+      "id": "edge:seat-vitrification:offer:about",
+      "source": "offer:seat-vitrification:starting-price",
+      "target": "product:seat-vitrification",
+      "relation_type": "about_product",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:seat-vitrification:offer:about"
+      }
+    },
+    {
+      "id": "edge:offer:ppf:multimedia-starting-price:contains",
+      "source": "product:ppf",
+      "target": "offer:ppf:multimedia-starting-price",
+      "relation_type": "contains",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:offer:ppf:multimedia-starting-price:contains",
+        "primary": true
+      }
+    },
+    {
+      "id": "edge:offer:ppf:multimedia-starting-price:about",
+      "source": "offer:ppf:multimedia-starting-price",
+      "target": "product:ppf",
+      "relation_type": "about_product",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:offer:ppf:multimedia-starting-price:about"
+      }
+    },
+    {
+      "id": "edge:faq:utzig:services-overview:contains",
+      "source": "rule:human-handoff",
+      "target": "faq:utzig:services-overview",
+      "relation_type": "contains",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:faq:utzig:services-overview:contains",
+        "primary": true
+      }
+    },
+    {
+      "id": "edge:faq:utzig:services-overview:answers",
+      "source": "rule:human-handoff",
+      "target": "faq:utzig:services-overview",
+      "relation_type": "answers_question",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:faq:utzig:services-overview:answers"
+      }
+    },
+    {
+      "id": "edge:faq:utzig:services-overview:embedded",
+      "source": "faq:utzig:services-overview",
+      "target": "embedded:utzig",
+      "relation_type": "publishes_to",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:faq:utzig:services-overview:embedded"
+      }
+    },
+    {
+      "id": "edge:faq:utzig:ppf-areas:contains",
+      "source": "product:ppf",
+      "target": "faq:utzig:ppf-areas",
+      "relation_type": "contains",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:faq:utzig:ppf-areas:contains",
+        "primary": true
+      }
+    },
+    {
+      "id": "edge:faq:utzig:ppf-areas:answers",
+      "source": "product:ppf",
+      "target": "faq:utzig:ppf-areas",
+      "relation_type": "answers_question",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:faq:utzig:ppf-areas:answers"
+      }
+    },
+    {
+      "id": "edge:faq:utzig:ppf-areas:embedded",
+      "source": "faq:utzig:ppf-areas",
+      "target": "embedded:utzig",
+      "relation_type": "publishes_to",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:faq:utzig:ppf-areas:embedded"
+      }
+    },
+    {
+      "id": "edge:faq:utzig:ppf-interior:contains",
+      "source": "product:ppf",
+      "target": "faq:utzig:ppf-interior",
+      "relation_type": "contains",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:faq:utzig:ppf-interior:contains",
+        "primary": true
+      }
+    },
+    {
+      "id": "edge:faq:utzig:ppf-interior:answers",
+      "source": "product:ppf",
+      "target": "faq:utzig:ppf-interior",
+      "relation_type": "answers_question",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:faq:utzig:ppf-interior:answers"
+      }
+    },
+    {
+      "id": "edge:faq:utzig:ppf-interior:embedded",
+      "source": "faq:utzig:ppf-interior",
+      "target": "embedded:utzig",
+      "relation_type": "publishes_to",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:faq:utzig:ppf-interior:embedded"
+      }
+    },
+    {
+      "id": "edge:faq:utzig:duration-wash:contains",
+      "source": "product:detailed-wash",
+      "target": "faq:utzig:duration-wash",
+      "relation_type": "contains",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:faq:utzig:duration-wash:contains",
+        "primary": true
+      }
+    },
+    {
+      "id": "edge:faq:utzig:duration-wash:answers",
+      "source": "product:detailed-wash",
+      "target": "faq:utzig:duration-wash",
+      "relation_type": "answers_question",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:faq:utzig:duration-wash:answers"
+      }
+    },
+    {
+      "id": "edge:faq:utzig:duration-wash:embedded",
+      "source": "faq:utzig:duration-wash",
+      "target": "embedded:utzig",
+      "relation_type": "publishes_to",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:faq:utzig:duration-wash:embedded"
+      }
+    },
+    {
+      "id": "edge:faq:utzig:duration-polish:contains",
+      "source": "product:commercial-polish",
+      "target": "faq:utzig:duration-polish",
+      "relation_type": "contains",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:faq:utzig:duration-polish:contains",
+        "primary": true
+      }
+    },
+    {
+      "id": "edge:faq:utzig:duration-polish:answers",
+      "source": "product:commercial-polish",
+      "target": "faq:utzig:duration-polish",
+      "relation_type": "answers_question",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:faq:utzig:duration-polish:answers"
+      }
+    },
+    {
+      "id": "edge:faq:utzig:duration-polish:embedded",
+      "source": "faq:utzig:duration-polish",
+      "target": "embedded:utzig",
+      "relation_type": "publishes_to",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:faq:utzig:duration-polish:embedded"
+      }
+    },
+    {
+      "id": "edge:faq:utzig:how-to-quote:contains",
+      "source": "rule:human-handoff",
+      "target": "faq:utzig:how-to-quote",
+      "relation_type": "contains",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:faq:utzig:how-to-quote:contains",
+        "primary": true
+      }
+    },
+    {
+      "id": "edge:faq:utzig:how-to-quote:answers",
+      "source": "rule:human-handoff",
+      "target": "faq:utzig:how-to-quote",
+      "relation_type": "answers_question",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:faq:utzig:how-to-quote:answers"
+      }
+    },
+    {
+      "id": "edge:faq:utzig:how-to-quote:embedded",
+      "source": "faq:utzig:how-to-quote",
+      "target": "embedded:utzig",
+      "relation_type": "publishes_to",
+      "weight": 1.0,
+      "metadata": {
+        "active": true,
+        "graph_json_edge_id": "edge:faq:utzig:how-to-quote:embedded"
+      }
+    }
+  ]
+}

@@ -86,7 +86,7 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
-          source: schema-release-plan.json,ops/microservices/validate-release-manifest.py,ops/microservices/validate-atomic-migrations.py,ops/microservices/route-map.json,apps/conversation-runtime/n8n/persona-conversation-template.json,ops/vps/apply-schema-release.sh,ops/vps/backup.sh,ops/vps/restore.sh,supabase/migrations,${{ inputs.manifest_path }}
+          source: schema-release-plan.json,ops/microservices/validate-release-manifest.py,ops/microservices/validate-atomic-migrations.py,ops/microservices/route-map.json,apps/conversation-runtime/n8n/persona-conversation-template.json,ops/vps/apply-schema-release.sh,ops/vps/rehearse-graph-editor-schema.sh,ops/vps/backup.sh,ops/vps/restore.sh,supabase/migrations,${{ inputs.manifest_path }}
           target: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
           overwrite: true
       - name: Apply exact pending schema plan with backup and isolated restore
