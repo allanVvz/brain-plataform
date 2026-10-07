@@ -24,7 +24,7 @@ serviço a partir de uma linhagem só: o PR #226 já une as duas (`90aaa72`).
 | #224 envio humano imediato, horário = agente, cards de canal | **merged, não publicado** | transport + control-plane |
 | #225 manifest só de transport/control-plane | **fechado** | publicaria control-plane errado |
 | #226 linhagem única + fila + tela + publicação 1 etapa | **aberto, CI pendente** | merge é humano |
-| akia worktree `agent-work/client-composer-bindings-20261006` | commits locais | portal do cliente, gateway CRM (ver §6) |
+| akia worktree `agent-work/client-composer-bindings-20261006` | **não commitado, co-editado** | portal do cliente, gateway CRM (ver §6) |
 | `scripts/verification/tock-south-grant-edit.mjs` (akia) | pronto, **não executado** | libera envio do login `tockfatal@south.com` |
 
 ## 3. Ordem de execução (cada passo tem critério de pronto)
@@ -80,15 +80,22 @@ serviço a partir de uma linhagem só: o PR #226 já une as duas (`90aaa72`).
 
 ## 6. Pendências no akia (portal do cliente)
 
-Branch local `claude/client-composer-bindings-20261006` (worktree compartilhado com
-outro agente; ele tem mudanças próprias não commitadas em `dashboard/` e `portal-web/package.json`):
-- `MessagesLayout.tsx`: faixa "Somente leitura" quando sem permissão; pílula vermelha
-  fora do horário (`lib/agent-hours.ts`, mesma regra do transport).
-- `configuracoes/page.tsx`: três cartões (Evolution com QR, Meta, Chatwoot sem segredos).
-- `apps/gateway/main.py`: `_crm_contract` libera `/portal/channels`, `/portal/business-hours` (view)
-  e `/portal/channels/evolution/qr` (manage).
-- `akia/apps/{control-plane,transport}` e `akia/dashboard` são cópias não publicadas:
-  não corrija bug lá; corrija no `brain-plataform`.
+Worktree `agent-work/client-composer-bindings-20261006`, branch
+`claude/client-composer-bindings-20261006`, **sem commit**. Outro agente edita os
+mesmos arquivos (já acrescentou "Usar Evolution no agente" / "Retomar Meta" na tela
+de Configurações), então quem continuar deve commitar por caminho, revisando o diff:
+
+| Arquivo | Autor | O que faz |
+|---|---|---|
+| `apps/gateway/main.py`, `apps/gateway/tests/test_crm.py` | Claude | `_crm_contract`: `/portal/channels` e `/portal/business-hours` (view), `/portal/channels/evolution/qr` (manage) |
+| `portal-web/.../messages/MessagesLayout.tsx`, `lib/agent-hours.ts`, `tests/agent-hours.test.ts` | Claude | faixa "Somente leitura" sem permissão; pílula vermelha fora do horário |
+| `portal-web/.../configuracoes/page.tsx`, `lib/api.ts` | Claude + outro agente | três cartões (Evolution/QR, Meta, Chatwoot sem segredos) + troca de canal |
+| `scripts/verification/tock-south-grant-edit.mjs` | Claude | libera envio do login Tock (dry-run → apply) |
+| `apps/control-plane/api/routes/portal.py` (snapshot), `apps/transport/...` (snapshot) | Claude + outro agente | cópia não publicada; o código vivo está no #224/#226 |
+| `dashboard/**` (cópia não publicada), `portal-web/package.json`, `tests/render/` | outro agente | — |
+
+`akia/apps/{control-plane,transport}` e `akia/dashboard` são cópias não publicadas:
+corrija no `brain-plataform`.
 
 ## 7. Próximas tarefas (por prioridade)
 
