@@ -1,0 +1,26 @@
+name: Inspect production disk inventory
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read disk and reclaimable cache inventory on the configured production VPS
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          command_timeout: 3m
+          script: |
+            set -Eeuo pipefail
+            [[ "$(hostname)" == srv1846215 ]]
+            printf 'identity=%s hostname=%s\n' "$(id -un)" "$(hostname)"
+            df -P /
+            docker system df
+            journalctl --disk-usage
+            du -x -h -d1 /var /opt/brain-ai /root /tmp 2>/dev/null | sort -h | tail -30
+            find /var/cache/apt -xdev -type f -printf '%s %p\n' 2>/dev/null | sort -nr | head -20
