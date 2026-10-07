@@ -1,0 +1,41 @@
+name: Clean inventoried production APT index cache
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  clean:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove only re-downloadable APT index files after exact size and lock checks
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          command_timeout: 3m
+          script: |
+            set -Eeuo pipefail
+            [[ "$(hostname)" == srv1846215 ]]
+            target=/var/lib/apt/lists
+            [[ -d "$target" && ! -L "$target" ]]
+            if pgrep -x apt >/dev/null || pgrep -x apt-get >/dev/null || pgrep -x unattended-upgrade >/dev/null; then
+              echo 'apt_transaction_active=true; refusing cache cleanup' >&2
+              exit 1
+            fi
+            if [[ -e "$target/lock" ]] && fuser "$target/lock" >/dev/null 2>&1; then
+              echo 'apt_lists_lock_in_use=true; refusing cache cleanup' >&2
+              exit 1
+            fi
+            before_kb="$(du -sk "$target" | awk '{print $1}')"
+            (( before_kb >= 180000 && before_kb <= 220000 ))
+            files="$(find "$target" -mindepth 1 -maxdepth 1 -type f ! -name lock | wc -l)"
+            (( files > 0 ))
+            find "$target" -mindepth 1 -maxdepth 1 -type f ! -name lock -delete
+            after_kb="$(du -sk "$target" | awk '{print $1}')"
+            printf 'apt_index_files_removed=%s\n' "$files"
+            printf 'apt_index_cache_before_kb=%s\n' "$before_kb"
+            printf 'apt_index_cache_after_kb=%s\n' "$after_kb"
+            df -P /
+            echo 'apt_lists_rebuild_command=apt-get update'
