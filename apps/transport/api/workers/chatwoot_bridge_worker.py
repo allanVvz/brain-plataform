@@ -231,7 +231,25 @@ class ChatwootBridgeWorker(BaseWorker):
             None,
         )
         if not session:
-            session = next((item for item in contact_inboxes if item.get("source_id")), None)
+            # The public API contact endpoint can return a contact without an
+            # inbox session. Create the API-inbox link through Chatwoot's
+            # authenticated application API; retries reconcile the 422 case
+            # from the contact record instead of creating another link.
+            try:
+                session = api.create_contact_inbox(
+                    contact_id=contact_id, source_id=identifier,
+                )
+            except RuntimeError as exc:
+                if "Chatwoot API returned HTTP 422" not in str(exc):
+                    raise
+            contact = api.get_contact(contact_id=contact_id)
+            contact_inboxes = contact.get("contact_inboxes") or []
+            session = next(
+                (item for item in contact_inboxes
+                 if int(((item.get("inbox") or {}).get("id") or item.get("inbox_id") or 0)) == config.inbox_id
+                 and item.get("source_id")),
+                session if session and session.get("source_id") else None,
+            )
         contact_identifier = str((session or {}).get("source_id") or "")
         if not contact_id or not contact_identifier:
             raise RuntimeError("Chatwoot contact response has no inbox session")

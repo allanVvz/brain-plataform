@@ -114,6 +114,20 @@ class ChatwootApi:
             },
         )
 
+    def get_contact(self, *, contact_id: int) -> dict[str, Any]:
+        return self._request(
+            "GET", f"/api/v1/accounts/{self.config.account_id}/contacts/{int(contact_id)}",
+        )
+
+    def create_contact_inbox(
+        self, *, contact_id: int, source_id: str,
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            f"/api/v1/accounts/{self.config.account_id}/contacts/{int(contact_id)}/contact_inboxes",
+            json={"inbox_id": self.config.inbox_id, "source_id": source_id},
+        )
+
     def list_conversations(self, *, contact_identifier: str) -> list[dict[str, Any]]:
         inbox = quote(self.config.inbox_identifier, safe="")
         contact = quote(contact_identifier, safe="")
