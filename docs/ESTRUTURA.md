@@ -1,6 +1,7 @@
 # Estrutura — leia antes de mudar fila, agente, canal ou grafo
 
-Atualizado em 2026-10-07. Regra geral: **um caminho por coisa**. Não crie fila,
+Atualizado em 2026-10-07. **Tudo vale para todos os agentes de todas as personas**
+(nada é exclusivo de uma persona; a persona é sempre parâmetro). Regra geral: **um caminho por coisa**. Não crie fila,
 estado, store ou workflow paralelo; simplifique o existente.
 
 ## Onde cada coisa roda
@@ -68,6 +69,6 @@ Fonte única: `apps/control-plane/api/services/business_hours.py`.
   publicar em 1 dispatch.
 - Unificar o store v2.1 no v3; levar retenção/liberação da fila para SQL e reduzir
   estados a *na fila, retida, enviando, enviada, falhou*.
-- Chatwoot por persona; avisos automáticos de fechamento/fora do horário (textos
-  já no grafo da Tock) pela fila.
-- Imagens de produto: Tock tem 64 de 73 produtos sem imagem no bundle publicado.
+- Chatwoot para todas as personas (hoje uma binding por env); avisos automáticos de
+  fechamento/fora do horário (textos já existem no grafo da Tock) pela fila.
+- Imagens de produto em todas as personas de catálogo (a Tock tem 64 de 73 sem imagem).

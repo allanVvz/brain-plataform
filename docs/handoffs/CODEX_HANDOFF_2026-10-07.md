@@ -1,9 +1,11 @@
 # Handoff para o Codex — fila, Evolution, Chatwoot (2026-10-07)
 
 Autor: Claude Opus 5.5. Leia antes: [docs/ESTRUTURA.md](../ESTRUTURA.md).
-Objetivo do usuário: **operar a Tock Fatal já**, com envio simples (portal, Chatwoot,
-agente), uma fila só, Evolution e Meta iguais, publicação de grafo em 1 etapa e
-telas mínimas. Tudo que for rígido ou duplicado deve ser removido.
+Objetivo do usuário: **operar já, com todos os agentes de todas as personas do AKIA**
+(a Tock Fatal é só a primeira prova): envio simples (portal, Chatwoot, agente), uma
+fila só, Evolution e Meta iguais, publicação de grafo em 1 etapa e telas mínimas.
+**Nada é exclusivo de uma persona**: código, telas e workflows recebem a persona
+como parâmetro. Tudo que for rígido ou duplicado deve ser removido.
 
 ## 1. Verdade de produção (lida em `/health/ready` do gateway)
 
@@ -40,12 +42,14 @@ serviço a partir de uma linhagem só: o PR #226 já une as duas (`90aaa72`).
 5. **Release** `integrated-release.yml`: `services=gateway,control-plane,conversation-runtime,transport`,
    primeiro `dry-run`, depois `deploy` (aprovação de ambiente). Pronto: `/health/ready`
    mostra o mesmo SHA nos quatro.
-6. **Horário da Tock**: o usuário pediu "desligue para a Tock". Rode
-   `set-persona-business-hours.yml` (`tock-fatal`, `enabled=false`): dry-run, depois apply.
-   Religar = mesmo workflow com `true`, ou a tela Agentes.
-7. **Portal do cliente** (akia, §6): publicar gateway CRM + South Pages, rodar o script
-   de liberação de envio (dry-run → apply).
-8. **Prova ponta a ponta** (número de teste do dono, lead 231, nunca terceiros):
+6. **Horário por persona**: `set-persona-business-hours.yml` aceita qualquer slug
+   (`enabled=false` = agente atende a qualquer hora). O usuário pediu desligar na
+   `tock-fatal` agora: dry-run, depois apply. No dia a dia, use a tela Agentes.
+7. **Portal do cliente** (akia, §6): publicar gateway CRM + Pages dos portais. Para a
+   Tock, rodar o script de liberação de envio (dry-run → apply); para as demais
+   personas o acesso de envio (`can_edit`) se dá na tela Acessos — não crie script por persona.
+8. **Prova ponta a ponta** em pelo menos uma persona Meta (Tock, lead 231) e uma
+   Evolution, com números de teste do dono, nunca terceiros:
    - portal: enviar texto → chega no WhatsApp na hora (também de madrugada);
    - Chatwoot (iPhone): texto e foto → chegam no WhatsApp; nota `/ligar-agente` religa;
    - agente: cliente escreve fora do horário com conversa parada há >10 min → espera a
@@ -102,8 +106,8 @@ corrija no `brain-plataform`.
 1. **Avisos ao cliente** de fechamento e fora do horário: os textos já estão no grafo
    da Tock (`copy:tock-closing-notice`, `copy:tock-after-hours-notice`). Envio autônomo
    hoje exige prova + preview do operador. Perguntar ao usuário: enviar direto ou pela fila.
-2. **Imagens de produto**: Tock tem 64 de 73 produtos sem asset de imagem no bundle
-   publicado (v38). Fonte das fotos: pedir ao usuário; inserir via bundle (asset `primary_product_media`
+2. **Imagens de produto** (todas as personas de catálogo): a Tock tem 64 de 73 produtos
+   sem asset de imagem no bundle publicado (v38); auditar as demais do mesmo jeito. Fonte das fotos: pedir ao usuário; inserir via bundle (asset `primary_product_media`
    + arestas `contains` produto→asset e `gallery_asset` asset→gallery) e publicar em 1 etapa.
 3. **Janela de 24 h da Meta**: texto livre fora da janela falha (131047); oferecer template no composer.
 4. **SQL da fila**: levar retenção/liberação e o "retomar sem janela" para
@@ -114,8 +118,12 @@ corrija no `brain-plataform`.
    linhagem Utzig (`graph_editor_*`, "single-step save") é o caminho.
 6. **Telas admin no AKIA**: Disparos e Agentes aparecem como "TELA AINDA NÃO MIGRADA"
    no portal-web; o operador usa o dashboard do Vercel. Decidir: migrar ou apagar a cópia `akia/dashboard`.
-7. **Roadmap**: sync Obsidian ⇄ bundle (provado viável: nós publicados têm o formato do
-   bundle e arestas mantêm `relation_type`); Chatwoot por persona com segredos no `secret_store`.
+7. **Chatwoot para todas as personas**: hoje a ponte usa uma binding por env
+   (`CHATWOOT_BRIDGE_BINDING_ID`). Para valer para todos os agentes: config por binding
+   (`workflow_bindings.metadata.chatwoot` + segredos no `secret_store`), worker iterando
+   bindings habilitados, webhook resolvendo a binding por `(account_id, inbox_id)`.
+8. **Roadmap**: sync Obsidian ⇄ bundle (provado viável: nós publicados têm o formato do
+   bundle e arestas mantêm `relation_type`).
 
 ## 8. Cuidados
 
