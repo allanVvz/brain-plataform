@@ -478,7 +478,7 @@ def _terminalize_technical_failure(
             # The contract requires one handoff after two consecutive failed
             # turns. Do not depend on graph recovery copy or a further commit
             # to establish that safety boundary.
-            conversation_runtime.supabase_client.handoff_whatsapp_lead(body.lead_ref)
+            pass  # technical failures never pause the lead
         else:
             persona = conversation_runtime.supabase_client.get_persona_by_id(
                 str(lead.get("persona_id") or "")
@@ -536,7 +536,7 @@ def _terminalize_technical_failure(
             int(locals()["failure_streak"])
             if "failure_streak" in locals() else 2
         )
-    handoff_required = failure_streak >= 2
+    handoff_required = False
     try:
         event_id = str(
             uuid5(

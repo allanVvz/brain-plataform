@@ -222,12 +222,13 @@ def askable_pending_fields(
     return [
         field for field in contract.get("fields") or []
         if _condition_matches(field.get("condition"), facts)
+        and field.get("question_mode") != "disabled"
         and dependencies_resolved(field)
         and not _resolved_for_field_owner(field, facts.get(field["key"]))
         and (
             field.get("required", True)
             or (
-                field.get("collection_mode") == "ask_once_optional"
+                (field.get("question_mode") == "optional" or field.get("collection_mode") == "ask_once_optional")
                 and str(field.get("question_node_id") or "") not in asked_ids
             )
         )
@@ -807,10 +808,15 @@ def check(
                     errors.append(f"fact_correction_not_explicit:{key}")
             elif policy == "higher_confidence" and float(fact.get("confidence") or 0) <= float(previous.get("confidence") or 0):
                 errors.append(f"fact_overwrite_confidence_too_low:{key}")
-        for dependency in field.get("depends_on") or []:
-            dependency_field = fields_by_key_any_owner.get(dependency) or {}
-            if not _resolved_for_field_owner(dependency_field, facts.get(dependency)):
-                errors.append(f"fact_dependency_unsatisfied:{key}:{dependency}")
+        # depends_on orders the questions; it never discards what the customer
+        # already said (a vehicle given before the service is still the vehicle).
+        dependency_notes = [
+            f"fact_dependency_unsatisfied:{key}:{dependency}"
+            for dependency in field.get("depends_on") or []
+            if not _resolved_for_field_owner(
+                fields_by_key_any_owner.get(dependency) or {}, facts.get(dependency),
+            )
+        ]
         if not _condition_matches(field.get("condition"), facts):
             errors.append(f"fact_condition_not_met:{key}")
         if len(errors) != fact_error_count:
@@ -821,6 +827,7 @@ def check(
                 "errors": errors[fact_error_count:],
             })
             continue
+        errors.extend(dependency_notes)
         accepted = {
             **fact, "value": value, "field_key": key,
             "source_message_id": source_message_id,

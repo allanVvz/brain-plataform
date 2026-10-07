@@ -307,7 +307,6 @@ class WhatsAppDispatchWorker(BaseWorker):
                     lead_ref=int(row["lead_ref"]),
                     error=reason,
                 )
-                supabase_client.handoff_whatsapp_lead(int(row["lead_ref"]))
                 event_emitter.emit(
                     "whatsapp.inbound_decision_failed",
                     entity_type="lead",

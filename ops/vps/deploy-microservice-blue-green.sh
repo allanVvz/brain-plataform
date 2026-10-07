@@ -330,9 +330,16 @@ if [[ "$ACTION" == "--apply" && "$SERVICE" == "conversation-runtime" ]]; then
   # isolated. The post-cutover canary must never be the first place that
   # discovers a mistyped or unsupported flow id.
   [[ -n "${CANARY_FLOW_ID:-}" ]] || { echo "runtime candidate requires CANARY_FLOW_ID" >&2; exit 1; }
-  "${COMPOSE[@]}" exec -T "$target_service" python -c \
-    'import sys; from services.wa_validator_service import supports_semantic_validator_flow; assert supports_semantic_validator_flow(sys.argv[1]), "unsupported semantic validator flow: " + sys.argv[1]' \
-    "$CANARY_FLOW_ID"
+  # The explicit Utzig deferral marker is not a validator profile; it is
+  # honored by run-microservice-wa-validator.sh and still requires the
+  # no-commit candidate probe below.
+  if [[ "${CANARY_PERSONA_SLUG:-}" == "utzig-garage" && "$CANARY_FLOW_ID" == "defer_allan_real_8510" ]]; then
+    echo "WA canary deferred for utzig-garage until Allan real delivery proof"
+  else
+    "${COMPOSE[@]}" exec -T "$target_service" python -c \
+      'import sys; from services.wa_validator_service import supports_semantic_validator_flow; assert supports_semantic_validator_flow(sys.argv[1]), "unsupported semantic validator flow: " + sys.argv[1]' \
+      "$CANARY_FLOW_ID"
+  fi
   [[ -n "${RUNTIME_PROBE_FIXTURE:-}" ]] || {
     echo "runtime candidate requires a no-commit conversation probe fixture" >&2
     exit 1

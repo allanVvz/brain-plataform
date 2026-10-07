@@ -1618,10 +1618,14 @@ def compile_persona_publication(
                             **({
                                 "faq_question": _faq_question_answer(node)[0],
                                 "faq_answer": _faq_question_answer(node)[1],
-                                "faq_aliases": [
-                                    str(alias) for alias in (node.get("data") or {}).get("aliases") or []
+                                # The ranker matches these exactly and by keyword;
+                                # authors write customer wording in either key.
+                                "faq_aliases": list(dict.fromkeys(
+                                    str(alias).strip()
+                                    for key in ("aliases", "question_aliases")
+                                    for alias in (node.get("data") or {}).get(key) or []
                                     if str(alias).strip()
-                                ],
+                                )),
                                 "faq_projection_contract": FAQ_PROJECTION_CONTRACT,
                             } if chunk["kind"] == "faq" else {}),
                         },

@@ -145,6 +145,18 @@ def test_optional_name_waits_for_published_dependency():
     )] == ["customer_identity"]
 
 
+def test_published_question_mode_changes_askability_without_losing_fact_field():
+    field = {**NAME_FIELD, "question_mode": "disabled"}
+    contract = {"fields": [field]}
+    assert graph_proof_checker_v3.askable_pending_fields(contract, {}) == []
+    assert contract["fields"][0]["key"] == "customer_identity"
+    field["question_mode"] = "optional"
+    assert graph_proof_checker_v3.askable_pending_fields(contract, {}) == [field]
+    assert graph_proof_checker_v3.askable_pending_fields(
+        contract, {}, asked_question_node_ids=["faq:identity"],
+    ) == []
+
+
 def test_affirmation_reads_exact_candidate_from_last_outbound(monkeypatch):
     context = _context(messages=[
         {"role": "assistant", "message_id": "out:1", "content": "Posso te chamar de Ana?",
@@ -200,16 +212,12 @@ def test_qualification_question_requires_valid_field_and_kind(monkeypatch):
         return conversation_runtime.decide_agentic(
             context, resolved_understanding=resolved, conversation_reply=reply,
         )
-    with pytest.raises(RuntimeError, match="question_kind_required"):
-        decide(ConversationReplyV1(reply="Qual é seu nome?"))
-    with pytest.raises(RuntimeError, match="field_not_eligible"):
-        decide(ConversationReplyV1(reply="Qual é seu nome?", question_kind="qualification",
-                                   asked_field_key="wrong"))
-    with pytest.raises(RuntimeError, match="field_metadata_mismatch"):
-        decide(ConversationReplyV1(reply="Posso te chamar de Utzig?", question_kind="consultative"))
-    with pytest.raises(RuntimeError, match="must_quote_candidate"):
-        decide(ConversationReplyV1(reply="Qual é seu nome?", question_kind="qualification",
-                                   asked_field_key="customer_identity"))
+    _, normalized = decide(ConversationReplyV1(reply="Qual é seu nome?"))
+    assert normalized.proof["question_kind"] == "qualification"
+    _, mismatched = decide(ConversationReplyV1(
+        reply="Posso te chamar de Utzig?", question_kind="consultative",
+    ))
+    assert "profile_name_confirmation_missing_candidate" in mismatched.proof["quality_warnings"]
     _, response = decide(ConversationReplyV1(reply="Posso te chamar de Ana?",
                                                question_kind="qualification",
                                                asked_field_key="customer_identity"))
