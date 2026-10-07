@@ -10,8 +10,6 @@ from repositories import chatwoot_bridge
 from services import chatwoot_api
 
 router = APIRouter(prefix="/webhooks/chatwoot", tags=["chatwoot"])
-_RESUME_COMMANDS = {"/retomar-ia", "!retomar-ia"}
-_PAUSE_COMMANDS = {"/assumir-ia", "!assumir-ia"}
 
 
 def _integer(value: object) -> int | None:
@@ -75,12 +73,8 @@ async def receive_chatwoot_event(
     if not outgoing:
         return {"ok": True, "ignored": True}
     if is_private:
-        command = content.casefold()
-        if command in _RESUME_COMMANDS:
-            operation = "resume_ai"
-        elif command in _PAUSE_COMMANDS:
-            operation = "pause_ai"
-        else:
+        operation = chatwoot_api.command_operation(content)
+        if operation is None:
             return {"ok": True, "ignored": True}
     else:
         operation = "human_reply"

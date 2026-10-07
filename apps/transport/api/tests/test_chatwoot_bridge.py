@@ -281,3 +281,15 @@ def test_brain_projection_uses_account_api_and_preserves_direction(incoming, mes
     assert calls[0][2]["source_id"] == "brain-message:812"
     assert calls[0][2]["external_created_at"] == "2026-10-06T12:34:56Z"
     assert calls[0][2]["content_attributes"]["brain_bridge_v1"] is True
+
+
+@pytest.mark.parametrize(
+    ("note", "operation"),
+    [
+        ("/ligar-agente", "resume_ai"), (" /LIGAR ", "resume_ai"), ("/retomar-ia", "resume_ai"),
+        ("/desligar-agente", "pause_ai"), ("/assumir-ia", "pause_ai"),
+        ("ligar o agente por favor", None), ("/ligar agora", None), ("", None), (None, None),
+    ],
+)
+def test_private_note_commands_use_one_vocabulary(note, operation):
+    assert chatwoot_api.command_operation(note) == operation

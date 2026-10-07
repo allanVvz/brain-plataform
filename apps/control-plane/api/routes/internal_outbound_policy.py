@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Header, HTTPException
 
-from services import internal_auth, supabase_client
+from services import business_hours, internal_auth, supabase_client
 
 
 router = APIRouter(prefix="/internal/v1/control-plane", tags=["internal-policy"])
@@ -25,33 +25,22 @@ def published_outbound_policy(
     publication = supabase_client.get_active_graph_publication(str(persona_id)) or {}
     if not publication:
         raise HTTPException(409, "Persona sem publicacao ativa.")
-    graph = publication.get("document_json") or {}
-    nodes = graph.get("nodes") if isinstance(graph, dict) else []
-    persona_node = next((
-        node for node in nodes
-        if isinstance(node, dict)
-        and str(node.get("node_type") or node.get("type") or "").lower() == "persona"
-    ), {})
-    node_data = persona_node.get("data") or persona_node.get("metadata") or {}
-    policy = (node_data.get("conversation_policy") or {}).get("business_hours")
-    # An active publication may deliberately omit a send window. That means
-    # replies are not time-restricted; appointment confirmation remains a
-    # separate business decision owned by the graph and a human attendant.
-    if policy is None or (isinstance(policy, dict) and policy.get("enabled") is False):
-        return {
-            "published_business_hours": None,
-            "graph_version": publication.get("version"),
-            "graph_checksum": publication.get("checksum"),
-        }
-    if (
-        not isinstance(policy, dict)
-        or not all(str(policy.get(key) or "").strip() for key in ("timezone", "start", "end"))
-    ):
+    hours = business_hours.effective(persona, publication)
+    # No window (or one switched off on the Agentes screen) means replies are
+    # not time-restricted; appointment confirmation remains a separate business
+    # decision owned by the graph and a human attendant.
+    if not hours["enabled"]:
+        if hours["switched_off"]:
+            return {
+                "published_business_hours": None,
+                "graph_version": publication.get("version"),
+                "graph_checksum": publication.get("checksum"),
+            }
         raise HTTPException(409, "Persona sem politica publicada de horario comercial.")
     return {"published_business_hours": {
-        "timezone": policy.get("timezone"),
-        "start": policy.get("start"),
-        "end": policy.get("end"),
+        "timezone": hours["timezone"],
+        "start": hours["start"],
+        "end": hours["end"],
         "graph_version": publication.get("version"),
         "graph_checksum": publication.get("checksum"),
     }}

@@ -1,3 +1,5 @@
+import pytest
+
 from services import operator_messaging
 
 
@@ -81,3 +83,32 @@ def test_duplicate_client_message_is_not_enqueued_twice(monkeypatch):
     assert first["deduplicated"] is False
     assert second["deduplicated"] is True
     assert len(rows) == 1
+
+
+def test_send_message_requires_edit_capability(monkeypatch):
+    from uuid import uuid4
+
+    from fastapi import HTTPException
+
+    from routes import messages as messages_route
+
+    seen = []
+
+    def deny(request, capability, **kwargs):
+        seen.append((capability, kwargs.get("persona_id")))
+        raise HTTPException(403, "sem permissao")
+
+    monkeypatch.setattr(
+        messages_route.supabase_client, "get_lead_by_ref",
+        lambda lead_ref: {"id": lead_ref, "persona_id": "persona-1"},
+    )
+    monkeypatch.setattr(messages_route.auth_service, "assert_persona_capability", deny)
+    monkeypatch.setattr(
+        messages_route.whatsapp_outbox, "enqueue_outbound",
+        lambda **kwargs: pytest.fail("a view-only user must not enqueue a message"),
+    )
+    body = messages_route.SendMessageBody(lead_ref=7, client_message_id=uuid4(), texto="oi")
+    with pytest.raises(HTTPException) as denied:
+        messages_route.send_message(body, object())
+    assert denied.value.status_code == 403
+    assert seen == [("edit", "persona-1")]

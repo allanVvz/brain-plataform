@@ -241,12 +241,27 @@ def prepare_outbound_envelope(
         lead=lead, binding=binding, text=text, correlation_id=correlation_id,
     )
     effective_metadata = dict(metadata or {})
-    if effective_metadata.get("published_business_hours") is None:
-        try:
-            effective_metadata.update(control_plane_client.published_outbound_policy(str(lead["persona_id"])))
-        except Exception as exc:
-            raise HTTPException(409, "Nao foi possivel obter a politica publicada de entrega.") from exc
-    schedule = _published_schedule(effective_metadata)
+    origin = "campaign" if campaign_scope else (message_origin or "conversation")
+    if origin not in {"conversation", "campaign", "manual", "proactive", "system"}:
+        raise ValueError("invalid message origin")
+    # Business hours switch the AGENT on and off (see agent_schedule): a closed
+    # agent does not take new conversations, and one already mid-dialogue keeps
+    # answering until the dialogue pauses. So a reply to the customer is never
+    # held at the door, and neither is a person typing in the portal or Chatwoot
+    # who just took over. Only messages the system starts on its own (campaigns,
+    # proactive and system sends) wait for the next opening, and inert queue
+    # previews keep the window they will be released under. An agent reply
+    # awaiting its proof is still a reply and carries no window.
+    if campaign_scope or origin in {"proactive", "system"} or initial_status == "preview_ready":
+        if effective_metadata.get("published_business_hours") is None:
+            try:
+                effective_metadata.update(control_plane_client.published_outbound_policy(str(lead["persona_id"])))
+            except Exception as exc:
+                raise HTTPException(409, "Nao foi possivel obter a politica publicada de entrega.") from exc
+        schedule = _published_schedule(effective_metadata)
+    else:
+        effective_metadata.pop("published_business_hours", None)
+        schedule = None
     effective_status = initial_status
     if schedule and schedule["closed"] and initial_status == "pending_send":
         effective_status = "buffered"
@@ -254,9 +269,6 @@ def prepare_outbound_envelope(
         {"published_business_hours": schedule["policy"], "available_at": schedule["available_at"]}
         if schedule else {}
     )
-    origin = "campaign" if campaign_scope else (message_origin or "conversation")
-    if origin not in {"conversation", "campaign", "manual", "proactive", "system"}:
-        raise ValueError("invalid message origin")
     scope_fields = {
         "message_origin": "campaign",
         "campaign_id": campaign_scope.get("campaign_id"),

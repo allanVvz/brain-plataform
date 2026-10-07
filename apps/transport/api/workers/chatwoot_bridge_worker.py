@@ -142,7 +142,7 @@ class ChatwootBridgeWorker(BaseWorker):
                 return
 
             if kind == "resume_ai":
-                if not message.get("private") or str(message.get("content") or "").strip().casefold() not in {"/retomar-ia", "!retomar-ia"}:
+                if not message.get("private") or chatwoot_api.command_operation(message.get("content")) != "resume_ai":
                     self._finish(operation, "ignored", "resume command must be a private note")
                     return
                 runtime_client.resume_ai(int(operation["lead_ref"]))
@@ -150,7 +150,7 @@ class ChatwootBridgeWorker(BaseWorker):
                 return
 
             if kind == "pause_ai":
-                if not message.get("private") or str(message.get("content") or "").strip().casefold() not in {"/assumir-ia", "!assumir-ia"}:
+                if not message.get("private") or chatwoot_api.command_operation(message.get("content")) != "pause_ai":
                     self._finish(operation, "ignored", "handoff command must be a private note")
                     return
                 runtime_client.pause_ai(int(operation["lead_ref"]))

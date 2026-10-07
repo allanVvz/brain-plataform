@@ -59,25 +59,96 @@ def test_published_schedule_rejects_unpinned_policy():
     assert exc.value.status_code == 409
 
 
-def test_manual_envelope_fetches_published_policy_when_not_pinned(monkeypatch):
-    policy = {
-        "timezone": "America/Sao_Paulo", "start": "00:00", "end": "23:59",
-        "graph_checksum": "sha256:published", "graph_version": 3,
-    }
+_NIGHT = {
+    "timezone": "America/Sao_Paulo", "start": "08:00", "end": "20:00",
+    "graph_checksum": "sha256:published", "graph_version": 38,
+}
+
+
+def _stub_envelope_dependencies(monkeypatch, *, policy=None):
     monkeypatch.setattr(whatsapp_outbox, "resolve_lead_binding", lambda lead: {"id": "binding"})
     monkeypatch.setattr(whatsapp_outbox, "_recipient_for_lead", lambda lead: "5511999999999")
     monkeypatch.setattr(whatsapp_outbox, "_observe_duplicate_content", lambda **_: None)
     monkeypatch.setattr(
-        whatsapp_outbox.control_plane_client,
-        "published_outbound_policy",
+        whatsapp_outbox.control_plane_client, "published_outbound_policy",
         lambda persona_id: {"published_business_hours": policy},
     )
+
+
+@pytest.fixture
+def after_hours(monkeypatch):
+    """23:15 in Sao Paulo, outside the published 08:00-20:00 window."""
+    class _Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 10, 7, 2, 15, tzinfo=timezone.utc).astimezone(tz) if tz else datetime(2026, 10, 7, 2, 15)
+    monkeypatch.setattr(whatsapp_outbox, "datetime", _Clock)
+
+
+def test_human_attendance_is_sent_now_even_outside_the_published_window(monkeypatch, after_hours):
+    _stub_envelope_dependencies(monkeypatch, policy=_NIGHT)
     envelope = whatsapp_outbox.prepare_outbound_envelope(
         lead={"id": 7, "persona_id": "persona"}, text="oi", sender_type="human",
         message_id="manual:1", correlation_id="manual:1", message_origin="manual",
     )
     assert envelope["buffer"]["message_origin"] == "manual"
-    assert envelope["message"]["metadata"]["published_business_hours"] == policy
+    assert envelope["buffer"]["status"] == "pending_send"
+    assert "available_at" not in envelope["buffer"]
+    assert "published_business_hours" not in envelope["buffer"]["payload"]
+    assert "published_business_hours" not in envelope["message"]["metadata"]
+
+
+def test_human_attendance_does_not_depend_on_the_policy_lookup(monkeypatch):
+    _stub_envelope_dependencies(monkeypatch)
+
+    def unavailable(_persona_id):
+        raise RuntimeError("control-plane down")
+
+    monkeypatch.setattr(whatsapp_outbox.control_plane_client, "published_outbound_policy", unavailable)
+    envelope = whatsapp_outbox.prepare_outbound_envelope(
+        lead={"id": 7, "persona_id": "persona"}, text="oi", sender_type="human",
+        message_id="manual:2", correlation_id="manual:2",
+    )
+    assert envelope["buffer"]["status"] == "pending_send"
+
+
+def test_agent_reply_is_never_held_at_the_door_even_after_closing(monkeypatch, after_hours):
+    # Closing time switches the agent off at the INBOUND (agent_schedule); a
+    # reply the agent is already producing mid-dialogue goes out right away.
+    _stub_envelope_dependencies(monkeypatch, policy=_NIGHT)
+    envelope = whatsapp_outbox.prepare_outbound_envelope(
+        lead={"id": 7, "persona_id": "persona"}, text="oi", sender_type="agent",
+        message_id="agent:2", correlation_id="agent:2",
+        metadata={"published_business_hours": {**_NIGHT}},
+    )
+    assert envelope["buffer"]["status"] == "pending_send"
+    assert "available_at" not in envelope["buffer"]
+    assert "published_business_hours" not in envelope["message"]["metadata"]
+
+
+def test_agent_reply_awaiting_proof_carries_no_window_after_closing(monkeypatch, after_hours):
+    # Proof promotion later turns this row into pending_send; an available_at
+    # stamped here would hold the very reply the dialogue is waiting for.
+    _stub_envelope_dependencies(monkeypatch, policy=_NIGHT)
+    envelope = whatsapp_outbox.prepare_outbound_envelope(
+        lead={"id": 7, "persona_id": "persona"}, text="oi", sender_type="agent",
+        message_id="agent:5", correlation_id="agent:5", initial_status="awaiting_proof",
+        metadata={"published_business_hours": {**_NIGHT}},
+    )
+    assert envelope["buffer"]["status"] == "awaiting_proof"
+    assert "available_at" not in envelope["buffer"]
+    assert "published_business_hours" not in envelope["buffer"]["payload"]
+
+
+@pytest.mark.parametrize("origin", ["proactive", "system"])
+def test_system_started_sends_still_wait_for_the_next_opening(monkeypatch, after_hours, origin):
+    _stub_envelope_dependencies(monkeypatch, policy=_NIGHT)
+    envelope = whatsapp_outbox.prepare_outbound_envelope(
+        lead={"id": 7, "persona_id": "persona"}, text="bom dia", sender_type="agent",
+        message_id=f"{origin}:1", correlation_id=f"{origin}:1", message_origin=origin,
+    )
+    assert envelope["buffer"]["status"] == "buffered"
+    assert envelope["buffer"]["available_at"].startswith("2026-10-07T11:00:00")
 
 
 def test_manual_envelope_without_published_hours_remains_sendable(monkeypatch):
@@ -92,7 +163,7 @@ def test_manual_envelope_without_published_hours_remains_sendable(monkeypatch):
 
     envelope = whatsapp_outbox.prepare_outbound_envelope(
         lead={"id": 7, "persona_id": "persona"}, text="oi", sender_type="agent",
-        message_id="agent:1", correlation_id="agent:1",
+        message_id="agent:1", correlation_id="agent:1", message_origin="proactive",
     )
 
     assert envelope["buffer"]["status"] == "pending_send"

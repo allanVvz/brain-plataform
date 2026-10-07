@@ -15,6 +15,27 @@ import httpx
 from utils.tls import get_ca_bundle_path
 
 
+# Private-note commands an attendant types in the Chatwoot app. Nothing else in a
+# private note is ever interpreted. "ligar/desligar" mirror the portal's agent
+# on/off switch so the same words work in both places.
+RESUME_COMMANDS = frozenset({
+    "/retomar-ia", "!retomar-ia", "/ligar-ia", "/ligar-agente", "/ligar",
+})
+PAUSE_COMMANDS = frozenset({
+    "/assumir-ia", "!assumir-ia", "/desligar-ia", "/desligar-agente", "/desligar",
+})
+
+
+def command_operation(content: object) -> str | None:
+    """`resume_ai` / `pause_ai` for a private-note command, else None."""
+    text = str(content or "").strip().casefold()
+    if text in RESUME_COMMANDS:
+        return "resume_ai"
+    if text in PAUSE_COMMANDS:
+        return "pause_ai"
+    return None
+
+
 def verify_webhook_signature(
     raw_body: bytes, timestamp: str | None, signature: str | None,
     secret: str, *, now: int | None = None,
