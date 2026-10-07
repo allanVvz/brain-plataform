@@ -117,6 +117,36 @@ def test_dispatcher_holds_on_a_paused_channel_instead_of_dropping(monkeypatch):
     assert not any(args and args[0] and "waiting_human" in str(args) for args, _ in calls["completed"])
 
 
+def _failing_send(monkeypatch, error):
+    worker, calls = _worker(monkeypatch, binding=META, lead={"id": 7, "external_contact_id": "5511999999999"})
+    ws = __import__("workers.whatsapp_dispatch_worker", fromlist=["x"])
+
+    class Provider:
+        def send_text(self, *_a):
+            raise error
+
+    monkeypatch.setattr(ws, "get_provider", lambda _name: Provider())
+    retried = []
+    worker._retry_or_dead_letter = lambda row, exc: retried.append(exc)
+    events = []
+    monkeypatch.setattr(ws.event_emitter, "emit", lambda name, **k: events.append(name))
+    return worker, calls, retried, events
+
+
+def test_outside_24h_window_fails_the_message_plainly_without_retry(monkeypatch):
+    from services.whatsapp_providers.meta import OutsideCustomerServiceWindow
+    worker, calls, retried, events = _failing_send(monkeypatch, OutsideCustomerServiceWindow("code=131047"))
+    worker._dispatch_group([_row("human")])
+    assert calls["completed"] == [(("out-1", "failed"), {"error": "Fora da janela de 24h da Meta — envie um template"})]
+    assert retried == [] and events == ["whatsapp.outbound_outside_window"]
+
+
+def test_other_provider_errors_keep_the_retry_path(monkeypatch):
+    worker, calls, retried, events = _failing_send(monkeypatch, RuntimeError("boom"))
+    worker._dispatch_group([_row("human")])
+    assert len(retried) == 1 and calls["completed"] == [] and events == []
+
+
 def test_sweep_releases_only_cleared_holds(monkeypatch):
     ws = __import__("workers.whatsapp_dispatch_worker", fromlist=["x"])
     released = []

@@ -303,7 +303,7 @@ class ChatwootBridgeWorker(BaseWorker):
             source_status = str(buffer.get("status") or "")
             status = {
                 "sent": "sent", "delivered": "delivered", "read": "read",
-                "dead_letter": "failed", "waiting_human": "failed",
+                "failed": "failed", "dead_letter": "failed", "waiting_human": "failed",
             }.get(source_status)
             if not status:
                 continue

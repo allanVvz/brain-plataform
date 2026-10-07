@@ -34,6 +34,9 @@ escrita só por workflow com dry-run/apply.
   fora do horário a mensagem do cliente espera a abertura; conversa em andamento
   (resposta há menos de 10 min) continua até pausar. Só campanha, proativa e
   preview carregam janela na saída.
+- **Fora da janela de 24h da Meta** (erro 131047): a mensagem livre falha na hora (`failed`,
+  "Fora da janela de 24h da Meta — envie um template"), sem retry nem pausa da lead; o motivo
+  aparece na conversa e no Chatwoot. Reabrir exige template (o envio não é automático).
 - Mídia: Meta e Evolution enviam imagem, áudio, vídeo e documento. Imagem recebida
   é lida por visão (`OPENAI_API_KEY` no transport); áudio é transcrito (Whisper).
 - Chatwoot: resposta do atendente (texto e anexos) entra na mesma fila; nota

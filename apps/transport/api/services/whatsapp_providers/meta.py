@@ -35,11 +35,31 @@ def _extract_meta_error_detail(response: httpx.Response) -> str:
     return "; ".join(str(part) for part in parts)[:500]
 
 
+# Graph error 131047: free-text/media sent more than 24h after the customer's
+# last message. Only an approved template can reopen the conversation.
+OUTSIDE_WINDOW_CODE = 131047
+OUTSIDE_WINDOW_REASON = "Fora da janela de 24h da Meta — envie um template"
+
+
+class OutsideCustomerServiceWindow(Exception):
+    """Meta rejected a non-template send because the 24h window is closed."""
+
+
+def _meta_error_code(response: httpx.Response) -> int | None:
+    try:
+        payload = response.json()
+        return int(payload["error"]["code"])
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
 def _raise_for_status_with_detail(response: httpx.Response) -> None:
     try:
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
         detail = _extract_meta_error_detail(response)
+        if _meta_error_code(response) == OUTSIDE_WINDOW_CODE:
+            raise OutsideCustomerServiceWindow(detail) from exc
         raise httpx.HTTPStatusError(
             f"{exc} | meta_error: {detail}" if detail else str(exc),
             request=exc.request,

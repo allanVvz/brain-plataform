@@ -27,6 +27,7 @@ from services import (
     whatsapp_outbox,
 )
 from services.whatsapp_providers import get_provider
+from services.whatsapp_providers.meta import OUTSIDE_WINDOW_REASON, OutsideCustomerServiceWindow
 from workers.base_worker import BaseWorker
 
 
@@ -139,6 +140,16 @@ class WhatsAppDispatchWorker(BaseWorker):
                     self._dispatch_inbound(row)
                 else:
                     self._dispatch_outbound(row)
+            except OutsideCustomerServiceWindow:
+                # Not retryable and not the lead's fault: fail it plainly so the
+                # operator sees why and can send a template instead.
+                supabase_client.complete_whatsapp_buffer(row["id"], "failed", error=OUTSIDE_WINDOW_REASON)
+                event_emitter.emit(
+                    "whatsapp.outbound_outside_window", entity_type="lead",
+                    entity_id=str(row.get("lead_ref") or ""), persona_id=row.get("persona_id"),
+                    payload={"buffer_id": row["id"], "reason": OUTSIDE_WINDOW_REASON},
+                    level="warning", source="workers.whatsapp",
+                )
             except Exception as exc:  # one poison message must not block the queue
                 self._retry_or_dead_letter(row, exc)
 
