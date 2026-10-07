@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from services import (
+    agent_schedule,
     catalog_response,
     event_emitter,
     n8n_client,
@@ -171,6 +172,29 @@ class WhatsAppDispatchWorker(BaseWorker):
                 source="workers.whatsapp",
             )
             return
+        if row.get("lead_ref") and not is_internal_validation:
+            inbound_at = agent_schedule.parse_time(row.get("created_at")) or datetime.now(timezone.utc)
+            opening = agent_schedule.deferral(
+                row["persona_id"],
+                messages=supabase_client.get_messages(str(row["lead_ref"]), limit=10) or [],
+                inbound_at=inbound_at,
+            )
+            if opening is not None:
+                supabase_client.defer_whatsapp_inbound(
+                    row["id"], opening.isoformat(), "outside_business_hours",
+                )
+                event_emitter.emit(
+                    "whatsapp.inbound_deferred_until_opening",
+                    entity_type="lead",
+                    entity_id=str(row.get("lead_ref") or ""),
+                    persona_id=row["persona_id"],
+                    payload={
+                        "correlation_id": row.get("correlation_id"),
+                        "opens_at": opening.isoformat(),
+                    },
+                    source="workers.whatsapp",
+                )
+                return
         binding = supabase_client.get_workflow_binding_by_id(row.get("channel_binding_id"))
         binding_metadata = (binding or {}).get("metadata") or {}
         if (

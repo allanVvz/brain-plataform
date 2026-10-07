@@ -9,10 +9,20 @@ from pydantic import BaseModel, ConfigDict
 
 from schemas.persona import PersonaCreate, PersonaUpdate
 from services import public_site
-from services import auth_service, supabase_client, vault_sync
+from services import auth_service, business_hours, supabase_client, vault_sync
 
 router = APIRouter(prefix="/personas", tags=["personas"])
 logger = logging.getLogger("personas")
+
+
+class BusinessHoursPatch(BaseModel):
+    """Agent hours saved from the Agentes screen; unset fields keep their value."""
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool | None = None
+    start: str | None = None
+    end: str | None = None
+    timezone: str | None = None
 
 
 class RoutingUpdate(BaseModel):
@@ -24,6 +34,7 @@ class RoutingUpdate(BaseModel):
     outbound_webhook_secret: str | None = None
     inbound_webhook_token: str | None = None
     rotate_inbound_token: bool | None = None
+    business_hours: BusinessHoursPatch | None = None
 
 
 class PublicSiteUpdate(BaseModel):
@@ -158,6 +169,10 @@ def _mask_routing(routing: dict, *, include_readiness: bool = False) -> dict:
         response["readiness"] = _routing_readiness(
             routing, live_binding, conversation_mode
         )
+        response["business_hours"] = business_hours.effective(
+            {"config": routing.get("config")},
+            supabase_client.get_active_graph_publication(str(routing.get("id") or "")),
+        )
     return response
 
 
@@ -286,6 +301,41 @@ def update_routing(slug: str, body: RoutingUpdate, request: Request):
             409,
             "Migration 011 not applied. Apply supabase/migrations/011_persona_routing.sql before editing persona routing.",
         )
+    if body.business_hours is not None:
+        try:
+            merged = business_hours.merge_override(
+                {"config": current.get("config")},
+                body.business_hours.model_dump(exclude_none=True),
+            )
+            candidate = business_hours.effective(
+                {"config": {business_hours.OVERRIDE_KEY: merged}},
+                supabase_client.get_active_graph_publication(str(current.get("id") or "")),
+            )
+            business_hours.assert_ordered(candidate)
+            if merged.get("enabled") and not candidate["configured"]:
+                raise business_hours.InvalidBusinessHours("informe inicio, fim e fuso para ligar o horario")
+        except business_hours.InvalidBusinessHours as exc:
+            raise HTTPException(400, str(exc)) from exc
+        config = dict(current.get("config") or {})
+        config[business_hours.OVERRIDE_KEY] = merged
+        supabase_client.update_persona_config(slug, config)
+        supabase_client.insert_event(
+            {
+                "event_type": "persona.business_hours_updated",
+                "entity_type": "persona",
+                "entity_id": str(current.get("id") or slug),
+                "persona_id": current.get("id"),
+                "payload": {
+                    "persona_slug": slug,
+                    "actor": auth_service.current_user(request).get("id"),
+                    "before": (current.get("config") or {}).get(business_hours.OVERRIDE_KEY),
+                    "after": merged,
+                },
+            },
+            level="info",
+            source="routes.personas",
+        )
+        current = supabase_client.get_persona_routing(slug) or current
     payload: dict = {}
     rotated_token: str | None = None
     requested_conversation_mode = body.conversation_mode

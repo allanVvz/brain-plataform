@@ -186,7 +186,9 @@ def send_message(body: SendMessageBody, request: Request) -> dict:
     persona_id = lead.get("persona_id")
     if not persona_id:
         raise HTTPException(409, detail="Lead sem persona.")
-    auth_service.assert_persona_access(request, persona_id=persona_id)
+    # Sending is a write: a view-only grant (e.g. a read-only client login) must
+    # not be able to enqueue WhatsApp messages by calling this route directly.
+    auth_service.assert_persona_capability(request, "edit", persona_id=persona_id)
 
     agent: dict | None = None
     if body.agent_id:

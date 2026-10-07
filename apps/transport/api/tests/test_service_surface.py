@@ -177,7 +177,7 @@ def test_transport_repository_contains_only_the_reviewed_production_surface():
         for node in tree.body
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
-    assert len(functions) == 79
+    assert len(functions) == 80  # +defer_whatsapp_inbound (business-hours agent switch)
     assert "terminalize_inbound_technical_failure" in functions
     assert "enqueue_proactive_with_proof" in functions
     assert "enqueue_reactivation_preview_with_proof" in functions

@@ -1285,6 +1285,20 @@ def record_whatsapp_safety_violation(
         payload = payload[0] if payload else {}
     return payload if isinstance(payload, dict) else {}
 
+def defer_whatsapp_inbound(buffer_id: str, available_at: str, reason: str) -> None:
+    """Put an unprocessed inbound back in the queue until `available_at`.
+
+    The agent has not seen it yet, so no attempt is burned: the row is simply
+    claimable again at the opening, in its original order.
+    """
+    from datetime import datetime, timezone
+    _execute_with_retry(get_client().table("lead_buffer").update({
+        "status": "retry", "available_at": available_at, "last_error": reason,
+        "locked_at": None, "locked_by": None,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }).eq("id", buffer_id).eq("direction", "inbound"))
+
+
 def complete_whatsapp_buffer(buffer_id: str, status: str, error: str | None = None) -> None:
     from datetime import datetime, timezone
     # Keep the chat projection in step with terminal outbound outbox states.

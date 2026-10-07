@@ -1,0 +1,80 @@
+name: Set persona business hours
+
+on:
+  workflow_dispatch:
+    inputs:
+      persona_slug:
+        description: Persona whose agent hours are switched
+        type: choice
+        options: [tock-fatal]
+        required: true
+      enabled:
+        description: "false = the agent answers at any hour; true = the agent follows its hours"
+        type: choice
+        options: ["false", "true"]
+        required: true
+      action:
+        description: dry-run only reads; apply writes personas.config.business_hours and one audit event
+        type: choice
+        options: [dry-run, apply]
+        default: dry-run
+
+permissions:
+  contents: read
+
+concurrency:
+  group: persona-business-hours-${{ inputs.persona_slug }}
+  cancel-in-progress: false
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Read, and optionally switch, the agent business hours
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        env:
+          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+          PERSONA_SLUG: ${{ inputs.persona_slug }}
+          HOURS_ENABLED: ${{ inputs.enabled }}
+          HOURS_ACTION: ${{ inputs.action }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          envs: VPS_APP_DIR,PERSONA_SLUG,HOURS_ENABLED,HOURS_ACTION
+          script: |
+            set -Eeuo pipefail
+            cd "$VPS_APP_DIR"
+            control_slot="$(python3 -c 'import json; print(json.load(open(".deploy/microservices/slots.json", encoding="utf-8"))["control-plane"]["active"])')"
+            [[ "$control_slot" == blue || "$control_slot" == green ]]
+            control_container="brain-ai-control-plane-$control_slot-1"
+            [[ "$(docker inspect -f '{{.State.Health.Status}}' "$control_container")" == healthy ]]
+            docker compose --env-file .env.compose -f docker-compose.yml -f infra/microservices/docker-compose.blue-green.yml exec -T \
+              -e PERSONA_SLUG -e HOURS_ENABLED -e HOURS_ACTION "control-plane-$control_slot" python - <<'PY'
+            import json, os
+            from services import supabase_client
+
+            slug = os.environ["PERSONA_SLUG"]
+            enabled = os.environ["HOURS_ENABLED"] == "true"
+            apply = os.environ["HOURS_ACTION"] == "apply"
+            persona = supabase_client.get_persona(slug)
+            assert persona, "persona_not_found"
+            config = dict(persona.get("config") or {})
+            before = config.get("business_hours")
+            after = {**(before if isinstance(before, dict) else {}), "enabled": enabled}
+            result = {"persona_slug": slug, "before": before, "after": after, "applied": apply}
+            if apply:
+                config["business_hours"] = after
+                supabase_client.update_persona_config(slug, config)
+                supabase_client.insert_event({
+                    "event_type": "persona.business_hours_updated", "entity_type": "persona",
+                    "entity_id": str(persona["id"]), "persona_id": persona["id"],
+                    "payload": {"persona_slug": slug, "before": before, "after": after,
+                                "actor": "workflow.set_persona_business_hours"},
+                }, source="workflow.set_persona_business_hours")
+                reread = (supabase_client.get_persona(slug) or {}).get("config", {}).get("business_hours")
+                assert reread == after, "business_hours_not_persisted"
+            print("PERSONA_BUSINESS_HOURS=" + json.dumps(result, sort_keys=True))
+            PY

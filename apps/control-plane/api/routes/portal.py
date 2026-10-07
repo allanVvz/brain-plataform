@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from services import (
     auth_service,
+    business_hours,
     campaigns_service,
     context_cards as context_cards_service,
     event_emitter,
@@ -185,6 +186,39 @@ def _binding_for_persona(persona_id: str) -> dict[str, Any] | None:
 
 def _whatsapp_bindings(persona_id: str) -> list[dict[str, Any]]:
     return [row for row in supabase_client.get_workflow_bindings(persona_id) if row.get("channel") == "whatsapp"]
+
+
+def _provider_binding(persona_id: str, provider: str) -> dict[str, Any] | None:
+    """The persona's binding for one provider, preferring the active row."""
+    rows = [row for row in _whatsapp_bindings(persona_id) if row.get("provider") == provider]
+    return next((row for row in rows if row.get("active")), rows[0] if rows else None)
+
+
+def _env_flag(name: str) -> bool:
+    return (os.environ.get(name) or "").strip().lower() in {"1", "true", "yes"}
+
+
+def _chatwoot_card(binding: dict[str, Any] | None) -> dict[str, Any]:
+    """Display-only Chatwoot access data. Tokens and signing secrets never leave
+    the transport; the browser only learns where and as whom to sign in."""
+    metadata = (binding or {}).get("metadata") or {}
+    own = metadata.get("chatwoot") if isinstance(metadata.get("chatwoot"), dict) else {}
+    is_global_binding = bool(binding) and str(binding["id"]) == (
+        os.environ.get("CHATWOOT_BRIDGE_BINDING_ID") or ""
+    ).strip()
+    base_url = (own.get("base_url") or os.environ.get("CHATWOOT_BASE_URL") or "").strip().rstrip("/")
+    enabled = bool(own.get("enabled")) or (is_global_binding and _env_flag("CHATWOOT_BRIDGE_ENABLED"))
+    if not binding or not base_url or not (own or is_global_binding):
+        return {"configured": False, "enabled": False}
+    return {
+        "configured": True,
+        "enabled": enabled,
+        "base_url": base_url,
+        "account_id": own.get("account_id") or os.environ.get("CHATWOOT_ACCOUNT_ID") or None,
+        "inbox_id": own.get("inbox_id") or os.environ.get("CHATWOOT_INBOX_ID") or None,
+        "login_email": own.get("login_email") or os.environ.get("CHATWOOT_LOGIN_EMAIL") or None,
+        "password_hint": "A senha é definida no próprio Chatwoot; use 'Esqueci minha senha' para redefinir.",
+    }
 
 
 def _evolution_webhook_target(
@@ -878,6 +912,69 @@ def whatsapp_channel(slug: str, request: Request):
     }
 
 
+@router.get("/business-hours")
+def persona_business_hours(request: Request, persona_slug: str = Query(...)):
+    """The agent's effective hours, so the Mensagens screen can show it off/on."""
+    persona = _persona(persona_slug, request)
+    hours = business_hours.effective(
+        persona, supabase_client.get_active_graph_publication(str(persona["id"])),
+    )
+    return {key: hours[key] for key in ("enabled", "start", "end", "timezone", "source")}
+
+
+@router.get("/channels")
+def persona_channels(request: Request, persona_slug: str = Query(...)):
+    """Connection cards (Evolution, Meta, Chatwoot) for one persona.
+
+    Public fields only: no ciphertext, token or signing secret is serialized.
+    """
+    persona = _persona(persona_slug, request)
+    bindings = _whatsapp_bindings(persona["id"])
+    active = next((row for row in bindings if row.get("active")), None)
+    evolution = _provider_binding(persona["id"], "evolution_baileys")
+    meta = _provider_binding(persona["id"], "meta_cloud")
+    user = auth_service.current_user(request)
+    can_manage = False
+    try:
+        auth_service.assert_persona_capability(
+            request, "manage", persona_id=persona["id"], persona_slug=persona_slug
+        )
+        can_manage = True
+    except HTTPException:
+        pass
+    meta_data = (meta or {}).get("metadata") or {}
+    return {
+        "active_provider": (active or {}).get("provider"),
+        "can_manage": can_manage,
+        "can_manage_provider": auth_service.is_admin(user),
+        "evolution": {
+            "configured": bool(evolution),
+            "active": bool(evolution and evolution.get("active")),
+            "status": (evolution or {}).get("connection_status") or "disabled",
+            "instance_key": (evolution or {}).get("provider_instance_key"),
+            "connected_phone": (evolution or {}).get("whatsapp_number"),
+        },
+        "meta_cloud": {
+            "configured": bool(meta),
+            "active": bool(meta and meta.get("active")),
+            "status": (meta or {}).get("connection_status") or "disabled",
+            "phone_number_id": (meta or {}).get("whatsapp_phone_number_id"),
+            "whatsapp_number": (meta or {}).get("whatsapp_number"),
+            "waba_id": meta_data.get("waba_id"),
+            "verified_name": meta_data.get("verified_name"),
+            "token_configured": bool(meta and meta.get("provider_secret_ciphertext")),
+        },
+        "chatwoot": _chatwoot_card(active),
+    }
+
+
+@router.post("/channels/evolution/qr")
+def persona_evolution_qr(request: Request, persona_slug: str = Query(...)):
+    """Fresh pairing QR for the persona's Evolution instance (no-store)."""
+    response = _evolution_action(persona_slug, request, "get_qr_code")
+    return JSONResponse(response, headers={"Cache-Control": "no-store"})
+
+
 @router.post("/personas/{slug}/channels/whatsapp/provider")
 def select_whatsapp_provider(slug: str, body: WhatsAppProviderBody, request: Request):
     """Switch transport only after an explicit confirmation.
@@ -1028,8 +1125,8 @@ def provision_evolution(slug: str, request: Request):
 
 def _evolution_action(slug: str, request: Request, action: str):
     persona = _persona(slug, request, "manage")
-    binding = _binding_for_persona(persona["id"])
-    if not binding or binding.get("provider") != "evolution_baileys":
+    binding = _provider_binding(persona["id"], "evolution_baileys")
+    if not binding:
         raise HTTPException(404, "Canal Evolution nao configurado.")
     public_base = (os.environ.get("AI_BRAIN_PUBLIC_API_URL") or "").rstrip("/")
     webhook_url = callback = None

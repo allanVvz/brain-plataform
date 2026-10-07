@@ -45,9 +45,11 @@ transport outbox. Do not configure Meta to call Chatwoot directly.
 - A public reply authored by the configured Chatwoot agent first hands the lead
   to the runtime, which pauses Vitória and parks outstanding inbound work, then
   enters the existing idempotent transport outbox.
-- A private note whose entire content is `/assumir-ia` pauses Vitória without
-  sending anything to the customer.
-- A private note whose entire content is `/retomar-ia` explicitly resumes her.
+- A private note whose entire content is `/desligar-agente` (also `/desligar`,
+  `/desligar-ia`, `/assumir-ia`) pauses Vitória without sending anything to the
+  customer.
+- A private note whose entire content is `/ligar-agente` (also `/ligar`,
+  `/ligar-ia`, `/retomar-ia`) explicitly resumes her.
 - Other private notes and messages from other users are ignored by the bridge.
 - The bridge marker in `content_attributes` prevents its projected messages
   from cycling back into the outbox. The database operation ledger deduplicates
@@ -70,3 +72,15 @@ rollback. To resume after a schema rollback, restore the data-only backup via
 the approved isolated restore procedure and reapply the exact schema release;
 then deploy the matching transport release. Never restore into the live
 database until the isolated verification succeeds.
+
+## Business hours and the agent
+
+Hours switch the **agent**, never a person. A reply typed in the portal or in the
+Chatwoot app is sent immediately, at any hour. Outside the persona's hours the
+agent is off (default hours come from the GraphBundle; the Agentes screen can
+override them, stored in `personas.config.business_hours`). A dialogue that is
+still going (someone answered the lead in the last 10 minutes) keeps its agent
+until it pauses; a customer message that arrives after the pause waits, unprocessed,
+until the next opening. `set-persona-business-hours.yml` switches the hours for
+one persona with a dry-run and an audit event.
+
