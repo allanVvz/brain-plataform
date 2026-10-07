@@ -42,7 +42,7 @@ jobs:
                     if not config or str(lead.get('channel_binding_id') or '') != config.binding_id:
                         continue
                     found = True
-                    ops = supabase_client._execute_with_retry(supabase_client.get_client().table('chatwoot_bridge_operations').select('status,attempt_count,last_error').eq('source_kind','brain_message').eq('source_id',str(row['id'])).limit(1)).data or []
+                    ops = supabase_client._execute_with_retry(supabase_client.get_client().table('chatwoot_bridge_operations').select('status,attempt_count,last_error,available_at').eq('source_kind','brain_message').eq('source_id',str(row['id'])).limit(1)).data or []
                     op = ops[0] if ops else {}
                     status = str(op.get('status') or 'missing')
                     attempts = int(op.get('attempt_count') or 0)
@@ -71,7 +71,42 @@ jobs:
                             }
                             setup_result = ('chatwoot_http_' + http.group(1)) if http else known.get(detail, 'setup_error_' + type(exc).__name__)
                     if mapped:
-                        projected = bool(api.find_message_by_source_id(conversation_id=int(mapping['conversation_id']),source_id=f"brain-message:{row['id']}",after_message_id=0))
+                        conversation_id = int(mapping['conversation_id'])
+                        source_id = f"brain-message:{row['id']}"
+                        existing = api.find_message_by_source_id(
+                            conversation_id=conversation_id, source_id=source_id, after_message_id=0,
+                        )
+                        projected = bool(existing)
+                        if not projected and status == 'retry':
+                            try:
+                                available_at = datetime.fromisoformat(
+                                    str(op.get('available_at') or '').replace('Z', '+00:00'),
+                                )
+                                retry_wait = (available_at - datetime.now(timezone.utc)).total_seconds()
+                            except (TypeError, ValueError):
+                                retry_wait = 0
+                            if retry_wait > 60:
+                                try:
+                                    created = api.create_message(
+                                        conversation_id=conversation_id,
+                                        source_id=source_id,
+                                        content=str(row.get('content') or '').strip(),
+                                        incoming=True,
+                                        external_created_at=str(row.get('created_at') or '') or None,
+                                        content_attributes={
+                                            'brain_message_id': int(row['id']),
+                                            'brain_sender_origin': 'customer',
+                                            'brain_status': '',
+                                        },
+                                    )
+                                    projected = bool(created.get('id'))
+                                    setup_result = 'message_reconciled' if projected else 'message_response_missing_id'
+                                except Exception as exc:
+                                    detail = str(exc)
+                                    http = re.search(r'Chatwoot API returned HTTP ([45][0-9]{2})$', detail)
+                                    setup_result = ('message_http_' + http.group(1)) if http else 'message_error_' + type(exc).__name__
+                            else:
+                                setup_result = 'retry_due_or_too_close'
                     break
                 if config:
                     states = supabase_client._execute_with_retry(supabase_client.get_client().table('chatwoot_bridge_operations').select('status').eq('channel_binding_id',config.binding_id).eq('source_kind','brain_message').in_('status',['pending','retry','processing','dead_letter']).limit(1000)).data or []
