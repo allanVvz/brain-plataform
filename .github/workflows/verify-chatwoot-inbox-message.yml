@@ -30,7 +30,7 @@ jobs:
             from workers.chatwoot_bridge_worker import ChatwootBridgeWorker
             import re
             config = chatwoot_api.configuration()
-            rows = supabase_client._execute_with_retry(supabase_client.get_client().table('messages').select('id,lead_id,direction,content,created_at').eq('direction','inbound').ilike('content','%Teste Chatwoot%').gte('created_at',(datetime.now(timezone.utc)-timedelta(minutes=60)).isoformat()).order('created_at',desc=True).limit(30)).data or []
+            rows = supabase_client._execute_with_retry(supabase_client.get_client().table('messages').select('id,lead_id,direction,content,created_at').eq('direction','inbound').ilike('content','%Teste Chatwoot%').gte('created_at',(datetime.now(timezone.utc)-timedelta(hours=24)).isoformat()).order('created_at',desc=True).limit(30)).data or []
             found = projected = mapped = False
             status, attempts, error_type = 'missing', 0, 'none'
             setup_result = 'test_message_not_found'
