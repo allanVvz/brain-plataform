@@ -11,7 +11,7 @@ estado, store ou workflow paralelo; simplifique o existente.
 | gateway, control-plane, conversation-runtime, transport | `brain-plataform` (`apps/*`) | blue/green por `ops/microservices/release-manifest.json` (digests da `main`) + aprovação de ambiente |
 | Telas admin vivas (Agentes, Disparos, Mensagens) | `brain-plataform/dashboard` | Vercel, a cada merge na `main` |
 | Portal do cliente e North (`*.pages.dev`), gateway CRM | `akia` (`apps/portal-web`, `apps/gateway`) | Cloudflare Pages por portal |
-| Chatwoot (app iPhone) | VPS `chat.vzforeal.com` | ponte no transport (`/webhooks/chatwoot`, worker `chatwoot_bridge`), config por env |
+| Chatwoot (app iPhone) | VPS `chat.vzforeal.com` | ponte no transport (`/webhooks/chatwoot`, worker `chatwoot_bridge`), config por binding (`metadata.chatwoot`), env como fallback |
 
 **Uma linhagem**: publique só a partir da `main` (a branch `feat/utzig-commercial-v15`
 foi unida a ela no PR #226). O manifest registra o que está no ar; confira em
@@ -69,6 +69,6 @@ Fonte única: `apps/control-plane/api/services/business_hours.py`.
   publicar em 1 dispatch.
 - Unificar o store v2.1 no v3; levar retenção/liberação da fila para SQL e reduzir
   estados a *na fila, retida, enviando, enviada, falhou*.
-- Chatwoot para todas as personas (hoje uma binding por env); avisos automáticos de
+- Avisos automáticos de
   fechamento/fora do horário (textos já existem no grafo da Tock) pela fila.
 - Imagens de produto em todas as personas de catálogo (a Tock tem 64 de 73 sem imagem).

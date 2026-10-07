@@ -1,0 +1,127 @@
+name: Set persona Chatwoot inbox
+
+# Writes only the NON-secret fields of workflow_bindings.metadata.chatwoot.
+# api_token / webhook_secret are never inputs: they are stored encrypted by the
+# protected server path (see apps/transport/docs/chatwoot-api-bridge.md). Until
+# both ciphertext fields exist, an enabled binding is skipped and logged.
+
+on:
+  workflow_dispatch:
+    inputs:
+      persona_slug:
+        description: Persona slug (any AKIA persona) whose active WhatsApp binding is configured
+        type: string
+        required: true
+      enabled:
+        description: "true = mirror this binding to Chatwoot; false = stop (data is kept)"
+        type: choice
+        options: ["true", "false"]
+        required: true
+      base_url:
+        description: Chatwoot HTTPS base URL (required when enabling)
+        type: string
+        required: false
+      account_id:
+        type: string
+        required: false
+      inbox_id:
+        type: string
+        required: false
+      inbox_identifier:
+        type: string
+        required: false
+      agent_id:
+        description: Chatwoot user id of the attending agent
+        type: string
+        required: false
+      action:
+        description: dry-run only reads; apply writes the binding metadata and one audit event
+        type: choice
+        options: [dry-run, apply]
+        default: dry-run
+
+permissions:
+  contents: read
+
+concurrency:
+  group: persona-chatwoot-${{ inputs.persona_slug }}
+  cancel-in-progress: false
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Read, and optionally write, the binding Chatwoot settings
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f
+        env:
+          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR || '/opt/brain-ai' }}
+          PERSONA_SLUG: ${{ inputs.persona_slug }}
+          CW_ENABLED: ${{ inputs.enabled }}
+          CW_BASE_URL: ${{ inputs.base_url }}
+          CW_ACCOUNT_ID: ${{ inputs.account_id }}
+          CW_INBOX_ID: ${{ inputs.inbox_id }}
+          CW_INBOX_IDENTIFIER: ${{ inputs.inbox_identifier }}
+          CW_AGENT_ID: ${{ inputs.agent_id }}
+          CW_ACTION: ${{ inputs.action }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          envs: VPS_APP_DIR,PERSONA_SLUG,CW_ENABLED,CW_BASE_URL,CW_ACCOUNT_ID,CW_INBOX_ID,CW_INBOX_IDENTIFIER,CW_AGENT_ID,CW_ACTION
+          script: |
+            set -Eeuo pipefail
+            cd "$VPS_APP_DIR"
+            control_slot="$(python3 -c 'import json; print(json.load(open(".deploy/microservices/slots.json", encoding="utf-8"))["control-plane"]["active"])')"
+            [[ "$control_slot" == blue || "$control_slot" == green ]]
+            control_container="brain-ai-control-plane-$control_slot-1"
+            [[ "$(docker inspect -f '{{.State.Health.Status}}' "$control_container")" == healthy ]]
+            docker compose --env-file .env.compose -f docker-compose.yml -f infra/microservices/docker-compose.blue-green.yml exec -T \
+              -e PERSONA_SLUG -e CW_ENABLED -e CW_BASE_URL -e CW_ACCOUNT_ID -e CW_INBOX_ID -e CW_INBOX_IDENTIFIER -e CW_AGENT_ID -e CW_ACTION "control-plane-$control_slot" python - <<'PY'
+            import json, os
+            from services import supabase_client
+
+            slug = os.environ["PERSONA_SLUG"].strip()
+            assert slug and len(slug) <= 120 and all(c.isalnum() or c == "-" for c in slug), "invalid_persona_slug"
+            enabled = os.environ["CW_ENABLED"] == "true"
+            apply = os.environ["CW_ACTION"] == "apply"
+            persona = supabase_client.get_persona(slug)
+            assert persona, "persona_not_found"
+            bindings = [
+                b for b in supabase_client.get_workflow_bindings(str(persona["id"]))
+                if b.get("active") and b.get("provider") in {"meta_cloud", "evolution_baileys"}
+            ]
+            assert len(bindings) == 1, "expected_exactly_one_active_whatsapp_binding"
+            binding = bindings[0]
+            metadata = dict(binding.get("metadata") or {})
+            before = dict(metadata.get("chatwoot") or {})
+            after = {**before, "enabled": enabled}
+            for key in ("base_url", "inbox_identifier"):
+                if os.environ["CW_" + key.upper()].strip():
+                    after[key] = os.environ["CW_" + key.upper()].strip()
+            for key in ("account_id", "inbox_id", "agent_id"):
+                if os.environ["CW_" + key.upper()].strip():
+                    after[key] = int(os.environ["CW_" + key.upper()])
+            if enabled:
+                assert str(after.get("base_url", "")).startswith("https://"), "https_base_url_required"
+                assert all(after.get(k) for k in ("account_id", "inbox_id", "inbox_identifier", "agent_id")), "chatwoot_fields_missing"
+            shown = lambda c: {k: v for k, v in c.items() if not k.endswith("_ciphertext")}
+            result = {
+                "persona_slug": slug, "binding_id": str(binding["id"]),
+                "before": shown(before), "after": shown(after), "applied": apply,
+                "secrets_present": all(after.get(k) for k in ("api_token_ciphertext", "webhook_secret_ciphertext")),
+            }
+            if apply:
+                metadata["chatwoot"] = after
+                supabase_client.update_workflow_binding_metadata(str(binding["id"]), metadata)
+                supabase_client.insert_event({
+                    "event_type": "persona.chatwoot_updated", "entity_type": "workflow_binding",
+                    "entity_id": str(binding["id"]), "persona_id": persona["id"],
+                    "payload": {"persona_slug": slug, "before": shown(before), "after": shown(after),
+                                "actor": "workflow.set_persona_chatwoot"},
+                }, source="workflow.set_persona_chatwoot")
+                reread = next(b for b in supabase_client.get_workflow_bindings(str(persona["id"])) if b["id"] == binding["id"])
+                assert (reread.get("metadata") or {}).get("chatwoot") == after, "chatwoot_not_persisted"
+            print("PERSONA_CHATWOOT=" + json.dumps(result, sort_keys=True))
+            PY

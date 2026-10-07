@@ -25,15 +25,7 @@ async def receive_chatwoot_event(
     x_chatwoot_timestamp: str | None = Header(None),
     x_chatwoot_signature: str | None = Header(None),
 ) -> dict:
-    config = chatwoot_api.configuration()
-    if not config:
-        raise HTTPException(503, "Chatwoot bridge is disabled")
-
     raw = await request.body()
-    if not chatwoot_api.verify_webhook_signature(
-        raw, x_chatwoot_timestamp, x_chatwoot_signature, config.webhook_secret,
-    ):
-        raise HTTPException(401, "invalid Chatwoot webhook signature")
     try:
         payload = json.loads(raw)
     except (TypeError, ValueError) as exc:
@@ -41,11 +33,21 @@ async def receive_chatwoot_event(
     if not isinstance(payload, dict):
         raise HTTPException(400, "invalid Chatwoot webhook payload")
 
+    # The payload only selects which binding's secret verifies it; nothing in it
+    # is trusted until that binding's HMAC matches.
     account_id = _integer((payload.get("account") or {}).get("id"))
     inbox_id = _integer((payload.get("inbox") or {}).get("id"))
+    config = chatwoot_api.configuration_for_inbox(account_id, inbox_id)
+    if not config:
+        return {"ok": True, "ignored": True}
+    if not chatwoot_api.verify_webhook_signature(
+        raw, x_chatwoot_timestamp, x_chatwoot_signature, config.webhook_secret,
+    ):
+        raise HTTPException(401, "invalid Chatwoot webhook signature")
+
     conversation = payload.get("conversation") or {}
     conversation_id = _integer(conversation.get("id") or conversation.get("display_id"))
-    if account_id != config.account_id or inbox_id != config.inbox_id or not conversation_id:
+    if not conversation_id:
         return {"ok": True, "ignored": True}
 
     mapping = chatwoot_bridge.get_conversation_by_chatwoot_id(

@@ -21,26 +21,56 @@ class ChatwootBridgeWorker(BaseWorker):
         self.worker_id = f"{socket.gethostname()}:{uuid.uuid4()}"
 
     def _run_cycle(self) -> None:
-        config = chatwoot_api.configuration()
-        if config is None:
+        ready: dict[str, chatwoot_api.ChatwootConfig] = {}
+        for config in chatwoot_api.configurations():
+            try:
+                self._prepare(config)
+                ready[config.binding_id] = config
+            except Exception as exc:
+                self._log_failure(config, exc)
+        if not ready:
             return
+
+        # One claim serves every binding; each operation is executed with the
+        # configuration of the binding it belongs to.
+        apis: dict[str, chatwoot_api.ChatwootApi] = {}
+        try:
+            for operation in chatwoot_bridge.claim_operations(self.worker_id, limit=20):
+                config = ready.get(str(operation.get("channel_binding_id")))
+                if config is None:
+                    # Binding switched off or misconfigured: keep the work.
+                    self._finish(operation, "retry", "Chatwoot binding is not configured", retry_seconds=300)
+                    continue
+                api = apis.get(config.binding_id) or apis.setdefault(
+                    config.binding_id, chatwoot_api.ChatwootApi(config),
+                )
+                self._process_operation(api, config, operation)
+            for config in ready.values():
+                try:
+                    api = apis.get(config.binding_id) or apis.setdefault(
+                        config.binding_id, chatwoot_api.ChatwootApi(config),
+                    )
+                    self._sync_delivery_statuses(api, config)
+                except Exception as exc:
+                    self._log_failure(config, exc)
+        finally:
+            for api in apis.values():
+                api.close()
+
+    def _prepare(self, config: chatwoot_api.ChatwootConfig) -> None:
         binding = supabase_client.get_workflow_binding_by_id(config.binding_id)
         # Chatwoot mirrors the ledger of any WhatsApp channel: Meta Cloud or an
         # Evolution linked phone. Replies go back through the same outbox.
         if (
             not binding or not binding.get("active")
-            or binding.get("provider") not in {"meta_cloud", "evolution_baileys"}
+            or binding.get("provider") not in chatwoot_bridge.WHATSAPP_PROVIDERS
         ):
             raise RuntimeError("configured Chatwoot binding is not an active WhatsApp binding")
-
         chatwoot_bridge.enqueue_projections(config.binding_id, limit=500)
-        api = chatwoot_api.ChatwootApi(config)
-        try:
-            for operation in chatwoot_bridge.claim_operations(self.worker_id, limit=20):
-                self._process_operation(api, config, operation)
-            self._sync_delivery_statuses(api)
-        finally:
-            api.close()
+
+    def _log_failure(self, config: chatwoot_api.ChatwootConfig, exc: Exception) -> None:
+        # Type only: messages can echo customer data or account identifiers.
+        sre_logger.error(self.name, f"binding={config.binding_id} error_type={type(exc).__name__}")
 
     def _process_operation(self, api: chatwoot_api.ChatwootApi, config, operation: dict[str, Any]) -> None:
         try:
@@ -297,8 +327,8 @@ class ChatwootBridgeWorker(BaseWorker):
         })
         return saved
 
-    def _sync_delivery_statuses(self, api: chatwoot_api.ChatwootApi) -> None:
-        for operation in chatwoot_bridge.pending_delivery_updates(limit=50):
+    def _sync_delivery_statuses(self, api: chatwoot_api.ChatwootApi, config) -> None:
+        for operation in chatwoot_bridge.pending_delivery_updates(config.binding_id, limit=50):
             buffer = chatwoot_bridge.get_delivery_buffer(str(operation["transport_buffer_id"])) or {}
             source_status = str(buffer.get("status") or "")
             status = {

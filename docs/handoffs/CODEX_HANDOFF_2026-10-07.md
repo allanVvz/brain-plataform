@@ -118,10 +118,11 @@ corrija no `brain-plataform`.
    linhagem Utzig (`graph_editor_*`, "single-step save") é o caminho.
 6. **Telas admin no AKIA**: Disparos e Agentes aparecem como "TELA AINDA NÃO MIGRADA"
    no portal-web; o operador usa o dashboard do Vercel. Decidir: migrar ou apagar a cópia `akia/dashboard`.
-7. **Chatwoot para todas as personas**: hoje a ponte usa uma binding por env
-   (`CHATWOOT_BRIDGE_BINDING_ID`). Para valer para todos os agentes: config por binding
-   (`workflow_bindings.metadata.chatwoot` + segredos no `secret_store`), worker iterando
-   bindings habilitados, webhook resolvendo a binding por `(account_id, inbox_id)`.
+7. **Chatwoot para todas as personas**: implementado (PR `claude/chatwoot-all-personas`,
+   depende do #226): config por binding em `workflow_bindings.metadata.chatwoot`
+   (segredos cifrados com `secret_store`), worker iterando bindings habilitados, webhook
+   resolvendo a binding por `(account_id, inbox_id)`. Falta apenas gravar os segredos
+   cifrados de cada binding (ver `apps/transport/docs/chatwoot-api-bridge.md`).
 8. **Roadmap**: sync Obsidian ⇄ bundle (provado viável: nós publicados têm o formato do
    bundle e arestas mantêm `relation_type`).
 

@@ -55,7 +55,7 @@ def test_chatwoot_webhook_authenticates_and_enqueues_one_human_reply(monkeypatch
         inbox_id=8, inbox_identifier="inbox-test", binding_id="binding-1",
         webhook_secret=secret, agent_id=17,
     )
-    monkeypatch.setattr(chatwoot_api, "configuration", lambda: config)
+    monkeypatch.setattr(chatwoot_api, "configurations", lambda: [config])
     monkeypatch.setattr(chatwoot.chatwoot_bridge, "get_conversation_by_chatwoot_id", lambda *args: {
         "channel_binding_id": "binding-1", "lead_ref": 51,
     })
@@ -85,7 +85,7 @@ def test_chatwoot_webhook_rejects_forgery_and_ignores_bridge_echo(monkeypatch):
         inbox_id=8, inbox_identifier="inbox-test", binding_id="binding-1",
         webhook_secret=secret, agent_id=17,
     )
-    monkeypatch.setattr(chatwoot_api, "configuration", lambda: config)
+    monkeypatch.setattr(chatwoot_api, "configurations", lambda: [config])
     monkeypatch.setattr(chatwoot.chatwoot_bridge, "get_conversation_by_chatwoot_id", lambda *args: {
         "channel_binding_id": "binding-1", "lead_ref": 51,
     })
@@ -112,7 +112,7 @@ def test_private_notes_require_explicit_pause_or_resume_command(monkeypatch):
         inbox_id=8, inbox_identifier="inbox-test", binding_id="binding-1",
         webhook_secret=secret, agent_id=17,
     )
-    monkeypatch.setattr(chatwoot_api, "configuration", lambda: config)
+    monkeypatch.setattr(chatwoot_api, "configurations", lambda: [config])
     monkeypatch.setattr(chatwoot.chatwoot_bridge, "get_conversation_by_chatwoot_id", lambda *args: {
         "channel_binding_id": "binding-1", "lead_ref": 51,
     })
@@ -367,18 +367,95 @@ def test_evolution_lead_uses_its_phone_jid_not_the_opaque_lid(monkeypatch):
     assert seen["phone_number"] == "+5551999998888"
 
 
-def test_bridge_accepts_an_evolution_binding(monkeypatch):
-    config = chatwoot_api.ChatwootConfig(
-        base_url="https://chat.example", api_token="t", account_id=3, inbox_id=8,
-        inbox_identifier="inbox-test", binding_id="binding-evo", webhook_secret="s", agent_id=17,
+def _config(binding_id: str, inbox_id: int, secret: str):
+    return chatwoot_api.ChatwootConfig(
+        base_url="https://chat.example", api_token="t", account_id=3, inbox_id=inbox_id,
+        inbox_identifier=f"inbox-{inbox_id}", binding_id=binding_id,
+        webhook_secret=secret, agent_id=17,
     )
-    monkeypatch.setattr("workers.chatwoot_bridge_worker.chatwoot_api.configuration", lambda: config)
+
+
+def test_worker_serves_every_binding_and_one_failure_does_not_block_the_other(monkeypatch):
+    configs = [_config("binding-meta", 8, "s1"), _config("binding-evo", 9, "s2")]
+    monkeypatch.setattr(chatwoot_api, "configurations", lambda: configs)
     monkeypatch.setattr("workers.chatwoot_bridge_worker.supabase_client.get_workflow_binding_by_id",
-                        lambda _id: {"id": "binding-evo", "active": True, "provider": "evolution_baileys"})
+                        lambda binding_id: {"id": binding_id, "active": True, "provider": (
+                            "meta_cloud" if binding_id == "binding-meta" else "evolution_baileys")})
     enqueued = []
-    monkeypatch.setattr("workers.chatwoot_bridge_worker.chatwoot_bridge.enqueue_projections",
-                        lambda binding_id, limit: enqueued.append(binding_id) or 0)
-    monkeypatch.setattr("workers.chatwoot_bridge_worker.chatwoot_bridge.claim_operations", lambda *_a, **_k: [])
-    monkeypatch.setattr("workers.chatwoot_bridge_worker.chatwoot_bridge.pending_delivery_updates", lambda **_k: [])
+
+    def enqueue(binding_id, limit):
+        if binding_id == "binding-meta":
+            raise RuntimeError("customer data must not be logged")
+        enqueued.append(binding_id)
+        return 0
+
+    bridge = "workers.chatwoot_bridge_worker.chatwoot_bridge."
+    monkeypatch.setattr(bridge + "enqueue_projections", enqueue)
+    monkeypatch.setattr(bridge + "claim_operations", lambda *_a, **_k: [
+        {"id": "op-evo", "channel_binding_id": "binding-evo", "operation": "project_message", "brain_message_id": 1},
+        {"id": "op-gone", "channel_binding_id": "binding-other", "operation": "project_message"},
+    ])
+    synced = []
+    monkeypatch.setattr(bridge + "pending_delivery_updates",
+                        lambda binding_id, **_k: synced.append(binding_id) or [])
+    finished = []
+    monkeypatch.setattr(bridge + "finish_operation",
+                        lambda operation_id, _worker, status, **_k: finished.append((operation_id, status)) or True)
+    monkeypatch.setattr(bridge + "get_message", lambda _id: None)
+    logged = []
+    monkeypatch.setattr("workers.chatwoot_bridge_worker.sre_logger.error", lambda _w, message: logged.append(message))
+    monkeypatch.setattr(chatwoot_api, "ChatwootApi", lambda config: type("Api", (), {"close": lambda self: None})())
+
     ChatwootBridgeWorker()._run_cycle()
+
     assert enqueued == ["binding-evo"]
+    assert synced == ["binding-evo"]
+    assert ("op-evo", "ignored") in finished and ("op-gone", "retry") in finished
+    assert logged == ["binding=binding-meta error_type=RuntimeError"]
+
+
+def test_webhook_picks_the_binding_by_inbox_and_rejects_the_other_bindings_secret(monkeypatch):
+    configs = [_config("binding-meta", 8, "secret-one"), _config("binding-evo", 9, "secret-two")]
+    monkeypatch.setattr(chatwoot_api, "configurations", lambda: configs)
+    monkeypatch.setattr(chatwoot.chatwoot_bridge, "get_conversation_by_chatwoot_id", lambda *args: {
+        "channel_binding_id": "binding-evo", "lead_ref": 52,
+    })
+    calls = []
+    monkeypatch.setattr(chatwoot.chatwoot_bridge, "enqueue_command",
+                        lambda **kwargs: calls.append(kwargs) or {"status": "pending"})
+    timestamp = str(int(time.time()))
+    body = json.dumps(_payload(inbox={"id": "9"}), separators=(",", ":")).encode()
+
+    assert _deliver(body, "secret-two", timestamp) == {"ok": True, "queued": True}
+    assert calls[0]["binding_id"] == "binding-evo"
+    with pytest.raises(HTTPException) as wrong_secret:
+        _deliver(body, "secret-one", timestamp)
+    assert wrong_secret.value.status_code == 401
+
+    unknown = json.dumps(_payload(inbox={"id": "99"}), separators=(",", ":")).encode()
+    assert _deliver(unknown, "secret-one", timestamp) == {"ok": True, "ignored": True}
+    assert len(calls) == 1
+
+
+def test_environment_config_remains_the_fallback_without_binding_metadata(monkeypatch):
+    for key, value in {
+        "CHATWOOT_BRIDGE_ENABLED": "true", "CHATWOOT_BASE_URL": "https://chat.example",
+        "CHATWOOT_API_ACCESS_TOKEN": "t", "CHATWOOT_ACCOUNT_ID": "3", "CHATWOOT_INBOX_ID": "8",
+        "CHATWOOT_INBOX_IDENTIFIER": "inbox-8", "CHATWOOT_BRIDGE_BINDING_ID": "binding-env",
+        "CHATWOOT_WEBHOOK_SECRET": "s", "CHATWOOT_AGENT_ID": "17",
+    }.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(chatwoot_api.chatwoot_bridge, "list_enabled_bindings", lambda: [])
+    assert [c.binding_id for c in chatwoot_api.configurations()] == ["binding-env"]
+
+    from services import secret_store
+    own = {"id": "binding-own", "metadata": {"chatwoot": {
+        "enabled": True, "base_url": "https://other.example", "account_id": 5, "inbox_id": 6,
+        "inbox_identifier": "inbox-6", "agent_id": 2,
+        "api_token_ciphertext": secret_store.encrypt_secret("tok"),
+        "webhook_secret_ciphertext": secret_store.encrypt_secret("sec"),
+    }}}
+    monkeypatch.setattr(chatwoot_api.chatwoot_bridge, "list_enabled_bindings", lambda: [own])
+    configs = {c.binding_id: c for c in chatwoot_api.configurations()}
+    assert set(configs) == {"binding-env", "binding-own"}
+    assert (configs["binding-own"].api_token, configs["binding-own"].webhook_secret) == ("tok", "sec")
