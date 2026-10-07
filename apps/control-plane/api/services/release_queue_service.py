@@ -381,14 +381,66 @@ def with_idempotency(
     return result
 
 
+def _resume_without_window(buffer_ids: list[str], actor_user_id: str | None) -> tuple[list[str], list[dict]]:
+    """Resume paused items that carry no delivery window.
+
+    Replies and human messages no longer carry `published_business_hours` (the
+    hours switch the agent at its inbound, not the message), and the database
+    resume schedules from that field. Those items go straight back in line;
+    everything that does carry a window keeps the database path.
+    """
+    rows = _rows(
+        supabase_client.get_client().table("lead_buffer")
+        .select("id,persona_id,status,payload").in_("id", buffer_ids)
+    )
+    remaining: list[str] = []
+    results: list[dict] = []
+    now = datetime.now(timezone.utc).isoformat()
+    by_id = {str(row["id"]): row for row in rows}
+    for buffer_id in buffer_ids:
+        row = by_id.get(str(buffer_id)) or {}
+        payload = row.get("payload") or {}
+        windowless = (
+            payload.get("queue_pause") and not payload.get("published_business_hours")
+            and row.get("status") not in {"preview_ready", "sent", "delivered", "read", "dead_letter", "ignored", "superseded"}
+        )
+        if not windowless:
+            remaining.append(buffer_id)
+            continue
+        supabase_client._execute_with_retry(
+            supabase_client.get_client().table("lead_buffer").update({
+                "status": "buffered", "available_at": now,
+                "payload": {key: value for key, value in payload.items() if key != "queue_pause"},
+                "updated_at": now,
+            }).eq("id", buffer_id).eq("status", row.get("status"))
+        )
+        supabase_client.insert_event({
+            "event_type": "messaging.queue.resume", "entity_type": "lead_buffer",
+            "entity_id": str(buffer_id), "persona_id": row.get("persona_id"),
+            "payload": {"result": "agendado", "reason": None, "actor_user_id": _uuid_or_none(actor_user_id),
+                        "previous_status": row.get("status"), "scheduled_for": now},
+        }, source="messaging.queue")
+        results.append({"buffer_id": buffer_id, "result": "agendado", "reason": None,
+                        "previous_status": row.get("status"), "scheduled_for": now})
+    return remaining, results
+
+
 def control_unified_queue(
     *, buffer_ids: list[str], action: str, actor_user_id: str | None,
 ) -> dict[str, Any]:
-    return supabase_client.get_client().rpc("control_message_queue_v2", {
+    handled: list[dict] = []
+    if action == "resume":
+        buffer_ids, handled = _resume_without_window(buffer_ids, actor_user_id)
+        if not buffer_ids:
+            return {"items": handled}
+    data = supabase_client.get_client().rpc("control_message_queue_v2", {
         "p_buffer_ids": buffer_ids,
         "p_action": action,
         "p_actor_user_id": _uuid_or_none(actor_user_id),
     }).execute().data
+    if handled and isinstance(data, dict):
+        data = {**data, "items": handled + list(data.get("items") or [])}
+    return data
 
 
 def generate_queue_previews(*, buffer_ids: list[str], actor_user_id: str | None) -> dict[str, Any]:

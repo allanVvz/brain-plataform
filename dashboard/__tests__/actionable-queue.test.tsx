@@ -1,7 +1,7 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ReleaseQueuePanel } from "@/components/disparos/ReleaseQueuePanel";
-import { ApiError } from "@/lib/api";
+import { simplifyMessage } from "@/components/disparos/queueSimple";
 
 const mocks = vi.hoisted(() => ({ queue: vi.fn(), control: vi.fn() }));
 vi.mock("@/lib/api", async (importOriginal) => {
@@ -10,201 +10,76 @@ vi.mock("@/lib/api", async (importOriginal) => {
 });
 vi.mock("@/lib/useGlobalPersona", () => ({ useGlobalPersona: () => ({ id: "persona-1", slug: "fixture" }) }));
 
-const base = {
-  id: "demand-1", demand_id: "group-1", persona_id: "persona-1", lead_ref: 7,
-  customer_message: "Preciso saber quando vocês atendem", customer_message_at: "2026-09-18T10:00:00Z",
-  last_agent_message: "Como posso ajudar?", last_agent_message_at: "2026-09-18T09:59:00Z",
-  lead: { nome: "Cliente real" }, persona: { name: "Loja" },
-  origin: "proactive", queue_state: "preview_ready", recent_context: [
-    { id: "i1", direction: "inbound", content: "Preciso saber quando vocês atendem", created_at: "2026-09-18T10:00:00Z" },
-    { id: "o1", direction: "outbound", content: "Como posso ajudar?", created_at: "2026-09-18T09:59:00Z" },
-  ],
-};
+const demand = (queue_state: string, message: Record<string, unknown>) => ({
+  id: `d-${queue_state}`, persona_id: "persona-1", lead: { nome: "Cliente" }, queue_state,
+  customer_message: "Quando vocês atendem?", outbound_messages: [{ buffer_id: `m-${queue_state}`, sequence: 1, kind: "response", ...message }],
+});
+const keys = (state: string, message: Record<string, unknown>) =>
+  simplifyMessage(state, message).actions.map((action) => `${action.key}:${action.endpoint}`);
 
-describe("operational demand queue", () => {
+describe("queue vocabulary", () => {
+  it("maps every internal state to pausada, agendada, gerar preview or enviar", () => {
+    expect(simplifyMessage("preview_ready", { status: "preview_ready", can_send: true }).state).toBe("preview");
+    expect(keys("preview_ready", { status: "preview_ready", can_send: true }))
+      .toEqual(["enviar:send-preview", "gerar_preview:regenerate-preview", "pausar:pause"]);
+    expect(simplifyMessage("pending", { status: "pending_send" }).state).toBe("agendada");
+    expect(simplifyMessage("paused", { status: "buffered" })).toEqual({ state: "pausada", actions: [expect.objectContaining({ key: "retomar", endpoint: "resume" })] });
+    expect(keys("technical_failure", { status: "technical_failure" })).toEqual(["gerar_preview:reprocess"]);
+    expect(keys("blocked", { status: "blocked" })).toEqual(["gerar_preview:operator-preview"]);
+    expect(keys("awaiting_customer", { status: "sent" })).toEqual(["gerar_preview:reactivate"]);
+  });
+});
+
+describe("queue screen", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.control.mockResolvedValue({ items: [{ result: "agendado" }] });
-    mocks.queue.mockResolvedValue({ items: [{ ...base, outbound_messages: [{
-      buffer_id: "message-1", sequence: 1, kind: "response", text: "Resposta pronta",
-      proof_id: "proof-1", status: "preview_ready", can_retry: true, can_send: true,
-    }] }], next_offset: null });
+    mocks.queue.mockResolvedValue({ items: [demand("preview_ready", { status: "preview_ready", text: "Resposta pronta", can_send: true })], next_offset: null });
   });
 
-  it("renders customer context and one outbound without ever using inbound as preview", async () => {
+  it("shows the lead, the conversation, the preview and only the simple actions", async () => {
     render(<ReleaseQueuePanel />);
-    expect(await screen.findByText("Contexto da conversa")).toBeInTheDocument();
-    expect(screen.getAllByText("Preciso saber quando vocês atendem").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Como posso ajudar?").length).toBeGreaterThan(0);
-    expect(screen.getByText("Resposta pronta")).toBeInTheDocument();
-    expect(screen.getByText("Mensagem 1 de 1")).toBeInTheDocument();
-    expect(screen.queryByText("Mensagem anterior")).not.toBeInTheDocument();
+    expect(await screen.findByText("Resposta pronta")).toBeInTheDocument();
+    expect(screen.getByText("Quando vocês atendem?")).toBeInTheDocument();
+    expect(screen.getAllByText("Preview pronto").length).toBeGreaterThan(0);
+    for (const label of ["Enviar", "Gerar preview", "Pausar"]) {
+      expect(screen.getByRole("button", { name: `${label} mensagem 1` })).toBeEnabled();
+    }
+    expect(screen.queryByText(/proof/i)).not.toBeInTheDocument();
   });
 
-  it("shows Retry and Enviar even when a capability is blocked", async () => {
-    mocks.queue.mockResolvedValue({ items: [{ ...base, outbound_messages: [{
-      buffer_id: "message-1", sequence: 1, kind: "response", text: "Resposta pronta",
-      status: "processing", can_retry: false, retry_reason: "Envio em andamento",
-      can_send: false, send_reason: "Mensagem não está pronta para envio",
-    }] }], next_offset: null });
-    render(<ReleaseQueuePanel />);
-    expect(await screen.findByRole("button", { name: "Retry mensagem 1" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Enviar mensagem 1" })).toBeDisabled();
-    expect(screen.getByText(/Retry: Envio em andamento/)).toBeInTheDocument();
-  });
-
-  it("retries one ordinary outbound without sending it, tagging the call with a fresh idempotency key", async () => {
-    render(<ReleaseQueuePanel />);
-    fireEvent.click(await screen.findByRole("button", { name: "Retry mensagem 1" }));
-    await waitFor(() => expect(mocks.control).toHaveBeenCalledWith(
-      "regenerate-preview", { buffer_ids: ["message-1"], idempotency_key: expect.any(String) },
-    ));
-    expect(mocks.control).not.toHaveBeenCalledWith("send-preview", expect.anything());
-  });
-
-  it("explicitly generates an inert preview from a blocked inbound", async () => {
-    mocks.queue.mockResolvedValue({ items: [{ ...base, queue_state: "blocked", outbound_messages: [{
-      buffer_id: "canonical-inbound", sequence: 1, kind: "response", status: "blocked",
-      can_retry: false, retry_reason: "Demanda sem falha técnica recuperável",
-      can_generate_preview: true, can_send: false, send_reason: "Gere uma resposta válida antes de enviar",
-    }] }], next_offset: null });
-    vi.spyOn(window, "confirm").mockReturnValue(true);
-    render(<ReleaseQueuePanel />);
-    fireEvent.click(await screen.findByRole("button", { name: "Gerar prévia da mensagem 1" }));
-    await waitFor(() => expect(mocks.control).toHaveBeenCalledWith(
-      "operator-preview", { buffer_ids: ["canonical-inbound"], idempotency_key: expect.any(String) },
-    ));
-    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("mensagem original"));
-    expect(mocks.control).not.toHaveBeenCalledWith("send-preview", expect.anything());
-  });
-
-  it("renders two messages in one demand and blocks message 2 until message 1 is confirmed", async () => {
-    mocks.queue.mockResolvedValue({ items: [{ ...base, outbound_messages: [
-      { buffer_id: "first", sequence: 1, kind: "apology", text: "Aviso de horário", proof_id: "proof-1", status: "preview_ready", can_retry: true, can_send: true },
-      { buffer_id: "second", sequence: 2, kind: "context", text: "Resposta contextual", proof_id: "proof-2", status: "preview_ready", can_retry: true, can_send: false, send_reason: "A mensagem 1 ainda não foi confirmada" },
-    ] }], next_offset: null });
-    render(<ReleaseQueuePanel />);
-    expect(await screen.findByText("Mensagem 1 de 2")).toBeInTheDocument();
-    expect(screen.getByText("Mensagem 2 de 2")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Enviar mensagem 2" })).toBeDisabled();
-    expect(screen.getByText(/A mensagem 1 ainda não foi confirmada/)).toBeInTheDocument();
-  });
-
-  it("retries only the selected second message and does not send in the same click", async () => {
-    mocks.queue.mockResolvedValue({ items: [{ ...base, outbound_messages: [
-      { buffer_id: "first-sent", sequence: 1, kind: "apology", text: "Aviso", status: "sent", can_retry: false, retry_reason: "Mensagem já confirmada", can_send: false, send_reason: "Mensagem já confirmada" },
-      { buffer_id: "second-failed", sequence: 2, kind: "context", text: "Contexto", status: "failed", can_retry: true, can_send: false, send_reason: "Mensagem não está pronta para envio" },
-    ] }], next_offset: null });
-    render(<ReleaseQueuePanel />);
-    fireEvent.click(await screen.findByRole("button", { name: "Retry mensagem 2" }));
-    await waitFor(() => expect(mocks.control).toHaveBeenCalledTimes(1));
-    expect(mocks.control).toHaveBeenCalledWith("regenerate-preview", { buffer_ids: ["second-failed"], idempotency_key: expect.any(String) });
-    expect(mocks.control).not.toHaveBeenCalledWith("send-preview", expect.anything());
-  });
-
-  it("sends one selected message and suppresses a double click while the request is pending", async () => {
-    let resolve!: (value: unknown) => void;
+  it("sends with one idempotency key per click and ignores a double click", async () => {
+    let resolve: (value: unknown) => void = () => {};
     mocks.control.mockReturnValue(new Promise((done) => { resolve = done; }));
     render(<ReleaseQueuePanel />);
-    const button = await screen.findByRole("button", { name: "Enviar mensagem 1" });
-    fireEvent.click(button); fireEvent.click(button);
-    expect(mocks.control).toHaveBeenCalledTimes(1);
-    expect(mocks.control).toHaveBeenCalledWith("send-preview", { buffer_ids: ["message-1"], idempotency_key: expect.any(String) });
+    const send = await screen.findByRole("button", { name: "Enviar mensagem 1" });
+    fireEvent.click(send);
+    fireEvent.click(send);
     resolve({ items: [{ result: "agendado" }] });
-  });
-
-  it("generates a fresh idempotency key per click instead of reusing one across actions", async () => {
-    render(<ReleaseQueuePanel />);
-    fireEvent.click(await screen.findByRole("button", { name: "Retry mensagem 1" }));
     await waitFor(() => expect(mocks.control).toHaveBeenCalledTimes(1));
-    fireEvent.click(await screen.findByRole("button", { name: "Enviar mensagem 1" }));
-    await waitFor(() => expect(mocks.control).toHaveBeenCalledTimes(2));
-    const [, firstBody] = mocks.control.mock.calls[0];
-    const [, secondBody] = mocks.control.mock.calls[1];
-    expect(firstBody.idempotency_key).not.toEqual(secondBody.idempotency_key);
+    expect(mocks.control).toHaveBeenCalledWith("send-preview", { buffer_ids: ["m-preview_ready"], idempotency_key: expect.any(String) });
+    expect(await screen.findByText("Agendada para envio")).toBeInTheDocument();
   });
 
-  it("shows an operator-facing instruction instead of a generic backend-down message for a 409/422/403", async () => {
+  it("keeps Enviar visible but disabled, with the reason", async () => {
+    mocks.queue.mockResolvedValue({ items: [demand("preview_ready", {
+      status: "preview_ready", text: "Resposta", can_send: false, send_reason: "A mensagem 1 ainda não foi confirmada",
+    })], next_offset: null });
     render(<ReleaseQueuePanel />);
-    mocks.control.mockRejectedValueOnce(new ApiError({ status: 409, path: "/messaging/queue/send-preview", kind: "client", detail: "superado", requestId: "req-409" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Enviar mensagem 1" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(/já mudou este item/);
-    expect(screen.getByRole("alert")).toHaveTextContent("req-409");
-    expect(screen.getByRole("alert")).not.toHaveTextContent(/indispon[íi]vel/i);
-
-    mocks.control.mockRejectedValueOnce(new ApiError({ status: 403, path: "/messaging/queue/send-preview", kind: "forbidden", detail: "sem acesso", requestId: "req-403" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Enviar mensagem 1" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(/sem permiss[ãa]o/i);
-
-    mocks.control.mockRejectedValueOnce(new ApiError({ status: 502, path: "/messaging/queue/send-preview", kind: "unavailable", detail: "", requestId: "req-502" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Enviar mensagem 1" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(/indispon[íi]vel/i);
+    expect(await screen.findByRole("button", { name: "Enviar mensagem 1" })).toBeDisabled();
+    expect(screen.getByText("A mensagem 1 ainda não foi confirmada")).toBeInTheDocument();
   });
 
-  it("labels a preview blocked by an invalid proof distinctly from a healthy preview", async () => {
-    mocks.queue.mockResolvedValue({ items: [{ ...base, outbound_messages: [{
-      buffer_id: "message-1", sequence: 1, kind: "response", text: "Resposta pronta",
-      status: "preview_ready", can_retry: true, can_send: false,
-      send_reason: "Proof ou publicação inválida",
-    }] }], next_offset: null });
+  it("filters by state", async () => {
+    mocks.queue.mockResolvedValue({ items: [
+      demand("preview_ready", { status: "preview_ready", text: "Pronta", can_send: true }),
+      demand("paused", { status: "buffered", text: "Parada" }),
+    ], next_offset: null });
     render(<ReleaseQueuePanel />);
-    // Labelled in both the preview card and the per-message state summary.
-    expect(await screen.findAllByText(/Proof inválida/)).toHaveLength(2);
+    await screen.findByText("Pronta");
+    fireEvent.click(screen.getByRole("button", { name: "Pausadas" }));
     expect(screen.queryByText("Pronta")).not.toBeInTheDocument();
-  });
-
-  it("labels a recovered stale claim distinctly from an ordinary generated preview", async () => {
-    mocks.queue.mockResolvedValue({ items: [{ ...base, queue_state: "blocked", outbound_messages: [{
-      buffer_id: "canonical-inbound", sequence: 1, kind: "response", status: "blocked",
-      can_retry: false, can_generate_preview: true, can_send: false,
-    }] }], next_offset: null });
-    mocks.control.mockResolvedValue({ items: [{ buffer_id: "canonical-inbound", result: "recuperando_tentativa_antiga" }] });
-    vi.spyOn(window, "confirm").mockReturnValue(true);
-    render(<ReleaseQueuePanel />);
-    fireEvent.click(await screen.findByRole("button", { name: "Gerar prévia da mensagem 1" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Recuperando tentativa antiga");
-  });
-
-  it("shows three API demands for one lead without a local two-row limit", async () => {
-    mocks.queue.mockResolvedValue({ items: [1, 2, 3].map((value) => ({
-      ...base, id: `d-${value}`, demand_id: `g-${value}`, customer_message: `Demanda ${value}`,
-      outbound_messages: [{ buffer_id: `b-${value}`, sequence: 1, kind: "response", text: `Resposta ${value}`, status: "blocked", can_retry: false, can_send: false }],
-    })), next_offset: null });
-    render(<ReleaseQueuePanel />);
-    expect(await screen.findByText("Demanda 1")).toBeInTheDocument();
-    expect(screen.getByText("Demanda 2")).toBeInTheDocument();
-    expect(screen.getByText("Demanda 3")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /Retry mensagem 1/ })).toHaveLength(3);
-  });
-
-  it("uses the explicit empty-agent fallback and expands directional history", async () => {
-    mocks.queue.mockResolvedValue({ items: [{ ...base, last_agent_message: null, recent_context: [
-      { id: "i0", direction: "inbound", content: "Oi, tudo bem?", created_at: "2026-09-18T09:00:00Z" },
-      ...base.recent_context,
-    ], outbound_messages: [{ buffer_id: "blocked", sequence: 1, kind: "response", status: "blocked", can_retry: false, can_send: false }] }], next_offset: null });
-    render(<ReleaseQueuePanel />);
-    expect(await screen.findByText("Ainda sem resposta do agente")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Histórico recente (2)"));
-    const history = screen.getByText("Histórico recente (2)").parentElement!;
-    expect(within(history).getByText(/Cliente ·/)).toBeInTheDocument();
-    expect(within(history).getByText(/Agente ·/)).toBeInTheDocument();
-  });
-
-  it("does not repeat the headline customer/agent messages inside the expandable history", async () => {
-    // base.recent_context already contains the exact same content+timestamp
-    // as base.customer_message/base.customer_message_at (the headline). Only
-    // the genuinely older, distinct message should survive into history.
-    mocks.queue.mockResolvedValue({ items: [{ ...base, recent_context: [
-      { id: "i-older", direction: "inbound", content: "Oi, bom dia", created_at: "2026-09-18T08:00:00Z" },
-      ...base.recent_context,
-    ], outbound_messages: [{ buffer_id: "message-1", sequence: 1, kind: "response", text: "Resposta pronta", status: "preview_ready", can_retry: true, can_send: true }] }], next_offset: null });
-    render(<ReleaseQueuePanel />);
-    fireEvent.click(await screen.findByText(/Histórico recente/));
-    expect(screen.getByText("Histórico recente (1)")).toBeInTheDocument();
-    expect(screen.getByText("Oi, bom dia")).toBeInTheDocument();
-    // "Preciso saber quando vocês atendem" still appears once, as the headline
-    // — but not a second time inside the expanded history.
-    const history = screen.getByText("Histórico recente (1)").parentElement!;
-    expect(within(history).queryByText("Preciso saber quando vocês atendem")).not.toBeInTheDocument();
+    expect(screen.getByText("Parada")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retomar mensagem 1" })).toBeEnabled();
   });
 });

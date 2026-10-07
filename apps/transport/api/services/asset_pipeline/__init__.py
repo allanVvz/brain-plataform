@@ -236,7 +236,9 @@ def run_pipeline(file_bytes: bytes, ctx: AssetPipelineContext) -> AssetReadingBu
     elif classification.kind.startswith("image"):
         if classification.needs_ocr:
             ocr_res = _ocr.run(file_bytes)
-            extracted_text = ocr_res.extracted_text or ""
+            # The "mock" engine means no OCR is installed; its placeholder sentence
+            # is not the image's content and must never reach the agent as such.
+            extracted_text = "" if ocr_res.engine == "mock" else (ocr_res.extracted_text or "")
         if (not extracted_text) or (ocr_res and ocr_res.needs_ai_fallback):
             ai_res = _ai.run(file_bytes, ctx.mime, prior_text=extracted_text, openai_api_key=ctx.openai_api_key)
             if ai_res and ai_res.extracted_text:

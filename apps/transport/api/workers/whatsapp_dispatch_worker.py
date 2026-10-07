@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import re
 import socket
+import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -16,6 +17,7 @@ from typing import Any
 
 from services import (
     agent_schedule,
+    outbound_gate,
     catalog_response,
     event_emitter,
     n8n_client,
@@ -54,6 +56,12 @@ class WhatsAppDispatchWorker(BaseWorker):
     name = "WhatsAppDispatchWorker"
     interval = int(os.environ.get("WHATSAPP_DISPATCH_INTERVAL", "2"))
 
+    # One pacing ledger per process: every dispatcher thread shares it, so a
+    # channel's rate holds no matter how many leads are sent in parallel.
+    _send_rate = outbound_gate.SendRate()
+    _last_hold_sweep = 0.0
+    _HOLD_SWEEP_SECONDS = 30.0
+
     def __init__(self) -> None:
         super().__init__()
         self.worker_id = f"{socket.gethostname()}:{os.getpid()}"
@@ -62,6 +70,7 @@ class WhatsAppDispatchWorker(BaseWorker):
         )
 
     def _run_cycle(self) -> None:
+        self._release_cleared_holds()
         rows = supabase_client.claim_whatsapp_buffer(self.worker_id)
         groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for row in rows:
@@ -83,6 +92,44 @@ class WhatsAppDispatchWorker(BaseWorker):
             thread_name_prefix="whatsapp-dispatch",
         ) as executor:
             list(executor.map(self._dispatch_group, ordered_groups))
+
+    def _release_cleared_holds(self) -> None:
+        """Put back in line the outbounds whose hold reason no longer applies."""
+        now = time.monotonic()
+        if now - WhatsAppDispatchWorker._last_hold_sweep < self._HOLD_SWEEP_SECONDS:
+            return
+        WhatsAppDispatchWorker._last_hold_sweep = now
+        try:
+            held = supabase_client.list_held_whatsapp_outbound()
+        except Exception as exc:
+            sre_logger.error("WhatsAppDispatchWorker", f"held outbound sweep failed: {type(exc).__name__}")
+            return
+        bindings: dict[str, Any] = {}
+        leads: dict[Any, Any] = {}
+        for row in held:
+            reason = str((row.get("payload") or {}).get("queue_hold_reason") or "")
+            binding_id = row.get("channel_binding_id")
+            if binding_id not in bindings:
+                bindings[binding_id] = supabase_client.get_workflow_binding_by_id(binding_id)
+            if row.get("lead_ref") not in leads:
+                leads[row.get("lead_ref")] = (
+                    supabase_client.get_lead_by_ref(row["lead_ref"]) if row.get("lead_ref") else {}
+                )
+            if outbound_gate.hold_cleared(reason, binding=bindings[binding_id], lead=leads[row.get("lead_ref")]):
+                supabase_client.release_held_whatsapp_outbound(row)
+                event_emitter.emit(
+                    "whatsapp.outbound_released", entity_type="lead",
+                    entity_id=str(row.get("lead_ref") or ""), persona_id=row.get("persona_id"),
+                    payload={"buffer_id": row["id"], "reason": reason}, source="workers.whatsapp",
+                )
+
+    def _hold(self, row: dict[str, Any], reason: str) -> None:
+        supabase_client.hold_whatsapp_outbound(row, reason)
+        event_emitter.emit(
+            "whatsapp.outbound_held", entity_type="lead",
+            entity_id=str(row.get("lead_ref") or ""), persona_id=row.get("persona_id"),
+            payload={"buffer_id": row["id"], "reason": reason}, source="workers.whatsapp",
+        )
 
     def _dispatch_group(self, rows: list[dict[str, Any]]) -> None:
         """Keep one lead FIFO while allowing unrelated leads in parallel."""
@@ -377,15 +424,10 @@ class WhatsAppDispatchWorker(BaseWorker):
             )
             return
         metadata = binding.get("metadata") or {}
-        if (
-            metadata.get("safety_paused")
-            or binding.get("connection_status") == "safety_paused"
-        ):
-            supabase_client.complete_whatsapp_buffer(
-                row["id"],
-                "waiting_human",
-                error="binding safety paused",
-            )
+        if outbound_gate.channel_paused(binding):
+            # A paused channel holds its messages; nothing is lost and the next
+            # lead's message on another channel goes out meanwhile.
+            self._hold(row, outbound_gate.HOLD_CHANNEL_PAUSED)
             return
         try:
             whatsapp_outbox.validate_direct_binding(binding)
@@ -412,6 +454,17 @@ class WhatsAppDispatchWorker(BaseWorker):
             if row.get("lead_ref")
             else {}
         )
+        if not outbound_gate.is_human(row) and outbound_gate.lead_paused(lead):
+            decision, reason = outbound_gate.decide(
+                row, binding=binding, lead=lead,
+                messages=supabase_client.get_messages(str(row["lead_ref"]), limit=10) or [],
+            )
+            if decision == "supersede":
+                supabase_client.complete_whatsapp_buffer(row["id"], "superseded", error=reason)
+                return
+            if decision == "hold":
+                self._hold(row, str(reason))
+                return
         identities = ((lead or {}).get("metadata") or {}).get("identities") or {}
         recipient = str(
             identities.get("remote_jid_alt")
@@ -438,6 +491,7 @@ class WhatsAppDispatchWorker(BaseWorker):
             return
 
         if transport_mode == "provider_direct":
+            self._send_rate.wait(binding)
             outbound_payload = row.get("payload") or {}
             provider = get_provider(binding.get("provider"))
             if outbound_payload.get("catalog_images"):
@@ -452,7 +506,7 @@ class WhatsAppDispatchWorker(BaseWorker):
                 supabase_client.complete_whatsapp_outbound(row["id"], binding_id=binding["id"],
                     correlation_id=correlation_id, wamid=external_id, success=True)
                 return
-            if outbound_payload.get("media") and binding.get("provider") == "evolution_baileys":
+            if outbound_payload.get("media") and binding.get("provider") in {"evolution_baileys", "meta_cloud"}:
                 media = outbound_payload["media"]
                 signed_url = supabase_client._storage_signed_url(
                     media.get("bucket"), media.get("path"), 3600

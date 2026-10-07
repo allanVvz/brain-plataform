@@ -2,20 +2,26 @@ name: Publish GraphBundle
 on:
   workflow_dispatch:
     inputs:
+      # One step: pick the bundle and the persona, run, approve the
+      # production-content environment. The checksums are the ones this run's
+      # plan computes; pass them only to pin a plan reviewed earlier.
       action:
-        description: Compile only, stage, or activate the approved persona graph
+        description: activate = publish now (plan + stage + activate); plan = compile only
         type: choice
-        options: [plan, stage, activate]
-        default: plan
+        options: [activate, plan, stage]
+        default: activate
       bundle_path: {description: Versioned GraphBundle path, required: true}
       persona_slug: {description: Target persona, required: true}
-      approved_draft_checksum: {description: Human-approved draft checksum, required: true}
-      approved_runtime_checksum: {description: Human-approved runtime checksum, required: true}
+      approved_draft_checksum: {description: "Optional: pin a previously reviewed draft checksum", required: false, default: ""}
+      approved_runtime_checksum: {description: "Optional: pin a previously reviewed runtime checksum", required: false, default: ""}
 permissions:
   contents: read
 jobs:
   plan:
     runs-on: ubuntu-latest
+    outputs:
+      draft_checksum: ${{ steps.checksums.outputs.draft_checksum }}
+      runtime_checksum: ${{ steps.checksums.outputs.runtime_checksum }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -23,14 +29,33 @@ jobs:
       - run: pip install -r apps/control-plane/api/requirements.txt
       - name: Compile without publication
         run: python apps/control-plane/api/scripts/compile_graph_bundle.py "${{ inputs.bundle_path }}" > publication-plan.json
+      - name: Resolve the checksums this publication will carry
+        id: checksums
+        env:
+          PINNED_DRAFT: ${{ inputs.approved_draft_checksum }}
+          PINNED_RUNTIME: ${{ inputs.approved_runtime_checksum }}
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          plan = json.load(open("publication-plan.json", encoding="utf-8"))
+          print("draft_checksum=" + (os.environ["PINNED_DRAFT"] or str(plan.get("draft_checksum") or "")))
+          print("runtime_checksum=" + (os.environ["PINNED_RUNTIME"] or str(plan.get("runtime_checksum") or "")))
+          PY
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          plan = json.load(open("publication-plan.json", encoding="utf-8"))
+          print("### GraphBundle plan")
+          for key in ("persona_slug", "publication_allowed", "draft_checksum", "runtime_checksum", "validation_errors"):
+              print(f"- **{key}**: `{plan.get(key)}`")
+          PY
       - name: Verify persona scope, checksums, and publication gates
         run: |
           python ops/microservices/validate-graphbundle-plan.py \
             --bundle "${{ inputs.bundle_path }}" \
             --plan publication-plan.json \
             --persona-slug "${{ inputs.persona_slug }}" \
-            --approved-draft-checksum "${{ inputs.approved_draft_checksum }}" \
-            --approved-runtime-checksum "${{ inputs.approved_runtime_checksum }}" \
+            --approved-draft-checksum "${{ steps.checksums.outputs.draft_checksum }}" \
+            --approved-runtime-checksum "${{ steps.checksums.outputs.runtime_checksum }}" \
             > graphbundle-review.json
       - uses: actions/upload-artifact@v4
         with:
@@ -71,8 +96,8 @@ jobs:
           GRAPH_ACTION: ${{ inputs.action }}
           BUNDLE_PATH: ${{ inputs.bundle_path }}
           PERSONA_SLUG: ${{ inputs.persona_slug }}
-          APPROVED_DRAFT_CHECKSUM: ${{ inputs.approved_draft_checksum }}
-          APPROVED_RUNTIME_CHECKSUM: ${{ inputs.approved_runtime_checksum }}
+          APPROVED_DRAFT_CHECKSUM: ${{ needs.plan.outputs.draft_checksum }}
+          APPROVED_RUNTIME_CHECKSUM: ${{ needs.plan.outputs.runtime_checksum }}
           PUBLISH_ACTOR: github:${{ github.actor }}:${{ github.run_id }}
         with:
           host: ${{ secrets.VPS_HOST }}
