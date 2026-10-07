@@ -27,10 +27,13 @@ jobs:
             from datetime import datetime, timedelta, timezone
             from services import chatwoot_api, supabase_client
             from repositories import chatwoot_bridge
+            from workers.chatwoot_bridge_worker import ChatwootBridgeWorker
+            import re
             config = chatwoot_api.configuration()
-            rows = supabase_client._execute_with_retry(supabase_client.get_client().table('messages').select('id,lead_id,direction,content,created_at').eq('direction','inbound').ilike('content','%Teste Chatwoot%').gte('created_at',(datetime.now(timezone.utc)-timedelta(minutes=60)).isoformat()).order('created_at',desc=True).limit(30)).data or []
+            rows = supabase_client._execute_with_retry(supabase_client.get_client().table('messages').select('id,lead_id,direction,content,created_at').eq('direction','inbound').ilike('content','%Teste Chatwoot%').gte('created_at',(datetime.now(timezone.utc)-timedelta(hours=24)).isoformat()).order('created_at',desc=True).limit(30)).data or []
             found = projected = mapped = False
             status, attempts, error_type = 'missing', 0, 'none'
+            setup_result = 'test_message_not_found'
             queue = {}
             api = chatwoot_api.ChatwootApi(config) if config else None
             try:
@@ -47,6 +50,26 @@ jobs:
                     error_type = et if et.replace('_','').replace('.','').isalnum() else ('other' if et else 'none')
                     mapping = chatwoot_bridge.get_conversation(config.binding_id,int(row['lead_id']))
                     mapped = bool(mapping and mapping.get('conversation_id'))
+                    setup_result = 'already_mapped' if mapped else 'not_attempted'
+                    if not mapped:
+                        # Idempotently establish this lead's contact/conversation using
+                        # the same production path; emit only a fixed reason code.
+                        try:
+                            mapping = ChatwootBridgeWorker()._ensure_conversation(
+                                api, config, int(row['lead_id']), lead,
+                            )
+                            mapped = bool(mapping and mapping.get('conversation_id'))
+                            setup_result = 'conversation_ready' if mapped else 'no_mapping_returned'
+                        except Exception as exc:
+                            detail = str(exc)
+                            http = re.search(r'Chatwoot API returned HTTP ([45][0-9]{2})$', detail)
+                            known = {
+                                'lead phone number is unavailable': 'lead_phone_unavailable',
+                                'Chatwoot contact response has no inbox session': 'contact_missing_inbox_session',
+                                'Chatwoot conversation response has no id': 'conversation_missing_id',
+                                'Chatwoot API returned invalid JSON': 'chatwoot_invalid_json',
+                            }
+                            setup_result = ('chatwoot_http_' + http.group(1)) if http else known.get(detail, 'setup_error_' + type(exc).__name__)
                     if mapped:
                         projected = bool(api.find_message_by_source_id(conversation_id=int(mapping['conversation_id']),source_id=f"brain-message:{row['id']}",after_message_id=0))
                     break
@@ -62,6 +85,7 @@ jobs:
             print('test_message_projection_status='+status)
             print('test_message_projection_attempts='+str(attempts))
             print('test_message_projection_error_type='+error_type)
+            print('test_message_conversation_setup='+setup_result)
             print('chatwoot_bridge_nonterminal_sample='+','.join(f'{k}:{queue[k]}' for k in sorted(queue)))
             print('test_message_in_chatwoot_inbox='+str(projected).lower())
             if config: print('chatwoot_inbox_id='+str(config.inbox_id))

@@ -186,6 +186,60 @@ def test_human_reply_hands_off_before_using_transport_outbox(monkeypatch):
     assert calls[3][2]["transport_buffer_id"] == "00000000-0000-0000-0000-000000000001"
 
 
+def test_projection_creates_missing_api_inbox_contact_session(monkeypatch):
+    config = chatwoot_api.ChatwootConfig(
+        base_url="https://chat.example", api_token="not-used", account_id=3,
+        inbox_id=8, inbox_identifier="inbox-test", binding_id="binding-1",
+        webhook_secret="not-used", agent_id=17,
+    )
+    calls = []
+
+    class FakeApi:
+        def create_or_get_contact(self, **kwargs):
+            calls.append(("contact", kwargs))
+            return {"id": 61, "contact_inboxes": []}
+
+        def create_contact_inbox(self, **kwargs):
+            calls.append(("contact_inbox", kwargs))
+            return {"source_id": kwargs["source_id"]}
+
+        def get_contact(self, **kwargs):
+            calls.append(("get_contact", kwargs))
+            return {"contact_inboxes": [{"inbox_id": 8, "source_id": "session-61"}]}
+
+        def list_conversations(self, **kwargs):
+            calls.append(("list_conversations", kwargs))
+            return []
+
+        def create_conversation(self, **kwargs):
+            calls.append(("create_conversation", kwargs))
+            return {"id": 901}
+
+        def assign_conversation(self, conversation_id):
+            calls.append(("assign", conversation_id))
+            return {}
+
+    monkeypatch.setattr(
+        "workers.chatwoot_bridge_worker.chatwoot_bridge.get_conversation",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        "workers.chatwoot_bridge_worker.chatwoot_bridge.save_conversation",
+        lambda payload: payload | {"conversation_id": 901},
+    )
+    mapping = ChatwootBridgeWorker()._ensure_conversation(
+        FakeApi(), config, 51,
+        {"external_contact_id": "+5511999999999", "nome": "Contato"},
+    )
+
+    assert mapping["conversation_id"] == 901
+    assert calls[1][0] == "contact_inbox"
+    assert calls[1][1]["contact_id"] == 61
+    assert calls[1][1]["source_id"] == "brain:binding-1:51"
+    assert calls[2] == ("get_contact", {"contact_id": 61})
+    assert calls[3][1]["contact_identifier"] == "session-61"
+
+
 @pytest.mark.parametrize(
     ("incoming", "message_type"),
     [(True, "incoming"), (False, "outgoing")],
